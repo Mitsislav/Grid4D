@@ -367,7 +367,7 @@ arbitrary meshes efficiently; the viewport renders into its own target.
 | 3.3 ✅ | L | `grid4d-eval` + `EvaluatedScene`, node revisions; render/picking migrate; `extract_reuses_capacity`-style test for evaluation — done 2026-10-18: process-wide unique scene/node revisions (bumped by `get_mut` and structural edits), `EvaluatedScene::update` skips unchanged scenes, `MeshKey`/`Drawable`/`PickShape` live in eval, render/picking/brackets read it; the Attribute Manager edits a copy so idle frames never bump the revision (guarded by a test over every panel) |
 | 3.4 | S | ~~`GeometryHandle`-keyed batches + `GpuMeshCache`~~ — done early in 3.2 for primitives (`MeshKey`); what remains is a key for editable meshes (mesh `Arc` + revision) once 3.6 adds them |
 | 3.5 ✅ | M | Offscreen viewport target (colour/depth/MSAA, resize handling) — done 2026-10-19: `grid4d_render::ViewportTarget` (`Rgba8Unorm` gamma colour because egui samples textures as gamma, 4× MSAA when supported, `Depth32Float`, transparent clear over the UI's gradient), `ViewportRenderer::render` submits its own pass, `ui/viewport/gpu_view.rs` registers and re-points the egui texture on resize; the paint callback, `Arc<Mutex<FrameData>>` and the window's depth/MSAA are gone. Checked on screen, maximized and resized |
-| 3.6 | M | `ObjectKind::Polygon`, Make Editable (`C`), BVH picking, `.g4d` **v3** (zip + binary geometry) with migration (v2 was taken by segment counts); v3 may also change the `"format"` tag from `"oc4d"` to `"grid4d"` |
+| 3.6 | M | `ObjectKind::Polygon`, Make Editable (`C`) per [`reference/modeling-modes.md`](reference/modeling-modes.md) §2 (incl. Cylinder/Cone caps with their own point rings), BVH picking, `.g4d` **v3** (zip + binary geometry) with migration (v2 was taken by segment counts); v3 may also change the `"format"` tag from `"oc4d"` to `"grid4d"` |
 
 **Acceptance:** 10 000 cubes and a 1 M-triangle mesh render at interactive rates
 (see performance budget); editing a primitive's segments updates instantly;
@@ -379,6 +379,10 @@ eval/extract/prepare/paint.
 ## Phase 4 — Polygon modelling & Subdivision Surface (v0.4)
 
 **Goal:** the C4D component workflow on polygon objects.
+
+**Behaviour specs** (parameters, edge cases, acceptance tests — read before
+implementing): [`reference/modeling-modes.md`](reference/modeling-modes.md) (3.6,
+4.1–4.3) and [`reference/generator-subdivision-surface.md`](reference/generator-subdivision-surface.md) (4.7).
 
 ### Design
 
