@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 oc4d-scene.workspace = true
 oc4d-geom.workspace = true
+oc4d-eval.workspace = true
 oc4d-render.workspace = true
 oc4d-io.workspace = true
 egui.workspace = true

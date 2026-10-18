@@ -89,16 +89,20 @@ impl AttributesPanel {
         selection_len: usize,
         commands: &mut CommandQueue,
     ) {
-        let Some(node) = doc.scene.get_mut(id) else { return };
-        self.node_edit.begin(id, &node.data);
+        // Widgets edit a copy; the scene is only written (and its revision only
+        // bumped) when a value actually changed, so idle frames stay idle.
+        let Some(mut data) = doc.scene.get(id).map(|node| node.data.clone()) else {
+            return;
+        };
+        self.node_edit.begin(id, &data);
 
         // Title: "Cube Object [Cube]"
         ui.horizontal(|ui| {
-            let tag = node.data.kind.tag();
+            let tag = data.kind.tag();
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
             icons::paint(ui.painter(), rect, Icon::Object(tag), tag_color(tag));
             ui.label(
-                RichText::new(format!("{} Object [{}]", node.data.kind.label(), node.data.name))
+                RichText::new(format!("{} Object [{}]", data.kind.label(), data.name))
                     .strong()
                     .color(p::TEXT_STRONG),
             );
@@ -122,12 +126,17 @@ impl AttributesPanel {
         });
 
         match self.tab {
-            Tab::Basic => basic_tab(ui, &mut node.data),
-            Tab::Coord => coord_tab(ui, &mut node.data),
-            Tab::Object => object_tab(ui, &mut node.data),
+            Tab::Basic => basic_tab(ui, &mut data),
+            Tab::Coord => coord_tab(ui, &mut data),
+            Tab::Object => object_tab(ui, &mut data),
+        }
+        if doc.scene.get(id).is_some_and(|node| node.data != data)
+            && let Some(node) = doc.scene.get_mut(id)
+        {
+            node.data.clone_from(&data);
         }
 
-        if let Some((id, before)) = self.node_edit.end(id, &node.data, interaction_ongoing(ui)) {
+        if let Some((id, before)) = self.node_edit.end(id, &data, interaction_ongoing(ui)) {
             commands.push(EditorCommand::CommitLive {
                 inverse: SceneEdit::SetData { id, data: before },
                 label: self.tab.edit_label(),

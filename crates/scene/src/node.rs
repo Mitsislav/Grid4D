@@ -333,6 +333,8 @@ pub struct Node {
     /// still stored (so its `NodeId`s survive an undo) but invisible to every
     /// public query.
     pub(crate) detached: bool,
+    /// Changes whenever the node may have been modified (see [`Node::revision`]).
+    pub(crate) revision: u64,
 }
 
 impl Node {
@@ -348,6 +350,7 @@ impl Node {
             parent: None,
             children: Vec::new(),
             detached: false,
+            revision: crate::scene::next_revision(),
         }
     }
 
@@ -383,6 +386,14 @@ impl Node {
     #[must_use]
     pub fn children(&self) -> &[NodeId] {
         &self.children
+    }
+
+    /// Changes whenever this node may have been modified: mutable access, insertion,
+    /// re-attachment or a move. Values are unique across all scenes, so caches keyed
+    /// by revision can never confuse two nodes or two documents.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 }
 

@@ -3,17 +3,17 @@
 #
 #  Workspace layout (dependency direction is strictly one-way):
 #
-#      oc4d-geom  ◀──  oc4d-scene  ◀──  oc4d-render  ◀──  oc4d-ui  ◀──  open-c4d (binary)
-#      (geometry)      (data)           (wgpu)            (egui)         (composition root)
-#                           ▲                                  │
-#                           └──────────  oc4d-io  ◀────────────┘   (.oc4d files)
+#      oc4d-geom ◀── oc4d-scene ◀── oc4d-eval ◀── oc4d-render ◀── oc4d-ui ◀── open-c4d (binary)
+#      (geometry)    (data)         (evaluation)  (wgpu)          (egui)      (composition root)
+#                         ▲                                         │
+#                         └─────────────── oc4d-io ◀────────────────┘   (.oc4d files)
 #
 #  See ARCHITECTURE.md for the architectural rules.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [workspace]
 resolver = "3"
-members = ["crates/geom", "crates/scene", "crates/render", "crates/io", "crates/ui"]
+members = ["crates/geom", "crates/scene", "crates/eval", "crates/render", "crates/io", "crates/ui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -26,6 +26,7 @@ publish = false
 # Internal crates
 oc4d-geom = { path = "crates/geom" }
 oc4d-scene = { path = "crates/scene" }
+oc4d-eval = { path = "crates/eval" }
 oc4d-render = { path = "crates/render" }
 oc4d-io = { path = "crates/io" }
 oc4d-ui = { path = "crates/ui" }

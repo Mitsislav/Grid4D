@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use egui::{Align, Align2, Layout, Margin, PointerButton, Pos2, Rect, Response, Sense, Ui, pos2};
 use egui_wgpu::wgpu;
 use glam::{Mat4, Vec2 as GVec2, Vec3};
+use oc4d_eval::EvaluatedScene;
 use oc4d_render::{FrameData, GpuTargetConfig, OrbitCamera, ViewportRenderer, pick};
 use oc4d_scene::{Aabb, Document, ObjectKindTag, Scene, WalkItem};
 
@@ -28,6 +29,8 @@ const NAV_HINT: &str = "Alt+Left: orbit · Alt+Middle / Middle: pan · Alt+Right
 #[derive(Debug)]
 pub struct ViewportPanel {
     camera: OrbitCamera,
+    /// What the document looks like this frame; re-evaluated only when it changed.
+    evaluated: EvaluatedScene,
     /// Render snapshot shared with the paint callback (no per-frame allocation).
     frame: Arc<Mutex<FrameData>>,
     gpu_ready: bool,
@@ -68,6 +71,7 @@ impl ViewportPanel {
         };
         Self {
             camera: OrbitCamera::default(),
+            evaluated: EvaluatedScene::new(),
             frame: Arc::new(Mutex::new(FrameData::new())),
             gpu_ready,
             walk_stack: Vec::with_capacity(64),
@@ -149,20 +153,23 @@ impl ViewportPanel {
             interaction.owns_pointer
         };
         if !navigating && !gizmo_owns_pointer {
-            self.pick_on_click(ui, &response, rect, &doc.scene, editor);
+            self.evaluated.update(&doc.scene);
+            self.pick_on_click(ui, &response, rect, editor);
         }
         self.context_menu(&response, editor);
 
         // ── Paint ────────────────────────────────────────────────────────────
         let painter = ui.painter_at(rect);
         overlay::background(&painter, rect);
+        // A gizmo drag above may have moved an object; free if nothing changed.
+        self.evaluated.update(&doc.scene);
 
         if self.gpu_ready {
             {
                 let mut frame = self.frame.lock().unwrap_or_else(PoisonError::into_inner);
                 frame.set_camera(&self.camera, rect.aspect_ratio());
                 frame.show_grid = self.show_grid;
-                frame.extract(&doc.scene, |id| editor.selection.contains(id));
+                frame.extract(&self.evaluated, |id| editor.selection.contains(id));
             }
             painter.add(egui_wgpu::Callback::new_paint_callback(
                 rect,
@@ -180,14 +187,7 @@ impl ViewportPanel {
 
         overlay::view_label(&painter, rect, "Perspective");
         let view_proj = self.camera.view_projection(rect.aspect_ratio());
-        overlay::selection_brackets(
-            &painter,
-            rect,
-            &view_proj,
-            &doc.scene,
-            &editor.selection,
-            &mut self.walk_stack,
-        );
+        overlay::selection_brackets(&painter, rect, &view_proj, &self.evaluated, &editor.selection);
         if let Some(geo) = &gizmo_geo {
             geo.paint(&painter, self.gizmo.hot_axis());
         }
@@ -296,7 +296,7 @@ impl ViewportPanel {
         active
     }
 
-    fn pick_on_click(&mut self, ui: &Ui, response: &Response, rect: Rect, scene: &Scene, editor: &mut EditorState) {
+    fn pick_on_click(&self, ui: &Ui, response: &Response, rect: Rect, editor: &mut EditorState) {
         if !response.clicked_by(PointerButton::Primary) {
             return;
         }
@@ -309,7 +309,7 @@ impl ViewportPanel {
         };
         let ray = self.camera.ray_from_ndc(to_ndc(pointer, rect), rect.aspect_ratio());
         let mode = SelectMode::from_modifiers(modifiers);
-        match pick(scene, ray, &mut self.walk_stack) {
+        match pick(&self.evaluated, ray) {
             Some(id) => editor.commands.push(EditorCommand::Select { id, mode }),
             None if mode == SelectMode::Replace => editor.commands.push(EditorCommand::DeselectAll),
             None => {}

@@ -2,8 +2,8 @@
 
 use egui::{Align2, FontId, Mesh, Painter, Rect, Shape, Stroke, pos2, vec2};
 use glam::{Mat4, Vec3};
+use oc4d_eval::EvaluatedScene;
 use oc4d_render::OrbitCamera;
-use oc4d_scene::{Scene, WalkItem};
 
 use super::project;
 use crate::{Selection, theme::palette as p};
@@ -13,20 +13,17 @@ pub(super) fn selection_brackets(
     painter: &Painter,
     rect: Rect,
     view_proj: &Mat4,
-    scene: &Scene,
+    scene: &EvaluatedScene,
     selection: &Selection,
-    stack: &mut Vec<WalkItem>,
 ) {
     if selection.is_empty() {
         return;
     }
     let stroke = Stroke::new(1.5, p::HIGHLIGHT.gamma_multiply(0.9));
-    scene.walk(stack, |id, node, world, _| {
-        if !node.data.visible_in_editor || !node.data.enabled {
-            return false;
-        }
-        if selection.contains(id)
-            && let Some(b) = node.data.kind.local_bounds()
+    for node in scene.nodes() {
+        let world = node.world;
+        if selection.contains(node.id)
+            && let Some(b) = node.bounds
         {
             let corner = |i: u8| {
                 Vec3::new(
@@ -48,8 +45,7 @@ pub(super) fn selection_brackets(
                 }
             }
         }
-        true
-    });
+    }
 }
 
 /// Vertical gradient behind the 3D content.

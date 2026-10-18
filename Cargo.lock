@@ -2458,6 +2458,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oc4d-eval"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "oc4d-geom",
+ "oc4d-scene",
+]
+
+[[package]]
 name = "oc4d-geom"
 version = "0.1.0"
 dependencies = [
@@ -2481,6 +2490,7 @@ dependencies = [
  "bytemuck",
  "glam",
  "naga",
+ "oc4d-eval",
  "oc4d-geom",
  "oc4d-scene",
  "wgpu",
@@ -2502,6 +2512,7 @@ dependencies = [
  "egui-wgpu",
  "glam",
  "log",
+ "oc4d-eval",
  "oc4d-geom",
  "oc4d-io",
  "oc4d-render",

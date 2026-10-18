@@ -3,9 +3,11 @@ use std::{collections::HashMap, ops::Range};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt as _;
 
+use oc4d_eval::MeshKey;
+
 use crate::{
     FrameData, InstanceRaw, Vertex,
-    mesh::{MeshKey, TessellationScratch},
+    mesh::{TessellationScratch, tessellate},
     shaders,
 };
 
@@ -197,7 +199,8 @@ impl ViewportRenderer {
             mesh.last_used = self.frame;
             return true;
         }
-        key.tessellate(
+        tessellate(
+            key,
             &mut self.tessellation,
             &mut self.vertex_scratch,
             &mut self.index_scratch,

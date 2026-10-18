@@ -1,0 +1,29 @@
+//! # oc4d-eval
+//!
+//! Turns the document — what the user authored — into what viewers draw and pick
+//! this frame: an [`EvaluatedScene`] of visible nodes with world matrices,
+//! [`Drawable`]s (unit geometry named by a [`MeshKey`], plus scale and colour)
+//! and pick shapes.
+//!
+//! ## Architecture rule
+//!
+//! Sits between the scene and its consumers:
+//!
+//! ```text
+//! oc4d-geom ◀── oc4d-scene ◀── oc4d-eval ◀── oc4d-render ◀── oc4d-ui
+//! ```
+//!
+//! It reads the scene and never mutates it, and knows nothing about GPUs or UI.
+//! Generators, deformers and animation (later phases) evaluate here, so the
+//! renderer and picking never need to know about them.
+//!
+//! [`EvaluatedScene::update`] is on the per-frame hot path: it skips all work
+//! when the scene's revision is unchanged and allocates nothing in steady state.
+
+mod drawable;
+mod evaluated;
+mod key;
+
+pub use drawable::{Drawable, drawable};
+pub use evaluated::{EvaluatedNode, EvaluatedScene, PickShape};
+pub use key::{MeshKey, Ratio};

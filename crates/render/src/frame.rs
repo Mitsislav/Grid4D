@@ -2,12 +2,10 @@ use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
-use oc4d_scene::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, NodeId, ObjectKind, Scene, WalkItem};
+use oc4d_eval::{EvaluatedScene, MeshKey};
+use oc4d_scene::NodeId;
 
-use crate::{
-    OrbitCamera,
-    mesh::{MeshKey, Ratio},
-};
+use crate::OrbitCamera;
 
 /// Per-instance GPU data. Layout must match `InstanceIn` in `shaders/mesh.wgsl`.
 #[repr(C)]
@@ -33,8 +31,8 @@ struct Batch {
     last_used: u64,
 }
 
-/// Everything the GPU needs to draw one viewport frame — a render-side snapshot
-/// of the scene. Owned by the UI, filled every frame, consumed by
+/// Everything the GPU needs to draw one viewport frame. Owned by the UI, filled
+/// every frame from an [`EvaluatedScene`], consumed by
 /// [`ViewportRenderer::prepare`](crate::ViewportRenderer::prepare).
 #[derive(Debug)]
 pub struct FrameData {
@@ -50,7 +48,6 @@ pub struct FrameData {
     batches: Vec<Batch>,
     batch_index: HashMap<MeshKey, usize>,
     frame: u64,
-    walk_stack: Vec<WalkItem>,
 }
 
 impl Default for FrameData {
@@ -72,7 +69,6 @@ impl FrameData {
             batches: Vec::with_capacity(16),
             batch_index: HashMap::with_capacity(16),
             frame: 0,
-            walk_stack: Vec::with_capacity(64),
         }
     }
 
@@ -98,49 +94,44 @@ impl FrameData {
         self.light_dir = (camera.back() * 0.6 + camera.up() * 0.7 - camera.right() * 0.4).normalize_or(Vec3::Y);
     }
 
-    /// Rebuilds the instance batches from `scene`.
+    /// Rebuilds the instance batches from the evaluated scene.
     ///
-    /// Hot path: allocation-free once every shape in the scene has been seen,
-    /// because batches are emptied (keeping capacity), never recreated. A new
-    /// shape allocates its batch once. Hidden or disabled objects hide their
-    /// whole subtree.
-    pub fn extract(&mut self, scene: &Scene, is_selected: impl Fn(NodeId) -> bool) {
+    /// Hot path: allocation-free once every shape has been seen, because batches
+    /// are emptied (keeping capacity), never recreated; a new shape allocates its
+    /// batch once. Selection is editor state, so it is applied here, per frame.
+    pub fn extract(&mut self, scene: &EvaluatedScene, is_selected: impl Fn(NodeId) -> bool) {
         self.frame += 1;
+        let frame = self.frame;
         for batch in &mut self.batches {
             batch.instances.clear();
         }
-        let (batches, index, frame) = (&mut self.batches, &mut self.batch_index, self.frame);
-        scene.walk(&mut self.walk_stack, |id, node, world, _depth| {
-            if !node.data.visible_in_editor || !node.data.enabled {
-                return false;
-            }
-            if let Some(style) = draw_style(&node.data.kind, node.data.display_color) {
-                let model = *world * Mat4::from_scale(style.scale);
-                let slot = *index.entry(style.key).or_insert_with(|| {
-                    batches.push(Batch {
-                        key: style.key,
-                        instances: Vec::new(),
-                        last_used: frame,
-                    });
-                    batches.len() - 1
+        for node in scene.nodes() {
+            let Some(draw) = node.drawable else { continue };
+            let model = node.world * Mat4::from_scale(draw.scale);
+            let batches = &mut self.batches;
+            let slot = *self.batch_index.entry(draw.key).or_insert_with(|| {
+                batches.push(Batch {
+                    key: draw.key,
+                    instances: Vec::new(),
+                    last_used: frame,
                 });
-                let batch = &mut batches[slot];
-                batch.last_used = frame;
-                batch.instances.push(InstanceRaw {
-                    model: model.to_cols_array_2d(),
-                    normal: normal_matrix(&model),
-                    color: [style.color[0], style.color[1], style.color[2], 1.0],
-                    params: [
-                        f32::from(u8::from(is_selected(id))),
-                        f32::from(u8::from(style.unlit)),
-                        0.0,
-                        0.0,
-                    ],
-                });
-            }
-            true
-        });
-        if self.frame.is_multiple_of(BATCH_TTL_FRAMES) {
+                batches.len() - 1
+            });
+            let batch = &mut self.batches[slot];
+            batch.last_used = frame;
+            batch.instances.push(InstanceRaw {
+                model: model.to_cols_array_2d(),
+                normal: normal_matrix(&model),
+                color: [draw.color[0], draw.color[1], draw.color[2], 1.0],
+                params: [
+                    f32::from(u8::from(is_selected(node.id))),
+                    f32::from(u8::from(draw.unlit)),
+                    0.0,
+                    0.0,
+                ],
+            });
+        }
+        if frame.is_multiple_of(BATCH_TTL_FRAMES) {
             self.drop_stale_batches();
         }
     }
@@ -153,149 +144,6 @@ impl FrameData {
         for (slot, batch) in self.batches.iter().enumerate() {
             self.batch_index.insert(batch.key, slot);
         }
-    }
-}
-
-/// How an object is drawn.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct DrawStyle {
-    pub key: MeshKey,
-    /// Object-space scale applied to the unit mesh.
-    pub scale: Vec3,
-    pub color: [f32; 3],
-    pub unlit: bool,
-}
-
-/// The unit mesh, scale and colour for an object; `None` for objects without
-/// geometry (Nulls, shapes with zero size).
-pub(crate) fn draw_style(kind: &ObjectKind, color: [f32; 3]) -> Option<DrawStyle> {
-    let shaded = |key, scale| {
-        Some(DrawStyle {
-            key,
-            scale,
-            color,
-            unlit: false,
-        })
-    };
-    match *kind {
-        ObjectKind::Null => None,
-        ObjectKind::Cube { size, segments } => shaded(MeshKey::Cube { segments }, size),
-        ObjectKind::Sphere { radius, segments } => shaded(MeshKey::Sphere { segments }, Vec3::splat(radius)),
-        ObjectKind::Cylinder {
-            radius,
-            height,
-            rotation_segments,
-            height_segments,
-        } => shaded(
-            MeshKey::Cylinder {
-                rotation: rotation_segments,
-                height: height_segments,
-            },
-            Vec3::new(radius, height, radius),
-        ),
-        ObjectKind::Plane {
-            width,
-            depth,
-            width_segments,
-            depth_segments,
-        } => shaded(
-            MeshKey::Plane {
-                width: width_segments,
-                depth: depth_segments,
-            },
-            Vec3::new(width, 1.0, depth),
-        ),
-        ObjectKind::Cone {
-            bottom_radius,
-            top_radius,
-            height,
-            rotation_segments,
-            height_segments,
-        } => {
-            let (rb, rt) = (bottom_radius.max(0.0), top_radius.max(0.0));
-            let r = rb.max(rt);
-            if r <= 0.0 {
-                return None;
-            }
-            shaded(
-                MeshKey::Cone {
-                    bottom: Ratio::new(rb, r),
-                    top: Ratio::new(rt, r),
-                    rotation: rotation_segments,
-                    height: height_segments,
-                },
-                Vec3::new(r, height, r),
-            )
-        }
-        ObjectKind::Torus {
-            ring_radius,
-            pipe_radius,
-            ring_segments,
-            pipe_segments,
-        } => {
-            let outer = ring_radius.abs() + pipe_radius.abs();
-            if outer <= 0.0 {
-                return None;
-            }
-            shaded(
-                MeshKey::Torus {
-                    ring: Ratio::new(ring_radius.abs(), outer),
-                    ring_segments,
-                    pipe_segments,
-                },
-                Vec3::splat(outer),
-            )
-        }
-        ObjectKind::Disc {
-            inner_radius,
-            outer_radius,
-            rotation_segments,
-            disc_segments,
-        } => {
-            let (ri, ro) = (inner_radius.max(0.0), outer_radius.max(0.0));
-            let r = ri.max(ro);
-            if r <= 0.0 || ro == ri {
-                return None; // no area
-            }
-            shaded(
-                MeshKey::Disc {
-                    inner: Ratio::new(ri.min(ro), r),
-                    outer: Ratio::new(ri.max(ro), r),
-                    rotation: rotation_segments,
-                    segments: disc_segments,
-                },
-                Vec3::new(r, 1.0, r),
-            )
-        }
-        ObjectKind::Capsule {
-            radius,
-            height,
-            rotation_segments,
-            height_segments,
-            cap_segments,
-        } => {
-            let r = radius.abs();
-            if r <= 0.0 {
-                return None;
-            }
-            let total = height.abs().max(2.0 * r);
-            shaded(
-                MeshKey::Capsule {
-                    straight: Ratio::new(total - 2.0 * r, total),
-                    rotation: rotation_segments,
-                    height: height_segments,
-                    cap: cap_segments,
-                },
-                Vec3::splat(r),
-            )
-        }
-        ObjectKind::Camera { .. } => shaded(MeshKey::Cube { segments: [1, 1, 1] }, Vec3::splat(CAMERA_MARKER_SIZE)),
-        ObjectKind::Light { color: light, .. } => Some(DrawStyle {
-            key: MeshKey::Sphere { segments: 24 },
-            scale: Vec3::splat(LIGHT_MARKER_RADIUS),
-            color: light,
-            unlit: true,
-        }),
     }
 }
 
@@ -315,9 +163,15 @@ fn normal_matrix(model: &Mat4) -> [[f32; 4]; 3] {
 
 #[cfg(test)]
 mod tests {
-    use oc4d_scene::{Document, Node, ObjectKindTag};
+    use oc4d_scene::{Document, Node, ObjectKind};
 
     use super::*;
+
+    fn evaluated(doc: &Document) -> EvaluatedScene {
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        eval
+    }
 
     #[test]
     fn instance_layout_is_144_bytes() {
@@ -327,35 +181,19 @@ mod tests {
     #[test]
     fn extract_reuses_capacity() {
         let doc = Document::with_demo_scene();
+        let eval = evaluated(&doc);
         let mut frame = FrameData::new();
-        frame.extract(&doc.scene, |_| false);
+        frame.extract(&eval, |_| false);
         let count = frame.instance_count();
         assert!(count >= 5, "demo scene should produce instances, got {count}");
         let caps = |f: &FrameData| -> Vec<usize> { f.batches.iter().map(|b| b.instances.capacity()).collect() };
         let before = (caps(&frame), frame.batches.capacity(), frame.batch_index.capacity());
         for _ in 0..(2 * BATCH_TTL_FRAMES) {
-            frame.extract(&doc.scene, |_| false);
+            frame.extract(&eval, |_| false);
         }
         assert_eq!(frame.instance_count(), count);
         let after = (caps(&frame), frame.batches.capacity(), frame.batch_index.capacity());
         assert_eq!(before, after, "steady-state extraction must not reallocate");
-    }
-
-    #[test]
-    fn hidden_parent_hides_children() {
-        let mut doc = Document::with_demo_scene();
-        let group = doc
-            .scene
-            .iter()
-            .find(|(_, n)| n.data.name == "Group")
-            .map(|(id, _)| id)
-            .unwrap();
-        let mut frame = FrameData::new();
-        frame.extract(&doc.scene, |_| false);
-        let before = frame.instance_count();
-        doc.scene.get_mut(group).unwrap().data.visible_in_editor = false;
-        frame.extract(&doc.scene, |_| false);
-        assert_eq!(frame.instance_count(), before - 2);
     }
 
     #[test]
@@ -378,7 +216,7 @@ mod tests {
             },
         ));
         let mut frame = FrameData::new();
-        frame.extract(&doc.scene, |_| false);
+        frame.extract(&evaluated(&doc), |_| false);
         let batches: Vec<(MeshKey, usize)> = frame.batches().map(|(k, i)| (k, i.len())).collect();
         assert_eq!(
             batches,
@@ -390,42 +228,29 @@ mod tests {
     }
 
     #[test]
-    fn shape_ratios_are_part_of_the_key_and_size_is_the_scale() {
-        let torus = |ring, pipe| ObjectKind::Torus {
-            ring_radius: ring,
-            pipe_radius: pipe,
-            ring_segments: 36,
-            pipe_segments: 18,
-        };
-        let small = draw_style(&torus(200.0, 50.0), [1.0; 3]).unwrap();
-        let big = draw_style(&torus(400.0, 100.0), [1.0; 3]).unwrap();
-        let fat = draw_style(&torus(200.0, 100.0), [1.0; 3]).unwrap();
-        assert_eq!(small.key, big.key, "uniformly scaled: same mesh");
-        assert_eq!(big.scale, Vec3::splat(500.0));
-        assert_ne!(small.key, fat.key, "a thicker pipe is another shape");
-    }
-
-    #[test]
-    fn every_kind_has_a_draw_style_except_nulls_and_empty_shapes() {
-        for tag in ObjectKindTag::ALL {
-            let style = draw_style(&tag.default_kind(), [1.0; 3]);
-            assert_eq!(style.is_some(), tag != ObjectKindTag::Null, "{tag:?}");
-        }
-        let flat_cone = ObjectKind::Cone {
-            bottom_radius: 0.0,
-            top_radius: 0.0,
-            height: 10.0,
-            rotation_segments: 8,
-            height_segments: 1,
-        };
-        assert_eq!(draw_style(&flat_cone, [1.0; 3]), None);
+    fn selection_and_scale_reach_the_instances() {
+        let doc = Document::with_demo_scene();
+        let cube = doc.scene.roots()[0];
+        let mut frame = FrameData::new();
+        frame.extract(&evaluated(&doc), |id| id == cube);
+        let selected: Vec<&InstanceRaw> = frame
+            .batches()
+            .flat_map(|(_, i)| i)
+            .filter(|i| i.params[0] == 1.0)
+            .collect();
+        assert_eq!(selected.len(), 1);
+        // The 200 cm cube at y = 100: the unit mesh scaled by its size.
+        let model = Mat4::from_cols_array_2d(&selected[0].model);
+        let expected = Mat4::from_translation(Vec3::new(0.0, 100.0, 0.0)) * Mat4::from_scale(Vec3::splat(200.0));
+        assert!(model.abs_diff_eq(expected, 1e-3));
     }
 
     #[test]
     fn stale_batches_are_dropped() {
         let mut doc = Document::with_demo_scene();
+        let mut eval = evaluated(&doc);
         let mut frame = FrameData::new();
-        frame.extract(&doc.scene, |_| false);
+        frame.extract(&eval, |_| false);
         let shapes = frame.batches.len();
         // New segments on the only cylinder: a new shape appears, the old one goes stale.
         let cylinder = doc.scene.iter().find(|(_, n)| n.data.name == "Cylinder").unwrap().0;
@@ -435,8 +260,9 @@ mod tests {
             rotation_segments: 7,
             height_segments: 1,
         };
+        eval.update(&doc.scene);
         for _ in 0..(2 * BATCH_TTL_FRAMES) {
-            frame.extract(&doc.scene, |_| false);
+            frame.extract(&eval, |_| false);
         }
         assert_eq!(frame.batches.len(), shapes, "the old cylinder batch was forgotten");
         assert!(

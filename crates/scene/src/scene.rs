@@ -1,4 +1,7 @@
-use std::fmt;
+use std::{
+    fmt,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use glam::Mat4;
 use slotmap::SlotMap;
@@ -37,6 +40,14 @@ pub struct Detached {
     pub index: usize,
 }
 
+/// Source of every revision number: process-wide, so revisions of different
+/// scenes (a replaced document, a loaded file) never collide.
+static REVISIONS: AtomicU64 = AtomicU64::new(1);
+
+pub(crate) fn next_revision() -> u64 {
+    REVISIONS.fetch_add(1, Ordering::Relaxed)
+}
+
 /// One entry of the explicit traversal stack used by [`Scene::walk`].
 ///
 /// The stack is owned by the caller so that per-frame traversals (render
@@ -62,7 +73,14 @@ pub struct WalkItem {
 /// Invariants: every attached node is reachable from `roots` exactly once with
 /// consistent parent links; every detached node belongs to exactly one subtree
 /// listed in `detached_roots`, whose root has no parent.
-#[derive(Clone, Debug, Default)]
+///
+/// ## Revisions
+///
+/// [`Scene::revision`] changes whenever anything in the scene may have changed:
+/// every [`Scene::get_mut`] and every structural edit. Read-only access never
+/// changes it, so code that only *looks* must use [`Scene::get`] — this is what
+/// lets the evaluation skip frames in which nothing changed.
+#[derive(Clone, Debug)]
 pub struct Scene {
     nodes: SlotMap<NodeId, Node>,
     roots: Vec<NodeId>,
@@ -70,12 +88,37 @@ pub struct Scene {
     detached_roots: Vec<NodeId>,
     /// Number of nodes, across all detached subtrees, hidden from public queries.
     detached_count: usize,
+    revision: u64,
+}
+
+impl Default for Scene {
+    fn default() -> Self {
+        Self {
+            nodes: SlotMap::with_key(),
+            roots: Vec::new(),
+            detached_roots: Vec::new(),
+            detached_count: 0,
+            revision: next_revision(),
+        }
+    }
 }
 
 impl Scene {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Changes whenever anything in the scene may have changed (see the type docs).
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Marks the scene as changed.
+    fn touch(&mut self) -> u64 {
+        self.revision = next_revision();
+        self.revision
     }
 
     /// Number of attached nodes.
@@ -100,8 +143,16 @@ impl Scene {
         self.nodes.get(id).filter(|n| !n.detached)
     }
 
+    /// Mutable access to an attached node. Marks the node and the scene as
+    /// changed — use [`Scene::get`] to only read.
     pub fn get_mut(&mut self, id: NodeId) -> Option<&mut Node> {
-        self.nodes.get_mut(id).filter(|n| !n.detached)
+        if !self.contains(id) {
+            return None;
+        }
+        let revision = self.touch();
+        let node = self.nodes.get_mut(id)?;
+        node.revision = revision;
+        Some(node)
     }
 
     /// Top-level nodes, in Object Manager order.
@@ -142,6 +193,7 @@ impl Scene {
     pub fn insert(&mut self, node: Node) -> NodeId {
         let id = self.nodes.insert(fresh(node));
         self.roots.push(id);
+        self.touch();
         id
     }
 
@@ -160,6 +212,7 @@ impl Scene {
         }
         let id = self.nodes.insert(fresh(node));
         self.link(id, parent, index);
+        self.touch();
         Ok(id)
     }
 
@@ -183,6 +236,7 @@ impl Scene {
         let (parent, index) = self.unlink(id).ok_or(SceneError::NodeNotFound)?;
         self.detached_count += self.set_subtree_detached(id, true);
         self.detached_roots.push(id);
+        self.touch();
         Ok(Detached {
             root: id,
             parent,
@@ -204,6 +258,10 @@ impl Scene {
         self.detached_roots.retain(|&r| r != root);
         self.detached_count -= self.set_subtree_detached(root, false);
         self.link(root, parent, index);
+        let revision = self.touch();
+        if let Some(node) = self.nodes.get_mut(root) {
+            node.revision = revision;
+        }
         Ok(())
     }
 
@@ -220,6 +278,7 @@ impl Scene {
             }
         }
         self.detached_count -= removed;
+        self.touch();
         Ok(removed)
     }
 
@@ -275,6 +334,10 @@ impl Scene {
         };
         self.unlink(id).ok_or(SceneError::NodeNotFound)?;
         self.link(id, new_parent, index);
+        let revision = self.touch();
+        if let Some(node) = self.nodes.get_mut(id) {
+            node.revision = revision;
+        }
         if let Some(transform) = kept
             && let Some(node) = self.nodes.get_mut(id)
         {
@@ -453,6 +516,7 @@ fn fresh(mut node: Node) -> Node {
     node.parent = None;
     node.children.clear();
     node.detached = false;
+    node.revision = next_revision();
     node
 }
 
@@ -730,6 +794,53 @@ mod tests {
         assert!(s.world_matrix(child).abs_diff_eq(world_before, 1e-3));
         s.detach(child).unwrap();
         assert_eq!(s.transform_keeping_world(child, None), None, "detached");
+    }
+
+    #[test]
+    fn reading_never_changes_the_revision_and_writing_always_does() {
+        let mut s = Scene::new();
+        let a = s.insert(null("a"));
+        let b = s.insert_child(a, null("b")).unwrap();
+
+        let r = s.revision();
+        let _ = (s.get(a), s.children(a), s.iter().count(), s.world_matrix(b), s.len());
+        s.walk(&mut Vec::new(), |_, _, _, _| true);
+        assert_eq!(s.revision(), r, "read-only access");
+
+        let node_before = s.get(b).unwrap().revision();
+        s.get_mut(b).unwrap().data.name = "renamed".to_owned();
+        assert!(s.revision() > r);
+        assert!(s.get(b).unwrap().revision() > node_before, "the node is marked too");
+        assert_eq!(s.get_mut(NodeId::default()).map(|_| ()), None);
+
+        let mut last = s.revision();
+        let mut changed = |s: &Scene, what: &str| {
+            assert!(s.revision() > last, "{what} must change the revision");
+            last = s.revision();
+        };
+        s.insert(null("c"));
+        changed(&s, "insert");
+        let d = s.detach(b).unwrap();
+        changed(&s, "detach");
+        s.attach(b, d.parent, d.index).unwrap();
+        changed(&s, "attach");
+        s.reparent_at(b, None, 0, true).unwrap();
+        changed(&s, "reparent");
+        s.detach(b).unwrap();
+        s.purge(b).unwrap();
+        changed(&s, "purge");
+    }
+
+    #[test]
+    fn revisions_are_unique_across_scenes() {
+        let first = Scene::new();
+        let second = Scene::new();
+        assert_ne!(
+            first.revision(),
+            second.revision(),
+            "a replaced document never looks unchanged"
+        );
+        assert_eq!(first.clone().revision(), first.revision(), "a copy is the same content");
     }
 
     #[test]

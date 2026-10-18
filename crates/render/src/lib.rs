@@ -3,13 +3,13 @@
 //! GPU viewport rendering for OpenC4D, built directly on `wgpu`.
 //!
 //! ```text
-//!  Scene ──extract──▶ FrameData ──prepare──▶ GPU buffers ──paint──▶ render pass
-//!  (oc4d-scene)       (CPU, reused)          (ViewportRenderer)     (owned by the host)
+//!  EvaluatedScene ──extract──▶ FrameData ──prepare──▶ GPU buffers ──paint──▶ render pass
+//!  (oc4d-eval)                 (CPU, reused)          (ViewportRenderer)     (owned by the host)
 //! ```
 //!
 //! ## Architecture rules
 //!
-//! * Reads the scene, never mutates it.
+//! * Reads the evaluated scene (`oc4d-eval`), never the document itself.
 //! * Knows nothing about egui: the UI layer adapts [`ViewportRenderer`] to whatever
 //!   paint-callback mechanism it uses (`egui_wgpu::CallbackTrait` today).
 //! * The per-frame path (`FrameData::extract`, `ViewportRenderer::prepare`,
@@ -25,7 +25,7 @@ mod picking;
 pub use camera::{OrbitCamera, Ray};
 pub use frame::{FrameData, InstanceRaw};
 pub use gpu::{GpuTargetConfig, ViewportRenderer};
-pub use mesh::{MeshKey, Ratio, Vertex};
+pub use mesh::{TessellationScratch, Vertex, tessellate};
 pub use picking::pick;
 
 /// WGSL sources, exposed for offline validation and tooling.

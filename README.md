@@ -66,18 +66,19 @@ cargo clippy --workspace --all-targets -- -D warnings   # lints
 ## Architecture
 
 ```
-oc4d-geom  ◀──  oc4d-scene  ◀──  oc4d-render  ◀──  oc4d-ui  ◀──  open-c4d (binary)
-(geometry)      (data)           (wgpu)            (egui)         (composition root)
-                     ▲                                │
-                     └───────────  oc4d-io  ◀─────────┘
-                                   (.oc4d files)
+oc4d-geom  ◀──  oc4d-scene  ◀──  oc4d-eval  ◀──  oc4d-render  ◀──  oc4d-ui  ◀──  open-c4d (binary)
+(geometry)      (data)           (evaluation)    (wgpu)            (egui)         (composition root)
+                     ▲                                                │
+                     └──────────────────  oc4d-io  ◀──────────────────┘
+                                          (.oc4d files)
 ```
 
 | Crate         | Responsibility                                                      |
 |---------------|---------------------------------------------------------------------|
 | `oc4d-geom`   | Polygon meshes with n-gons, topology, vertex normals (Phong angle), triangulation for the GPU. glam only. |
 | `oc4d-scene`  | Scene graph (slotmap arena, generational `NodeId`), transforms (HPB), bounds, document time. No GPU, no UI. |
-| `oc4d-render` | Orbit camera, per-frame `FrameData` extraction, wgpu pipelines + WGSL shaders, picking. No UI. |
+| `oc4d-eval`   | Evaluated scene: visible nodes with world matrices, drawables (unit mesh keys) and pick shapes; skipped when nothing changed. No GPU, no UI. |
+| `oc4d-render` | Orbit camera, per-frame `FrameData` extraction, generated-mesh cache, wgpu pipelines + WGSL shaders, picking. No UI. |
 | `oc4d-io`     | `.oc4d` document files: versioned JSON format, atomic save, load with clear errors. No GPU, no UI. |
 | `oc4d-ui`     | Theme, painted vector icons, panels, gizmo, shortcuts, command queue, undo history. |
 | `open-c4d`    | Window / GPU surface setup and panel layout.                         |
