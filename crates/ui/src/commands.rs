@@ -46,8 +46,9 @@ pub enum EditorCommand {
     NewDocument,
     /// Asks for a document to open (asks to save unsaved changes first).
     Open,
-    /// Opens a recently used document (asks to save unsaved changes first).
-    OpenRecent(std::path::PathBuf),
+    /// Opens this document: File ▸ Open Recent, or a file dropped on the window
+    /// (asks to save unsaved changes first).
+    OpenFile(std::path::PathBuf),
     /// Saves to the current file, asking for a path if there is none yet.
     Save,
     /// Asks for a path and saves there.
@@ -132,7 +133,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
     match command {
         EditorCommand::NewDocument => file::request(FileAction::New, doc, editor, viewport),
         EditorCommand::Open => file::request(FileAction::Open, doc, editor, viewport),
-        EditorCommand::OpenRecent(path) => file::request(FileAction::OpenPath(path), doc, editor, viewport),
+        EditorCommand::OpenFile(path) => file::request(FileAction::OpenPath(path), doc, editor, viewport),
         EditorCommand::Save => {
             file::save(doc, editor, false);
         }

@@ -13,6 +13,7 @@
 pub mod about;
 pub mod alert;
 pub mod attributes;
+pub mod drop_overlay;
 pub mod menu_bar;
 pub mod mode_palette;
 pub mod outliner;

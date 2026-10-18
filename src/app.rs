@@ -5,7 +5,7 @@ use egui::{CentralPanel, Margin, Panel};
 use oc4d_scene::Document;
 use oc4d_ui::{
     AttributesPanel, EditorState, OutlinerPanel, RecentFiles, TimelinePanel, ViewportPanel, commands, file,
-    panels::{about, alert, menu_bar, mode_palette, status_bar, toolbar, unsaved_changes},
+    panels::{about, alert, drop_overlay, menu_bar, mode_palette, status_bar, toolbar, unsaved_changes},
     recent, shortcuts,
     theme::{self, metrics},
 };
@@ -94,6 +94,7 @@ impl eframe::App for OpenC4DApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         shortcuts::handle(&ctx, &mut self.doc, &mut self.editor);
+        file::accept_dropped_files(&ctx, &mut self.editor);
 
         // Order matters: top/bottom bars span the full width, then the right-hand
         // managers take full height, then the left palette and the timeline
@@ -150,6 +151,7 @@ impl eframe::App for OpenC4DApp {
         about::show(&ctx, &mut self.editor);
         unsaved_changes::show(&ctx, &self.doc, &mut self.editor);
         alert::show(&ctx, &mut self.editor);
+        drop_overlay::show(&ctx);
 
         if commands::apply_pending(&mut self.doc, &mut self.editor, &mut self.viewport) {
             ctx.request_repaint();

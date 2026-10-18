@@ -23,6 +23,8 @@ pub mod palette {
     /// The 1 px grooves between panels.
     pub const BORDER: Color32 = Color32::from_rgb(0x10, 0x11, 0x12);
     pub const SEPARATOR: Color32 = Color32::from_rgb(0x3b, 0x3d, 0x42);
+    /// Darkens everything behind an overlay (file drop target).
+    pub const SCRIM: Color32 = Color32::from_black_alpha(170);
 
     pub const TEXT: Color32 = Color32::from_rgb(0xc6, 0xc8, 0xcc);
     pub const TEXT_STRONG: Color32 = Color32::from_rgb(0xee, 0xf0, 0xf2);

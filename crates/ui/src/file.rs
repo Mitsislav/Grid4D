@@ -334,6 +334,55 @@ fn file_stem_for(name: &str) -> String {
     }
 }
 
+/// `true` for paths with the document extension (any letter case).
+#[must_use]
+pub fn is_document(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case(oc4d_io::EXTENSION))
+}
+
+/// Opens a document dropped onto the window (asking "Save changes?" first), or
+/// explains why the dropped files cannot be opened. Call once per frame, before
+/// the commands are applied.
+pub fn accept_dropped_files(ctx: &egui::Context, editor: &mut EditorState) {
+    // Allocates only on the frame something was dropped.
+    let choice = ctx.input(|i| {
+        let paths: Vec<&Path> = i.raw.dropped_files.iter().map(|file| file.path()).collect();
+        choose_dropped(&paths)
+    });
+    match choice {
+        None => {}
+        Some(Ok(path)) => editor.commands.push(EditorCommand::OpenFile(path)),
+        Some(Err(alert)) => editor.file.alert = Some(alert),
+    }
+}
+
+/// The first `.oc4d` among `paths`; `None` if nothing was dropped, an alert if
+/// none of them is a document. (One document is open at a time, so further
+/// documents in the same drop are ignored.)
+fn choose_dropped(paths: &[&Path]) -> Option<Result<PathBuf, Alert>> {
+    if paths.is_empty() {
+        return None;
+    }
+    Some(match paths.iter().find(|path| is_document(path)) {
+        Some(path) => Ok(path.to_path_buf()),
+        None => {
+            let mut message = format!(
+                "None of the dropped files is an OpenC4D document (.{}):\n",
+                oc4d_io::EXTENSION
+            );
+            for path in paths {
+                message.push('\n');
+                message.push_str(&path.file_name().unwrap_or(path.as_os_str()).to_string_lossy());
+            }
+            Err(Alert {
+                title: "Cannot Open Dropped Files",
+                message,
+            })
+        }
+    })
+}
+
 /// Keeps the window in step with the document file, once per frame after the
 /// commands ran: the close button asks "Save changes?" first, a confirmed quit
 /// closes the window, and the title shows the name and a `*` for unsaved changes.
@@ -716,7 +765,7 @@ mod tests {
         oc4d_io::save(&Document::new("Old shot"), &path).unwrap();
         f.make_dirty();
 
-        f.run(&[EditorCommand::OpenRecent(path.clone())]);
+        f.run(&[EditorCommand::OpenFile(path.clone())]);
         assert_eq!(f.editor.file.pending(), Some(&FileAction::OpenPath(path.clone())));
         f.run(&[EditorCommand::AnswerUnsaved(UnsavedChoice::Discard)]);
         assert_eq!(f.doc.name, "Old shot");
@@ -729,8 +778,61 @@ mod tests {
         let mut f = Fixture::new("recent_gone", None, None);
         let gone = f.dir.join("gone.oc4d");
         f.editor.file.recent.touch(&gone);
-        f.run(&[EditorCommand::OpenRecent(gone)]);
+        f.run(&[EditorCommand::OpenFile(gone)]);
         assert!(f.editor.file.recent.is_empty());
         assert_eq!(f.editor.file.alert.as_ref().unwrap().title, "Could Not Open Document");
+    }
+
+    // ── Drag and drop ───────────────────────────────────────────────────────
+
+    #[test]
+    fn the_first_document_in_a_drop_is_chosen() {
+        assert_eq!(choose_dropped(&[]), None);
+        let picked = choose_dropped(&[Path::new("notes.txt"), Path::new("a/shot.OC4D"), Path::new("b.oc4d")]);
+        assert_eq!(picked, Some(Ok(PathBuf::from("a/shot.OC4D"))));
+
+        let Some(Err(alert)) = choose_dropped(&[Path::new("a/notes.txt"), Path::new("model.gltf")]) else {
+            panic!("no document was dropped");
+        };
+        assert_eq!(alert.title, "Cannot Open Dropped Files");
+        assert!(alert.message.contains("notes.txt") && alert.message.contains("model.gltf"));
+    }
+
+    /// A file dropped onto the window, as the windowing integration reports it.
+    #[derive(Debug)]
+    struct Dropped(PathBuf);
+
+    impl egui::DroppedFile for Dropped {
+        fn path(&self) -> &Path {
+            &self.0
+        }
+
+        fn bytes(&self) -> Result<Vec<u8>, String> {
+            std::fs::read(&self.0).map_err(|err| err.to_string())
+        }
+    }
+
+    #[test]
+    fn dropping_a_document_on_the_window_opens_it_after_the_prompt() {
+        let mut f = Fixture::new("drop", None, None);
+        let path = f.dir.join("dropped.oc4d");
+        oc4d_io::save(&Document::new("Dropped"), &path).unwrap();
+        f.make_dirty();
+
+        let ctx = egui::Context::default();
+        let input = RawInput {
+            dropped_files: vec![std::sync::Arc::new(Dropped(path.clone()))],
+            ..RawInput::default()
+        };
+        let editor = &mut f.editor;
+        ctx.run_ui(input, |ui| accept_dropped_files(ui.ctx(), editor))
+            .drop_without_applying_deltas();
+
+        f.run(&[]); // the queued OpenFile
+        assert_eq!(f.editor.file.pending(), Some(&FileAction::OpenPath(path.clone())));
+        f.run(&[EditorCommand::AnswerUnsaved(UnsavedChoice::Discard)]);
+        assert_eq!(f.doc.name, "Dropped");
+        assert_eq!(f.editor.file.path(), Some(path.as_path()));
+        assert_eq!(f.editor.file.recent.paths().first(), Some(&path));
     }
 }

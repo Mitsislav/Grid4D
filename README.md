@@ -35,7 +35,8 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
   `Ctrl+Shift+S`) with native dialogs; `.oc4d` is versioned JSON. The title shows
   the file name and `*` for unsaved changes, and New, Open, Quit and the window's
   close button ask "Save changes?" first. File ▸ Open Recent remembers the last ten
-  documents, and the window size and panel layout are restored on the next start.
+  documents, a `.oc4d` dropped onto the window opens it, and the window size and
+  panel layout are restored on the next start.
 - **Undo / redo** (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`, toolbar, Edit menu): create,
   delete, re-parent, gizmo drags, attribute and project-setting edits, renames and
   visibility toggles — one step per interaction, restoring the selection too.

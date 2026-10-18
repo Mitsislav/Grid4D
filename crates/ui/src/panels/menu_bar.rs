@@ -234,7 +234,7 @@ fn recent_menu(ui: &mut Ui, editor: &mut EditorState) {
         ui.close();
     }
     if let Some(path) = open {
-        editor.commands.push(EditorCommand::OpenRecent(path));
+        editor.commands.push(EditorCommand::OpenFile(path));
         ui.close();
     }
 }
