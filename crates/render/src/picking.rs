@@ -10,10 +10,10 @@ use crate::Ray;
 pub fn pick(scene: &Scene, ray: Ray, stack: &mut Vec<WalkItem>) -> Option<NodeId> {
     let mut best: Option<(f32, NodeId)> = None;
     scene.walk(stack, |id, node, world, _| {
-        if !node.visible_in_editor || !node.enabled {
+        if !node.data.visible_in_editor || !node.data.enabled {
             return false;
         }
-        let Some(bounds) = node.kind.local_bounds() else {
+        let Some(bounds) = node.data.kind.local_bounds() else {
             return true;
         };
         if world.determinant().abs() <= f32::EPSILON {
@@ -22,7 +22,7 @@ pub fn pick(scene: &Scene, ray: Ray, stack: &mut Vec<WalkItem>) -> Option<NodeId
         let inv = world.inverse();
         let origin = inv.transform_point3(ray.origin);
         let dir = inv.transform_vector3(ray.dir);
-        let hit = match node.kind {
+        let hit = match node.data.kind {
             ObjectKind::Sphere { radius } => ray_sphere(origin, dir, radius),
             ObjectKind::Light { .. } => ray_sphere(origin, dir, LIGHT_MARKER_RADIUS),
             _ => bounds.ray_intersect(origin, dir),
@@ -65,7 +65,7 @@ mod tests {
         let cam = OrbitCamera::default();
         let ray = cam.ray_from_ndc(Vec2::ZERO, 1.6);
         let id = pick(&doc.scene, ray, &mut Vec::new()).expect("should hit something");
-        assert_eq!(doc.scene.get(id).unwrap().name, "Cube");
+        assert_eq!(doc.scene.get(id).unwrap().data.name, "Cube");
     }
 
     #[test]

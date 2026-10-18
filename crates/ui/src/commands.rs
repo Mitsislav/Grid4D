@@ -90,13 +90,13 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 // Like C4D: a new camera is created at the current view.
                 ObjectKindTag::Camera => {
                     let cam = viewport.camera();
-                    node.transform = Transform::from_position(cam.eye());
-                    node.transform.rotation = Vec3::new(cam.yaw, -cam.pitch, 0.0);
-                    node.display_color = [0.3, 0.3, 0.32];
+                    node.data.transform = Transform::from_position(cam.eye());
+                    node.data.transform.rotation = Vec3::new(cam.yaw, -cam.pitch, 0.0);
+                    node.data.display_color = [0.3, 0.3, 0.32];
                 }
                 ObjectKindTag::Light => {
-                    node.transform.position = Vec3::new(0.0, 400.0, 0.0);
-                    node.display_color = [1.0, 0.95, 0.85];
+                    node.data.transform.position = Vec3::new(0.0, 400.0, 0.0);
+                    node.data.display_color = [1.0, 0.95, 0.85];
                 }
                 ObjectKindTag::Null
                 | ObjectKindTag::Cube
@@ -169,7 +169,7 @@ mod tests {
     fn id_of(doc: &Document, name: &str) -> NodeId {
         doc.scene
             .iter()
-            .find(|(_, n)| n.name == name)
+            .find(|(_, n)| n.data.name == name)
             .map(|(id, _)| id)
             .unwrap_or_else(|| panic!("no node named {name}"))
     }
@@ -207,7 +207,10 @@ mod tests {
         let second = id_of(&doc, "Cube.1");
         assert!(doc.scene.contains(id_of(&doc, "Cube")));
         assert_eq!(editor.selection.as_slice(), &[second]);
-        assert_eq!(doc.scene.get(second).unwrap().kind, ObjectKindTag::Cube.default_kind());
+        assert_eq!(
+            doc.scene.get(second).unwrap().data.kind,
+            ObjectKindTag::Cube.default_kind()
+        );
     }
 
     #[test]
@@ -220,7 +223,7 @@ mod tests {
             &[EditorCommand::CreateObject(ObjectKindTag::Camera)],
         );
         let camera = doc.scene.get(id_of(&doc, "Camera")).unwrap();
-        assert!(camera.transform.position.abs_diff_eq(vp.camera().eye(), 1e-3));
+        assert!(camera.data.transform.position.abs_diff_eq(vp.camera().eye(), 1e-3));
     }
 
     #[test]

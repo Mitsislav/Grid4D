@@ -22,11 +22,11 @@ pub(super) fn selection_brackets(
     }
     let stroke = Stroke::new(1.5, p::HIGHLIGHT.gamma_multiply(0.9));
     scene.walk(stack, |id, node, world, _| {
-        if !node.visible_in_editor || !node.enabled {
+        if !node.data.visible_in_editor || !node.data.enabled {
             return false;
         }
         if selection.contains(id)
-            && let Some(b) = node.kind.local_bounds()
+            && let Some(b) = node.data.kind.local_bounds()
         {
             let corner = |i: u8| {
                 Vec3::new(

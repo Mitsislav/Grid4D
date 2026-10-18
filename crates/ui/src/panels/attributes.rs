@@ -3,7 +3,7 @@
 //! settings, like Cinema 4D does.
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
-use oc4d_scene::{Document, Node, NodeId, ObjectKind};
+use oc4d_scene::{Document, NodeData, NodeId, ObjectKind};
 
 use crate::{
     EditorState,
@@ -67,11 +67,11 @@ impl AttributesPanel {
 
         // Title: "Cube Object [Cube]"
         ui.horizontal(|ui| {
-            let tag = node.kind.tag();
+            let tag = node.data.kind.tag();
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
             icons::paint(ui.painter(), rect, Icon::Object(tag), tag_color(tag));
             ui.label(
-                RichText::new(format!("{} Object [{}]", node.kind.label(), node.name))
+                RichText::new(format!("{} Object [{}]", node.data.kind.label(), node.data.name))
                     .strong()
                     .color(p::TEXT_STRONG),
             );
@@ -95,49 +95,49 @@ impl AttributesPanel {
         });
 
         match self.tab {
-            Tab::Basic => basic_tab(ui, node),
-            Tab::Coord => coord_tab(ui, node),
-            Tab::Object => object_tab(ui, node),
+            Tab::Basic => basic_tab(ui, &mut node.data),
+            Tab::Coord => coord_tab(ui, &mut node.data),
+            Tab::Object => object_tab(ui, &mut node.data),
         }
     }
 }
 
-fn basic_tab(ui: &mut Ui, node: &mut Node) {
+fn basic_tab(ui: &mut Ui, data: &mut NodeData) {
     section_heading(ui, "Basic Properties");
     Grid::new("oc4d.attr.basic")
         .num_columns(2)
         .spacing([6.0, 4.0])
         .show(ui, |ui| {
             attr_label(ui, "Name", LABEL_WIDTH);
-            ui.add(TextEdit::singleline(&mut node.name).desired_width(f32::INFINITY));
+            ui.add(TextEdit::singleline(&mut data.name).desired_width(f32::INFINITY));
             ui.end_row();
 
             attr_label(ui, "Visible in Editor", LABEL_WIDTH);
-            ui.checkbox(&mut node.visible_in_editor, "");
+            ui.checkbox(&mut data.visible_in_editor, "");
             ui.end_row();
 
             attr_label(ui, "Visible in Renderer", LABEL_WIDTH);
-            ui.checkbox(&mut node.visible_in_render, "");
+            ui.checkbox(&mut data.visible_in_render, "");
             ui.end_row();
 
             attr_label(ui, "Display Color", LABEL_WIDTH);
-            ui.color_edit_button_rgb(&mut node.display_color);
+            ui.color_edit_button_rgb(&mut data.display_color);
             ui.end_row();
 
             attr_label(ui, "Enabled", LABEL_WIDTH);
-            ui.checkbox(&mut node.enabled, "");
+            ui.checkbox(&mut data.enabled, "");
             ui.end_row();
         });
 }
 
-fn coord_tab(ui: &mut Ui, node: &mut Node) {
+fn coord_tab(ui: &mut Ui, data: &mut NodeData) {
     section_heading(ui, "Coordinates");
     const ROWS: [[&str; 3]; 3] = [
         ["P . X", "S . X", "R . H"],
         ["P . Y", "S . Y", "R . P"],
         ["P . Z", "S . Z", "R . B"],
     ];
-    let t = &mut node.transform;
+    let t = &mut data.transform;
     Grid::new("oc4d.attr.coord")
         .num_columns(6)
         .spacing([4.0, 4.0])
@@ -179,12 +179,12 @@ fn coord_tab(ui: &mut Ui, node: &mut Node) {
     }
 }
 
-fn object_tab(ui: &mut Ui, node: &mut Node) {
+fn object_tab(ui: &mut Ui, data: &mut NodeData) {
     section_heading(ui, "Object Properties");
     Grid::new("oc4d.attr.object")
         .num_columns(2)
         .spacing([6.0, 4.0])
-        .show(ui, |ui| match &mut node.kind {
+        .show(ui, |ui| match &mut data.kind {
             ObjectKind::Null => {
                 ui.label(
                     RichText::new("A Null groups objects. Drag objects onto it in the Object Manager.")

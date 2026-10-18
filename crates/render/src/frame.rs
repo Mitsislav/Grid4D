@@ -104,10 +104,10 @@ impl FrameData {
         }
         let batches = &mut self.batches;
         scene.walk(&mut self.walk_stack, |id, node, world, _depth| {
-            if !node.visible_in_editor || !node.enabled {
+            if !node.data.visible_in_editor || !node.data.enabled {
                 return false;
             }
-            if let Some((mesh, scale, color, unlit)) = draw_style(&node.kind, node.display_color) {
+            if let Some((mesh, scale, color, unlit)) = draw_style(&node.data.kind, node.data.display_color) {
                 let model = *world * Mat4::from_scale(scale);
                 batches[mesh.index()].push(InstanceRaw {
                     model: model.to_cols_array_2d(),
@@ -188,13 +188,13 @@ mod tests {
         let group = doc
             .scene
             .iter()
-            .find(|(_, n)| n.name == "Group")
+            .find(|(_, n)| n.data.name == "Group")
             .map(|(id, _)| id)
             .unwrap();
         let mut frame = FrameData::new();
         frame.extract(&doc.scene, |_| false);
         let before = frame.instance_count();
-        doc.scene.get_mut(group).unwrap().visible_in_editor = false;
+        doc.scene.get_mut(group).unwrap().data.visible_in_editor = false;
         frame.extract(&doc.scene, |_| false);
         assert_eq!(frame.instance_count(), before - 2);
     }

@@ -155,7 +155,7 @@ impl OutlinerPanel {
     fn tree(&mut self, ui: &mut Ui, scene: &Scene, id: NodeId, depth: u32, editor: &EditorState) {
         let Some(node) = scene.get(id) else { return };
         let filtering = !self.filter.is_empty();
-        if !filtering || contains_ignore_ascii_case(&node.name, &self.filter) {
+        if !filtering || contains_ignore_ascii_case(&node.data.name, &self.filter) {
             self.row(ui, scene, id, node, if filtering { 0 } else { depth }, editor);
         }
         if filtering || !self.collapsed.contains(&id) {
@@ -227,7 +227,7 @@ impl OutlinerPanel {
         x += 15.0;
 
         // Type icon.
-        let tag = node.kind.tag();
+        let tag = node.data.kind.tag();
         icons::paint(
             &painter,
             Rect::from_min_size(pos2(x, cy - 8.0), Vec2::splat(16.0)),
@@ -256,7 +256,7 @@ impl OutlinerPanel {
                 self.actions.push(RowAction::CommitRename(id));
             }
         } else {
-            let color = match (selected, node.enabled) {
+            let color = match (selected, node.data.enabled) {
                 (_, false) => p::TEXT_FAINT,
                 (true, true) => p::TEXT_STRONG,
                 (false, true) => p::TEXT,
@@ -264,7 +264,7 @@ impl OutlinerPanel {
             ui.painter_at(name_rect).text(
                 pos2(name_rect.left(), cy),
                 Align2::LEFT_CENTER,
-                &node.name,
+                &node.data.name,
                 TextStyle::Body.resolve(ui.style()),
                 color,
             );
@@ -273,8 +273,8 @@ impl OutlinerPanel {
         // Traffic lights: upper = editor visibility, lower = render visibility.
         let dots_x = rect.right() - 32.0;
         for (offset, visible, action) in [
-            (-3.5, node.visible_in_editor, RowAction::ToggleEditorVisibility(id)),
-            (3.5, node.visible_in_render, RowAction::ToggleRenderVisibility(id)),
+            (-3.5, node.data.visible_in_editor, RowAction::ToggleEditorVisibility(id)),
+            (3.5, node.data.visible_in_render, RowAction::ToggleRenderVisibility(id)),
         ] {
             let center = pos2(dots_x, cy + offset);
             let hit = ui.interact(
@@ -295,7 +295,7 @@ impl OutlinerPanel {
         // Enabled check mark.
         let check_rect = Rect::from_center_size(pos2(rect.right() - 14.0, cy), Vec2::splat(13.0));
         let check = ui.interact(check_rect, ui.scope_id().with(("enabled", id)), Sense::click());
-        let (icon, color) = if node.enabled {
+        let (icon, color) = if node.data.enabled {
             (Icon::Check, p::ENABLED)
         } else {
             (Icon::Cross, p::VIS_HIDDEN)
@@ -363,7 +363,7 @@ impl OutlinerPanel {
             let painter = ui
                 .ctx()
                 .layer_painter(LayerId::new(Order::Tooltip, Id::unique("oc4d.outliner.drag")));
-            let text = painter.layout_no_wrap(node.name.clone(), FontId::proportional(12.0), p::TEXT_STRONG);
+            let text = painter.layout_no_wrap(node.data.name.clone(), FontId::proportional(12.0), p::TEXT_STRONG);
             let bg = Rect::from_min_size(pointer + vec2(14.0, 6.0), text.size() + vec2(10.0, 4.0));
             painter.rect_filled(bg, CornerRadius::same(3), p::ACCENT_BG);
             painter.galley(bg.min + vec2(5.0, 2.0), text, p::TEXT_STRONG);
@@ -398,24 +398,24 @@ impl OutlinerPanel {
                 }
                 RowAction::ToggleEditorVisibility(id) => {
                     if let Some(n) = doc.scene.get_mut(id) {
-                        n.visible_in_editor = !n.visible_in_editor;
+                        n.data.visible_in_editor = !n.data.visible_in_editor;
                     }
                 }
                 RowAction::ToggleRenderVisibility(id) => {
                     if let Some(n) = doc.scene.get_mut(id) {
-                        n.visible_in_render = !n.visible_in_render;
+                        n.data.visible_in_render = !n.data.visible_in_render;
                     }
                 }
                 RowAction::ToggleEnabled(id) => {
                     if let Some(n) = doc.scene.get_mut(id) {
-                        n.enabled = !n.enabled;
+                        n.data.enabled = !n.data.enabled;
                     }
                 }
                 RowAction::StartRename(id) => {
                     if let Some(n) = doc.scene.get(id) {
                         self.renaming = Some(id);
                         self.rename_buffer.clear();
-                        self.rename_buffer.push_str(&n.name);
+                        self.rename_buffer.push_str(&n.data.name);
                         self.rename_needs_focus = true;
                     }
                 }
@@ -424,7 +424,7 @@ impl OutlinerPanel {
                     if let Some(n) = doc.scene.get_mut(id)
                         && !name.is_empty()
                     {
-                        name.clone_into(&mut n.name);
+                        name.clone_into(&mut n.data.name);
                     }
                     self.renaming = None;
                 }

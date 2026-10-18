@@ -148,12 +148,14 @@ impl ObjectKind {
     }
 }
 
-/// An object in the scene graph.
+/// Everything about a node except its place in the hierarchy: the payload that
+/// the Attribute Manager and the Object Manager edit.
 ///
-/// Hierarchy links (`parent`, `children`) are owned by the [`Scene`](crate::Scene)
-/// and can only be changed through its API, which keeps them consistent.
-#[derive(Clone, Debug)]
-pub struct Node {
+/// Kept separate from the hierarchy links so that a value edit is one cheap
+/// snapshot/swap of `NodeData` (the unit of undo for attribute edits) and can
+/// never corrupt the parent/child structure.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeData {
     pub name: String,
     pub kind: ObjectKind,
     pub transform: Transform,
@@ -165,11 +167,9 @@ pub struct Node {
     pub visible_in_render: bool,
     /// The check mark in the Object Manager.
     pub enabled: bool,
-    pub(crate) parent: Option<NodeId>,
-    pub(crate) children: Vec<NodeId>,
 }
 
-impl Node {
+impl NodeData {
     /// Neutral viewport grey (linear RGB).
     pub const DEFAULT_COLOR: [f32; 3] = [0.55, 0.56, 0.58];
 
@@ -183,30 +183,10 @@ impl Node {
             visible_in_editor: true,
             visible_in_render: true,
             enabled: true,
-            parent: None,
-            children: Vec::new(),
         }
     }
 
-    #[must_use]
-    pub fn with_transform(mut self, transform: Transform) -> Self {
-        self.transform = transform;
-        self
-    }
-
-    #[must_use]
-    pub fn with_position(mut self, position: Vec3) -> Self {
-        self.transform.position = position;
-        self
-    }
-
-    #[must_use]
-    pub fn with_color(mut self, linear_rgb: [f32; 3]) -> Self {
-        self.display_color = linear_rgb;
-        self
-    }
-
-    /// World-space bounds given this node's world matrix. Objects without extent
+    /// World-space bounds given the node's world matrix. Objects without extent
     /// (Nulls) yield a zero-size box at their origin.
     #[must_use]
     pub fn world_bounds(&self, world: &glam::Mat4) -> Aabb {
@@ -217,6 +197,63 @@ impl Node {
                 Aabb { min: p, max: p }
             }
         }
+    }
+}
+
+/// An object in the scene graph: its [`NodeData`] plus hierarchy links.
+///
+/// Hierarchy links (`parent`, `children`) and the detached flag are owned by the
+/// [`Scene`](crate::Scene) and can only be changed through its API, which keeps
+/// them consistent.
+#[derive(Clone, Debug)]
+pub struct Node {
+    pub data: NodeData,
+    pub(crate) parent: Option<NodeId>,
+    pub(crate) children: Vec<NodeId>,
+    /// Part of a subtree removed with [`Scene::detach`](crate::Scene::detach):
+    /// still stored (so its `NodeId`s survive an undo) but invisible to every
+    /// public query.
+    pub(crate) detached: bool,
+}
+
+impl Node {
+    #[must_use]
+    pub fn new(name: impl Into<String>, kind: ObjectKind) -> Self {
+        Self::from_data(NodeData::new(name, kind))
+    }
+
+    #[must_use]
+    pub fn from_data(data: NodeData) -> Self {
+        Self {
+            data,
+            parent: None,
+            children: Vec::new(),
+            detached: false,
+        }
+    }
+
+    #[must_use]
+    pub fn with_transform(mut self, transform: Transform) -> Self {
+        self.data.transform = transform;
+        self
+    }
+
+    #[must_use]
+    pub fn with_position(mut self, position: Vec3) -> Self {
+        self.data.transform.position = position;
+        self
+    }
+
+    #[must_use]
+    pub fn with_color(mut self, linear_rgb: [f32; 3]) -> Self {
+        self.data.display_color = linear_rgb;
+        self
+    }
+
+    /// See [`NodeData::world_bounds`].
+    #[must_use]
+    pub fn world_bounds(&self, world: &glam::Mat4) -> Aabb {
+        self.data.world_bounds(world)
     }
 
     #[must_use]

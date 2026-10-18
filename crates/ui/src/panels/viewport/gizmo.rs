@@ -241,7 +241,7 @@ impl GizmoState {
 fn apply_drag(geo: &GizmoGeometry, drag: &Drag, pointer: Pos2, scene: &mut Scene) {
     let Some(node) = scene.get_mut(drag.node) else { return };
     let axis = drag.axis;
-    let t = &mut node.transform;
+    let t = &mut node.data.transform;
 
     match geo.tool {
         Tool::Move | Tool::Scale => {
