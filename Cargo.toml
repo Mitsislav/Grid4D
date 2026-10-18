@@ -1,0 +1,105 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  OpenC4D — open-source, modular 3D content creation suite
+#
+#  Workspace layout (dependency direction is strictly one-way):
+#
+#      oc4d-scene  ◀──  oc4d-render  ◀──  oc4d-ui  ◀──  open-c4d (binary)
+#      (data)           (wgpu)            (egui)         (composition root)
+#
+#  See ARCHITECTURE.md for the architectural rules.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[workspace]
+resolver = "3"
+members = ["crates/scene", "crates/render", "crates/ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95" # eframe 0.37 requires 1.95
+publish = false
+
+[workspace.dependencies]
+# Internal crates
+oc4d-scene = { path = "crates/scene" }
+oc4d-render = { path = "crates/render" }
+oc4d-ui = { path = "crates/ui" }
+
+# UI — eframe ships egui + winit + the wgpu integration (wgpu is its default renderer).
+eframe = "0.37"
+egui = "0.37"
+egui-wgpu = "0.37"
+
+# GPU — must stay on the exact major version egui-wgpu uses (30), so cargo
+# unifies both into a single `wgpu` and the types are interchangeable.
+# Backends (Vulkan / DX12 / Metal / GL) are enabled by eframe's defaults.
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
+
+# Math & data
+glam = "0.34"
+bytemuck = { version = "1.25", features = ["derive"] }
+slotmap = "1.1"
+
+# Diagnostics
+log = "0.4"
+env_logger = "0.11"
+
+# Dev-only: offline WGSL validation in `cargo test` (same version wgpu uses).
+naga = { version = "30", features = ["wgsl-in"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+# Performance / correctness lints that matter for the render loop.
+redundant_clone = "warn"
+needless_collect = "warn"
+large_types_passed_by_value = "warn"
+trivially_copy_pass_by_ref = "warn"
+inefficient_to_string = "warn"
+manual_memcpy = "warn"
+cast_lossless = "warn"
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
+
+# ─── Root binary ─────────────────────────────────────────────────────────────
+
+[package]
+name = "open-c4d"
+description = "OpenC4D — an open-source 3D content creation suite inspired by Cinema 4D's workflow."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+default-run = "open-c4d"
+
+[dependencies]
+oc4d-scene.workspace = true
+oc4d-ui.workspace = true
+eframe.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+log.workspace = true
+env_logger.workspace = true
+
+[lints]
+workspace = true
+
+# ─── Build profiles ──────────────────────────────────────────────────────────
+
+# egui + wgpu are sluggish without optimisation: optimise dependencies even in
+# debug builds while keeping our own crates quick to compile.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

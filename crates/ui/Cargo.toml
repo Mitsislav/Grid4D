@@ -1,0 +1,18 @@
+[package]
+name = "oc4d-ui"
+description = "OpenC4D editor UI: Cinema 4D-style panels, theme and viewport interaction (egui)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+oc4d-scene.workspace = true
+oc4d-render.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+glam.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true
