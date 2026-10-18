@@ -5,13 +5,15 @@
 #
 #      oc4d-scene  ◀──  oc4d-render  ◀──  oc4d-ui  ◀──  open-c4d (binary)
 #      (data)           (wgpu)            (egui)         (composition root)
+#           ▲                                  │
+#           └──────────  oc4d-io  ◀────────────┘   (.oc4d files; ui uses it from Phase 2.2)
 #
 #  See ARCHITECTURE.md for the architectural rules.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [workspace]
 resolver = "3"
-members = ["crates/scene", "crates/render", "crates/ui"]
+members = ["crates/scene", "crates/render", "crates/io", "crates/ui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -24,6 +26,7 @@ publish = false
 # Internal crates
 oc4d-scene = { path = "crates/scene" }
 oc4d-render = { path = "crates/render" }
+oc4d-io = { path = "crates/io" }
 oc4d-ui = { path = "crates/ui" }
 
 # UI — eframe ships egui + winit + the wgpu integration (wgpu is its default renderer).
@@ -40,6 +43,10 @@ wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
 glam = "0.34"
 bytemuck = { version = "1.25", features = ["derive"] }
 slotmap = "1.1"
+
+# File formats (oc4d-io only)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # Diagnostics
 log = "0.4"

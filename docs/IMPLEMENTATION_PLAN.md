@@ -287,7 +287,7 @@ returns the exact original document and selection; redo ×5 reproduces it;
 
 | Step | Size | Work |
 |------|------|------|
-| 2.1 | M | `oc4d-io` crate: DTOs, `save(&Document, path)`, `load(path) -> Result<Document, IoError>`; round-trip test on the demo scene; fixtures |
+| 2.1 ✅ | M | `oc4d-io` crate: DTOs, `save(&Document, path)`, `load(path) -> Result<Document, IoError>`; round-trip test on the demo scene; fixtures — done 2026-10-18: flat pre-order object list with parent indices (no recursion limit, no cycles), HPB radians (exact round trip), atomic save via temp file + rename, non-finite numbers rejected, golden fixture `demo_v1.oc4d` |
 | 2.2 | M | File menu Open/Save/Save As + `Ctrl+O/S/Shift+S`; dirty flag; title; "Save changes?" modal on New/Open/Quit |
 | 2.3 | S | Recent files (File ▸ Recent), persisted window/splitter state |
 | 2.4 | S | Drag-and-drop a `.oc4d` file onto the window opens it |
