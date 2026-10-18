@@ -488,7 +488,7 @@ mod tests {
     fn row_edits_are_undoable_commands() {
         let mut doc = Document::with_demo_scene();
         let mut editor = EditorState::default();
-        let mut viewport = ViewportPanel::new(None, None, 1);
+        let mut viewport = ViewportPanel::new(None);
         let sphere = doc.scene.roots()[1];
 
         edit_data(&doc, &mut editor, sphere, "Rename", |d| "Ball".clone_into(&mut d.name));

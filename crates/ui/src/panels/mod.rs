@@ -48,7 +48,7 @@ mod tests {
         let mut outliner = OutlinerPanel::default();
         let mut attributes = AttributesPanel::default();
         let mut timeline = TimelinePanel::default();
-        let mut viewport = ViewportPanel::new(None, None, 1);
+        let mut viewport = ViewportPanel::new(None);
 
         let mut frame = |doc: &mut Document, editor: &mut EditorState| {
             ctx.run_ui(RawInput::default(), |ui| {

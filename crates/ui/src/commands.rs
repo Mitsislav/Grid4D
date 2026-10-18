@@ -328,7 +328,7 @@ mod tests {
 
     /// A headless viewport: without a wgpu render state it only keeps the camera.
     fn viewport() -> ViewportPanel {
-        ViewportPanel::new(None, None, 1)
+        ViewportPanel::new(None)
     }
 
     fn id_of(doc: &Document, name: &str) -> NodeId {

@@ -1,19 +1,16 @@
 //! The 3D viewport: header menus, navigation, picking, gizmo and the GPU view.
 
-mod callback;
 mod gizmo;
+mod gpu_view;
 mod overlay;
 
-use std::sync::{Arc, Mutex, PoisonError};
-
 use egui::{Align, Align2, Layout, Margin, PointerButton, Pos2, Rect, Response, Sense, Ui, pos2};
-use egui_wgpu::wgpu;
 use glam::{Mat4, Vec2 as GVec2, Vec3};
 use oc4d_eval::EvaluatedScene;
-use oc4d_render::{FrameData, GpuTargetConfig, OrbitCamera, ViewportRenderer, pick};
+use oc4d_render::{FrameData, OrbitCamera, pick};
 use oc4d_scene::{Aabb, Document, ObjectKindTag, Scene, WalkItem};
 
-use self::{callback::ViewportCallback, gizmo::GizmoGeometry, gizmo::GizmoState};
+use self::{gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView};
 use crate::{
     EditorCommand, EditorState, SelectMode, Selection,
     icons::Icon,
@@ -31,9 +28,10 @@ pub struct ViewportPanel {
     camera: OrbitCamera,
     /// What the document looks like this frame; re-evaluated only when it changed.
     evaluated: EvaluatedScene,
-    /// Render snapshot shared with the paint callback (no per-frame allocation).
-    frame: Arc<Mutex<FrameData>>,
-    gpu_ready: bool,
+    /// Render snapshot, refilled every frame (no per-frame allocation).
+    frame: FrameData,
+    /// Renderer and offscreen target; `None` without a wgpu render state.
+    gpu: Option<GpuView>,
     walk_stack: Vec<WalkItem>,
     gizmo: GizmoState,
     show_grid: bool,
@@ -44,36 +42,18 @@ pub struct ViewportPanel {
 }
 
 impl ViewportPanel {
-    /// Creates the panel and installs the GPU renderer into egui-wgpu's resources.
-    ///
-    /// `depth_format` and `msaa_samples` must match the host's `NativeOptions`
-    /// (`depth_buffer`, `multisampling`), since the viewport draws into egui's pass.
-    pub fn new(
-        render_state: Option<&egui_wgpu::RenderState>,
-        depth_format: Option<wgpu::TextureFormat>,
-        msaa_samples: u32,
-    ) -> Self {
-        let gpu_ready = match render_state {
-            Some(rs) => {
-                let target = GpuTargetConfig {
-                    color_format: rs.target_format,
-                    depth_format,
-                    msaa_samples,
-                };
-                let renderer = ViewportRenderer::new(&rs.device, &target);
-                rs.renderer.write().callback_resources.insert(renderer);
-                true
-            }
-            None => {
-                log::error!("No wgpu render state: the 3D viewport is disabled. Run with the wgpu renderer.");
-                false
-            }
-        };
+    /// Creates the panel. The viewport renders into its own offscreen target
+    /// (own MSAA and depth), so nothing about the window's surface matters here.
+    /// Without a render state (tests, a non-wgpu backend) it shows a notice.
+    pub fn new(render_state: Option<&egui_wgpu::RenderState>) -> Self {
+        if render_state.is_none() {
+            log::error!("No wgpu render state: the 3D viewport is disabled. Run with the wgpu renderer.");
+        }
         Self {
             camera: OrbitCamera::default(),
             evaluated: EvaluatedScene::new(),
-            frame: Arc::new(Mutex::new(FrameData::new())),
-            gpu_ready,
+            frame: FrameData::new(),
+            gpu: render_state.map(GpuView::new),
             walk_stack: Vec::with_capacity(64),
             gizmo: GizmoState::default(),
             show_grid: true,
@@ -164,17 +144,18 @@ impl ViewportPanel {
         // A gizmo drag above may have moved an object; free if nothing changed.
         self.evaluated.update(&doc.scene);
 
-        if self.gpu_ready {
-            {
-                let mut frame = self.frame.lock().unwrap_or_else(PoisonError::into_inner);
-                frame.set_camera(&self.camera, rect.aspect_ratio());
-                frame.show_grid = self.show_grid;
-                frame.extract(&self.evaluated, |id| editor.selection.contains(id));
-            }
-            painter.add(egui_wgpu::Callback::new_paint_callback(
+        if let Some(gpu) = &mut self.gpu {
+            self.frame.set_camera(&self.camera, rect.aspect_ratio());
+            self.frame.show_grid = self.show_grid;
+            self.frame.extract(&self.evaluated, |id| editor.selection.contains(id));
+            let texture = gpu.render(&self.frame, pixel_size(rect, ui.ctx().pixels_per_point()));
+            // Drawn over the background gradient: the target is cleared to transparent.
+            painter.image(
+                texture,
                 rect,
-                ViewportCallback::new(Arc::clone(&self.frame)),
-            ));
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
         } else {
             painter.text(
                 rect.center(),
@@ -347,6 +328,21 @@ impl ViewportPanel {
     }
 }
 
+/// Size of `rect` in physical pixels, at least 1 × 1.
+fn pixel_size(rect: Rect, pixels_per_point: f32) -> [u32; 2] {
+    let px = |points: f32| {
+        let pixels = (points * pixels_per_point).round().clamp(1.0, 16_384.0);
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "rounded and clamped to 1..=16384"
+        )]
+        let pixels = pixels as u32;
+        pixels
+    };
+    [px(rect.width()), px(rect.height())]
+}
+
 /// Window position → normalised device coordinates (`[-1, 1]`, Y up).
 fn to_ndc(pos: Pos2, rect: Rect) -> GVec2 {
     GVec2::new(
@@ -398,7 +394,7 @@ mod tests {
                 time: 0.0,
                 doc,
                 editor,
-                viewport: ViewportPanel::new(None, None, 1),
+                viewport: ViewportPanel::new(None),
             }
         }
 

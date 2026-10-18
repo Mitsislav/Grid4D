@@ -18,9 +18,10 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
 - **Parametric primitives** with Cinema 4D-style parameters and segment counts:
   cube, sphere, cylinder, plane, cone, torus, disc and capsule, plus nulls, cameras
   and lights.
-- **wgpu viewport**: generated meshes cached per shape and drawn instanced, MSAA,
-  depth testing, Phong-angle smoothing, anti-aliased adaptive grid, orange selection
-  rim, axis triad and "Grid Spacing" HUD.
+- **wgpu viewport**: renders into its own offscreen target (4× MSAA, depth) shown as
+  an image; generated meshes cached per shape and drawn instanced, Phong-angle
+  smoothing, anti-aliased adaptive grid, orange selection rim, axis triad and
+  "Grid Spacing" HUD.
 - **Navigation**: Alt+LMB orbit · Alt+MMB / MMB pan · Alt+RMB / wheel zoom ·
   `H` frame scene · `O` frame selection. Drag the icons at the top-right of the
   viewport header to orbit / zoom / pan with one button.

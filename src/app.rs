@@ -14,13 +14,6 @@ use oc4d_ui::{
 
 const MIN_MANAGERS_WIDTH: f32 = 280.0;
 
-/// GPU surface settings that the viewport renderer must match.
-#[derive(Clone, Copy, Debug)]
-pub struct GpuSettings {
-    pub depth_bits: u8,
-    pub msaa_samples: u32,
-}
-
 pub struct OpenC4DApp {
     doc: Document,
     editor: EditorState,
@@ -35,12 +28,11 @@ pub struct OpenC4DApp {
 
 impl OpenC4DApp {
     /// `open`: a document to open instead of the demo scene (from the command line).
-    pub fn new(cc: &eframe::CreationContext<'_>, gpu: GpuSettings, open: Option<std::path::PathBuf>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, open: Option<std::path::PathBuf>) -> Self {
         theme::apply(&cc.egui_ctx);
 
         let render_state = cc.wgpu_render_state.as_ref();
-        let depth_format = egui_wgpu::depth_format_from_bits(gpu.depth_bits, 0);
-        let viewport = ViewportPanel::new(render_state, depth_format, gpu.msaa_samples);
+        let viewport = ViewportPanel::new(render_state);
 
         let mut editor = EditorState {
             renderer_info: render_state.map_or_else(

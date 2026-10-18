@@ -348,7 +348,7 @@ arbitrary meshes efficiently; the viewport renders into its own target.
   resolve) texture registered with `egui_wgpu::Renderer::register_native_texture`,
   then shown as an egui image. Unlocks: overlays with their own depth (points/edges
   in Phase 4), wireframe passes, ID-buffer picking if ever needed, multiple viewports
-  with independent settings (Phase 7), post effects. `callback.rs` remains the only
+  with independent settings (Phase 7), post effects. `gpu_view.rs` is the only
   egui-wgpu adapter. Keep the size test pattern for any new uniform/instance struct.
 * Picking: per-object BVH over triangles (`oc4d-geom`), built lazily per geometry
   revision; object pick = ray vs. instance AABB, then BVH for exact hit.
@@ -361,7 +361,7 @@ arbitrary meshes efficiently; the viewport renders into its own target.
 | 3.2 ✅ | M | Parametric primitives (+ Cone, Torus, Disc, Capsule); Attribute Manager segment fields; render consumes generated meshes — done 2026-10-18: `oc4d_geom::primitives` (lathe-based round shapes, welded cube lattice), segment fields on every primitive, `.oc4d` **format v2** with v1 migration, and the renderer's part of 3.4 (`MeshKey`-keyed batches + GPU mesh cache with eviction); `open-c4d file.oc4d` opens a file at start-up |
 | 3.3 ✅ | L | `oc4d-eval` + `EvaluatedScene`, node revisions; render/picking migrate; `extract_reuses_capacity`-style test for evaluation — done 2026-10-18: process-wide unique scene/node revisions (bumped by `get_mut` and structural edits), `EvaluatedScene::update` skips unchanged scenes, `MeshKey`/`Drawable`/`PickShape` live in eval, render/picking/brackets read it; the Attribute Manager edits a copy so idle frames never bump the revision (guarded by a test over every panel) |
 | 3.4 | S | ~~`GeometryHandle`-keyed batches + `GpuMeshCache`~~ — done early in 3.2 for primitives (`MeshKey`); what remains is a key for editable meshes (mesh `Arc` + revision) once 3.6 adds them |
-| 3.5 | M | Offscreen viewport target (colour/depth/MSAA, resize handling) |
+| 3.5 ✅ | M | Offscreen viewport target (colour/depth/MSAA, resize handling) — done 2026-10-19: `oc4d_render::ViewportTarget` (`Rgba8Unorm` gamma colour because egui samples textures as gamma, 4× MSAA when supported, `Depth32Float`, transparent clear over the UI's gradient), `ViewportRenderer::render` submits its own pass, `ui/viewport/gpu_view.rs` registers and re-points the egui texture on resize; the paint callback, `Arc<Mutex<FrameData>>` and the window's depth/MSAA are gone. Checked on screen, maximized and resized |
 | 3.6 | M | `ObjectKind::Polygon`, Make Editable (`C`), BVH picking, `.oc4d` **v3** (zip + binary geometry) with migration (v2 was taken by segment counts) |
 
 **Acceptance:** 10 000 cubes and a 1 M-triangle mesh render at interactive rates

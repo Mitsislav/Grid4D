@@ -3,15 +3,15 @@
 //! GPU viewport rendering for OpenC4D, built directly on `wgpu`.
 //!
 //! ```text
-//!  EvaluatedScene ──extract──▶ FrameData ──prepare──▶ GPU buffers ──paint──▶ render pass
-//!  (oc4d-eval)                 (CPU, reused)          (ViewportRenderer)     (owned by the host)
+//!  EvaluatedScene ──extract──▶ FrameData ──render──▶ ViewportTarget ──▶ texture the UI shows
+//!  (oc4d-eval)                 (CPU, reused)        (own MSAA + depth, resolved)
 //! ```
 //!
 //! ## Architecture rules
 //!
 //! * Reads the evaluated scene (`oc4d-eval`), never the document itself.
-//! * Knows nothing about egui: the UI layer adapts [`ViewportRenderer`] to whatever
-//!   paint-callback mechanism it uses (`egui_wgpu::CallbackTrait` today).
+//! * Knows nothing about egui: it renders into its own [`ViewportTarget`], and the UI
+//!   layer registers the resolved texture with its toolkit to display it.
 //! * The per-frame path (`FrameData::extract`, `ViewportRenderer::prepare`,
 //!   `ViewportRenderer::paint`) is allocation-free in steady state: CPU vectors are
 //!   cleared and refilled, and GPU buffers only grow (geometrically) when needed.
@@ -21,12 +21,14 @@ mod frame;
 mod gpu;
 mod mesh;
 mod picking;
+mod target;
 
 pub use camera::{OrbitCamera, Ray};
 pub use frame::{FrameData, InstanceRaw};
 pub use gpu::{GpuTargetConfig, ViewportRenderer};
 pub use mesh::{TessellationScratch, Vertex, tessellate};
 pub use picking::pick;
+pub use target::ViewportTarget;
 
 /// WGSL sources, exposed for offline validation and tooling.
 pub mod shaders {

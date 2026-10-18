@@ -12,8 +12,8 @@
 //!   [`EditorCommand`]s and applied once per frame, after layout, by
 //!   [`commands::apply_pending`]. This keeps borrow scopes small and gives undo/redo
 //!   a single choke point later.
-//! * GPU work is delegated to `oc4d-render`; this crate only adapts it to egui's
-//!   paint-callback mechanism.
+//! * GPU work is delegated to `oc4d-render`, which draws the 3D view into its own
+//!   offscreen target; this crate only shows that target as an egui texture.
 
 pub mod commands;
 pub mod editor;

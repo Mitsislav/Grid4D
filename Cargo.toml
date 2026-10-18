@@ -97,7 +97,6 @@ oc4d-ui.workspace = true
 # such as recent files survive restarts. Only the binary owns storage.
 eframe = { workspace = true, features = ["persistence"] }
 egui.workspace = true
-egui-wgpu.workspace = true
 log.workspace = true
 env_logger.workspace = true
 

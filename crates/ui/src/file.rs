@@ -516,7 +516,7 @@ mod tests {
             Self {
                 doc: Document::with_demo_scene(),
                 editor,
-                viewport: ViewportPanel::new(None, None, 1),
+                viewport: ViewportPanel::new(None),
                 log,
                 dir,
             }

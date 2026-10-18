@@ -6,7 +6,7 @@ use wgpu::util::DeviceExt as _;
 use oc4d_eval::MeshKey;
 
 use crate::{
-    FrameData, InstanceRaw, Vertex,
+    FrameData, InstanceRaw, Vertex, ViewportTarget,
     mesh::{TessellationScratch, tessellate},
     shaders,
 };
@@ -226,7 +226,28 @@ impl ViewportRenderer {
         true
     }
 
-    /// Records the viewport draw calls into the host's render pass.
+    /// Draws `frame` into `target` and submits the work: [`prepare`](Self::prepare),
+    /// then one render pass with [`paint`](Self::paint). The renderer must have been
+    /// created for `target.config()`.
+    pub fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FrameData, target: &ViewportTarget) {
+        self.prepare(device, queue, frame);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("oc4d.viewport.encoder"),
+        });
+        {
+            let (color, depth) = target.attachments();
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("oc4d.viewport.pass"),
+                color_attachments: &[Some(color)],
+                depth_stencil_attachment: Some(depth),
+                ..Default::default()
+            });
+            self.paint(&mut pass);
+        }
+        queue.submit([encoder.finish()]);
+    }
+
+    /// Records the viewport draw calls into an open render pass.
     pub fn paint(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_bind_group(0, &self.camera_bind_group, &[]);
 

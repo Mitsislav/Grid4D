@@ -9,12 +9,7 @@
 
 mod app;
 
-use app::{GpuSettings, OpenC4DApp};
-
-/// Depth-buffer precision for the 3D viewport (the viewport draws into egui's pass).
-const DEPTH_BITS: u8 = 24;
-/// MSAA sample count for the whole window, including the 3D viewport.
-const MSAA_SAMPLES: u16 = 4;
+use app::OpenC4DApp;
 
 fn main() -> eframe::Result {
     env_logger::Builder::from_env(
@@ -36,24 +31,15 @@ fn main() -> eframe::Result {
             .with_maximized(true)
             .with_inner_size([1280.0, 720.0])
             .with_min_inner_size([1024.0, 640.0]),
+        // The 3D viewport renders into its own target with its own MSAA and depth,
+        // so the window surface (egui's 2D only) needs neither.
         renderer: eframe::Renderer::Wgpu,
-        depth_buffer: DEPTH_BITS,
-        multisampling: MSAA_SAMPLES,
         ..Default::default()
     };
 
     eframe::run_native(
         "OpenC4D",
         native_options,
-        Box::new(|cc| {
-            Ok(Box::new(OpenC4DApp::new(
-                cc,
-                GpuSettings {
-                    depth_bits: DEPTH_BITS,
-                    msaa_samples: u32::from(MSAA_SAMPLES),
-                },
-                open,
-            )))
-        }),
+        Box::new(|cc| Ok(Box::new(OpenC4DApp::new(cc, open)))),
     )
 }
