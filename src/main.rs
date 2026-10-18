@@ -31,7 +31,10 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("OpenC4D")
             .with_app_id("open-c4d")
-            .with_inner_size([1600.0, 940.0])
+            // Start maximized; the size below is what un-maximizing returns to, and it
+            // fits a 1366 × 768 screen. A saved window state takes precedence.
+            .with_maximized(true)
+            .with_inner_size([1280.0, 720.0])
             .with_min_inner_size([1024.0, 640.0]),
         renderer: eframe::Renderer::Wgpu,
         depth_buffer: DEPTH_BITS,

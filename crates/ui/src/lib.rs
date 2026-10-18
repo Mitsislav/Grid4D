@@ -26,6 +26,7 @@ pub mod recent;
 pub mod shortcuts;
 pub mod theme;
 mod widgets;
+pub mod window;
 
 pub use commands::{CommandQueue, EditorCommand, SelectMode};
 pub use editor::{EditMode, EditorState, Selection, Tool};

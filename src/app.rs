@@ -9,6 +9,7 @@ use oc4d_ui::{
     panels::{about, alert, drop_overlay, menu_bar, mode_palette, status_bar, toolbar, unsaved_changes},
     recent, shortcuts,
     theme::{self, metrics},
+    window::WindowFit,
 };
 
 const MIN_MANAGERS_WIDTH: f32 = 280.0;
@@ -29,6 +30,7 @@ pub struct OpenC4DApp {
     timeline: TimelinePanel,
     /// Time of the previous playback tick (egui clock, seconds).
     last_tick: Option<f64>,
+    window_fit: WindowFit,
 }
 
 impl OpenC4DApp {
@@ -74,6 +76,7 @@ impl OpenC4DApp {
             attributes: AttributesPanel::default(),
             timeline: TimelinePanel::default(),
             last_tick: None,
+            window_fit: WindowFit::default(),
         }
     }
 }
@@ -100,6 +103,7 @@ impl eframe::App for OpenC4DApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.window_fit.check(&ctx);
         shortcuts::handle(&ctx, &mut self.doc, &mut self.editor);
         file::accept_dropped_files(&ctx, &mut self.editor);
 
