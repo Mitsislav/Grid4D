@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use crate::{Aabb, Transform};
+use crate::{Aabb, MeshHandle, Transform};
 
 slotmap::new_key_type! {
     /// Stable, generational handle to a node in a [`Scene`](crate::Scene).
@@ -19,7 +19,8 @@ pub const CAMERA_MARKER_SIZE: f32 = 40.0;
 ///
 /// Primitive parameters mirror Cinema 4D's "Object" tab: sizes in cm, the axis
 /// along +Y, and segment counts that decide how finely the shape is tessellated
-/// (geometry comes from `grid4d_geom::primitives`).
+/// (geometry comes from `grid4d_geom::primitives`). "Make Editable" turns a
+/// primitive into a [`Polygon`](ObjectKind::Polygon) object with its own mesh.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ObjectKind {
     /// Empty transform used to group other objects.
@@ -84,6 +85,10 @@ pub enum ObjectKind {
         color: [f32; 3],
         intensity: f32,
     },
+    /// An editable mesh (C4D's "Polygon Object"), in object space.
+    Polygon {
+        mesh: MeshHandle,
+    },
 }
 
 /// Field-less discriminant of [`ObjectKind`] — for icons, menus and dispatch tables.
@@ -100,10 +105,11 @@ pub enum ObjectKindTag {
     Capsule,
     Camera,
     Light,
+    Polygon,
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -115,6 +121,7 @@ impl ObjectKindTag {
         Self::Capsule,
         Self::Camera,
         Self::Light,
+        Self::Polygon,
     ];
 
     /// Geometric primitives (the "Create ▸ Object" family).
@@ -143,6 +150,7 @@ impl ObjectKindTag {
             Self::Capsule => "Capsule",
             Self::Camera => "Camera",
             Self::Light => "Light",
+            Self::Polygon => "Polygon",
         }
     }
 
@@ -202,6 +210,10 @@ impl ObjectKindTag {
                 color: [1.0, 1.0, 1.0],
                 intensity: 1.0,
             },
+            // Empty, like C4D's Create ▸ Polygon Object.
+            Self::Polygon => ObjectKind::Polygon {
+                mesh: MeshHandle::new(grid4d_geom::PolyMesh::new()),
+            },
         }
     }
 }
@@ -221,6 +233,7 @@ impl ObjectKind {
             Self::Capsule { .. } => ObjectKindTag::Capsule,
             Self::Camera { .. } => ObjectKindTag::Camera,
             Self::Light { .. } => ObjectKindTag::Light,
+            Self::Polygon { .. } => ObjectKindTag::Polygon,
         }
     }
 
@@ -230,7 +243,7 @@ impl ObjectKind {
     }
 
     /// Object-space bounds used for framing and picking.
-    /// `None` for objects without spatial extent (a Null).
+    /// `None` for objects without spatial extent (a Null, an empty mesh).
     #[must_use]
     pub fn local_bounds(&self) -> Option<Aabb> {
         let half = match *self {
@@ -262,6 +275,8 @@ impl ObjectKind {
             Self::Capsule { radius, height, .. } => Vec3::new(radius, (height * 0.5).max(radius.abs()), radius),
             Self::Camera { .. } => Vec3::splat(CAMERA_MARKER_SIZE * 0.5),
             Self::Light { .. } => Vec3::splat(LIGHT_MARKER_RADIUS),
+            // Exact and not centred: the mesh's own (cached) bounds.
+            Self::Polygon { ref mesh } => return mesh.bounds(),
         };
         Some(Aabb::from_half_extents(half.abs()))
     }
@@ -432,5 +447,30 @@ mod tests {
             cap_segments: 4,
         };
         assert_eq!(half(&squat), Vec3::splat(50.0), "never shorter than its diameter");
+    }
+
+    #[test]
+    fn polygon_objects_use_their_mesh_bounds() {
+        assert_eq!(ObjectKindTag::Polygon.default_kind().local_bounds(), None, "empty");
+        let mut mesh = grid4d_geom::PolyMesh::new();
+        for p in [
+            Vec3::new(1.0, 2.0, 3.0),
+            Vec3::new(5.0, -2.0, 4.0),
+            Vec3::new(2.0, 0.0, 9.0),
+        ] {
+            mesh.add_point(p).unwrap();
+        }
+        mesh.add_face(&[0, 1, 2]).unwrap();
+        let kind = ObjectKind::Polygon {
+            mesh: MeshHandle::new(mesh),
+        };
+        assert_eq!(
+            kind.local_bounds(),
+            Some(Aabb {
+                min: Vec3::new(1.0, -2.0, 3.0),
+                max: Vec3::new(5.0, 2.0, 9.0)
+            })
+        );
+        assert_eq!(kind.label(), "Polygon");
     }
 }

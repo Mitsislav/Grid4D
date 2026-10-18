@@ -18,6 +18,7 @@ pub enum Icon {
     Scale,
     Rotate,
     // Component modes
+    MakeEditable,
     ModelMode,
     PointsMode,
     EdgesMode,
@@ -92,6 +93,21 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             c.arrow_head_at(end, 0.2);
         }
 
+        Icon::MakeEditable => {
+            // The cube's wireframe with its points showing: now it can be edited.
+            paint_object(&c, ObjectKindTag::Cube, Color32::TRANSPARENT);
+            for p in [
+                (0.5, 0.08),
+                (0.9, 0.29),
+                (0.9, 0.71),
+                (0.5, 0.92),
+                (0.1, 0.71),
+                (0.1, 0.29),
+                (0.5, 0.5),
+            ] {
+                c.disc(p, 0.08);
+            }
+        }
         Icon::ModelMode => paint_object(&c, ObjectKindTag::Cube, Color32::TRANSPARENT),
         Icon::PointsMode => {
             c.rect_stroke((0.18, 0.18), (0.82, 0.82), color.gamma_multiply(0.35));
@@ -320,6 +336,13 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.fill(&[(0.66, 0.56), (0.95, 0.36), (0.95, 0.76)]);
             c.circle((0.22, 0.2), 0.1);
             c.circle((0.48, 0.2), 0.1);
+        }
+        ObjectKindTag::Polygon => {
+            // A triangle split into four: a mesh of polygons.
+            let outline = [(0.5, 0.1), (0.92, 0.86), (0.08, 0.86)];
+            c.fill_with(&outline, soft);
+            c.polyline(&outline, true);
+            c.polyline(&[(0.71, 0.48), (0.5, 0.86), (0.29, 0.48)], true);
         }
         ObjectKindTag::Light => {
             c.disc((0.5, 0.5), 0.19);

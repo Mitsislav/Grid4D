@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use glam::Mat4;
-use grid4d_scene::{Aabb, LIGHT_MARKER_RADIUS, NodeId, ObjectKind, Scene, WalkItem};
+use grid4d_scene::{Aabb, LIGHT_MARKER_RADIUS, MeshHandle, MeshId, NodeId, ObjectKind, Scene, WalkItem};
 
 use crate::{Drawable, drawable};
 
@@ -12,6 +14,8 @@ pub enum PickShape {
     Bounds,
     /// An exact sphere of this radius around the origin.
     Sphere { radius: f32 },
+    /// A polygon object's mesh, exactly (see [`EvaluatedScene::mesh`]).
+    Mesh(MeshId),
 }
 
 /// One visible node, as viewers see it this frame.
@@ -37,6 +41,8 @@ pub struct EvaluatedNode {
 #[derive(Debug, Default)]
 pub struct EvaluatedScene {
     nodes: Vec<EvaluatedNode>,
+    /// The meshes of the visible polygon objects, for drawing and picking.
+    meshes: HashMap<MeshId, MeshHandle>,
     walk_stack: Vec<WalkItem>,
     /// [`Scene::revision`] of the scene `nodes` were built from.
     revision: Option<u64>,
@@ -58,11 +64,15 @@ impl EvaluatedScene {
             return false;
         }
         self.nodes.clear();
-        let nodes = &mut self.nodes;
+        self.meshes.clear();
+        let (nodes, meshes) = (&mut self.nodes, &mut self.meshes);
         scene.walk(&mut self.walk_stack, |id, node, world, depth| {
             let data = &node.data;
             if !data.visible_in_editor || !data.enabled {
                 return false;
+            }
+            if let ObjectKind::Polygon { mesh } = &data.kind {
+                meshes.insert(mesh.id(), mesh.clone());
             }
             nodes.push(EvaluatedNode {
                 id,
@@ -83,11 +93,19 @@ impl EvaluatedScene {
     pub fn nodes(&self) -> &[EvaluatedNode] {
         &self.nodes
     }
+
+    /// The mesh behind a [`MeshKey::Polygon`](crate::MeshKey::Polygon) or
+    /// [`PickShape::Mesh`], if a visible object uses it.
+    #[must_use]
+    pub fn mesh(&self, id: MeshId) -> Option<&MeshHandle> {
+        self.meshes.get(&id)
+    }
 }
 
 fn pick_shape(kind: &ObjectKind) -> PickShape {
     match *kind {
         ObjectKind::Null => PickShape::None,
+        ObjectKind::Polygon { ref mesh } => PickShape::Mesh(mesh.id()),
         ObjectKind::Sphere { radius, .. } => PickShape::Sphere { radius },
         ObjectKind::Light { .. } => PickShape::Sphere {
             radius: LIGHT_MARKER_RADIUS,
@@ -105,7 +123,7 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
 
 #[cfg(test)]
 mod tests {
-    use grid4d_scene::Document;
+    use grid4d_scene::{Document, Node};
 
     use super::*;
 
@@ -136,15 +154,45 @@ mod tests {
     #[test]
     fn steady_state_updates_reuse_capacity() {
         let mut doc = Document::with_demo_scene();
+        doc.scene.insert(Node::new("Mesh", polygon_cube()));
         let mut eval = EvaluatedScene::new();
         eval.update(&doc.scene);
-        let capacity = (eval.nodes.capacity(), eval.walk_stack.capacity());
+        let capacity = |e: &EvaluatedScene| (e.nodes.capacity(), e.meshes.capacity(), e.walk_stack.capacity());
+        let before = capacity(&eval);
         let cube = id_of(&doc, "Cube");
         for i in 0..100 {
             doc.scene.get_mut(cube).unwrap().data.transform.position.y = f32::from(u8::try_from(i).unwrap());
             assert!(eval.update(&doc.scene));
         }
-        assert_eq!((eval.nodes.capacity(), eval.walk_stack.capacity()), capacity);
+        assert_eq!(capacity(&eval), before);
+    }
+
+    fn polygon_cube() -> ObjectKind {
+        let mesh = crate::editable_mesh(&grid4d_scene::ObjectKindTag::Cube.default_kind()).unwrap();
+        ObjectKind::Polygon {
+            mesh: MeshHandle::new(mesh),
+        }
+    }
+
+    #[test]
+    fn polygon_objects_expose_their_mesh_while_visible() {
+        let mut doc = Document::new("meshes");
+        let kind = polygon_cube();
+        let ObjectKind::Polygon { mesh } = &kind else {
+            unreachable!()
+        };
+        let mesh = mesh.clone();
+        let id = doc.scene.insert(Node::new("Mesh", kind));
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let node = eval.nodes()[0];
+        assert_eq!(node.pick, PickShape::Mesh(mesh.id()));
+        assert_eq!(node.bounds, mesh.bounds());
+        assert_eq!(eval.mesh(mesh.id()), Some(&mesh));
+
+        doc.scene.get_mut(id).unwrap().data.visible_in_editor = false;
+        eval.update(&doc.scene);
+        assert_eq!(eval.mesh(mesh.id()), None, "hidden objects are not drawn or picked");
     }
 
     #[test]

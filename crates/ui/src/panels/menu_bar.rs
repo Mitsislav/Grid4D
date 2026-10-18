@@ -114,6 +114,18 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
         });
 
         ui.menu_button("Mesh", |ui| {
+            ui.menu_button("Conversion", |ui| {
+                let convertible = crate::commands::can_make_editable(doc, &editor.selection);
+                if ui
+                    .add_enabled(convertible, Button::new("Make Editable").shortcut_text("C"))
+                    .on_disabled_hover_text("Select a primitive to turn it into a polygon object")
+                    .clicked()
+                {
+                    editor.commands.push(EditorCommand::MakeEditable);
+                    ui.close();
+                }
+            });
+            ui.separator();
             for name in [
                 "Extrude",
                 "Inner Extrude",

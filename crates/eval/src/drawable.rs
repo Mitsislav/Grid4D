@@ -1,6 +1,8 @@
-//! How an object is drawn: which unit geometry, at what scale, in what colour.
+//! How an object is drawn: which unit geometry, at what scale, in what colour;
+//! and the mesh a primitive becomes when it is made editable.
 
 use glam::Vec3;
+use grid4d_geom::PolyMesh;
 use grid4d_scene::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, ObjectKind};
 
 use crate::{MeshKey, Ratio};
@@ -16,7 +18,7 @@ pub struct Drawable {
 }
 
 /// The unit mesh, scale and colour for an object; `None` for objects without
-/// geometry (Nulls, shapes with zero size).
+/// geometry (Nulls, shapes with zero size, polygon objects without polygons).
 #[must_use]
 pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
     let shaded = |key, scale| {
@@ -146,12 +148,44 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
             color: light,
             unlit: true,
         }),
+        ObjectKind::Polygon { ref mesh } => {
+            if mesh.mesh().face_count() == 0 {
+                return None;
+            }
+            shaded(MeshKey::Polygon(mesh.id()), Vec3::ONE)
+        }
+    }
+}
+
+/// The mesh a primitive becomes when it is made editable ("Make Editable"):
+/// exactly what the viewport draws for it, with the size applied to the points.
+/// `None` for objects that are not primitives (Nulls, cameras, lights) or are
+/// already editable, and for shapes without area.
+#[must_use]
+pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
+    match kind {
+        ObjectKind::Cube { .. }
+        | ObjectKind::Sphere { .. }
+        | ObjectKind::Cylinder { .. }
+        | ObjectKind::Plane { .. }
+        | ObjectKind::Cone { .. }
+        | ObjectKind::Torus { .. }
+        | ObjectKind::Disc { .. }
+        | ObjectKind::Capsule { .. } => {
+            let draw = drawable(kind, [0.0; 3])?;
+            let mut mesh = draw.key.build()?;
+            for point in mesh.points_mut() {
+                *point *= draw.scale;
+            }
+            Some(mesh)
+        }
+        ObjectKind::Null | ObjectKind::Camera { .. } | ObjectKind::Light { .. } | ObjectKind::Polygon { .. } => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use grid4d_scene::ObjectKindTag;
+    use grid4d_scene::{MeshHandle, ObjectKindTag};
 
     use super::*;
 
@@ -175,7 +209,9 @@ mod tests {
     fn every_kind_is_drawable_except_nulls_and_empty_shapes() {
         for tag in ObjectKindTag::ALL {
             let style = drawable(&tag.default_kind(), [1.0; 3]);
-            assert_eq!(style.is_some(), tag != ObjectKindTag::Null, "{tag:?}");
+            // The default polygon object is empty.
+            let expected = !matches!(tag, ObjectKindTag::Null | ObjectKindTag::Polygon);
+            assert_eq!(style.is_some(), expected, "{tag:?}");
         }
         let flat_cone = ObjectKind::Cone {
             bottom_radius: 0.0,
@@ -185,6 +221,58 @@ mod tests {
             height_segments: 1,
         };
         assert_eq!(drawable(&flat_cone, [1.0; 3]), None);
+    }
+
+    #[test]
+    fn editable_meshes_look_like_the_primitive() {
+        for tag in ObjectKindTag::PRIMITIVES {
+            let kind = tag.default_kind();
+            let mesh = editable_mesh(&kind).unwrap_or_else(|| panic!("{tag:?}"));
+            let draw = drawable(&kind, [1.0; 3]).unwrap();
+            let unit = draw.key.build().unwrap();
+            assert_eq!(mesh.face_count(), unit.face_count(), "{tag:?}");
+            let (min, max) = mesh.bounds().unwrap();
+            let (umin, umax) = unit.bounds().unwrap();
+            assert!(
+                min.abs_diff_eq(umin * draw.scale, 1e-3),
+                "{tag:?}: size applied to the points"
+            );
+            assert!(max.abs_diff_eq(umax * draw.scale, 1e-3), "{tag:?}");
+        }
+        for tag in [
+            ObjectKindTag::Null,
+            ObjectKindTag::Camera,
+            ObjectKindTag::Light,
+            ObjectKindTag::Polygon,
+        ] {
+            assert!(editable_mesh(&tag.default_kind()).is_none(), "{tag:?}");
+        }
+    }
+
+    #[test]
+    fn editable_cylinders_keep_their_caps_separate() {
+        let kind = ObjectKindTag::Cylinder.default_kind(); // 36 around, 4 high
+        let mesh = editable_mesh(&kind).unwrap();
+        let mut distinct: Vec<[u32; 3]> = mesh.points().iter().map(|p| p.to_array().map(f32::to_bits)).collect();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(mesh.point_count() - distinct.len(), 2 * 36, "each rim exists twice");
+        assert!(
+            !grid4d_geom::Topology::build(&mesh).is_closed(),
+            "until Optimize merges them"
+        );
+    }
+
+    #[test]
+    fn polygon_objects_draw_their_mesh_unscaled() {
+        let mesh = MeshHandle::new(editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap());
+        let kind = ObjectKind::Polygon { mesh: mesh.clone() };
+        let d = drawable(&kind, [0.5; 3]).unwrap();
+        assert_eq!(
+            (d.key, d.scale, d.unlit),
+            (MeshKey::Polygon(mesh.id()), Vec3::ONE, false)
+        );
+        assert_eq!(MeshKey::Polygon(mesh.id()).build(), None, "stored, not generated");
     }
 
     #[test]

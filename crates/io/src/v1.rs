@@ -154,7 +154,7 @@ impl KindDto {
 
 #[cfg(test)]
 mod tests {
-    use crate::from_str;
+    use crate::from_json as from_str;
 
     use super::*;
 

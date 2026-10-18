@@ -1,17 +1,30 @@
-//! The vertical mode palette on the left edge (Model / Points / Edges / Polygons).
+//! The vertical palette on the left edge: Make Editable, then the modes
+//! (Model / Points / Edges / Polygons) and snapping.
 
 use egui::Ui;
+use grid4d_scene::Document;
 
 use crate::{
-    EditMode, EditorState,
+    EditMode, EditorCommand, EditorState, commands,
     icons::Icon,
     widgets::{IconStyle, icon_button},
 };
 
-pub fn show(ui: &mut Ui, editor: &mut EditorState) {
+pub fn show(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
     ui.vertical_centered(|ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
         ui.add_space(6.0);
+        // Like C4D, the palette starts with Make Editable.
+        let convert = IconStyle {
+            enabled: commands::can_make_editable(doc, &editor.selection),
+            ..IconStyle::default()
+        };
+        if icon_button(ui, Icon::MakeEditable, convert, "Make Editable (C)").clicked() {
+            editor.commands.push(EditorCommand::MakeEditable);
+        }
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
         for mode in EditMode::ALL {
             let style = IconStyle {
                 selected: editor.mode == mode,

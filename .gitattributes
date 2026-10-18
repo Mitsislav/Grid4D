@@ -3,4 +3,7 @@
 * text=auto eol=lf
 
 *.png binary
+# Documents: zip archives from format version 3 on (older JSON fixtures are frozen).
+*.g4d binary
+*.oc4d binary
 *.ico binary

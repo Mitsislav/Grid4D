@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
 use grid4d_eval::{EvaluatedScene, MeshKey};
-use grid4d_scene::NodeId;
+use grid4d_scene::{MeshHandle, NodeId};
 
 use crate::OrbitCamera;
 
@@ -27,6 +27,8 @@ const BATCH_TTL_FRAMES: u64 = 240;
 #[derive(Debug)]
 struct Batch {
     key: MeshKey,
+    /// The geometry of a [`MeshKey::Polygon`], for the renderer to upload.
+    mesh: Option<MeshHandle>,
     instances: Vec<InstanceRaw>,
     last_used: u64,
 }
@@ -72,12 +74,13 @@ impl FrameData {
         }
     }
 
-    /// The non-empty batches of this frame: each mesh key with its instances.
-    pub fn batches(&self) -> impl Iterator<Item = (MeshKey, &[InstanceRaw])> + '_ {
+    /// The non-empty batches of this frame: each mesh key, the polygon mesh it
+    /// names (for [`MeshKey::Polygon`]), and its instances.
+    pub fn batches(&self) -> impl Iterator<Item = (MeshKey, Option<&MeshHandle>, &[InstanceRaw])> + '_ {
         self.batches
             .iter()
             .filter(|b| !b.instances.is_empty())
-            .map(|b| (b.key, b.instances.as_slice()))
+            .map(|b| (b.key, b.mesh.as_ref(), b.instances.as_slice()))
     }
 
     #[must_use]
@@ -110,8 +113,15 @@ impl FrameData {
             let model = node.world * Mat4::from_scale(draw.scale);
             let batches = &mut self.batches;
             let slot = *self.batch_index.entry(draw.key).or_insert_with(|| {
+                // A key's mesh never changes (an edited mesh has a new id), so the
+                // handle is looked up once, when its batch is created.
+                let mesh = match draw.key {
+                    MeshKey::Polygon(id) => scene.mesh(id).cloned(),
+                    _ => None,
+                };
                 batches.push(Batch {
                     key: draw.key,
+                    mesh,
                     instances: Vec::new(),
                     last_used: frame,
                 });
@@ -163,7 +173,7 @@ fn normal_matrix(model: &Mat4) -> [[f32; 4]; 3] {
 
 #[cfg(test)]
 mod tests {
-    use grid4d_scene::{Document, Node, ObjectKind};
+    use grid4d_scene::{Document, Node, ObjectKind, ObjectKindTag};
 
     use super::*;
 
@@ -217,7 +227,7 @@ mod tests {
         ));
         let mut frame = FrameData::new();
         frame.extract(&evaluated(&doc), |_| false);
-        let batches: Vec<(MeshKey, usize)> = frame.batches().map(|(k, i)| (k, i.len())).collect();
+        let batches: Vec<(MeshKey, usize)> = frame.batches().map(|(k, _, i)| (k, i.len())).collect();
         assert_eq!(
             batches,
             [
@@ -235,7 +245,7 @@ mod tests {
         frame.extract(&evaluated(&doc), |id| id == cube);
         let selected: Vec<&InstanceRaw> = frame
             .batches()
-            .flat_map(|(_, i)| i)
+            .flat_map(|(_, _, i)| i)
             .filter(|i| i.params[0] == 1.0)
             .collect();
         assert_eq!(selected.len(), 1);
@@ -268,7 +278,37 @@ mod tests {
         assert!(
             frame
                 .batches()
-                .any(|(k, _)| k == MeshKey::Cylinder { rotation: 7, height: 1 })
+                .any(|(k, _, _)| k == MeshKey::Cylinder { rotation: 7, height: 1 })
+        );
+    }
+
+    #[test]
+    fn polygon_objects_bring_their_mesh_and_share_it_when_they_can() {
+        let mesh = MeshHandle::new(grid4d_eval::editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap());
+        let mut doc = Document::new("meshes");
+        for x in [0.0, 300.0] {
+            let kind = ObjectKind::Polygon { mesh: mesh.clone() };
+            doc.scene
+                .insert(Node::new("Shared", kind).with_position(Vec3::new(x, 0.0, 0.0)));
+        }
+        let other = MeshHandle::new(grid4d_eval::editable_mesh(&ObjectKindTag::Sphere.default_kind()).unwrap());
+        doc.scene
+            .insert(Node::new("Own", ObjectKind::Polygon { mesh: other.clone() }));
+        let mut frame = FrameData::new();
+        frame.extract(&evaluated(&doc), |_| false);
+        let batches: Vec<(MeshKey, Option<&MeshHandle>, usize)> =
+            frame.batches().map(|(k, m, i)| (k, m, i.len())).collect();
+        assert_eq!(
+            batches,
+            [
+                (MeshKey::Polygon(mesh.id()), Some(&mesh), 2),
+                (MeshKey::Polygon(other.id()), Some(&other), 1)
+            ]
+        );
+        let unscaled = frame.batches().next().unwrap().2[1].model;
+        assert_eq!(
+            Mat4::from_cols_array_2d(&unscaled),
+            Mat4::from_translation(Vec3::new(300.0, 0.0, 0.0))
         );
     }
 }

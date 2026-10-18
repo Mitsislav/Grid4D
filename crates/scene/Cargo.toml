@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+grid4d-geom.workspace = true
 glam.workspace = true
 slotmap.workspace = true
 

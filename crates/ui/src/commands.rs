@@ -7,7 +7,9 @@
 
 use glam::Vec3;
 use grid4d_render::OrbitCamera;
-use grid4d_scene::{Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit, Transform};
+use grid4d_scene::{
+    Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, SceneEdit, Transform,
+};
 
 use crate::{
     EditorState, Selection, ViewportPanel,
@@ -59,6 +61,9 @@ pub enum EditorCommand {
     AnswerUnsaved(UnsavedChoice),
     CreateObject(ObjectKindTag),
     DeleteSelected,
+    /// Turns the selected primitives into polygon objects that look the same
+    /// (C4D's "Make Editable", `C`); other objects are left alone.
+    MakeEditable,
     Select {
         id: NodeId,
         mode: SelectMode,
@@ -167,6 +172,23 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 .collect();
             commit(doc, editor, "Delete", edits, |_, selection| selection.clear());
         }
+        EditorCommand::MakeEditable => {
+            let edits = editor
+                .selection
+                .as_slice()
+                .iter()
+                .filter_map(|&id| {
+                    let data = &doc.scene.get(id)?.data;
+                    let mesh = grid4d_eval::editable_mesh(&data.kind)?;
+                    let mut data = data.clone();
+                    data.kind = ObjectKind::Polygon {
+                        mesh: MeshHandle::new(mesh),
+                    };
+                    Some(SceneEdit::SetData { id, data })
+                })
+                .collect();
+            commit(doc, editor, "Make Editable", edits, |_, _| {});
+        }
         EditorCommand::Select { id, mode } => {
             if doc.scene.contains(id) {
                 match mode {
@@ -250,6 +272,17 @@ fn commit(
     }
 }
 
+/// `true` if [`EditorCommand::MakeEditable`] has a primitive to convert in
+/// `selection` (enables the menu entry and the palette button).
+#[must_use]
+pub fn can_make_editable(doc: &Document, selection: &Selection) -> bool {
+    selection.as_slice().iter().any(|&id| {
+        doc.scene
+            .get(id)
+            .is_some_and(|node| ObjectKindTag::PRIMITIVES.contains(&node.data.kind.tag()))
+    })
+}
+
 /// Default data for a new object, named uniquely, C4D-style.
 fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> NodeData {
     let mut data = NodeData::new(scene.unique_name(tag.label()), tag.default_kind());
@@ -272,7 +305,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Cone
         | ObjectKindTag::Torus
         | ObjectKindTag::Disc
-        | ObjectKindTag::Capsule => {}
+        | ObjectKindTag::Capsule
+        | ObjectKindTag::Polygon => {}
     }
     data
 }
@@ -317,7 +351,8 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Cone
         | ObjectKindTag::Torus
         | ObjectKindTag::Disc
-        | ObjectKindTag::Capsule => palette::ICON_PRIMITIVE,
+        | ObjectKindTag::Capsule
+        | ObjectKindTag::Polygon => palette::ICON_PRIMITIVE,
     }
 }
 
@@ -402,6 +437,55 @@ mod tests {
         assert_eq!(doc.scene.len(), before - 3, "Group, Cylinder and Box");
         assert!(!doc.scene.contains(group) && !doc.scene.contains(child));
         assert!(editor.selection.is_empty());
+    }
+
+    #[test]
+    fn make_editable_bakes_primitives_into_meshes_as_one_undo_step() {
+        let (mut doc, mut editor, mut vp) = (Document::with_demo_scene(), EditorState::default(), viewport());
+        let (cube, light, group) = (id_of(&doc, "Cube"), id_of(&doc, "Light"), id_of(&doc, "Group"));
+        let cube_before = doc.scene.get(cube).unwrap().data.clone();
+        let light_before = doc.scene.get(light).unwrap().data.clone();
+        editor.selection.set_all([cube, light, group]);
+        assert!(can_make_editable(&doc, &editor.selection));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+
+        let data = doc.scene.get(cube).unwrap().data.clone();
+        let ObjectKind::Polygon { mesh } = &data.kind else {
+            panic!("not converted: {:?}", data.kind)
+        };
+        assert_eq!((mesh.mesh().point_count(), mesh.mesh().face_count()), (8, 6));
+        let topology = grid4d_geom::Topology::build(mesh.mesh());
+        assert!(topology.is_closed() && topology.is_manifold(), "a closed, manifold box");
+        let bounds = mesh.bounds().unwrap();
+        assert!(
+            bounds.max.abs_diff_eq(Vec3::splat(100.0), 1e-4),
+            "the 200 cm size is in the points"
+        );
+        assert_eq!((&data.name, data.transform), (&cube_before.name, cube_before.transform));
+        assert_eq!(doc.scene.get(light).unwrap().data, light_before, "lights stay lights");
+        assert_eq!(editor.history.undo_label(), Some("Make Editable"));
+        assert!(!can_make_editable(&doc, &editor.selection), "nothing left to convert");
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(cube).unwrap().data, cube_before);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        let ObjectKind::Polygon { mesh: again } = &doc.scene.get(cube).unwrap().data.kind else {
+            panic!("redo did not restore the mesh")
+        };
+        assert_eq!(
+            again.id(),
+            mesh.id(),
+            "the same mesh comes back, so its GPU copy is reused"
+        );
+    }
+
+    #[test]
+    fn make_editable_without_primitives_records_nothing() {
+        let (mut doc, mut editor, mut vp) = (Document::with_demo_scene(), EditorState::default(), viewport());
+        editor.selection.set_all([id_of(&doc, "Light"), id_of(&doc, "Group")]);
+        assert!(!can_make_editable(&doc, &editor.selection));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        assert_eq!(editor.history.undo_label(), None);
     }
 
     #[test]

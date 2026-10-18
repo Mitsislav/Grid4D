@@ -4,9 +4,12 @@
 //! Objects that differ only in size share one key (and so one GPU mesh and one
 //! instanced draw call). Parameters that change the shape itself — segment
 //! counts, a cone's radius ratio, a torus's pipe thickness — are part of the key.
+//! A polygon object's key is its mesh's [`MeshId`]: objects sharing a mesh
+//! share a draw call, and an edited mesh (a new id) gets a new GPU mesh.
 
 use glam::Vec3;
 use grid4d_geom::{PolyMesh, primitives};
+use grid4d_scene::MeshId;
 
 /// A shape ratio in `[0, 1]`, stored as `f32` bits so keys can be hashed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -64,13 +67,18 @@ pub enum MeshKey {
         height: u32,
         cap: u32,
     },
+    /// A polygon object's mesh, as is (scale 1); the geometry lives in its
+    /// [`MeshHandle`](grid4d_scene::MeshHandle), see [`EvaluatedScene::mesh`](crate::EvaluatedScene::mesh).
+    Polygon(MeshId),
 }
 
 impl MeshKey {
-    /// The unit geometry for this key.
+    /// The unit geometry for a primitive's key; `None` for a polygon object,
+    /// whose geometry is not generated but stored.
     #[must_use]
-    pub fn build(self) -> PolyMesh {
-        match self {
+    pub fn build(self) -> Option<PolyMesh> {
+        Some(match self {
+            Self::Polygon(_) => return None,
             Self::Cube { segments } => primitives::cube(Vec3::ONE, segments),
             Self::Sphere { segments } => primitives::sphere(1.0, segments),
             Self::Cylinder { rotation, height } => primitives::cylinder(1.0, 1.0, rotation, height),
@@ -102,7 +110,7 @@ impl MeshKey {
                 let s = straight.get().min(0.999);
                 primitives::capsule(1.0, 2.0 / (1.0 - s), rotation, height, cap)
             }
-        }
+        })
     }
 }
 
@@ -112,7 +120,7 @@ mod tests {
 
     #[test]
     fn unit_meshes_have_unit_size() {
-        let size = |key: MeshKey| key.build().bounds().map(|(min, max)| max - min).unwrap();
+        let size = |key: MeshKey| key.build().unwrap().bounds().map(|(min, max)| max - min).unwrap();
         assert!(size(MeshKey::Cube { segments: [1, 1, 1] }).abs_diff_eq(Vec3::ONE, 1e-6));
         assert!(size(MeshKey::Sphere { segments: 24 }).abs_diff_eq(Vec3::splat(2.0), 1e-3));
         assert!(

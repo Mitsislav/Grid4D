@@ -189,5 +189,6 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Capsule => "Add Capsule",
         ObjectKindTag::Camera => "Add Camera (at the current view)",
         ObjectKindTag::Light => "Add Light",
+        ObjectKindTag::Polygon => "Add Polygon Object",
     }
 }

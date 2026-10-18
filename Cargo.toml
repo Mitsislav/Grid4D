@@ -53,6 +53,8 @@ slotmap = "1.1"
 # File formats (grid4d-io only)
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# .g4d archives (format version 3+): only deflate, with the pure-Rust zlib backend.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # Diagnostics
 log = "0.4"

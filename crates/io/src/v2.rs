@@ -1,33 +1,30 @@
-//! Format version 2 (current): version 1 plus segment counts on every primitive
-//! and the Cone, Torus, Disc and Capsule objects. Never change these types once
-//! released: add a `v3` module and migrate instead.
-
-use std::collections::HashMap;
+//! Format version 2 — read-only. JSON files with segment counts on every
+//! primitive and the Cone, Torus, Disc and Capsule objects, but no polygon
+//! objects; they load unchanged into the current scene types. These types are
+//! frozen.
 
 use glam::Vec3;
-use grid4d_scene::{Document, NodeData, NodeId, ObjectKind, TimeSettings, Transform};
-use serde::{Deserialize, Serialize};
+use grid4d_scene::{Document, NodeData, ObjectKind, TimeSettings, Transform};
+use serde::Deserialize;
 
 use crate::{
-    FORMAT_TAG, IoError,
+    IoError,
     common::{assemble, check_finite},
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub(crate) struct File {
-    format: String,
-    version: u32,
     document: DocumentDto,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct DocumentDto {
     name: String,
     time: TimeDto,
     objects: Vec<ObjectDto>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct TimeDto {
     fps: u32,
     start: i32,
@@ -35,11 +32,11 @@ struct TimeDto {
     looping: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct ObjectDto {
     name: String,
     /// Index of the parent in `objects`, always smaller than this object's own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     parent: Option<usize>,
     kind: KindDto,
     position: [f32; 3],
@@ -53,7 +50,7 @@ struct ObjectDto {
     enabled: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum KindDto {
     Null,
@@ -117,36 +114,6 @@ impl File {
         Ok(serde_json::from_str(text)?)
     }
 
-    pub(crate) fn from_document(doc: &Document) -> Result<Self, IoError> {
-        let mut index_of: HashMap<NodeId, usize> = HashMap::with_capacity(doc.scene.len());
-        let mut objects = Vec::with_capacity(doc.scene.len());
-        // Pre-order: a parent is always written (and indexed) before its children.
-        doc.scene.walk(&mut Vec::new(), |id, node, _, _| {
-            index_of.insert(id, objects.len());
-            let parent = node.parent().and_then(|p| index_of.get(&p).copied());
-            objects.push(ObjectDto::new(&node.data, parent));
-            true
-        });
-        for object in &objects {
-            object.check_finite()?;
-        }
-        let settings = doc.time.settings();
-        Ok(Self {
-            format: FORMAT_TAG.to_owned(),
-            version: 2,
-            document: DocumentDto {
-                name: doc.name.clone(),
-                time: TimeDto {
-                    fps: settings.fps,
-                    start: settings.start,
-                    end: settings.end,
-                    looping: settings.looping,
-                },
-                objects,
-            },
-        })
-    }
-
     pub(crate) fn into_document(self) -> Result<Document, IoError> {
         let DocumentDto { name, time, objects } = self.document;
         let objects = objects
@@ -167,22 +134,6 @@ impl File {
 }
 
 impl ObjectDto {
-    fn new(data: &NodeData, parent: Option<usize>) -> Self {
-        let t = &data.transform;
-        Self {
-            name: data.name.clone(),
-            parent,
-            kind: KindDto::from(&data.kind),
-            position: t.position.to_array(),
-            rotation_hpb: t.rotation.to_array(),
-            scale: t.scale.to_array(),
-            display_color: data.display_color,
-            visible_in_editor: data.visible_in_editor,
-            visible_in_render: data.visible_in_render,
-            enabled: data.enabled,
-        }
-    }
-
     fn into_data(self) -> NodeData {
         NodeData {
             name: self.name,
@@ -240,91 +191,6 @@ impl KindDto {
             } => vec![inner_radius, outer_radius],
             Self::Camera { fov_y_deg } => vec![fov_y_deg],
             Self::Light { color, intensity } => vec![color[0], color[1], color[2], intensity],
-        }
-    }
-}
-
-impl From<&ObjectKind> for KindDto {
-    fn from(kind: &ObjectKind) -> Self {
-        match *kind {
-            ObjectKind::Null => Self::Null,
-            ObjectKind::Cube { size, segments } => Self::Cube {
-                size: size.to_array(),
-                segments,
-            },
-            ObjectKind::Sphere { radius, segments } => Self::Sphere { radius, segments },
-            ObjectKind::Cylinder {
-                radius,
-                height,
-                rotation_segments,
-                height_segments,
-            } => Self::Cylinder {
-                radius,
-                height,
-                rotation_segments,
-                height_segments,
-            },
-            ObjectKind::Plane {
-                width,
-                depth,
-                width_segments,
-                depth_segments,
-            } => Self::Plane {
-                width,
-                depth,
-                width_segments,
-                depth_segments,
-            },
-            ObjectKind::Cone {
-                bottom_radius,
-                top_radius,
-                height,
-                rotation_segments,
-                height_segments,
-            } => Self::Cone {
-                bottom_radius,
-                top_radius,
-                height,
-                rotation_segments,
-                height_segments,
-            },
-            ObjectKind::Torus {
-                ring_radius,
-                pipe_radius,
-                ring_segments,
-                pipe_segments,
-            } => Self::Torus {
-                ring_radius,
-                pipe_radius,
-                ring_segments,
-                pipe_segments,
-            },
-            ObjectKind::Disc {
-                inner_radius,
-                outer_radius,
-                rotation_segments,
-                disc_segments,
-            } => Self::Disc {
-                inner_radius,
-                outer_radius,
-                rotation_segments,
-                disc_segments,
-            },
-            ObjectKind::Capsule {
-                radius,
-                height,
-                rotation_segments,
-                height_segments,
-                cap_segments,
-            } => Self::Capsule {
-                radius,
-                height,
-                rotation_segments,
-                height_segments,
-                cap_segments,
-            },
-            ObjectKind::Camera { fov_y_deg } => Self::Camera { fov_y_deg },
-            ObjectKind::Light { color, intensity } => Self::Light { color, intensity },
         }
     }
 }
@@ -411,169 +277,5 @@ impl From<KindDto> for ObjectKind {
             KindDto::Camera { fov_y_deg } => Self::Camera { fov_y_deg },
             KindDto::Light { color, intensity } => Self::Light { color, intensity },
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use grid4d_scene::{Node, ObjectKindTag};
-
-    use super::*;
-    use crate::{from_str, to_string};
-
-    /// What a file must preserve: document name, time settings, and the
-    /// hierarchy in pre-order (depth + data). `NodeId`s are not part of a file.
-    fn snapshot(doc: &Document) -> (String, TimeSettings, Vec<(u32, NodeData)>) {
-        let mut nodes = Vec::new();
-        doc.scene.walk(&mut Vec::new(), |_, node, _, depth| {
-            nodes.push((depth, node.data.clone()));
-            true
-        });
-        (doc.name.clone(), doc.time.settings(), nodes)
-    }
-
-    fn round_trip(doc: &Document) -> Document {
-        from_str(&to_string(doc).unwrap()).unwrap()
-    }
-
-    #[test]
-    fn the_demo_scene_round_trips_exactly() {
-        let mut doc = Document::with_demo_scene();
-        doc.name = "Shot 010 — ünïcode".to_owned();
-        doc.time.set_settings(TimeSettings {
-            fps: 25,
-            start: -12,
-            end: 250,
-            looping: false,
-        });
-        assert_eq!(snapshot(&round_trip(&doc)), snapshot(&doc));
-    }
-
-    #[test]
-    fn every_kind_and_awkward_values_round_trip() {
-        let mut doc = Document::new("kinds");
-        let mut parent = None;
-        for (i, tag) in ObjectKindTag::ALL.into_iter().enumerate() {
-            let mut data = NodeData::new(format!("{} \"quoted\" {i}", tag.label()), tag.default_kind());
-            data.transform = Transform {
-                position: Vec3::new(0.1, -1e-7, 123_456.79),
-                rotation: Vec3::new(std::f32::consts::PI, -0.3, 1.0e-3),
-                scale: Vec3::new(1.0 / 3.0, 2.0, 0.001),
-            };
-            data.display_color = [0.1, 0.2, 0.3];
-            data.visible_in_editor = i % 2 == 0;
-            data.visible_in_render = i % 3 == 0;
-            data.enabled = i % 4 != 0;
-            let id = doc.scene.insert_at(parent, usize::MAX, Node::from_data(data)).unwrap();
-            parent = Some(id);
-        }
-        assert_eq!(snapshot(&round_trip(&doc)), snapshot(&doc));
-    }
-
-    #[test]
-    fn segment_counts_round_trip() {
-        let mut doc = Document::new("segments");
-        doc.scene.insert(Node::new(
-            "fine",
-            ObjectKind::Cube {
-                size: Vec3::splat(10.0),
-                segments: [3, 7, 11],
-            },
-        ));
-        doc.scene.insert(Node::new(
-            "torus",
-            ObjectKind::Torus {
-                ring_radius: 3.5,
-                pipe_radius: 1.25,
-                ring_segments: 64,
-                pipe_segments: 5,
-            },
-        ));
-        assert_eq!(snapshot(&round_trip(&doc)), snapshot(&doc));
-    }
-
-    #[test]
-    fn deep_and_wide_hierarchies_round_trip() {
-        let mut doc = Document::new("deep");
-        let mut parent = None;
-        for depth in 0..500 {
-            let id = doc
-                .scene
-                .insert_at(
-                    parent,
-                    usize::MAX,
-                    Node::new(format!("level {depth}"), ObjectKind::Null),
-                )
-                .unwrap();
-            for sibling in 0..3 {
-                doc.scene
-                    .insert_at(
-                        Some(id),
-                        0,
-                        Node::new(format!("leaf {depth}.{sibling}"), ObjectKind::Null),
-                    )
-                    .unwrap();
-            }
-            parent = Some(id);
-        }
-        let loaded = round_trip(&doc);
-        assert_eq!(loaded.scene.len(), 2000);
-        assert_eq!(snapshot(&loaded), snapshot(&doc));
-    }
-
-    #[test]
-    fn detached_nodes_are_not_saved() {
-        let mut doc = Document::with_demo_scene();
-        let group = doc.scene.iter().find(|(_, n)| n.data.name == "Group").unwrap().0;
-        doc.scene.detach(group).unwrap();
-        let loaded = round_trip(&doc);
-        assert_eq!(loaded.scene.len(), doc.scene.len());
-        assert!(loaded.scene.detached_roots().is_empty());
-        assert_eq!(snapshot(&loaded), snapshot(&doc));
-    }
-
-    #[test]
-    fn non_finite_values_refuse_to_save() {
-        let mut doc = Document::with_demo_scene();
-        let cube = doc.scene.roots()[0];
-        doc.scene.get_mut(cube).unwrap().data.transform.scale.y = f32::NAN;
-        let err = to_string(&doc).unwrap_err();
-        assert!(matches!(err, IoError::Invalid(_)), "{err:?}");
-        assert!(err.to_string().contains("\"Cube\""), "{err}");
-    }
-
-    #[test]
-    fn malformed_files_give_clear_errors() {
-        let ok = to_string(&Document::with_demo_scene()).unwrap();
-
-        let err = from_str("{ \"format\": \"oc4d\", ").unwrap_err();
-        assert!(matches!(err, IoError::Parse { line: 1, .. }), "{err:?}");
-
-        for not_ours in ["{}", "{\"format\": \"gltf\", \"version\": 1}", "{\"format\": \"oc4d\"}"] {
-            assert!(matches!(from_str(not_ours), Err(IoError::NotADocument)), "{not_ours}");
-        }
-
-        let newer = ok.replacen("\"version\": 2", "\"version\": 7", 1);
-        assert!(matches!(
-            from_str(&newer),
-            Err(IoError::UnsupportedVersion { found: 7, newest: 2 })
-        ));
-
-        let missing_field = ok.replacen("\"enabled\": true", "\"enabeld\": true", 1);
-        assert!(matches!(from_str(&missing_field), Err(IoError::Parse { .. })));
-
-        let unknown_kind = ok.replacen("\"type\": \"cube\"", "\"type\": \"teapot\"", 1);
-        assert!(matches!(from_str(&unknown_kind), Err(IoError::Parse { .. })));
-
-        let overflow = ok.replacen("\"radius\": 80.0", "\"radius\": 1e300", 1);
-        assert!(matches!(from_str(&overflow), Err(IoError::Invalid(_))), "f32 overflow");
-    }
-
-    #[test]
-    fn time_settings_are_validated_on_load() {
-        let text = to_string(&Document::new("t"))
-            .unwrap()
-            .replacen("\"fps\": 30", "\"fps\": 0", 1);
-        assert_eq!(from_str(&text).unwrap().time.fps(), 1);
     }
 }

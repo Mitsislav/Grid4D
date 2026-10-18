@@ -54,6 +54,8 @@ pub struct Triangulator {
     remaining: Vec<u32>,
     /// Triangles of the current face, in local corner indices.
     local: Vec<[u32; 3]>,
+    /// The current face's corner positions (for [`Triangulator::triangulate_points`]).
+    face_positions: Vec<Vec3>,
 }
 
 impl Triangulator {
@@ -82,6 +84,27 @@ impl Triangulator {
                 out.triangle_faces.push(face);
             }
         }
+    }
+
+    /// Triangulates every face of `mesh` into triangles of point indices, with the
+    /// face each one came from (both cleared first): the same split as
+    /// [`triangulate`](Self::triangulate), for consumers that need only positions
+    /// (ray casting) and no per-corner vertices or normals.
+    pub fn triangulate_points(&mut self, mesh: &PolyMesh, triangles: &mut Vec<[u32; 3]>, faces: &mut Vec<u32>) {
+        triangles.clear();
+        faces.clear();
+        let mut positions = std::mem::take(&mut self.face_positions);
+        for (f, corners) in mesh.faces().enumerate() {
+            positions.clear();
+            positions.extend(corners.iter().map(|&p| mesh.points()[us(p)]));
+            self.triangulate_face(&positions);
+            let face = u32_index(f);
+            for [a, b, c] in self.local.drain(..) {
+                triangles.push([corners[us(a)], corners[us(b)], corners[us(c)]]);
+                faces.push(face);
+            }
+        }
+        self.face_positions = positions;
     }
 
     /// Fills `self.local` with the triangles of one polygon.
@@ -282,6 +305,24 @@ mod tests {
         assert_eq!(tri.uvs, uvs);
         assert_eq!(tri.triangle_faces, [0, 0, 1, 1]);
         assert!(triangulate(&shapes::cube(1.0)).uvs.is_empty());
+    }
+
+    #[test]
+    fn point_triangles_match_the_gpu_triangles() {
+        let mut triangulator = Triangulator::new();
+        let (mut triangles, mut faces) = (Vec::new(), Vec::new());
+        for (name, mesh) in all_shapes() {
+            let tri = triangulate(&mesh);
+            triangulator.triangulate_points(&mesh, &mut triangles, &mut faces);
+            assert_eq!(faces, tri.triangle_faces, "{name}");
+            for (t, points) in triangles.iter().enumerate() {
+                assert_eq!(
+                    points.map(|p| mesh.points()[us(p)]),
+                    triangle(&tri, t),
+                    "{name} triangle {t}"
+                );
+            }
+        }
     }
 
     #[test]

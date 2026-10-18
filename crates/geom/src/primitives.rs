@@ -5,13 +5,15 @@
 //! 4D's default orientation), sizes in scene units, faces counter-clockwise from
 //! outside. Segment counts are clamped to a sane range so a typo cannot ask for
 //! a billion polygons. Caps are single n-gons (cheap, and good input for later
-//! modelling tools).
+//! modelling tools) with their own ring of points, not shared with the side —
+//! as in the reference application, so a rim stays hard under smoothing and
+//! subdivision (see `docs/reference/modeling-modes.md` §2).
 
 use std::{collections::HashMap, f32::consts::PI};
 
 use glam::Vec3;
 
-use crate::{PolyMesh, u32_index};
+use crate::{PolyMesh, u32_index, us};
 
 /// Upper limit for any segment count.
 pub const MAX_SEGMENTS: u32 = 1000;
@@ -65,7 +67,7 @@ impl Builder {
 enum End {
     /// Converges to a single point at this height (sphere pole, cone apex).
     Pole(f32),
-    /// Closed by one n-gon (cylinder cap).
+    /// Closed by one n-gon on its own copy of the ring's points (cylinder cap).
     Cap,
 }
 
@@ -97,6 +99,15 @@ fn lathe(profile: &[(f32, f32)], around: u32, top: End, bottom: End) -> PolyMesh
     let (Some(&first), Some(&last)) = (rings.first(), rings.last()) else {
         return b.build();
     };
+    // A cap's points: a copy of the ring, so the cap is separate from the side.
+    let cap_ring = |b: &mut Builder, ring: u32| {
+        let copy = u32_index(b.points.len());
+        for j in 0..n {
+            let p = b.points[us(at(ring, j))];
+            b.point(p);
+        }
+        copy
+    };
     match top {
         End::Pole(y) => {
             let pole = b.point(Vec3::new(0.0, y, 0.0));
@@ -105,7 +116,8 @@ fn lathe(profile: &[(f32, f32)], around: u32, top: End, bottom: End) -> PolyMesh
             }
         }
         End::Cap => {
-            let cap: Vec<u32> = (0..n).map(|j| at(first, j)).collect();
+            let ring = cap_ring(&mut b, first);
+            let cap: Vec<u32> = (0..n).map(|j| at(ring, j)).collect();
             b.face(&cap);
         }
     }
@@ -117,7 +129,8 @@ fn lathe(profile: &[(f32, f32)], around: u32, top: End, bottom: End) -> PolyMesh
             }
         }
         End::Cap => {
-            let cap: Vec<u32> = (0..n).rev().map(|j| at(last, j)).collect();
+            let ring = cap_ring(&mut b, last);
+            let cap: Vec<u32> = (0..n).rev().map(|j| at(ring, j)).collect();
             b.face(&cap);
         }
     }
@@ -356,6 +369,27 @@ mod tests {
         }
     }
 
+    /// Merges points at bit-identical positions — what Optimize ▸ Points (with
+    /// zero tolerance) will do; enough to check that separate caps fit exactly.
+    fn welded(mesh: &PolyMesh) -> PolyMesh {
+        let mut index: HashMap<[u32; 3], u32> = HashMap::new();
+        let mut points = Vec::new();
+        let remap: Vec<u32> = mesh
+            .points()
+            .iter()
+            .map(|p| {
+                *index.entry(p.to_array().map(f32::to_bits)).or_insert_with(|| {
+                    points.push(*p);
+                    u32_index(points.len() - 1)
+                })
+            })
+            .collect();
+        let faces = mesh
+            .faces()
+            .map(|f| f.iter().map(|&p| remap[us(p)]).collect::<Vec<_>>());
+        PolyMesh::from_faces(points, faces).unwrap()
+    }
+
     fn assert_bounds(name: &str, mesh: &PolyMesh, half: Vec3) {
         let (min, max) = mesh.bounds().unwrap();
         assert!(
@@ -369,10 +403,6 @@ mod tests {
         let cases = [
             ("cube", cube(Vec3::new(200.0, 100.0, 50.0), [2, 3, 4])),
             ("sphere", sphere(100.0, 24)),
-            ("cylinder", cylinder(50.0, 200.0, 36, 4)),
-            ("cone", cone(100.0, 0.0, 200.0, 36, 8)),
-            ("inverted cone", cone(0.0, 40.0, 100.0, 12, 3)),
-            ("frustum", cone(100.0, 30.0, 80.0, 16, 2)),
             ("capsule", capsule(50.0, 200.0, 36, 4, 8)),
             ("short capsule", capsule(50.0, 40.0, 12, 4, 3)),
         ];
@@ -381,6 +411,25 @@ mod tests {
             assert_outward(name, &mesh);
         }
         assert_eq!(shape(&torus(200.0, 50.0, 36, 18)), (true, 0), "a torus has genus 1");
+    }
+
+    /// Caps are separate pieces (each rim exists twice), and merging the
+    /// duplicates closes the shape exactly.
+    #[test]
+    fn caps_have_their_own_points_and_fit_the_side_exactly() {
+        let cases = [
+            ("cylinder", cylinder(50.0, 200.0, 36, 4), 2 * 36),
+            ("cone", cone(100.0, 0.0, 200.0, 36, 8), 36),
+            ("inverted cone", cone(0.0, 40.0, 100.0, 12, 3), 12),
+            ("frustum", cone(100.0, 30.0, 80.0, 16, 2), 2 * 16),
+        ];
+        for (name, mesh, rim_points) in cases {
+            assert_eq!(shape(&mesh), (false, 2), "{name}: side and caps are open pieces");
+            assert_outward(name, &mesh);
+            let closed = welded(&mesh);
+            assert_eq!(mesh.point_count() - closed.point_count(), rim_points, "{name}");
+            assert_eq!(shape(&closed), (true, 2), "{name}: merged, it is watertight");
+        }
     }
 
     #[test]
@@ -411,6 +460,7 @@ mod tests {
         assert_bounds("cylinder", &cylinder(50.0, 200.0, 36, 4), Vec3::new(50.0, 100.0, 50.0));
         let cyl = cylinder(50.0, 200.0, 36, 4);
         assert_eq!(cyl.face_count(), 36 * 4 + 2);
+        assert_eq!(cyl.point_count(), 36 * 5 + 2 * 36, "each cap has its own ring");
         assert!(cyl.faces().any(|f| f.len() == 36), "caps are single n-gons");
 
         let p = plane(400.0, 300.0, 20, 10);
@@ -418,7 +468,11 @@ mod tests {
         assert_bounds("plane", &p, Vec3::new(200.0, 0.0, 150.0));
 
         let cone_mesh = cone(100.0, 0.0, 200.0, 36, 8);
-        assert_eq!(cone_mesh.point_count(), 36 * 8 + 1, "a single apex point");
+        assert_eq!(
+            cone_mesh.point_count(),
+            36 * 8 + 1 + 36,
+            "a single apex point; the base cap has its own ring"
+        );
         assert_bounds("cone", &cone_mesh, Vec3::new(100.0, 100.0, 100.0));
 
         // 16 pipe segments sample the top of the tube exactly (90° = 4/16).

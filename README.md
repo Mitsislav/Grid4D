@@ -20,6 +20,9 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
 - **Parametric primitives** with Cinema 4D-style parameters and segment counts:
   cube, sphere, cylinder, plane, cone, torus, disc and capsule, plus nulls, cameras
   and lights.
+- **Make Editable** (`C`, Mesh ▸ Conversion, or the top of the left palette): turns
+  primitives into polygon objects (triangles, quads and n-gons) that look the same,
+  in one undo step; polygon objects are picked by their actual triangles.
 - **wgpu viewport**: renders into its own offscreen target (4× MSAA, depth) shown as
   an image; generated meshes cached per shape and drawn instanced, Phong-angle
   smoothing, anti-aliased adaptive grid, orange selection rim, axis triad and
@@ -38,11 +41,12 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
 - **Timeline**: ruler with scrubbable playhead, play/pause/step/loop
   (`F8`, `F6`, `F7`, `F`, `G`), preview range and fps.
 - **Files**: New / Open / Save / Save As (`Ctrl+N`, `Ctrl+O`, `Ctrl+S`,
-  `Ctrl+Shift+S`) with native dialogs; `.g4d` is versioned JSON, and `.oc4d` files
-  from before the rename (the project was called OpenC4D) open too. The title
-  shows the file name and `*` for unsaved changes, and New, Open, Quit and the
-  window's close button ask "Save changes?" first. File ▸ Open Recent remembers the last ten
-  documents, a `.g4d` dropped onto the window (or given on the command line:
+  `Ctrl+Shift+S`) with native dialogs; `.g4d` is a versioned zip archive (JSON plus
+  binary meshes), and `.oc4d` files from before the rename (the project was called
+  OpenC4D) open too. The title shows the file name and `*` for unsaved changes, and
+  New, Open, Quit and the window's close button ask "Save changes?" first. File ▸
+  Open Recent remembers the last ten documents, a `.g4d` dropped onto the window (or
+  given on the command line:
   `grid4d scene.g4d`) opens it, and the window size and panel layout are
   restored on the next start.
 - **Undo / redo** (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`, toolbar, Edit menu): create,
@@ -83,7 +87,7 @@ grid4d-geom  ◀──  grid4d-scene  ◀──  grid4d-eval  ◀──  grid4d-
 | `grid4d-scene`   | Scene graph (slotmap arena, generational `NodeId`), transforms (HPB), bounds, document time. No GPU, no UI. |
 | `grid4d-eval`    | Evaluated scene: visible nodes with world matrices, drawables (unit mesh keys) and pick shapes; skipped when nothing changed. No GPU, no UI. |
 | `grid4d-render`  | Orbit camera, per-frame `FrameData` extraction, generated-mesh cache, wgpu pipelines + WGSL shaders, picking. No UI. |
-| `grid4d-io`      | `.g4d` document files: versioned JSON format, atomic save, load with clear errors. No GPU, no UI. |
+| `grid4d-io`      | `.g4d` document files: versioned zip archive (JSON + binary meshes), atomic save, load with clear errors. No GPU, no UI. |
 | `grid4d-ui`      | Theme, painted vector icons, panels, gizmo, shortcuts, command queue, undo history. |
 | `grid4d`         | Window / GPU surface setup and panel layout.                         |
 

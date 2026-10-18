@@ -4,6 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt as _;
 
 use grid4d_eval::MeshKey;
+use grid4d_scene::MeshHandle;
 
 use crate::{
     FrameData, InstanceRaw, Vertex, ViewportTarget,
@@ -64,8 +65,9 @@ const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array!
 /// Owns every GPU resource of the 3D viewport and records its draw commands.
 ///
 /// Usage per frame: [`prepare`](Self::prepare) (uploads) → [`paint`](Self::paint)
-/// (inside the host's render pass). Meshes are generated and uploaded the first
-/// frame their [`MeshKey`] appears and freed when unused for a while.
+/// (inside the host's render pass). Meshes are generated (primitives) or taken
+/// from their [`MeshHandle`] (polygon objects) and uploaded the first frame their
+/// [`MeshKey`] appears, and freed when unused for a while.
 #[derive(Debug)]
 pub struct ViewportRenderer {
     mesh_pipeline: wgpu::RenderPipeline,
@@ -169,8 +171,8 @@ impl ViewportRenderer {
 
         self.draws.clear();
         let mut offset = 0usize;
-        for (key, instances) in frame.batches() {
-            if !self.ensure_mesh(device, key) {
+        for (key, mesh, instances) in frame.batches() {
+            if !self.ensure_mesh(device, key, mesh) {
                 continue; // nothing to draw for this shape
             }
             queue.write_buffer(
@@ -193,14 +195,24 @@ impl ViewportRenderer {
         self.draw_grid = frame.show_grid;
     }
 
-    /// Makes sure the mesh for `key` is on the GPU; `false` if it has no triangles.
-    fn ensure_mesh(&mut self, device: &wgpu::Device, key: MeshKey) -> bool {
+    /// Makes sure the mesh for `key` is on the GPU (`polygon` holds the geometry of
+    /// a [`MeshKey::Polygon`]); `false` if it has no triangles.
+    fn ensure_mesh(&mut self, device: &wgpu::Device, key: MeshKey, polygon: Option<&MeshHandle>) -> bool {
         if let Some(mesh) = self.meshes.get_mut(&key) {
             mesh.last_used = self.frame;
             return true;
         }
+        let generated;
+        let source = match (polygon, key.build()) {
+            (Some(handle), _) => handle.mesh(),
+            (None, Some(mesh)) => {
+                generated = mesh;
+                &generated
+            }
+            (None, None) => return false, // a polygon key without its mesh
+        };
         tessellate(
-            key,
+            source,
             &mut self.tessellation,
             &mut self.vertex_scratch,
             &mut self.index_scratch,

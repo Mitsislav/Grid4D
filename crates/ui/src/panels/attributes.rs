@@ -362,6 +362,15 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 }
                 ui.end_row();
             }
+            ObjectKind::Polygon { mesh } => {
+                // The geometry is edited in the viewport (Points / Edges / Polygons).
+                let mesh = mesh.mesh();
+                for (label, count) in [("Points", mesh.point_count()), ("Polygons", mesh.face_count())] {
+                    attr_label(ui, label, LABEL_WIDTH);
+                    ui.label(count.to_string());
+                    ui.end_row();
+                }
+            }
         });
 }
 

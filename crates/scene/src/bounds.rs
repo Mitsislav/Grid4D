@@ -74,8 +74,10 @@ impl Aabb {
         let inv = dir.recip();
         let t0 = (self.min - origin) * inv;
         let t1 = (self.max - origin) * inv;
-        let t_near = t0.min(t1).max_element();
-        let t_far = t0.max(t1).min_element();
+        // NaN (0 · ∞): parallel to that slab and starting on its boundary, i.e. inside it.
+        let on_face = t0.is_nan_mask() | t1.is_nan_mask();
+        let t_near = Vec3::select(on_face, Vec3::NEG_INFINITY, t0.min(t1)).max_element();
+        let t_far = Vec3::select(on_face, Vec3::INFINITY, t0.max(t1)).min_element();
         if t_far >= t_near.max(0.0) && t_far.is_finite() {
             Some(t_near.max(0.0))
         } else {
@@ -101,6 +103,10 @@ mod tests {
         assert_eq!(b.ray_intersect(Vec3::new(3.0, 0.0, -5.0), Vec3::Z), None);
         // Starting inside the box hits at t = 0.
         assert_eq!(b.ray_intersect(Vec3::ZERO, Vec3::X), Some(0.0));
+        // Grazing a face (axis-aligned, exactly on the boundary) still hits.
+        assert_eq!(b.ray_intersect(Vec3::new(1.0, 0.0, -5.0), Vec3::Z), Some(4.0));
+        assert_eq!(b.ray_intersect(Vec3::new(1.0, 1.0, -5.0), Vec3::Z), Some(4.0));
+        assert_eq!(b.ray_intersect(Vec3::new(1.0 + 1e-3, 0.0, -5.0), Vec3::Z), None);
     }
 
     #[test]

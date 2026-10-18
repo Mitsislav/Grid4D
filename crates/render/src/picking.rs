@@ -7,8 +7,9 @@ use crate::Ray;
 /// Returns the closest visible object hit by `ray`.
 ///
 /// Tests in each object's local space, using its [`PickShape`]: exact for
-/// spheres, oriented bounding boxes for everything else (Nulls are skipped).
-/// Allocation-free.
+/// spheres and polygon objects (a BVH per mesh, built on its first pick),
+/// oriented bounding boxes for everything else (Nulls are skipped).
+/// Allocation-free once each mesh's BVH exists.
 #[must_use]
 pub fn pick(scene: &EvaluatedScene, ray: Ray) -> Option<NodeId> {
     let mut best: Option<(f32, NodeId)> = None;
@@ -23,6 +24,13 @@ pub fn pick(scene: &EvaluatedScene, ray: Ray) -> Option<NodeId> {
             PickShape::None => None,
             PickShape::Sphere { radius } => ray_sphere(origin, dir, radius),
             PickShape::Bounds => node.bounds.and_then(|b| b.ray_intersect(origin, dir)),
+            // The box first: most rays miss most objects.
+            PickShape::Mesh(mesh) => node
+                .bounds
+                .and_then(|b| b.ray_intersect(origin, dir))
+                .and(scene.mesh(mesh))
+                .and_then(|mesh| mesh.raycast(origin, dir))
+                .map(|hit| hit.t),
         };
         // Affine maps preserve the ray parameter, so `t` is comparable across objects.
         if let Some(t) = hit
@@ -50,7 +58,7 @@ fn ray_sphere(origin: Vec3, dir: Vec3, radius: f32) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use glam::Vec2;
-    use grid4d_scene::Document;
+    use grid4d_scene::{Document, MeshHandle, Node, ObjectKind, ObjectKindTag};
 
     use super::*;
     use crate::OrbitCamera;
@@ -96,5 +104,30 @@ mod tests {
             dir: Vec3::Z,
         };
         assert_eq!(pick(&evaluated(&doc), through), Some(sphere.0));
+    }
+
+    #[test]
+    fn polygon_objects_are_picked_by_their_triangles() {
+        let mut doc = Document::new("meshes");
+        let torus = grid4d_eval::editable_mesh(&ObjectKindTag::Torus.default_kind()).unwrap();
+        let kind = ObjectKind::Polygon {
+            mesh: MeshHandle::new(torus),
+        };
+        let id = doc
+            .scene
+            .insert(Node::new("Torus", kind).with_position(Vec3::new(0.0, 0.0, 500.0)));
+        let eval = evaluated(&doc);
+        let down = |x: f32| Ray {
+            origin: Vec3::new(x, 1000.0, 500.0),
+            dir: -Vec3::Y,
+        };
+        // Ring radius 200, pipe radius 50: the tube spans x = 150…250.
+        assert_eq!(pick(&eval, down(200.0)), Some(id));
+        assert_eq!(
+            pick(&eval, down(0.0)),
+            None,
+            "the hole is inside the box but not the mesh"
+        );
+        assert_eq!(pick(&eval, down(400.0)), None);
     }
 }

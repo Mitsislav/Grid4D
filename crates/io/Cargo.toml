@@ -9,9 +9,11 @@ publish.workspace = true
 
 [dependencies]
 grid4d-scene.workspace = true
+grid4d-geom.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true

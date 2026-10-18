@@ -54,6 +54,7 @@ mod tests {
             ctx.run_ui(RawInput::default(), |ui| {
                 menu_bar::show(ui, doc, editor);
                 toolbar::show(ui, editor);
+                mode_palette::show(ui, doc, editor);
                 outliner.show(ui, doc, editor);
                 attributes.show(ui, doc, editor);
                 timeline.show(ui, &mut doc.time, editor);

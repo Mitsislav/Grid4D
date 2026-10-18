@@ -1,9 +1,37 @@
 //! Logic shared by every format version: assembling a document from objects
-//! stored in pre-order with parent indices, and number validation.
+//! stored in pre-order with parent indices, number validation, and reading
+//! archive entries.
+
+use std::io::{Cursor, Read as _};
 
 use grid4d_scene::{Document, Node, NodeData, NodeId, TimeSettings};
+use zip::{ZipArchive, result::ZipError};
 
 use crate::IoError;
+
+/// A document archive (format version 3 and later) being read.
+pub(crate) struct Archive<'a>(ZipArchive<Cursor<&'a [u8]>>);
+
+impl<'a> Archive<'a> {
+    pub(crate) fn new(bytes: &'a [u8]) -> Result<Self, IoError> {
+        Ok(Self(ZipArchive::new(Cursor::new(bytes))?))
+    }
+
+    /// The decompressed contents of entry `name`, which may be at most `max`
+    /// bytes: what the file *claims* about sizes is never trusted for memory.
+    pub(crate) fn read(&mut self, name: &str, max: u64) -> Result<Vec<u8>, IoError> {
+        let entry = self.0.by_name(name).map_err(|err| match err {
+            ZipError::FileNotFound => IoError::Invalid(format!("the file has no \"{name}\"")),
+            other => other.into(),
+        })?;
+        let mut data = Vec::with_capacity(usize::try_from(entry.size().min(max)).unwrap_or(0));
+        entry.take(max.saturating_add(1)).read_to_end(&mut data)?;
+        if u64::try_from(data.len()).unwrap_or(u64::MAX) > max {
+            return Err(IoError::Invalid(format!("\"{name}\" is larger than expected")));
+        }
+        Ok(data)
+    }
+}
 
 /// Builds a document from `objects` in Object Manager pre-order, each naming an
 /// earlier object as its parent (`None` for top-level objects).
