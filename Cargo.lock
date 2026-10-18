@@ -2458,6 +2458,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "oc4d-geom"
+version = "0.1.0"
+dependencies = [
+ "glam",
+]
+
+[[package]]
 name = "oc4d-io"
 version = "0.1.0"
 dependencies = [

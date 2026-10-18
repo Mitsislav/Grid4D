@@ -62,15 +62,16 @@ cargo clippy --workspace --all-targets -- -D warnings   # lints
 ## Architecture
 
 ```
-oc4d-scene  ◀──  oc4d-render  ◀──  oc4d-ui  ◀──  open-c4d (binary)
-(data)           (wgpu)            (egui)         (composition root)
-     ▲                                │
-     └───────────  oc4d-io  ◀─────────┘
-                   (.oc4d files)
+oc4d-geom  ◀──  oc4d-scene  ◀──  oc4d-render  ◀──  oc4d-ui  ◀──  open-c4d (binary)
+(geometry)      (data)           (wgpu)            (egui)         (composition root)
+                     ▲                                │
+                     └───────────  oc4d-io  ◀─────────┘
+                                   (.oc4d files)
 ```
 
 | Crate         | Responsibility                                                      |
 |---------------|---------------------------------------------------------------------|
+| `oc4d-geom`   | Polygon meshes with n-gons, topology, vertex normals (Phong angle), triangulation for the GPU. glam only. |
 | `oc4d-scene`  | Scene graph (slotmap arena, generational `NodeId`), transforms (HPB), bounds, document time. No GPU, no UI. |
 | `oc4d-render` | Orbit camera, per-frame `FrameData` extraction, wgpu pipelines + WGSL shaders, picking. No UI. |
 | `oc4d-io`     | `.oc4d` document files: versioned JSON format, atomic save, load with clear errors. No GPU, no UI. |

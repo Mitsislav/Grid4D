@@ -357,7 +357,7 @@ arbitrary meshes efficiently; the viewport renders into its own target.
 
 | Step | Size | Work |
 |------|------|------|
-| 3.1 | M | `oc4d-geom` crate: `PolyMesh`, triangulation, normals, tests (Euler characteristic, winding — port `winding_matches_normals`) |
+| 3.1 ✅ | M | `oc4d-geom` crate: `PolyMesh`, triangulation, normals, tests (Euler characteristic, winding — port `winding_matches_normals`) — done 2026-10-18: CSR face-vertex storage with validation, Newell face vectors, `Topology` (edges, edge/point → faces, closed, manifold & orientation, Euler), `Smoothing` (flat / smooth / Phong angle 80°), `Triangulator` (shorter-diagonal quads, ear clipping with fan fallback, per-corner vertices, reused buffers) |
 | 3.2 | M | Parametric primitives (+ Cone, Torus, Disc, Capsule); Attribute Manager segment fields; render consumes generated meshes |
 | 3.3 | L | `oc4d-eval` + `EvaluatedScene`, node revisions; render/picking migrate; `extract_reuses_capacity`-style test for evaluation |
 | 3.4 | M | `GeometryHandle`-keyed batches + `GpuMeshCache` |
