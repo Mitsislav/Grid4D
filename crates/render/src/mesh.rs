@@ -174,8 +174,8 @@ mod tests {
         for kind in MeshKind::ALL {
             let mesh = kind.build();
             assert_eq!(mesh.indices.len() % 3, 0);
-            for tri in mesh.indices.chunks_exact(3) {
-                let [a, b, c] = [tri[0], tri[1], tri[2]].map(|i| mesh.vertices[i as usize]);
+            for tri in mesh.indices.as_chunks::<3>().0 {
+                let [a, b, c] = tri.map(|i| mesh.vertices[i as usize]);
                 let (pa, pb, pc) = (Vec3::from(a.position), Vec3::from(b.position), Vec3::from(c.position));
                 let face = (pb - pa).cross(pc - pa);
                 assert!(face.length() > 1e-7, "{kind:?}: degenerate triangle {tri:?}");

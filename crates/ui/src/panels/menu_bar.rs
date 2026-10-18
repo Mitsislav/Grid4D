@@ -134,11 +134,16 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 time.go_to_end();
                 ui.close();
             }
+            // Same behaviour as the F / G shortcuts and the transport buttons.
             if ui.add(Button::new("Previous Frame").shortcut_text("F")).clicked() {
+                time.stop();
                 time.step(-1);
+                ui.close();
             }
             if ui.add(Button::new("Next Frame").shortcut_text("G")).clicked() {
+                time.stop();
                 time.step(1);
+                ui.close();
             }
             ui.separator();
             ui.checkbox(&mut time.looping, "Loop Playback");

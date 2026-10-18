@@ -98,7 +98,11 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     node.transform.position = Vec3::new(0.0, 400.0, 0.0);
                     node.display_color = [1.0, 0.95, 0.85];
                 }
-                _ => {}
+                ObjectKindTag::Null
+                | ObjectKindTag::Cube
+                | ObjectKindTag::Sphere
+                | ObjectKindTag::Cylinder
+                | ObjectKindTag::Plane => {}
             }
             let id = doc.scene.insert(node);
             editor.selection.set_single(id);
@@ -147,6 +151,177 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         ObjectKindTag::Null => palette::ICON_NULL,
         ObjectKindTag::Camera => palette::ICON_CAMERA,
         ObjectKindTag::Light => palette::ICON_LIGHT,
-        _ => palette::ICON_PRIMITIVE,
+        ObjectKindTag::Cube | ObjectKindTag::Sphere | ObjectKindTag::Cylinder | ObjectKindTag::Plane => {
+            palette::ICON_PRIMITIVE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A headless viewport: without a wgpu render state it only keeps the camera.
+    fn viewport() -> ViewportPanel {
+        ViewportPanel::new(None, None, 1)
+    }
+
+    fn id_of(doc: &Document, name: &str) -> NodeId {
+        doc.scene
+            .iter()
+            .find(|(_, n)| n.name == name)
+            .map(|(id, _)| id)
+            .unwrap_or_else(|| panic!("no node named {name}"))
+    }
+
+    fn run(doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel, commands: &[EditorCommand]) {
+        for command in commands {
+            editor.commands.push(command.clone());
+        }
+        assert!(apply_pending(doc, editor, viewport));
+        assert!(editor.commands.is_empty());
+    }
+
+    #[test]
+    fn apply_pending_reports_whether_anything_ran() {
+        let (mut doc, mut editor, mut vp) = (Document::default(), EditorState::default(), viewport());
+        assert!(!apply_pending(&mut doc, &mut editor, &mut vp));
+        editor.commands.push(EditorCommand::DeselectAll);
+        assert!(apply_pending(&mut doc, &mut editor, &mut vp));
+        assert!(!apply_pending(&mut doc, &mut editor, &mut vp));
+    }
+
+    #[test]
+    fn create_object_names_uniquely_and_selects_it() {
+        let (mut doc, mut editor, mut vp) = (Document::default(), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[
+                EditorCommand::CreateObject(ObjectKindTag::Cube),
+                EditorCommand::CreateObject(ObjectKindTag::Cube),
+            ],
+        );
+        assert_eq!(doc.scene.len(), 2);
+        let second = id_of(&doc, "Cube.1");
+        assert!(doc.scene.contains(id_of(&doc, "Cube")));
+        assert_eq!(editor.selection.as_slice(), &[second]);
+        assert_eq!(doc.scene.get(second).unwrap().kind, ObjectKindTag::Cube.default_kind());
+    }
+
+    #[test]
+    fn new_camera_is_placed_at_the_current_view() {
+        let (mut doc, mut editor, mut vp) = (Document::default(), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Camera)],
+        );
+        let camera = doc.scene.get(id_of(&doc, "Camera")).unwrap();
+        assert!(camera.transform.position.abs_diff_eq(vp.camera().eye(), 1e-3));
+    }
+
+    #[test]
+    fn delete_removes_subtrees_and_clears_selection() {
+        let (mut doc, mut editor, mut vp) = (Document::with_demo_scene(), EditorState::default(), viewport());
+        let before = doc.scene.len();
+        let (group, child) = (id_of(&doc, "Group"), id_of(&doc, "Box"));
+        // Parent and child both selected: the child goes with the parent, no double delete.
+        editor.selection.set_all([child, group]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
+        assert_eq!(doc.scene.len(), before - 3, "Group, Cylinder and Box");
+        assert!(!doc.scene.contains(group) && !doc.scene.contains(child));
+        assert!(editor.selection.is_empty());
+    }
+
+    #[test]
+    fn reparent_keeps_world_position_and_rejects_cycles() {
+        let (mut doc, mut editor, mut vp) = (Document::with_demo_scene(), EditorState::default(), viewport());
+        let (cube, group, cylinder) = (id_of(&doc, "Cube"), id_of(&doc, "Group"), id_of(&doc, "Cylinder"));
+        let world_before = doc.scene.world_matrix(cube).w_axis.truncate();
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[
+                EditorCommand::Reparent {
+                    node: cube,
+                    new_parent: Some(group),
+                },
+                // Group under its own child: rejected, the hierarchy is unchanged.
+                EditorCommand::Reparent {
+                    node: group,
+                    new_parent: Some(cylinder),
+                },
+            ],
+        );
+        assert_eq!(doc.scene.get(cube).unwrap().parent(), Some(group));
+        assert_eq!(doc.scene.get(group).unwrap().parent(), None);
+        let world_after = doc.scene.world_matrix(cube).w_axis.truncate();
+        assert!(world_after.abs_diff_eq(world_before, 1e-3), "{world_after:?}");
+    }
+
+    #[test]
+    fn select_modes_follow_c4d() {
+        let (mut doc, mut editor, mut vp) = (Document::with_demo_scene(), EditorState::default(), viewport());
+        let (cube, sphere) = (id_of(&doc, "Cube"), id_of(&doc, "Sphere"));
+        let select = |id, mode| EditorCommand::Select { id, mode };
+
+        run(&mut doc, &mut editor, &mut vp, &[select(cube, SelectMode::Replace)]);
+        assert_eq!(editor.selection.as_slice(), &[cube]);
+
+        run(&mut doc, &mut editor, &mut vp, &[select(sphere, SelectMode::Add)]);
+        assert_eq!(editor.selection.as_slice(), &[cube, sphere]);
+        assert_eq!(editor.selection.active(), Some(sphere));
+
+        run(&mut doc, &mut editor, &mut vp, &[select(cube, SelectMode::Toggle)]);
+        assert_eq!(editor.selection.as_slice(), &[sphere]);
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SelectAll]);
+        assert_eq!(editor.selection.len(), doc.scene.len());
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeselectAll]);
+        assert!(editor.selection.is_empty());
+    }
+
+    #[test]
+    fn commands_on_deleted_nodes_are_ignored() {
+        let (mut doc, mut editor, mut vp) = (Document::with_demo_scene(), EditorState::default(), viewport());
+        let sphere = id_of(&doc, "Sphere");
+        editor.selection.set_single(sphere);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[
+                EditorCommand::DeleteSelected,
+                EditorCommand::Select {
+                    id: sphere,
+                    mode: SelectMode::Add,
+                },
+                EditorCommand::Reparent {
+                    node: sphere,
+                    new_parent: None,
+                },
+            ],
+        );
+        assert!(!doc.scene.contains(sphere));
+        assert!(editor.selection.is_empty());
+    }
+
+    #[test]
+    fn new_document_resets_scene_selection_and_view() {
+        let (mut doc, mut editor, mut vp) = (Document::with_demo_scene(), EditorState::default(), viewport());
+        editor.selection.set_single(id_of(&doc, "Cube"));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::FrameSelected]);
+        assert_ne!(*vp.camera(), oc4d_render::OrbitCamera::default());
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::NewDocument]);
+        assert!(doc.scene.is_empty());
+        assert!(editor.selection.is_empty());
+        assert_eq!(*vp.camera(), oc4d_render::OrbitCamera::default());
     }
 }

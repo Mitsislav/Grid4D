@@ -146,6 +146,11 @@ Phase 6 animation needs Phase 1 (edits) and Phase 3 (evaluation).
 
 **Goal:** a reproducible, collaborative baseline before larger work.
 
+> **Status (2026-10-18): done locally**, CI not yet run (no remote). Rust 1.99.1;
+> fmt, clippy `-D warnings` and 38 tests pass; the app starts (Vulkan). The first
+> build on the newer clippy flagged `chunks_exact_to_as_chunks` in a mesh test —
+> fixed. Remaining: push to GitHub so the CI workflow (incl. the 1.95 MSRV job) runs.
+
 | Step | Size | Work |
 |------|------|------|
 | 0.1 | S | Install toolchain (`rustup`, stable ≥ 1.95, MSVC build tools on Windows); run `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`; fix anything the first build reveals. |

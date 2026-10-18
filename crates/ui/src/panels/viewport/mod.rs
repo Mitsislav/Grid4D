@@ -134,11 +134,17 @@ impl ViewportPanel {
         self.view_height = rect.height();
 
         let navigating = self.navigate(ui, &response, rect);
+        // Built once per frame (after navigation moved the camera) and shared by
+        // interaction and painting; rebuilt only if a drag just moved the object.
+        let mut gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect);
         let gizmo_owns_pointer = if navigating {
             false
         } else {
-            let geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect);
-            self.gizmo.interact(ui, &response, geo.as_ref(), &mut doc.scene)
+            let interaction = self.gizmo.interact(ui, &response, gizmo_geo.as_ref(), &mut doc.scene);
+            if interaction.moved_object {
+                gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect);
+            }
+            interaction.owns_pointer
         };
         if !navigating && !gizmo_owns_pointer {
             self.pick_on_click(ui, &response, rect, &doc.scene, editor);
@@ -180,7 +186,7 @@ impl ViewportPanel {
             &editor.selection,
             &mut self.walk_stack,
         );
-        if let Some(geo) = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect) {
+        if let Some(geo) = &gizmo_geo {
             geo.paint(&painter, self.gizmo.hot_axis());
         }
         if self.show_axis_triad {

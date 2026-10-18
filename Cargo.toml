@@ -17,6 +17,7 @@ members = ["crates/scene", "crates/render", "crates/ui"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95" # eframe 0.37 requires 1.95
+license = "MIT OR Apache-2.0"
 publish = false
 
 [workspace.dependencies]
@@ -74,6 +75,7 @@ description = "OpenC4D — an open-source 3D content creation suite inspired by 
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 default-run = "open-c4d"
 

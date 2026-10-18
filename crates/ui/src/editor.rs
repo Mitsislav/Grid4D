@@ -2,6 +2,7 @@
 //! active tool, modes and transient UI flags.
 
 use oc4d_scene::{NodeId, Scene};
+use slotmap::SecondaryMap;
 
 use crate::CommandQueue;
 
@@ -80,15 +81,29 @@ impl EditMode {
 
 /// Ordered object selection. The last entry is the *active* object
 /// (the one the Attribute Manager and gizmo work on).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+///
+/// `contains` is O(1): the renderer asks it once per node per frame, so a
+/// linear scan would make "Select All" quadratic on the hot path. `members`
+/// always holds exactly the ids in `ids`.
+#[derive(Clone, Debug, Default)]
 pub struct Selection {
     ids: Vec<NodeId>,
+    members: SecondaryMap<NodeId, ()>,
 }
+
+impl PartialEq for Selection {
+    fn eq(&self, other: &Self) -> bool {
+        // `members` is derived from `ids`, so the ordered list decides equality.
+        self.ids == other.ids
+    }
+}
+
+impl Eq for Selection {}
 
 impl Selection {
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
-        self.ids.contains(&id)
+        self.members.contains_key(id)
     }
 
     #[must_use]
@@ -112,36 +127,53 @@ impl Selection {
     }
 
     pub fn set_single(&mut self, id: NodeId) {
-        self.ids.clear();
-        self.ids.push(id);
+        self.clear();
+        self.push(id);
     }
 
     /// Adds `id` and makes it the active object.
     pub fn add(&mut self, id: NodeId) {
-        self.ids.retain(|&x| x != id);
-        self.ids.push(id);
+        if self.contains(id) {
+            self.ids.retain(|&x| x != id);
+            self.ids.push(id);
+        } else {
+            self.push(id);
+        }
     }
 
     pub fn toggle(&mut self, id: NodeId) {
-        if self.contains(id) {
+        if self.members.remove(id).is_some() {
             self.ids.retain(|&x| x != id);
         } else {
-            self.ids.push(id);
+            self.push(id);
         }
     }
 
     pub fn clear(&mut self) {
         self.ids.clear();
+        self.members.clear();
     }
 
+    /// Replaces the selection; duplicates in `ids` are ignored.
     pub fn set_all(&mut self, ids: impl IntoIterator<Item = NodeId>) {
-        self.ids.clear();
-        self.ids.extend(ids);
+        self.clear();
+        for id in ids {
+            if !self.contains(id) {
+                self.push(id);
+            }
+        }
     }
 
     /// Drops ids that no longer exist in `scene`.
     pub fn retain_existing(&mut self, scene: &Scene) {
         self.ids.retain(|&id| scene.contains(id));
+        self.members.retain(|id, ()| scene.contains(id));
+    }
+
+    /// Appends an id that is known not to be selected yet.
+    fn push(&mut self, id: NodeId) {
+        self.members.insert(id, ());
+        self.ids.push(id);
     }
 }
 
@@ -179,5 +211,89 @@ impl Default for EditorState {
             renderer_info: String::new(),
             show_about: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use oc4d_scene::{Node, ObjectKind};
+
+    use super::*;
+
+    fn scene_with(n: usize) -> (Scene, Vec<NodeId>) {
+        let mut scene = Scene::new();
+        let ids = (0..n)
+            .map(|i| scene.insert(Node::new(format!("n{i}"), ObjectKind::Null)))
+            .collect();
+        (scene, ids)
+    }
+
+    /// The O(1) membership set must always agree with the ordered list.
+    fn assert_consistent(sel: &Selection, all: &[NodeId]) {
+        for &id in all {
+            assert_eq!(sel.contains(id), sel.as_slice().contains(&id), "{id:?}");
+        }
+        let mut sorted = sel.as_slice().to_vec();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), sel.len(), "duplicate ids in selection");
+    }
+
+    #[test]
+    fn membership_tracks_every_operation() {
+        let (mut scene, ids) = scene_with(4);
+        let [a, b, c, d] = [ids[0], ids[1], ids[2], ids[3]];
+        let mut sel = Selection::default();
+
+        sel.set_single(a);
+        assert_consistent(&sel, &ids);
+        sel.add(b);
+        sel.add(a); // re-adding moves `a` to the end (active)
+        assert_eq!(sel.as_slice(), &[b, a]);
+        assert_eq!(sel.active(), Some(a));
+        assert_consistent(&sel, &ids);
+
+        sel.toggle(c);
+        sel.toggle(b);
+        assert_eq!(sel.as_slice(), &[a, c]);
+        assert_consistent(&sel, &ids);
+
+        sel.set_all([d, a, d]);
+        assert_eq!(sel.as_slice(), &[d, a]);
+        assert_consistent(&sel, &ids);
+
+        scene.remove(d);
+        sel.retain_existing(&scene);
+        assert_eq!(sel.as_slice(), &[a]);
+        assert!(!sel.contains(d));
+        assert_consistent(&sel, &ids);
+
+        sel.clear();
+        assert!(sel.is_empty());
+        assert_consistent(&sel, &ids);
+    }
+
+    #[test]
+    fn stale_ids_are_never_members() {
+        let (mut scene, ids) = scene_with(1);
+        let mut sel = Selection::default();
+        sel.set_single(ids[0]);
+        scene.remove(ids[0]);
+        // A new node may reuse the slot, but with a new generation.
+        let fresh = scene.insert(Node::new("fresh", ObjectKind::Null));
+        assert!(!sel.contains(fresh));
+    }
+
+    #[test]
+    fn equality_ignores_the_membership_index() {
+        let (_, ids) = scene_with(2);
+        let mut x = Selection::default();
+        let mut y = Selection::default();
+        x.set_all([ids[0], ids[1]]);
+        y.add(ids[0]);
+        y.add(ids[1]);
+        assert_eq!(x, y);
+        y.add(ids[0]);
+        assert_ne!(x, y, "order (and so the active object) matters");
     }
 }

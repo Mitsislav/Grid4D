@@ -1,0 +1,5 @@
+# Keep LF in the repository and in every checkout, on every OS, so
+# `cargo fmt --check` gives the same answer in CI and locally.
+* text=auto eol=lf
+
+*.png binary

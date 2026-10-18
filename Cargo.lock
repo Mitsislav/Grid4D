@@ -2452,6 +2452,7 @@ dependencies = [
  "log",
  "oc4d-render",
  "oc4d-scene",
+ "slotmap",
 ]
 
 [[package]]

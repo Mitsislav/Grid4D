@@ -73,4 +73,6 @@ workflow. It is not affiliated with or endorsed by Maxon. Cinema 4D is a
 trademark of Maxon Computer GmbH. All icons and artwork in this repository are
 original.
 
-License: to be decided (MIT OR Apache-2.0 is the Rust ecosystem default).
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for how to contribute.

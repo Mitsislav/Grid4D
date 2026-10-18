@@ -60,16 +60,21 @@ impl GizmoGeometry {
         let to_eye = camera.eye() - origin;
 
         let ends_px = axes.map(|axis| project(&view_proj, rect, origin + axis * length));
-        let rings = std::array::from_fn(|i| {
-            let (u, v) = (axes[(i + 1) % 3], axes[(i + 2) % 3]);
-            let mut ring = [Pos2::ZERO; RING_SEGMENTS];
-            for (k, point) in ring.iter_mut().enumerate() {
-                let a = TAU * k as f32 / RING_SEGMENTS as f32;
-                let world_point = origin + (u * a.cos() + v * a.sin()) * length * 0.85;
-                *point = project(&view_proj, rect, world_point)?;
-            }
-            Some(ring)
-        });
+        // Only the rotate tool draws and hit-tests the rings.
+        let rings = if editor.tool == Tool::Rotate {
+            std::array::from_fn(|i| {
+                let (u, v) = (axes[(i + 1) % 3], axes[(i + 2) % 3]);
+                let mut ring = [Pos2::ZERO; RING_SEGMENTS];
+                for (k, point) in ring.iter_mut().enumerate() {
+                    let a = TAU * k as f32 / RING_SEGMENTS as f32;
+                    let world_point = origin + (u * a.cos() + v * a.sin()) * length * 0.85;
+                    *point = project(&view_proj, rect, world_point)?;
+                }
+                Some(ring)
+            })
+        } else {
+            [None; 3]
+        };
 
         Some(Self {
             node: id,
@@ -161,34 +166,47 @@ pub(super) struct GizmoState {
     drag: Option<Drag>,
 }
 
+/// What [`GizmoState::interact`] did this frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct GizmoInteraction {
+    /// The gizmo owns the pointer, so the viewport must not treat the click as a pick.
+    pub owns_pointer: bool,
+    /// A drag changed the object's transform: geometry built before it is stale.
+    pub moved_object: bool,
+}
+
 impl GizmoState {
     pub(super) fn hot_axis(&self) -> Option<usize> {
         self.drag.map(|d| d.axis).or(self.hot)
     }
 
-    /// Handles hover and drag. Returns `true` if the gizmo owns the pointer this
-    /// frame (so the viewport must not treat the click as a pick).
+    /// Handles hover and drag.
     pub(super) fn interact(
         &mut self,
         ui: &Ui,
         response: &Response,
         geo: Option<&GizmoGeometry>,
         scene: &mut Scene,
-    ) -> bool {
+    ) -> GizmoInteraction {
         let alt = ui.input(|i| i.modifiers.alt);
 
         if let Some(mut drag) = self.drag {
+            let mut moved_object = false;
             if response.dragged_by(PointerButton::Primary)
                 && let (Some(geo), Some(pointer)) = (geo, response.interact_pointer_pos())
                 && geo.node == drag.node
             {
+                moved_object = pointer != drag.last_pointer;
                 apply_drag(geo, &drag, pointer, scene);
                 drag.last_pointer = pointer;
                 self.drag = Some(drag);
             } else {
                 self.drag = None;
             }
-            return true;
+            return GizmoInteraction {
+                owns_pointer: true,
+                moved_object,
+            };
         }
 
         self.hot = match (geo, response.hover_pos()) {
@@ -207,10 +225,16 @@ impl GizmoState {
                     axis,
                     last_pointer: response.interact_pointer_pos().unwrap_or(press),
                 });
-                return true;
+                return GizmoInteraction {
+                    owns_pointer: true,
+                    moved_object: false,
+                };
             }
         }
-        self.hot.is_some() && response.clicked()
+        GizmoInteraction {
+            owns_pointer: self.hot.is_some() && response.clicked(),
+            moved_object: false,
+        }
     }
 }
 
