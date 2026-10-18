@@ -1,6 +1,6 @@
-//! # oc4d-scene
+//! # grid4d-scene
 //!
-//! The document model of OpenC4D: the scene graph (objects, hierarchy, transforms)
+//! The document model of Grid4D: the scene graph (objects, hierarchy, transforms)
 //! and document time. This crate is the single source of truth for scene data.
 //!
 //! ## Architecture rule

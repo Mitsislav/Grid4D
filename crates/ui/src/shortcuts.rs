@@ -17,7 +17,7 @@
 //! | `F` / `G`      | Previous / next frame      |
 
 use egui::Key;
-use oc4d_scene::Document;
+use grid4d_scene::Document;
 
 use crate::{EditorCommand, EditorState, Tool};
 

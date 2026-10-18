@@ -6,7 +6,7 @@
 //! [`UndoGroup`]. Undo applies a group's edits and stores what `apply_all`
 //! returns as the redo edits, and vice versa.
 
-use oc4d_scene::{Document, SceneEdit, SceneError};
+use grid4d_scene::{Document, SceneEdit, SceneError};
 
 use crate::Selection;
 

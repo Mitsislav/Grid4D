@@ -2,8 +2,8 @@
 //! Cinema 4D "Standard" workspace each frame.
 
 use egui::{CentralPanel, Margin, Panel};
-use oc4d_scene::Document;
-use oc4d_ui::{
+use grid4d_scene::Document;
+use grid4d_ui::{
     AttributesPanel, EditorCommand, EditorState, OutlinerPanel, RecentFiles, TimelinePanel, ViewportPanel, commands,
     file,
     panels::{about, alert, drop_overlay, menu_bar, mode_palette, status_bar, toolbar, unsaved_changes},
@@ -14,7 +14,7 @@ use oc4d_ui::{
 
 const MIN_MANAGERS_WIDTH: f32 = 280.0;
 
-pub struct OpenC4DApp {
+pub struct Grid4DApp {
     doc: Document,
     editor: EditorState,
     viewport: ViewportPanel,
@@ -26,7 +26,7 @@ pub struct OpenC4DApp {
     window_fit: WindowFit,
 }
 
-impl OpenC4DApp {
+impl Grid4DApp {
     /// `open`: a document to open instead of the demo scene (from the command line).
     pub fn new(cc: &eframe::CreationContext<'_>, open: Option<std::path::PathBuf>) -> Self {
         theme::apply(&cc.egui_ctx);
@@ -73,7 +73,7 @@ impl OpenC4DApp {
     }
 }
 
-impl eframe::App for OpenC4DApp {
+impl eframe::App for Grid4DApp {
     /// Called by eframe on exit and periodically. Window geometry and panel sizes
     /// are persisted by eframe itself (the `persistence` feature).
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -102,17 +102,17 @@ impl eframe::App for OpenC4DApp {
         // Order matters: top/bottom bars span the full width, then the right-hand
         // managers take full height, then the left palette and the timeline
         // (under the viewport only), and finally the viewport fills the rest.
-        Panel::top("oc4d.menu_bar")
+        Panel::top("grid4d.menu_bar")
             .frame(theme::header_frame())
             .exact_size(metrics::MENU_BAR_HEIGHT)
             .show(ui, |ui| menu_bar::show(ui, &mut self.doc, &mut self.editor));
 
-        Panel::top("oc4d.toolbar")
+        Panel::top("grid4d.toolbar")
             .frame(theme::panel_frame().inner_margin(Margin::symmetric(6, 0)))
             .exact_size(metrics::TOOLBAR_HEIGHT)
             .show(ui, |ui| toolbar::show(ui, &mut self.editor));
 
-        Panel::bottom("oc4d.status_bar")
+        Panel::bottom("grid4d.status_bar")
             .frame(theme::header_frame())
             .exact_size(metrics::STATUS_BAR_HEIGHT)
             .show(ui, |ui| status_bar::show(ui, &self.doc, &self.editor));
@@ -121,14 +121,14 @@ impl eframe::App for OpenC4DApp {
 
         // Limits are relative to the window so the viewport and timeline always keep room.
         let max_managers_width = (ui.available_width() * 0.45).max(MIN_MANAGERS_WIDTH);
-        Panel::right("oc4d.managers")
+        Panel::right("grid4d.managers")
             .frame(theme::panel_frame())
             .resizable(true)
             .default_size(370.0)
             .size_range(MIN_MANAGERS_WIDTH..=max_managers_width)
             .show(ui, |ui| {
                 let max_outliner_height = (ui.available_height() - 160.0).max(140.0);
-                Panel::top("oc4d.object_manager")
+                Panel::top("grid4d.object_manager")
                     .frame(theme::panel_frame())
                     .resizable(true)
                     .default_size(330.0)
@@ -137,13 +137,13 @@ impl eframe::App for OpenC4DApp {
                 CentralPanel::no_frame().show(ui, |ui| self.attributes.show(ui, &mut self.doc, &mut self.editor));
             });
 
-        Panel::left("oc4d.mode_palette")
+        Panel::left("grid4d.mode_palette")
             .frame(theme::panel_frame())
             .resizable(false)
             .exact_size(40.0)
             .show(ui, |ui| mode_palette::show(ui, &mut self.editor));
 
-        Panel::bottom("oc4d.timeline")
+        Panel::bottom("grid4d.timeline")
             .frame(theme::panel_frame())
             .resizable(false)
             .exact_size(66.0)

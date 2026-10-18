@@ -6,8 +6,8 @@
 //! typed value, a click) is recorded as one undo step through [`LiveEdit`].
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
-use oc4d_geom::primitives::MAX_SEGMENTS;
-use oc4d_scene::{Document, NodeData, NodeId, ObjectKind, SceneEdit, TimeSettings};
+use grid4d_geom::primitives::MAX_SEGMENTS;
+use grid4d_scene::{Document, NodeData, NodeId, ObjectKind, SceneEdit, TimeSettings};
 
 use crate::{
     CommandQueue, EditorCommand, EditorState,
@@ -69,7 +69,7 @@ impl AttributesPanel {
         });
 
         ScrollArea::vertical()
-            .id_salt("oc4d.attributes.scroll")
+            .id_salt("grid4d.attributes.scroll")
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 egui::Frame::new().inner_margin(Margin::symmetric(8, 6)).show(ui, |ui| {
@@ -167,7 +167,7 @@ impl AttributesPanel {
 
 fn basic_tab(ui: &mut Ui, data: &mut NodeData) {
     section_heading(ui, "Basic Properties");
-    Grid::new("oc4d.attr.basic")
+    Grid::new("grid4d.attr.basic")
         .num_columns(2)
         .spacing([6.0, 4.0])
         .show(ui, |ui| {
@@ -201,7 +201,7 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData) {
         ["P . Z", "S . Z", "R . B"],
     ];
     let t = &mut data.transform;
-    Grid::new("oc4d.attr.coord")
+    Grid::new("grid4d.attr.coord")
         .num_columns(6)
         .spacing([4.0, 4.0])
         .show(ui, |ui| {
@@ -238,13 +238,13 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData) {
         });
     ui.add_space(6.0);
     if ui.button("Reset Transform").clicked() {
-        *t = oc4d_scene::Transform::IDENTITY;
+        *t = grid4d_scene::Transform::IDENTITY;
     }
 }
 
 fn object_tab(ui: &mut Ui, data: &mut NodeData) {
     section_heading(ui, "Object Properties");
-    Grid::new("oc4d.attr.object")
+    Grid::new("grid4d.attr.object")
         .num_columns(2)
         .spacing([6.0, 4.0])
         .show(ui, |ui| match &mut data.kind {
@@ -373,7 +373,7 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
     );
     section_heading(ui, "Project Settings");
     let time = &mut doc.time;
-    Grid::new("oc4d.attr.project")
+    Grid::new("grid4d.attr.project")
         .num_columns(2)
         .spacing([6.0, 4.0])
         .show(ui, |ui| {

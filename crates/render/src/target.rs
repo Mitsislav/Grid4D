@@ -65,21 +65,21 @@ impl ViewportTarget {
                 .create_view(&wgpu::TextureViewDescriptor::default())
         };
         let resolve_view = texture(
-            "oc4d.viewport.color",
+            "grid4d.viewport.color",
             Self::COLOR_FORMAT,
             1,
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         );
         let msaa_view = (samples > 1).then(|| {
             texture(
-                "oc4d.viewport.color.msaa",
+                "grid4d.viewport.color.msaa",
                 Self::COLOR_FORMAT,
                 samples,
                 wgpu::TextureUsages::RENDER_ATTACHMENT,
             )
         });
         let depth_view = texture(
-            "oc4d.viewport.depth",
+            "grid4d.viewport.depth",
             Self::DEPTH_FORMAT,
             samples,
             wgpu::TextureUsages::RENDER_ATTACHMENT,

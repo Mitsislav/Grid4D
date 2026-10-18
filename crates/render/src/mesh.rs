@@ -1,10 +1,10 @@
-//! GPU vertices for the unit geometry named by a [`MeshKey`] (see `oc4d-eval`):
-//! generated with `oc4d_geom`, triangulated, and uploaded once per key by
+//! GPU vertices for the unit geometry named by a [`MeshKey`] (see `grid4d-eval`):
+//! generated with `grid4d_geom`, triangulated, and uploaded once per key by
 //! [`ViewportRenderer`](crate::ViewportRenderer).
 
 use bytemuck::{Pod, Zeroable};
-use oc4d_eval::MeshKey;
-use oc4d_geom::{Smoothing, TriMesh, Triangulator};
+use grid4d_eval::MeshKey;
+use grid4d_geom::{Smoothing, TriMesh, Triangulator};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
@@ -46,7 +46,7 @@ pub fn tessellate(key: MeshKey, scratch: &mut TessellationScratch, vertices: &mu
 #[cfg(test)]
 mod tests {
     use glam::Vec3;
-    use oc4d_eval::Ratio;
+    use grid4d_eval::Ratio;
 
     use super::*;
 

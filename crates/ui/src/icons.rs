@@ -7,7 +7,7 @@
 use std::f32::consts::{PI, TAU};
 
 use egui::{Color32, CornerRadius, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, vec2};
-use oc4d_scene::ObjectKindTag;
+use grid4d_scene::ObjectKindTag;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Icon {

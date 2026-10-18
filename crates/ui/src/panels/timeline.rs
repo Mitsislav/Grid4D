@@ -8,7 +8,7 @@ use egui::{
     Align, Align2, ComboBox, CornerRadius, DragValue, FontId, Layout, Rect, RichText, Sense, Stroke, Ui, UiBuilder,
     pos2, vec2,
 };
-use oc4d_scene::{Playback, SceneEdit, TimeSettings, TimeState};
+use grid4d_scene::{Playback, SceneEdit, TimeSettings, TimeState};
 
 use crate::{
     EditorCommand, EditorState,
@@ -237,7 +237,7 @@ fn transport(ui: &mut Ui, time: &mut TimeState) {
             .layout(Layout::right_to_left(Align::Center)),
         |ui| {
             let mut fps = time.fps();
-            ComboBox::from_id_salt("oc4d.timeline.fps")
+            ComboBox::from_id_salt("grid4d.timeline.fps")
                 .width(64.0)
                 .selected_text(format!("{fps} fps"))
                 .show_ui(ui, |ui| {

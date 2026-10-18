@@ -1,4 +1,4 @@
-//! # oc4d-eval
+//! # grid4d-eval
 //!
 //! Turns the document — what the user authored — into what viewers draw and pick
 //! this frame: an [`EvaluatedScene`] of visible nodes with world matrices,
@@ -10,7 +10,7 @@
 //! Sits between the scene and its consumers:
 //!
 //! ```text
-//! oc4d-geom ◀── oc4d-scene ◀── oc4d-eval ◀── oc4d-render ◀── oc4d-ui
+//! grid4d-geom ◀── grid4d-scene ◀── grid4d-eval ◀── grid4d-render ◀── grid4d-ui
 //! ```
 //!
 //! It reads the scene and never mutates it, and knows nothing about GPUs or UI.

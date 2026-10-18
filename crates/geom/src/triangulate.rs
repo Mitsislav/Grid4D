@@ -210,7 +210,7 @@ mod tests {
     }
 
     /// Every triangle faces the same way as its polygon and as its vertex normals
-    /// (counter-clockwise from outside) — the GPU test of `oc4d-render`, ported.
+    /// (counter-clockwise from outside) — the GPU test of `grid4d-render`, ported.
     #[test]
     fn winding_matches_normals() {
         for (name, mesh) in all_shapes() {

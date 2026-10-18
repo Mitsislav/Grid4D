@@ -1,12 +1,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
-#  OpenC4D — open-source, modular 3D content creation suite
+#  Grid4D — open-source, modular 3D content creation suite
 #
 #  Workspace layout (dependency direction is strictly one-way):
 #
-#      oc4d-geom ◀── oc4d-scene ◀── oc4d-eval ◀── oc4d-render ◀── oc4d-ui ◀── open-c4d (binary)
-#      (geometry)    (data)         (evaluation)  (wgpu)          (egui)      (composition root)
-#                         ▲                                         │
-#                         └─────────────── oc4d-io ◀────────────────┘   (.oc4d files)
+#      grid4d-geom ◀── grid4d-scene ◀── grid4d-eval ◀── grid4d-render ◀── grid4d-ui ◀── grid4d (binary)
+#      (geometry)      (data)           (evaluation)    (wgpu)            (egui)        (composition root)
+#                            ▲                                                │
+#                            └─────────────────  grid4d-io  ◀─────────────────┘   (.g4d files)
 #
 #  See ARCHITECTURE.md for the architectural rules.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -24,12 +24,12 @@ publish = false
 
 [workspace.dependencies]
 # Internal crates
-oc4d-geom = { path = "crates/geom" }
-oc4d-scene = { path = "crates/scene" }
-oc4d-eval = { path = "crates/eval" }
-oc4d-render = { path = "crates/render" }
-oc4d-io = { path = "crates/io" }
-oc4d-ui = { path = "crates/ui" }
+grid4d-geom = { path = "crates/geom" }
+grid4d-scene = { path = "crates/scene" }
+grid4d-eval = { path = "crates/eval" }
+grid4d-render = { path = "crates/render" }
+grid4d-io = { path = "crates/io" }
+grid4d-ui = { path = "crates/ui" }
 
 # UI — eframe ships egui + winit + the wgpu integration (wgpu is its default renderer).
 eframe = "0.37"
@@ -37,6 +37,8 @@ egui = "0.37"
 egui-wgpu = "0.37"
 # Native file dialogs (Win32 / Cocoa / XDG desktop portal on Linux — no GTK needed).
 rfd = "0.17"
+# Icon + version info in the Windows executable (build.rs; nothing on other targets).
+winresource = "0.1"
 
 # GPU — must stay on the exact major version egui-wgpu uses (30), so cargo
 # unifies both into a single `wgpu` and the types are interchangeable.
@@ -48,7 +50,7 @@ glam = "0.34"
 bytemuck = { version = "1.25", features = ["derive"] }
 slotmap = "1.1"
 
-# File formats (oc4d-io only)
+# File formats (grid4d-io only)
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
@@ -81,24 +83,27 @@ todo = "warn"
 # ─── Root binary ─────────────────────────────────────────────────────────────
 
 [package]
-name = "open-c4d"
-description = "OpenC4D — an open-source 3D content creation suite inspired by Cinema 4D's workflow."
+name = "grid4d"
+description = "Grid4D — an open-source 3D content creation suite inspired by Cinema 4D's workflow."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-default-run = "open-c4d"
+default-run = "grid4d"
 
 [dependencies]
-oc4d-scene.workspace = true
-oc4d-ui.workspace = true
+grid4d-scene.workspace = true
+grid4d-ui.workspace = true
 # `persistence`: window size/position, panel splitters (egui memory) and app data
 # such as recent files survive restarts. Only the binary owns storage.
 eframe = { workspace = true, features = ["persistence"] }
 egui.workspace = true
 log.workspace = true
 env_logger.workspace = true
+
+[build-dependencies]
+winresource.workspace = true
 
 [lints]
 workspace = true

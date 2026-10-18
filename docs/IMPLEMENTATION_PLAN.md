@@ -1,9 +1,14 @@
-# OpenC4D — Implementation Plan
+# Grid4D — Implementation Plan
 
 > Status of this document: **v1, 2026-10-18.** Written after a full read of the
 > v0.1 codebase (≈ 6.1 k lines, 27 tests). It turns the short roadmap in
 > `ARCHITECTURE.md` into ordered, PR-sized work with design decisions, acceptance
 > criteria and the files each step touches. Update it when a phase lands.
+>
+> **2026-10-19: the project was renamed from OpenC4D to Grid4D** — crates
+> `oc4d-*` → `grid4d-*`, binary `grid4d`, documents `.oc4d` → `.g4d` (old files
+> still open), original app icon in `assets/icon/`. Older entries below use the
+> new names.
 
 All rules in `ARCHITECTURE.md` still apply to every step below — dependency direction,
 the `EditorCommand` choke point, the allocation-free hot path, `NodeId`-only
@@ -19,7 +24,7 @@ references, no `unsafe`, no `unwrap`, exhaustive `match`, and
 3. [Release train](#3-release-train)
 4. [Phase 0 — Foundations & quick fixes](#phase-0--foundations--quick-fixes-v011)
 5. [Phase 1 — Undo / Redo](#phase-1--undo--redo-v02)
-6. [Phase 2 — Document persistence (`.oc4d`)](#phase-2--document-persistence-oc4d-v02)
+6. [Phase 2 — Document persistence (`.g4d`)](#phase-2--document-persistence-g4d-v02)
 7. [Phase 3 — Geometry core, evaluation, offscreen viewport](#phase-3--geometry-core-evaluation-offscreen-viewport-v03)
 8. [Phase 4 — Polygon modelling & Subdivision Surface](#phase-4--polygon-modelling--subdivision-surface-v04)
 9. [Phase 5 — Interchange (glTF, OBJ)](#phase-5--interchange-gltf-obj-v05)
@@ -85,31 +90,31 @@ The one-way dependency rule stays. New crates are added only where a real layer
 appears:
 
 ```
-            oc4d-geom   (PolyMesh, primitives, triangulation, topology, splines — glam only)
-                ▲
-            oc4d-scene  (Document, hierarchy, tags, materials, animation data, SceneEdit/History)
-             ▲     ▲
-     oc4d-eval     oc4d-io        (eval: generators, deformers, animation → EvaluatedScene)
-      ▲     ▲         ▲           (io: .oc4d, glTF, OBJ — serde lives here, not in scene)
-oc4d-render  oc4d-raytrace (Phase 8)
-      ▲          ▲     ▲
-      └──── oc4d-ui ───┘─── oc4d-io
-                ▲
-            open-c4d (bin)
+                grid4d-geom   (PolyMesh, primitives, triangulation, topology, splines — glam only)
+                     ▲
+                grid4d-scene  (Document, hierarchy, tags, materials, animation data, SceneEdit/History)
+                 ▲         ▲
+         grid4d-eval      grid4d-io   (eval: generators, deformers, animation → EvaluatedScene)
+          ▲     ▲               ▲     (io: .g4d, glTF, OBJ — serde lives here, not in scene)
+grid4d-render  grid4d-raytrace  │     (raytrace: Phase 8)
+          ▲     ▲               │
+          └───── grid4d-ui ─────┘
+                     ▲
+                grid4d (bin)
 ```
 
 | Crate | Introduced | May depend on | Must never depend on |
 |-------|-----------|---------------|----------------------|
-| `oc4d-geom` | Phase 3 | `glam` | scene, wgpu, egui |
-| `oc4d-scene` | exists | `oc4d-geom`, `glam`, `slotmap` | wgpu, egui, serde* |
-| `oc4d-eval` | Phase 3 | scene, geom | wgpu, egui |
-| `oc4d-io` | Phase 2 | scene, geom, `serde`, `serde_json`, `gltf`, `tobj` | wgpu, egui |
-| `oc4d-render` | exists | eval, scene, geom, `wgpu` | egui |
-| `oc4d-raytrace` | Phase 8 | eval, scene, geom, `rayon` | wgpu (CPU first), egui |
-| `oc4d-ui` | exists | all of the above, `egui`, `rfd` | — |
+| `grid4d-geom` | Phase 3 | `glam` | scene, wgpu, egui |
+| `grid4d-scene` | exists | `grid4d-geom`, `glam`, `slotmap` | wgpu, egui, serde* |
+| `grid4d-eval` | Phase 3 | scene, geom | wgpu, egui |
+| `grid4d-io` | Phase 2 | scene, geom, `serde`, `serde_json`, `gltf`, `tobj` | wgpu, egui |
+| `grid4d-render` | exists | eval, scene, geom, `wgpu` | egui |
+| `grid4d-raytrace` | Phase 8 | eval, scene, geom, `rayon` | wgpu (CPU first), egui |
+| `grid4d-ui` | exists | all of the above, `egui`, `rfd` | — |
 
-\* Keeping serde out of `oc4d-scene` means the file format is a separate,
-versioned DTO layer in `oc4d-io`; in-memory types can change without breaking files.
+\* Keeping serde out of `grid4d-scene` means the file format is a separate,
+versioned DTO layer in `grid4d-io`; in-memory types can change without breaking files.
 
 Two architectural moves carry most of the later phases:
 
@@ -119,7 +124,7 @@ Two architectural moves carry most of the later phases:
 2. **Authoring data vs. evaluated data (Phase 3).** Today the renderer reads the
    `Scene` directly. With generators, deformers and animation, the renderer and
    picking read an `EvaluatedScene` (world matrices, visibility, geometry handles)
-   produced by `oc4d-eval` with per-node revision-based caching.
+   produced by `grid4d-eval` with per-node revision-based caching.
 
 ---
 
@@ -128,7 +133,7 @@ Two architectural moves carry most of the later phases:
 | Version | Theme | Phases | "Done" means |
 |---------|-------|--------|--------------|
 | v0.1.1 | Foundations | 0 | git + CI green on Win/Linux/macOS, A1–A5 fixed |
-| **v0.2** | **Safe editing** | 1, 2 | Every edit undoable; save/load `.oc4d`; dirty flag + "save changes?" |
+| **v0.2** | **Safe editing** | 1, 2 | Every edit undoable; save/load `.g4d`; dirty flag + "save changes?" |
 | v0.3 | Real geometry | 3 | Primitives with segments, Make Editable (`C`), offscreen viewport, mesh cache |
 | v0.4 | Modelling | 4 | Points/Edges/Polygons modes, core mesh tools, Subdivision Surface |
 | v0.5 | Interchange | 5 | glTF 2.0 + OBJ import/export round-trips |
@@ -257,13 +262,13 @@ returns the exact original document and selection; redo ×5 reproduces it;
 
 ---
 
-## Phase 2 — Document persistence (`.oc4d`) (v0.2)
+## Phase 2 — Document persistence (`.g4d`) (v0.2)
 
 **Goal:** open/save/save-as, recent files, dirty tracking and safe quit.
 
 ### Design
 
-* New crate **`oc4d-io`**. The file format is a set of versioned **DTO** structs
+* New crate **`grid4d-io`**. The file format is a set of versioned **DTO** structs
   with `serde` derives, mapped to/from `Document`. Hierarchy is stored as a nested
   tree (not slotmap keys) — ids are rebuilt on load.
 * Container: **JSON** (`serde_json`) for v1: diffable, debuggable, trivially
@@ -278,7 +283,7 @@ returns the exact original document and selection; redo ×5 reproduces it;
 * UI: native dialogs via `rfd`; `EditorCommand::{Open(PathBuf), Save, SaveAs(PathBuf)}`;
   file work happens in `commands::apply`, never inside a panel.
 * Dirty flag = `history.revision != saved_revision`; window title
-  `OpenC4D — name.oc4d *`; on close request (`ViewportCommand::CancelClose`) show a
+  `Grid4D — name.g4d *`; on close request (`ViewportCommand::CancelClose`) show a
   "Save changes?" modal; same on New/Open.
 * eframe persistence (`persistence` feature): recent files, window size, manager
   splitter sizes.
@@ -287,10 +292,10 @@ returns the exact original document and selection; redo ×5 reproduces it;
 
 | Step | Size | Work |
 |------|------|------|
-| 2.1 ✅ | M | `oc4d-io` crate: DTOs, `save(&Document, path)`, `load(path) -> Result<Document, IoError>`; round-trip test on the demo scene; fixtures — done 2026-10-18: flat pre-order object list with parent indices (no recursion limit, no cycles), HPB radians (exact round trip), atomic save via temp file + rename, non-finite numbers rejected, golden fixture `demo_v1.oc4d` |
+| 2.1 ✅ | M | `grid4d-io` crate: DTOs, `save(&Document, path)`, `load(path) -> Result<Document, IoError>`; round-trip test on the demo scene; fixtures — done 2026-10-18: flat pre-order object list with parent indices (no recursion limit, no cycles), HPB radians (exact round trip), atomic save via temp file + rename, non-finite numbers rejected, golden fixture `demo_v1.oc4d` |
 | 2.2 ✅ | M | File menu Open/Save/Save As + `Ctrl+O/S/Shift+S`; dirty flag; title; "Save changes?" modal on New/Open/Quit — done 2026-10-18: `ui/file.rs` (+ `Ctrl+N`), `FileDialogs` seam with rfd, dirty = `History::state_id` ≠ saved, close button intercepted via `CancelClose`, error alert panel. Open: the title shows the file name; the document's own `name` is not renamed on Save As (revisit) |
 | 2.3 ✅ | S | Recent files (File ▸ Recent), persisted window/splitter state — done 2026-10-18: `RecentFiles` (10, newest first, vanished files dropped), opening a recent file asks "Save changes?" too; eframe `persistence` on the binary restores window geometry and panel sizes |
-| 2.4 ✅ | S | Drag-and-drop a `.oc4d` file onto the window opens it — done 2026-10-18: first `.oc4d` of a drop opens via `EditorCommand::OpenFile` (with the "Save changes?" prompt); other files get an alert; `drop_overlay` panel says what a drop will do while hovering. **Phase 2 (save/load) is complete**; glTF/OBJ follow in Phase 5 |
+| 2.4 ✅ | S | Drag-and-drop a `.g4d` file onto the window opens it — done 2026-10-18: first `.g4d` of a drop opens via `EditorCommand::OpenFile` (with the "Save changes?" prompt); other files get an alert; `drop_overlay` panel says what a drop will do while hovering. **Phase 2 (save/load) is complete**; glTF/OBJ follow in Phase 5 |
 
 **Acceptance:** save → quit → open reproduces the scene exactly (names, order,
 transforms, flags, kinds, time settings); malformed files produce an error dialog,
@@ -304,7 +309,7 @@ not a crash; unsaved changes are never lost silently.
 object can be converted to an editable polygon object; the renderer draws
 arbitrary meshes efficiently; the viewport renders into its own target.
 
-### 3A. `oc4d-geom` — mesh data
+### 3A. `grid4d-geom` — mesh data
 
 * `PolyMesh`: `points: Vec<Vec3>`, faces as **n-gons** in face-vertex form
   (`face_starts: Vec<u32>`, `face_points: Vec<u32>`) — modelling tools (extrude,
@@ -330,7 +335,7 @@ arbitrary meshes efficiently; the viewport renders into its own target.
   `Polygon` from its generator (one undo step).
 * `Node::revision: u64`, bumped by every edit to that node (in `Document::apply`
   and the direct-write paths).
-* **`oc4d-eval`**: `Evaluator::evaluate(&Document, &mut EvaluatedScene)` produces,
+* **`grid4d-eval`**: `Evaluator::evaluate(&Document, &mut EvaluatedScene)` produces,
   per visible node, world matrix, visibility, selection-independent draw data and a
   `GeometryHandle` (primitive params hash, or mesh `Arc` pointer + revision).
   Caches are keyed by revision, so steady state allocates nothing. Render and
@@ -350,19 +355,19 @@ arbitrary meshes efficiently; the viewport renders into its own target.
   in Phase 4), wireframe passes, ID-buffer picking if ever needed, multiple viewports
   with independent settings (Phase 7), post effects. `gpu_view.rs` is the only
   egui-wgpu adapter. Keep the size test pattern for any new uniform/instance struct.
-* Picking: per-object BVH over triangles (`oc4d-geom`), built lazily per geometry
+* Picking: per-object BVH over triangles (`grid4d-geom`), built lazily per geometry
   revision; object pick = ray vs. instance AABB, then BVH for exact hit.
 
 ### Steps
 
 | Step | Size | Work |
 |------|------|------|
-| 3.1 ✅ | M | `oc4d-geom` crate: `PolyMesh`, triangulation, normals, tests (Euler characteristic, winding — port `winding_matches_normals`) — done 2026-10-18: CSR face-vertex storage with validation, Newell face vectors, `Topology` (edges, edge/point → faces, closed, manifold & orientation, Euler), `Smoothing` (flat / smooth / Phong angle 80°), `Triangulator` (shorter-diagonal quads, ear clipping with fan fallback, per-corner vertices, reused buffers) |
-| 3.2 ✅ | M | Parametric primitives (+ Cone, Torus, Disc, Capsule); Attribute Manager segment fields; render consumes generated meshes — done 2026-10-18: `oc4d_geom::primitives` (lathe-based round shapes, welded cube lattice), segment fields on every primitive, `.oc4d` **format v2** with v1 migration, and the renderer's part of 3.4 (`MeshKey`-keyed batches + GPU mesh cache with eviction); `open-c4d file.oc4d` opens a file at start-up |
-| 3.3 ✅ | L | `oc4d-eval` + `EvaluatedScene`, node revisions; render/picking migrate; `extract_reuses_capacity`-style test for evaluation — done 2026-10-18: process-wide unique scene/node revisions (bumped by `get_mut` and structural edits), `EvaluatedScene::update` skips unchanged scenes, `MeshKey`/`Drawable`/`PickShape` live in eval, render/picking/brackets read it; the Attribute Manager edits a copy so idle frames never bump the revision (guarded by a test over every panel) |
+| 3.1 ✅ | M | `grid4d-geom` crate: `PolyMesh`, triangulation, normals, tests (Euler characteristic, winding — port `winding_matches_normals`) — done 2026-10-18: CSR face-vertex storage with validation, Newell face vectors, `Topology` (edges, edge/point → faces, closed, manifold & orientation, Euler), `Smoothing` (flat / smooth / Phong angle 80°), `Triangulator` (shorter-diagonal quads, ear clipping with fan fallback, per-corner vertices, reused buffers) |
+| 3.2 ✅ | M | Parametric primitives (+ Cone, Torus, Disc, Capsule); Attribute Manager segment fields; render consumes generated meshes — done 2026-10-18: `grid4d_geom::primitives` (lathe-based round shapes, welded cube lattice), segment fields on every primitive, `.g4d` **format v2** with v1 migration, and the renderer's part of 3.4 (`MeshKey`-keyed batches + GPU mesh cache with eviction); `grid4d file.g4d` opens a file at start-up |
+| 3.3 ✅ | L | `grid4d-eval` + `EvaluatedScene`, node revisions; render/picking migrate; `extract_reuses_capacity`-style test for evaluation — done 2026-10-18: process-wide unique scene/node revisions (bumped by `get_mut` and structural edits), `EvaluatedScene::update` skips unchanged scenes, `MeshKey`/`Drawable`/`PickShape` live in eval, render/picking/brackets read it; the Attribute Manager edits a copy so idle frames never bump the revision (guarded by a test over every panel) |
 | 3.4 | S | ~~`GeometryHandle`-keyed batches + `GpuMeshCache`~~ — done early in 3.2 for primitives (`MeshKey`); what remains is a key for editable meshes (mesh `Arc` + revision) once 3.6 adds them |
-| 3.5 ✅ | M | Offscreen viewport target (colour/depth/MSAA, resize handling) — done 2026-10-19: `oc4d_render::ViewportTarget` (`Rgba8Unorm` gamma colour because egui samples textures as gamma, 4× MSAA when supported, `Depth32Float`, transparent clear over the UI's gradient), `ViewportRenderer::render` submits its own pass, `ui/viewport/gpu_view.rs` registers and re-points the egui texture on resize; the paint callback, `Arc<Mutex<FrameData>>` and the window's depth/MSAA are gone. Checked on screen, maximized and resized |
-| 3.6 | M | `ObjectKind::Polygon`, Make Editable (`C`), BVH picking, `.oc4d` **v3** (zip + binary geometry) with migration (v2 was taken by segment counts) |
+| 3.5 ✅ | M | Offscreen viewport target (colour/depth/MSAA, resize handling) — done 2026-10-19: `grid4d_render::ViewportTarget` (`Rgba8Unorm` gamma colour because egui samples textures as gamma, 4× MSAA when supported, `Depth32Float`, transparent clear over the UI's gradient), `ViewportRenderer::render` submits its own pass, `ui/viewport/gpu_view.rs` registers and re-points the egui texture on resize; the paint callback, `Arc<Mutex<FrameData>>` and the window's depth/MSAA are gone. Checked on screen, maximized and resized |
+| 3.6 | M | `ObjectKind::Polygon`, Make Editable (`C`), BVH picking, `.g4d` **v3** (zip + binary geometry) with migration (v2 was taken by segment counts); v3 may also change the `"format"` tag from `"oc4d"` to `"grid4d"` |
 
 **Acceptance:** 10 000 cubes and a 1 M-triangle mesh render at interactive rates
 (see performance budget); editing a primitive's segments updates instantly;
@@ -385,11 +390,11 @@ eval/extract/prepare/paint.
   Select Connected, Invert. Component selection changes are undoable.
 * Gizmo operates on the selected components (pivot = selection centre, axes =
   object/world/normal).
-* Mesh operations live in `oc4d-geom::ops` as pure functions
+* Mesh operations live in `grid4d-geom::ops` as pure functions
   `fn extrude(mesh: &PolyMesh, sel: &PolySelection, params) -> PolyMesh`, each with
   topology-invariant tests; UI wraps them as interactive tools with a parameter
   panel in the Attribute Manager ("tool mode", like C4D).
-* Generator framework in `oc4d-eval`: a generator object takes its children as
+* Generator framework in `grid4d-eval`: a generator object takes its children as
   input and hides them in the editor (C4D behaviour). First generator:
   **Subdivision Surface** (Catmull-Clark, editor/render levels), using the Phase 3
   caches.
@@ -442,14 +447,14 @@ correctly; export → re-import round-trips hierarchy, transforms and geometry.
 Object Manager shows tag icons on the right of each row; the Attribute Manager
 `Mode ▸ Tags` becomes functional. Tags are edited through `SceneEdit` (undoable).
 
-### 6B. Animation data (in `oc4d-scene`)
+### 6B. Animation data (in `grid4d-scene`)
 
 * `ParamId` — a typed, closed address of an animatable parameter
   (`ParamId::Position(Axis)`, `Rotation(Axis)`, `Scale(Axis)`, `Kind(KindParam)`,
   `Visibility`, …) — no string paths.
 * `Track { node: NodeId, param: ParamId, curve: Curve }`,
   `Curve { keys: Vec<Key> }`, `Key { frame: f64, value: f32, interp: {Step, Linear, Bezier}, tangents }`.
-* Evaluation in `oc4d-eval` writes animated values into the `EvaluatedScene` — the
+* Evaluation in `grid4d-eval` writes animated values into the `EvaluatedScene` — the
   authoring data is not overwritten by playback. Attribute Manager shows the
   evaluated value and a keyframe indicator (filled = key on this frame, outlined =
   animated).
@@ -489,15 +494,15 @@ uniforms): grow geometrically, size tests next to each `#[repr(C)]` struct.
 
 ## Phase 8 — Offline renderer (v0.8)
 
-* New crate **`oc4d-raytrace`**: CPU path tracer (deterministic and testable
-  first; GPU compute later). Uses `oc4d-eval`'s evaluated scene, `oc4d-geom` BVH,
+* New crate **`grid4d-raytrace`**: CPU path tracer (deterministic and testable
+  first; GPU compute later). Uses `grid4d-eval`'s evaluated scene, `grid4d-geom` BVH,
   `rayon` for tiles.
 * Materials from Phase 6 (diffuse/GGX), area/point/spot lights, camera DOF later.
 * **Render View** (`Ctrl+R`): progressive render into the active viewport.
 * **Picture Viewer** (`Shift+R`): new panel/window `picture_viewer.rs` with
   history, zoom, save PNG/EXR (`image`, `exr` crates).
 * **Render Settings** (`Ctrl+B`): resolution, samples, output path, frame range →
-  stored in the document (`RenderSettings`, persisted in `.oc4d`).
+  stored in the document (`RenderSettings`, persisted in `.g4d`).
 * Rendering runs on a worker thread; the UI polls a channel each frame (no blocking
   in `ui()`); cancellable.
 
@@ -510,7 +515,7 @@ tolerance (small resolution, fixed seed) in CI.
 
 Lower resolution on purpose — plan in detail when v0.8 lands.
 
-* **Splines** (`oc4d-geom::spline`): Linear, Cubic, Bezier; primitives Circle,
+* **Splines** (`grid4d-geom::spline`): Linear, Cubic, Bezier; primitives Circle,
   Rectangle, Helix, Text (font outlines via `ttf-parser`); Pen tool.
 * **Spline generators:** Extrude, Lathe, Loft, Sweep (all via the Phase 4
   generator framework).
@@ -535,7 +540,7 @@ Lower resolution on purpose — plan in detail when v0.8 lands.
   Object Manager drag-reparent, rename, Attribute Manager edits → undo.
 * WGSL: every new shader added to `shaders_validate`; every `#[repr(C)]` struct
   gets a size/alignment test.
-* Golden files: `.oc4d` fixtures per format version; reference images for the
+* Golden files: `.g4d` fixtures per format version; reference images for the
   path tracer.
 
 ### Performance budget (tracked from Phase 3 on, `criterion` benches in `benches/`)
@@ -545,7 +550,7 @@ Lower resolution on purpose — plan in detail when v0.8 lands.
 | 10 000 primitive objects, orbiting | ≥ 60 fps, 0 allocations/frame in eval/extract/prepare/paint |
 | 1 M triangles single mesh | ≥ 60 fps orbit; component display ≥ 30 fps |
 | Select All on 10 k objects | no frame-time spike (A1 fix) |
-| Load 50 MB `.oc4d` | < 2 s |
+| Load 50 MB `.g4d` | < 2 s |
 
 Add a counting global allocator in a test-only binary to assert "zero allocations
 per steady-state frame" for the hot path, complementing `extract_reuses_capacity`.
@@ -553,7 +558,7 @@ per steady-state frame" for the hot path, complementing `extract_reuses_capacity
 ### CI
 
 `fmt --check` · `clippy -D warnings` · `test` on Windows/Linux/macOS · MSRV job
-(1.95) · `cargo deny` (licenses, advisories) · later: fuzzing the `.oc4d` parser
+(1.95) · `cargo deny` (licenses, advisories) · later: fuzzing the `.g4d` parser
 (`cargo fuzz`, nightly, scheduled) and release builds via `cargo-dist`.
 
 ### Documentation
@@ -561,7 +566,7 @@ per steady-state frame" for the hot path, complementing `extract_reuses_capacity
 * Keep `ARCHITECTURE.md` as the rules file; update its workspace tree and roadmap when a
   phase adds crates/panels.
 * `docs/ARCHITECTURE.md` (diagram from §2, data flow per frame),
-  `docs/FILE_FORMAT.md` (versioned `.oc4d` spec), user-facing shortcut list
+  `docs/FILE_FORMAT.md` (versioned `.g4d` spec), user-facing shortcut list
   generated from `shortcuts.rs` so Help ▸ About never drifts.
 
 ---

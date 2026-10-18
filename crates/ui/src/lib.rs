@@ -1,6 +1,6 @@
-//! # oc4d-ui
+//! # grid4d-ui
 //!
-//! The egui front-end of OpenC4D: a Cinema 4D-style workspace made of
+//! The egui front-end of Grid4D: a Cinema 4D-style workspace made of
 //! independent panels, a dark industrial theme and viewport interaction.
 //!
 //! ## Architecture rules
@@ -12,7 +12,7 @@
 //!   [`EditorCommand`]s and applied once per frame, after layout, by
 //!   [`commands::apply_pending`]. This keeps borrow scopes small and gives undo/redo
 //!   a single choke point later.
-//! * GPU work is delegated to `oc4d-render`, which draws the 3D view into its own
+//! * GPU work is delegated to `grid4d-render`, which draws the 3D view into its own
 //!   offscreen target; this crate only shows that target as an egui texture.
 
 pub mod commands;

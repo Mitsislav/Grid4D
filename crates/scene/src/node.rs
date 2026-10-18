@@ -19,7 +19,7 @@ pub const CAMERA_MARKER_SIZE: f32 = 40.0;
 ///
 /// Primitive parameters mirror Cinema 4D's "Object" tab: sizes in cm, the axis
 /// along +Y, and segment counts that decide how finely the shape is tessellated
-/// (geometry comes from `oc4d_geom::primitives`).
+/// (geometry comes from `grid4d_geom::primitives`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum ObjectKind {
     /// Empty transform used to group other objects.

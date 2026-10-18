@@ -2,7 +2,7 @@
 //! coordinate system, render buttons and object creation.
 
 use egui::{Align2, CornerRadius, FontId, Sense, Ui, Vec2, vec2};
-use oc4d_scene::ObjectKindTag;
+use grid4d_scene::ObjectKindTag;
 
 use crate::{
     EditorCommand, EditorState, Tool,

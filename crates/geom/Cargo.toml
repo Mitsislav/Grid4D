@@ -1,6 +1,6 @@
 [package]
-name = "oc4d-geom"
-description = "OpenC4D polygon geometry: n-gon meshes, triangulation, normals and topology. Depends only on glam."
+name = "grid4d-geom"
+description = "Grid4D polygon geometry: n-gon meshes, triangulation, normals and topology. Depends only on glam."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

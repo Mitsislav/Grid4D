@@ -2,7 +2,7 @@ use glam::Vec3;
 
 use crate::{Node, ObjectKind, ObjectKindTag, Scene, TimeState, Transform};
 
-/// A complete OpenC4D document: the scene graph plus document-level settings.
+/// A complete Grid4D document: the scene graph plus document-level settings.
 #[derive(Clone, Debug)]
 pub struct Document {
     pub name: String,

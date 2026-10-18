@@ -1,7 +1,7 @@
 //! Editor (session) state that is *not* part of the document: selection, the
 //! active tool, modes and transient UI flags.
 
-use oc4d_scene::{NodeId, Scene};
+use grid4d_scene::{NodeId, Scene};
 use slotmap::SecondaryMap;
 
 use crate::{CommandQueue, History, file::DocumentFile};
@@ -222,7 +222,7 @@ impl Default for EditorState {
 
 #[cfg(test)]
 mod tests {
-    use oc4d_scene::{Node, ObjectKind};
+    use grid4d_scene::{Node, ObjectKind};
 
     use super::*;
 

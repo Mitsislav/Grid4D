@@ -1,13 +1,14 @@
-//! # oc4d-io
+//! # grid4d-io
 //!
-//! Reading and writing OpenC4D documents (`.oc4d` files).
+//! Reading and writing Grid4D documents (`.g4d` files; `.oc4d` files from before
+//! the project was renamed from OpenC4D are the same format and open too).
 //!
 //! ## Architecture rule
 //!
 //! The file format is a set of versioned DTOs, separate from the in-memory
-//! types of `oc4d-scene`, so the scene can change without breaking files. Each
+//! types of `grid4d-scene`, so the scene can change without breaking files. Each
 //! format version has its own module; older versions are migrated on load.
-//! This crate never depends on `wgpu`, `egui` or `oc4d-ui`.
+//! This crate never depends on `wgpu`, `egui` or `grid4d-ui`.
 //!
 //! ## Format, version 2 (current)
 //!
@@ -41,13 +42,18 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use oc4d_scene::Document;
+use grid4d_scene::Document;
 use serde::Deserialize;
 
 /// File extension, without the dot.
-pub const EXTENSION: &str = "oc4d";
+pub const EXTENSION: &str = "g4d";
+/// Every extension that opens as a document: [`EXTENSION`], and `oc4d` from before
+/// the project was renamed from OpenC4D (same format). Files are saved as `EXTENSION`.
+pub const OPEN_EXTENSIONS: [&str; 2] = [EXTENSION, "oc4d"];
 /// The format version this build writes (and the newest it reads).
 pub const FORMAT_VERSION: u32 = 2;
+/// The `"format"` tag inside every file. It keeps the project's former name because
+/// released format versions are frozen; only a new version may change it.
 const FORMAT_TAG: &str = "oc4d";
 
 /// Why a document could not be saved or loaded.
@@ -60,9 +66,9 @@ pub enum IoError {
         column: usize,
         message: String,
     },
-    /// Valid JSON, but not an OpenC4D document.
-    NotOc4d,
-    /// Written by a newer OpenC4D (or an unknown version).
+    /// Valid JSON, but not a Grid4D document.
+    NotADocument,
+    /// Written by a newer Grid4D (or an unknown version).
     UnsupportedVersion {
         found: u32,
         newest: u32,
@@ -76,10 +82,10 @@ impl fmt::Display for IoError {
         match self {
             Self::Io(err) => write!(f, "{err}"),
             Self::Parse { line, column, message } => write!(f, "line {line}, column {column}: {message}"),
-            Self::NotOc4d => f.write_str("not an OpenC4D document"),
+            Self::NotADocument => f.write_str("not a Grid4D document"),
             Self::UnsupportedVersion { found, newest } => write!(
                 f,
-                "file format version {found} is not supported (this OpenC4D reads up to version {newest})"
+                "file format version {found} is not supported (this Grid4D reads up to version {newest})"
             ),
             Self::Invalid(message) => f.write_str(message),
         }
@@ -90,7 +96,7 @@ impl std::error::Error for IoError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(err) => Some(err),
-            Self::Parse { .. } | Self::NotOc4d | Self::UnsupportedVersion { .. } | Self::Invalid(_) => None,
+            Self::Parse { .. } | Self::NotADocument | Self::UnsupportedVersion { .. } | Self::Invalid(_) => None,
         }
     }
 }
@@ -129,7 +135,7 @@ pub fn from_str(text: &str) -> Result<Document, IoError> {
 
     let header: Header = serde_json::from_str(text)?;
     let (Some(FORMAT_TAG), Some(version)) = (header.format.as_deref(), header.version) else {
-        return Err(IoError::NotOc4d);
+        return Err(IoError::NotADocument);
     };
     match version {
         1 => v1::File::parse(text)?.into_document(),
@@ -161,7 +167,7 @@ pub fn load(path: &Path) -> Result<Document, IoError> {
     from_str(&fs::read_to_string(path)?)
 }
 
-/// `scene.oc4d` → `scene.oc4d.tmp`, in the same directory (so the rename is atomic).
+/// `scene.g4d` → `scene.g4d.tmp`, in the same directory (so the rename is atomic).
 fn temp_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".tmp");

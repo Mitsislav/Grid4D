@@ -2,8 +2,8 @@
 
 use egui::{Align2, FontId, Mesh, Painter, Rect, Shape, Stroke, pos2, vec2};
 use glam::{Mat4, Vec3};
-use oc4d_eval::EvaluatedScene;
-use oc4d_render::OrbitCamera;
+use grid4d_eval::EvaluatedScene;
+use grid4d_render::OrbitCamera;
 
 use super::project;
 use crate::{Selection, theme::palette as p};

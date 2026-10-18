@@ -1,7 +1,7 @@
 //! How an object is drawn: which unit geometry, at what scale, in what colour.
 
 use glam::Vec3;
-use oc4d_scene::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, ObjectKind};
+use grid4d_scene::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, ObjectKind};
 
 use crate::{MeshKey, Ratio};
 
@@ -151,7 +151,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
 
 #[cfg(test)]
 mod tests {
-    use oc4d_scene::ObjectKindTag;
+    use grid4d_scene::ObjectKindTag;
 
     use super::*;
 

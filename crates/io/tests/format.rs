@@ -3,7 +3,7 @@
 //!
 //! Regenerate the current golden file after an *intentional* format change (which
 //! also needs a new format version and a migration) with:
-//! `OC4D_UPDATE_FIXTURES=1 cargo test -p oc4d-io --test format`
+//! `GRID4D_UPDATE_FIXTURES=1 cargo test -p grid4d-io --test format`
 //! Older fixtures (`demo_v1.oc4d`, …) are never regenerated.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
@@ -13,10 +13,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use oc4d_scene::{Document, ObjectKind};
+use grid4d_scene::{Document, ObjectKind};
 
 /// Written by the current format version.
-const GOLDEN: &str = "tests/fixtures/demo_v2.oc4d";
+const GOLDEN: &str = "tests/fixtures/demo_v2.g4d";
 /// Written by format version 1 (before segment counts); kept to test migration.
 const DEMO_V1: &str = "tests/fixtures/demo_v1.oc4d";
 
@@ -26,7 +26,7 @@ fn fixture_path(relative: &str) -> PathBuf {
 
 /// A fresh, empty directory under the system temp dir, unique to this test.
 fn temp_dir(test: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("oc4d-io-{}-{test}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("grid4d-io-{}-{test}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -53,9 +53,9 @@ const DEMO_OUTLINE: [(u32, &str); 7] = [
 
 #[test]
 fn the_demo_scene_matches_the_golden_file() {
-    let text = oc4d_io::to_string(&Document::with_demo_scene()).unwrap();
+    let text = grid4d_io::to_string(&Document::with_demo_scene()).unwrap();
     let path = fixture_path(GOLDEN);
-    if std::env::var_os("OC4D_UPDATE_FIXTURES").is_some() {
+    if std::env::var_os("GRID4D_UPDATE_FIXTURES").is_some() {
         fs::write(&path, &text).unwrap();
     }
     let golden = fs::read_to_string(&path).unwrap();
@@ -67,14 +67,14 @@ fn the_demo_scene_matches_the_golden_file() {
 
 #[test]
 fn the_golden_file_loads() {
-    let doc = oc4d_io::load(&fixture_path(GOLDEN)).unwrap();
+    let doc = grid4d_io::load(&fixture_path(GOLDEN)).unwrap();
     assert_eq!(outline(&doc), DEMO_OUTLINE.map(|(d, n)| (d, n.to_owned())));
     assert_eq!(doc.time.fps(), 30);
 }
 
 #[test]
 fn the_version_1_fixture_still_loads() {
-    let doc = oc4d_io::load(&fixture_path(DEMO_V1)).unwrap();
+    let doc = grid4d_io::load(&fixture_path(DEMO_V1)).unwrap();
     assert_eq!(outline(&doc), DEMO_OUTLINE.map(|(d, n)| (d, n.to_owned())));
     let sphere = doc.scene.iter().find(|(_, n)| n.data.name == "Sphere").unwrap().1;
     assert_eq!(
@@ -87,23 +87,23 @@ fn the_version_1_fixture_still_loads() {
     );
     // Migrating then saving gives exactly what the current version writes.
     assert_eq!(
-        oc4d_io::to_string(&doc).unwrap(),
-        oc4d_io::to_string(&Document::with_demo_scene()).unwrap()
+        grid4d_io::to_string(&doc).unwrap(),
+        grid4d_io::to_string(&Document::with_demo_scene()).unwrap()
     );
 }
 
 #[test]
 fn save_and_load_through_the_filesystem() {
     let dir = temp_dir("save_load");
-    let path = dir.join(format!("shot.{}", oc4d_io::EXTENSION));
+    let path = dir.join(format!("shot.{}", grid4d_io::EXTENSION));
 
     let mut doc = Document::with_demo_scene();
-    oc4d_io::save(&doc, &path).unwrap();
+    grid4d_io::save(&doc, &path).unwrap();
     // Saving again replaces the file in place.
     doc.name = "Second save".to_owned();
-    oc4d_io::save(&doc, &path).unwrap();
+    grid4d_io::save(&doc, &path).unwrap();
 
-    let loaded = oc4d_io::load(&path).unwrap();
+    let loaded = grid4d_io::load(&path).unwrap();
     assert_eq!(loaded.name, "Second save");
     assert_eq!(loaded.scene.len(), doc.scene.len());
     let leftovers: Vec<String> = fs::read_dir(&dir)
@@ -112,7 +112,7 @@ fn save_and_load_through_the_filesystem() {
         .collect();
     assert_eq!(
         leftovers,
-        [format!("shot.{}", oc4d_io::EXTENSION)],
+        [format!("shot.{}", grid4d_io::EXTENSION)],
         "no temporary file left behind"
     );
     let _ = fs::remove_dir_all(&dir);
@@ -120,6 +120,6 @@ fn save_and_load_through_the_filesystem() {
 
 #[test]
 fn loading_a_missing_file_is_an_io_error() {
-    let missing = temp_dir("missing").join("nothing-here.oc4d");
-    assert!(matches!(oc4d_io::load(&missing), Err(oc4d_io::IoError::Io(_))));
+    let missing = temp_dir("missing").join("nothing-here.g4d");
+    assert!(matches!(grid4d_io::load(&missing), Err(grid4d_io::IoError::Io(_))));
 }

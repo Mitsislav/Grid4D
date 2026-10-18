@@ -1,6 +1,6 @@
 [package]
-name = "oc4d-render"
-description = "OpenC4D viewport renderer: scene extraction, GPU resources and wgpu pipelines. No UI."
+name = "grid4d-render"
+description = "Grid4D viewport renderer: scene extraction, GPU resources and wgpu pipelines. No UI."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,9 +8,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-oc4d-scene.workspace = true
-oc4d-geom.workspace = true
-oc4d-eval.workspace = true
+grid4d-scene.workspace = true
+grid4d-geom.workspace = true
+grid4d-eval.workspace = true
 glam.workspace = true
 wgpu.workspace = true
 bytemuck.workspace = true

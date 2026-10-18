@@ -7,8 +7,8 @@ use std::f32::consts::{PI, TAU};
 
 use egui::{Color32, CornerRadius, PointerButton, Pos2, Rect, Response, Shape, Stroke, Ui, Vec2};
 use glam::{Mat4, Quat, Vec3};
-use oc4d_render::OrbitCamera;
-use oc4d_scene::{NodeData, NodeId, Scene, SceneEdit};
+use grid4d_render::OrbitCamera;
+use grid4d_scene::{NodeData, NodeId, Scene, SceneEdit};
 
 use super::project;
 use crate::{CommandQueue, EditorCommand, EditorState, Tool, theme::palette as p};

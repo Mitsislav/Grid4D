@@ -31,7 +31,7 @@ pub use viewport::ViewportPanel;
 #[cfg(test)]
 mod tests {
     use egui::RawInput;
-    use oc4d_scene::Document;
+    use grid4d_scene::Document;
 
     use super::*;
     use crate::{EditorState, commands};

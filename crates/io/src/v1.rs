@@ -1,9 +1,9 @@
-//! Format version 1 — read-only. Files written by OpenC4D before primitives had
+//! Format version 1 — read-only. Files written by Grid4D before primitives had
 //! segment counts; loading migrates them to the current scene types, filling in
 //! each primitive's default segments. These types are frozen.
 
 use glam::Vec3;
-use oc4d_scene::{Document, NodeData, ObjectKind, TimeSettings, Transform};
+use grid4d_scene::{Document, NodeData, ObjectKind, TimeSettings, Transform};
 use serde::Deserialize;
 
 use crate::{

@@ -1,13 +1,15 @@
-# OpenC4D
+<img src="assets/icon/grid4d.svg" alt="" width="96" align="right">
+
+# Grid4D
 
 An open-source, modular 3D content creation suite written in Rust, with a
 workflow and layout inspired by Cinema 4D.
 
-![OpenC4D workspace](docs/screenshot.png)
+![Grid4D workspace](docs/screenshot.png)
 
 **Status: v0.1 — editor shell, with undo/redo and files.** The workspace, scene
 graph, GPU viewport, selection and transform tools work, every edit can be undone,
-and documents are saved as `.oc4d` files; modelling, keyframes, glTF and rendering
+and documents are saved as `.g4d` files; modelling, keyframes, glTF and rendering
 are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)).
 
 ## What works today
@@ -36,11 +38,12 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
 - **Timeline**: ruler with scrubbable playhead, play/pause/step/loop
   (`F8`, `F6`, `F7`, `F`, `G`), preview range and fps.
 - **Files**: New / Open / Save / Save As (`Ctrl+N`, `Ctrl+O`, `Ctrl+S`,
-  `Ctrl+Shift+S`) with native dialogs; `.oc4d` is versioned JSON. The title shows
-  the file name and `*` for unsaved changes, and New, Open, Quit and the window's
-  close button ask "Save changes?" first. File ▸ Open Recent remembers the last ten
-  documents, a `.oc4d` dropped onto the window (or given on the command line:
-  `open-c4d scene.oc4d`) opens it, and the window size and panel layout are
+  `Ctrl+Shift+S`) with native dialogs; `.g4d` is versioned JSON, and `.oc4d` files
+  from before the rename (the project was called OpenC4D) open too. The title
+  shows the file name and `*` for unsaved changes, and New, Open, Quit and the
+  window's close button ask "Save changes?" first. File ▸ Open Recent remembers the last ten
+  documents, a `.g4d` dropped onto the window (or given on the command line:
+  `grid4d scene.g4d`) opens it, and the window size and panel layout are
   restored on the next start.
 - **Undo / redo** (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`, toolbar, Edit menu): create,
   delete, re-parent, gizmo drags, attribute and project-setting edits, renames and
@@ -67,29 +70,29 @@ cargo clippy --workspace --all-targets -- -D warnings   # lints
 ## Architecture
 
 ```
-oc4d-geom  ◀──  oc4d-scene  ◀──  oc4d-eval  ◀──  oc4d-render  ◀──  oc4d-ui  ◀──  open-c4d (binary)
-(geometry)      (data)           (evaluation)    (wgpu)            (egui)         (composition root)
-                     ▲                                                │
-                     └──────────────────  oc4d-io  ◀──────────────────┘
-                                          (.oc4d files)
+grid4d-geom  ◀──  grid4d-scene  ◀──  grid4d-eval  ◀──  grid4d-render  ◀──  grid4d-ui  ◀──  grid4d (binary)
+(geometry)        (data)             (evaluation)      (wgpu)              (egui)          (composition root)
+                        ▲                                                      │
+                        └────────────────────  grid4d-io  ◀────────────────────┘
+                                               (.g4d files)
 ```
 
-| Crate         | Responsibility                                                      |
-|---------------|---------------------------------------------------------------------|
-| `oc4d-geom`   | Polygon meshes with n-gons, topology, vertex normals (Phong angle), triangulation for the GPU. glam only. |
-| `oc4d-scene`  | Scene graph (slotmap arena, generational `NodeId`), transforms (HPB), bounds, document time. No GPU, no UI. |
-| `oc4d-eval`   | Evaluated scene: visible nodes with world matrices, drawables (unit mesh keys) and pick shapes; skipped when nothing changed. No GPU, no UI. |
-| `oc4d-render` | Orbit camera, per-frame `FrameData` extraction, generated-mesh cache, wgpu pipelines + WGSL shaders, picking. No UI. |
-| `oc4d-io`     | `.oc4d` document files: versioned JSON format, atomic save, load with clear errors. No GPU, no UI. |
-| `oc4d-ui`     | Theme, painted vector icons, panels, gizmo, shortcuts, command queue, undo history. |
-| `open-c4d`    | Window / GPU surface setup and panel layout.                         |
+| Crate            | Responsibility                                                      |
+|------------------|---------------------------------------------------------------------|
+| `grid4d-geom`    | Polygon meshes with n-gons, topology, vertex normals (Phong angle), triangulation for the GPU. glam only. |
+| `grid4d-scene`   | Scene graph (slotmap arena, generational `NodeId`), transforms (HPB), bounds, document time. No GPU, no UI. |
+| `grid4d-eval`    | Evaluated scene: visible nodes with world matrices, drawables (unit mesh keys) and pick shapes; skipped when nothing changed. No GPU, no UI. |
+| `grid4d-render`  | Orbit camera, per-frame `FrameData` extraction, generated-mesh cache, wgpu pipelines + WGSL shaders, picking. No UI. |
+| `grid4d-io`      | `.g4d` document files: versioned JSON format, atomic save, load with clear errors. No GPU, no UI. |
+| `grid4d-ui`      | Theme, painted vector icons, panels, gizmo, shortcuts, command queue, undo history. |
+| `grid4d`         | Window / GPU surface setup and panel layout.                         |
 
 The rules (dependency direction, command queue, allocation-free render loop,
 module layout) are in [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Legal
 
-OpenC4D is an independent open-source project inspired by the Cinema 4D
+Grid4D is an independent open-source project inspired by the Cinema 4D
 workflow. It is not affiliated with or endorsed by Maxon. Cinema 4D is a
 trademark of Maxon Computer GmbH. All icons and artwork in this repository are
 original.

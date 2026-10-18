@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 /// Key under which the application stores [`RecentFiles::to_storage`].
-pub const STORAGE_KEY: &str = "oc4d.recent_files";
+pub const STORAGE_KEY: &str = "grid4d.recent_files";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecentFiles {
@@ -80,34 +80,34 @@ mod tests {
     #[test]
     fn touch_moves_to_the_top_without_duplicates() {
         let mut recent = RecentFiles::default();
-        for name in ["a.oc4d", "b.oc4d", "c.oc4d", "a.oc4d"] {
+        for name in ["a.g4d", "b.g4d", "c.g4d", "a.g4d"] {
             recent.touch(Path::new(name));
         }
-        assert_eq!(paths(&recent), ["a.oc4d", "c.oc4d", "b.oc4d"]);
-        recent.remove(Path::new("c.oc4d"));
-        assert_eq!(paths(&recent), ["a.oc4d", "b.oc4d"]);
+        assert_eq!(paths(&recent), ["a.g4d", "c.g4d", "b.g4d"]);
+        recent.remove(Path::new("c.g4d"));
+        assert_eq!(paths(&recent), ["a.g4d", "b.g4d"]);
     }
 
     #[test]
     fn only_the_newest_are_kept() {
         let mut recent = RecentFiles::default();
         for i in 0..15 {
-            recent.touch(Path::new(&format!("{i}.oc4d")));
+            recent.touch(Path::new(&format!("{i}.g4d")));
         }
         assert_eq!(recent.paths().len(), RecentFiles::LIMIT);
-        assert_eq!(recent.paths()[0], Path::new("14.oc4d"));
-        assert_eq!(recent.paths()[RecentFiles::LIMIT - 1], Path::new("5.oc4d"));
+        assert_eq!(recent.paths()[0], Path::new("14.g4d"));
+        assert_eq!(recent.paths()[RecentFiles::LIMIT - 1], Path::new("5.g4d"));
     }
 
     #[test]
     fn storage_round_trips_and_tolerates_junk() {
         let mut recent = RecentFiles::default();
-        recent.touch(Path::new("C:/scenes/old shot.oc4d"));
-        recent.touch(Path::new("/home/me/ünïcode.oc4d"));
+        recent.touch(Path::new("C:/scenes/old shot.g4d"));
+        recent.touch(Path::new("/home/me/ünïcode.g4d"));
         assert_eq!(RecentFiles::from_storage(&recent.to_storage()), recent);
 
-        let loaded = RecentFiles::from_storage("\n  a.oc4d  \n\nb.oc4d\na.oc4d\n");
-        assert_eq!(paths(&loaded), ["a.oc4d", "b.oc4d"]);
+        let loaded = RecentFiles::from_storage("\n  a.g4d  \n\nb.g4d\na.g4d\n");
+        assert_eq!(paths(&loaded), ["a.g4d", "b.g4d"]);
         assert!(RecentFiles::from_storage("").is_empty());
     }
 }

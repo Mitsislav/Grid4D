@@ -1,5 +1,5 @@
 use glam::Mat4;
-use oc4d_scene::{Aabb, LIGHT_MARKER_RADIUS, NodeId, ObjectKind, Scene, WalkItem};
+use grid4d_scene::{Aabb, LIGHT_MARKER_RADIUS, NodeId, ObjectKind, Scene, WalkItem};
 
 use crate::{Drawable, drawable};
 
@@ -105,7 +105,7 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
 
 #[cfg(test)]
 mod tests {
-    use oc4d_scene::Document;
+    use grid4d_scene::Document;
 
     use super::*;
 

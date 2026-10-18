@@ -8,7 +8,7 @@ use crate::{EditorState, theme::palette as p};
 pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
     let Some(alert) = &editor.file.alert else { return };
     let mut dismissed = false;
-    let response = Modal::new(Id::unique("oc4d.alert")).show(ctx, |ui| {
+    let response = Modal::new(Id::unique("grid4d.alert")).show(ctx, |ui| {
         ui.set_width(440.0);
         ui.label(RichText::new(alert.title).size(15.0).strong().color(p::TEXT_STRONG));
         ui.add_space(6.0);

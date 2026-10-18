@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
-use oc4d_eval::{EvaluatedScene, MeshKey};
-use oc4d_scene::NodeId;
+use grid4d_eval::{EvaluatedScene, MeshKey};
+use grid4d_scene::NodeId;
 
 use crate::OrbitCamera;
 
@@ -163,7 +163,7 @@ fn normal_matrix(model: &Mat4) -> [[f32; 4]; 3] {
 
 #[cfg(test)]
 mod tests {
-    use oc4d_scene::{Document, Node, ObjectKind};
+    use grid4d_scene::{Document, Node, ObjectKind};
 
     use super::*;
 

@@ -1,6 +1,6 @@
 use glam::Vec3;
-use oc4d_eval::{EvaluatedScene, PickShape};
-use oc4d_scene::NodeId;
+use grid4d_eval::{EvaluatedScene, PickShape};
+use grid4d_scene::NodeId;
 
 use crate::Ray;
 
@@ -50,7 +50,7 @@ fn ray_sphere(origin: Vec3, dir: Vec3, radius: f32) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use glam::Vec2;
-    use oc4d_scene::Document;
+    use grid4d_scene::Document;
 
     use super::*;
     use crate::OrbitCamera;

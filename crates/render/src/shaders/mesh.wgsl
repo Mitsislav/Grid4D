@@ -1,4 +1,4 @@
-// OpenC4D — shaded mesh pass.
+// Grid4D — shaded mesh pass.
 // Instanced: one draw call per primitive mesh kind (cube, sphere, cylinder, plane).
 // Lighting is done in linear space; the result is sRGB-encoded here when the
 // surface format is not an *Srgb format (egui prefers a gamma framebuffer).

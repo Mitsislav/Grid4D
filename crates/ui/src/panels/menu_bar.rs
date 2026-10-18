@@ -2,7 +2,7 @@
 //! disabled so the roadmap is visible in the product itself.
 
 use egui::{Button, Layout, RichText, Ui};
-use oc4d_scene::{Document, ObjectKindTag, SceneEdit};
+use grid4d_scene::{Document, ObjectKindTag, SceneEdit};
 
 use crate::{EditMode, EditorCommand, EditorState, Tool, theme::palette as p};
 

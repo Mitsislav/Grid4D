@@ -28,9 +28,9 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
     if !editor.show_about {
         return;
     }
-    let response = Modal::new(Id::unique("oc4d.about")).show(ctx, |ui| {
+    let response = Modal::new(Id::unique("grid4d.about")).show(ctx, |ui| {
         ui.set_width(460.0);
-        ui.label(RichText::new("OpenC4D").size(20.0).strong().color(p::TEXT_STRONG));
+        ui.label(RichText::new("Grid4D").size(20.0).strong().color(p::TEXT_STRONG));
         ui.label(
             RichText::new(concat!(
                 "Version ",
@@ -42,7 +42,7 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
         ui.add_space(10.0);
         ui.label(RichText::new("Keyboard & mouse").strong());
         ui.add_space(4.0);
-        Grid::new("oc4d.shortcuts")
+        Grid::new("grid4d.shortcuts")
             .num_columns(2)
             .spacing([24.0, 4.0])
             .striped(true)
@@ -56,7 +56,7 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
         ui.add_space(10.0);
         ui.label(
             RichText::new(
-                "OpenC4D is an independent project inspired by the Cinema 4D workflow. \
+                "Grid4D is an independent project inspired by the Cinema 4D workflow. \
                  It is not affiliated with or endorsed by Maxon. Cinema 4D is a trademark of Maxon Computer GmbH.",
             )
             .size(11.0)

@@ -1,4 +1,4 @@
-// OpenC4D — ground grid on the XZ plane.
+// Grid4D — ground grid on the XZ plane.
 // A single camera-centred quad; lines are computed analytically per pixel with
 // screen-space derivatives, so they stay 1 px wide and anti-aliased at any zoom.
 

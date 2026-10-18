@@ -2,7 +2,7 @@
 //! with unsaved changes. The answer is queued as a command.
 
 use egui::{Id, Modal, RichText};
-use oc4d_scene::Document;
+use grid4d_scene::Document;
 
 use crate::{
     EditorCommand, EditorState,
@@ -13,7 +13,7 @@ use crate::{
 pub fn show(ctx: &egui::Context, doc: &Document, editor: &mut EditorState) {
     let Some(action) = editor.file.pending() else { return };
     let mut choice = None;
-    let response = Modal::new(Id::unique("oc4d.unsaved_changes")).show(ctx, |ui| {
+    let response = Modal::new(Id::unique("grid4d.unsaved_changes")).show(ctx, |ui| {
         ui.set_width(400.0);
         ui.label(
             RichText::new(format!("Save changes to “{}”?", editor.file.display_name(doc)))

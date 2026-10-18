@@ -1,4 +1,4 @@
-# Contributing to OpenC4D
+# Contributing to Grid4D
 
 Thanks for helping build an open-source 3D content creation suite!
 
@@ -38,11 +38,11 @@ Windows, Linux and macOS.
 
 ## Legal
 
-OpenC4D is *inspired by* the Cinema 4D workflow and must never copy it: no Maxon
+Grid4D is *inspired by* the Cinema 4D workflow and must never copy it: no Maxon
 icons, artwork, trademarks or file formats. All artwork must be original.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in OpenC4D by you, as defined in the Apache-2.0 license, shall be
+for inclusion in Grid4D by you, as defined in the Apache-2.0 license, shall be
 dual licensed as below, without any additional terms or conditions.
 
 Licensed under either of

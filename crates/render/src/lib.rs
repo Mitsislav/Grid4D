@@ -1,15 +1,15 @@
-//! # oc4d-render
+//! # grid4d-render
 //!
-//! GPU viewport rendering for OpenC4D, built directly on `wgpu`.
+//! GPU viewport rendering for Grid4D, built directly on `wgpu`.
 //!
 //! ```text
 //!  EvaluatedScene ──extract──▶ FrameData ──render──▶ ViewportTarget ──▶ texture the UI shows
-//!  (oc4d-eval)                 (CPU, reused)        (own MSAA + depth, resolved)
+//!  (grid4d-eval)                 (CPU, reused)        (own MSAA + depth, resolved)
 //! ```
 //!
 //! ## Architecture rules
 //!
-//! * Reads the evaluated scene (`oc4d-eval`), never the document itself.
+//! * Reads the evaluated scene (`grid4d-eval`), never the document itself.
 //! * Knows nothing about egui: it renders into its own [`ViewportTarget`], and the UI
 //!   layer registers the resolved texture with its toolkit to display it.
 //! * The per-frame path (`FrameData::extract`, `ViewportRenderer::prepare`,

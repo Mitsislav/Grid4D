@@ -1,6 +1,6 @@
 [package]
-name = "oc4d-io"
-description = "OpenC4D document files (.oc4d): versioned on-disk format, save and load. No GPU, no UI."
+name = "grid4d-io"
+description = "Grid4D document files (.g4d): versioned on-disk format, save and load. No GPU, no UI."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-oc4d-scene.workspace = true
+grid4d-scene.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true

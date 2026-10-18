@@ -6,9 +6,9 @@ mod overlay;
 
 use egui::{Align, Align2, Layout, Margin, PointerButton, Pos2, Rect, Response, Sense, Ui, pos2};
 use glam::{Mat4, Vec2 as GVec2, Vec3};
-use oc4d_eval::EvaluatedScene;
-use oc4d_render::{FrameData, OrbitCamera, pick};
-use oc4d_scene::{Aabb, Document, ObjectKindTag, Scene, WalkItem};
+use grid4d_eval::EvaluatedScene;
+use grid4d_render::{FrameData, OrbitCamera, pick};
+use grid4d_scene::{Aabb, Document, ObjectKindTag, Scene, WalkItem};
 
 use self::{gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView};
 use crate::{
@@ -426,7 +426,7 @@ mod tests {
             }
         }
 
-        fn position(&self, id: oc4d_scene::NodeId) -> Vec3 {
+        fn position(&self, id: grid4d_scene::NodeId) -> Vec3 {
             self.doc.scene.get(id).unwrap().data.transform.position
         }
     }

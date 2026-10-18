@@ -1,6 +1,6 @@
 [package]
-name = "oc4d-scene"
-description = "OpenC4D document model: scene graph, transforms and document time. No GPU, no UI."
+name = "grid4d-scene"
+description = "Grid4D document model: scene graph, transforms and document time. No GPU, no UI."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

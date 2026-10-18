@@ -11,7 +11,7 @@ pub fn show(ctx: &egui::Context) {
         return;
     };
     let rect = ctx.content_rect();
-    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::unique("oc4d.drop_overlay")));
+    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::unique("grid4d.drop_overlay")));
     painter.rect_filled(rect, CornerRadius::ZERO, p::SCRIM);
     painter.rect_stroke(
         rect.shrink(12.0),
@@ -44,8 +44,8 @@ fn hover_label<'a>(paths: impl Iterator<Item = Option<&'a std::path::Path>>) -> 
     }
     match (any, any_path) {
         (false, _) => None,
-        (true, true) => Some("Only OpenC4D documents (.oc4d) can be opened".to_owned()),
-        (true, false) => Some("Drop an OpenC4D document (.oc4d) to open it".to_owned()),
+        (true, true) => Some("Only Grid4D documents (.g4d) can be opened".to_owned()),
+        (true, false) => Some("Drop a Grid4D document (.g4d) to open it".to_owned()),
     }
 }
 
@@ -64,11 +64,11 @@ mod tests {
         );
         assert_eq!(
             hover_label([Some(Path::new("notes.txt"))].into_iter()).as_deref(),
-            Some("Only OpenC4D documents (.oc4d) can be opened")
+            Some("Only Grid4D documents (.g4d) can be opened")
         );
         assert_eq!(
             hover_label([None].into_iter()).as_deref(),
-            Some("Drop an OpenC4D document (.oc4d) to open it")
+            Some("Drop a Grid4D document (.g4d) to open it")
         );
     }
 }

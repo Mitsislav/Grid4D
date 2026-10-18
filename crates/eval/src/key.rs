@@ -6,7 +6,7 @@
 //! counts, a cone's radius ratio, a torus's pipe thickness — are part of the key.
 
 use glam::Vec3;
-use oc4d_geom::{PolyMesh, primitives};
+use grid4d_geom::{PolyMesh, primitives};
 
 /// A shape ratio in `[0, 1]`, stored as `f32` bits so keys can be hashed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

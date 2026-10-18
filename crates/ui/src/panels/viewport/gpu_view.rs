@@ -1,4 +1,4 @@
-//! Glue between egui and `oc4d_render`: the viewport renders into its own
+//! Glue between egui and `grid4d_render`: the viewport renders into its own
 //! [`ViewportTarget`], and the resolved texture is shown as an egui image.
 //!
 //! This is the only place that talks to `egui_wgpu` (texture registration); the
@@ -7,7 +7,7 @@
 use std::fmt;
 
 use egui_wgpu::wgpu;
-use oc4d_render::{FrameData, ViewportRenderer, ViewportTarget};
+use grid4d_render::{FrameData, ViewportRenderer, ViewportTarget};
 
 /// The GPU side of one viewport.
 pub(super) struct GpuView {

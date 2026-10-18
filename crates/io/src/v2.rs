@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use glam::Vec3;
-use oc4d_scene::{Document, NodeData, NodeId, ObjectKind, TimeSettings, Transform};
+use grid4d_scene::{Document, NodeData, NodeId, ObjectKind, TimeSettings, Transform};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -416,7 +416,7 @@ impl From<KindDto> for ObjectKind {
 
 #[cfg(test)]
 mod tests {
-    use oc4d_scene::{Node, ObjectKindTag};
+    use grid4d_scene::{Node, ObjectKindTag};
 
     use super::*;
     use crate::{from_str, to_string};
@@ -550,7 +550,7 @@ mod tests {
         assert!(matches!(err, IoError::Parse { line: 1, .. }), "{err:?}");
 
         for not_ours in ["{}", "{\"format\": \"gltf\", \"version\": 1}", "{\"format\": \"oc4d\"}"] {
-            assert!(matches!(from_str(not_ours), Err(IoError::NotOc4d)), "{not_ours}");
+            assert!(matches!(from_str(not_ours), Err(IoError::NotADocument)), "{not_ours}");
         }
 
         let newer = ok.replacen("\"version\": 2", "\"version\": 7", 1);

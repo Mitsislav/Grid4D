@@ -1,6 +1,6 @@
-//! # oc4d-geom
+//! # grid4d-geom
 //!
-//! Polygon geometry for OpenC4D: n-gon meshes ([`PolyMesh`]), their triangulation
+//! Polygon geometry for Grid4D: n-gon meshes ([`PolyMesh`]), their triangulation
 //! for the GPU ([`Triangulator`] → [`TriMesh`]), vertex normals ([`Smoothing`]) and
 //! adjacency ([`Topology`]).
 //!
@@ -14,7 +14,7 @@
 //! ## Conventions
 //!
 //! Faces are wound counter-clockwise when seen from the side their normal points
-//! to (right-handed), like the rest of OpenC4D. A face is a simple polygon of three
+//! to (right-handed), like the rest of Grid4D. A face is a simple polygon of three
 //! or more distinct points; it may be non-convex and slightly non-planar.
 
 mod mesh;
@@ -31,7 +31,7 @@ pub use normals::Smoothing;
 pub use topology::Topology;
 pub use triangulate::{TriMesh, Triangulator};
 
-/// `u32` index → `usize`. Lossless on every platform OpenC4D supports (≥ 32-bit).
+/// `u32` index → `usize`. Lossless on every platform Grid4D supports (≥ 32-bit).
 pub(crate) fn us(index: u32) -> usize {
     usize::try_from(index).unwrap_or(usize::MAX)
 }

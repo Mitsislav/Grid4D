@@ -1,4 +1,4 @@
-//! The OpenC4D look: a dense, dark "industrial" theme in the spirit of
+//! The Grid4D look: a dense, dark "industrial" theme in the spirit of
 //! Cinema 4D's default UI — neutral greys, crisp 1 px dark separators, small
 //! corner radii, a steel-blue accent for selection and orange for activity.
 

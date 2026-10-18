@@ -6,8 +6,8 @@
 //! each step restores the selection it was made with.
 
 use glam::Vec3;
-use oc4d_render::OrbitCamera;
-use oc4d_scene::{Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit, Transform};
+use grid4d_render::OrbitCamera;
+use grid4d_scene::{Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit, Transform};
 
 use crate::{
     EditorState, Selection, ViewportPanel,

@@ -1,7 +1,7 @@
 //! Bottom status line: contextual help on the left, scene/GPU info on the right.
 
 use egui::{Align, Layout, RichText, Ui};
-use oc4d_scene::Document;
+use grid4d_scene::Document;
 
 use crate::{EditorState, theme::palette as p};
 

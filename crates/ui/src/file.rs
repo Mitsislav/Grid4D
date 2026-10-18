@@ -10,7 +10,7 @@ use std::{
 };
 
 use egui::ViewportCommand;
-use oc4d_scene::Document;
+use grid4d_scene::Document;
 
 use crate::{EditorCommand, EditorState, History, ViewportPanel, recent::RecentFiles};
 
@@ -19,7 +19,7 @@ pub trait FileDialogs: std::fmt::Debug {
     /// A document to open, or `None` if the user cancelled.
     fn pick_open(&mut self, directory: Option<&Path>) -> Option<PathBuf>;
     /// Where to save, or `None` if the user cancelled. `suggested` is a bare
-    /// file name such as `Untitled 1.oc4d`.
+    /// file name such as `Untitled 1.g4d`.
     fn pick_save(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf>;
 }
 
@@ -31,14 +31,14 @@ impl FileDialogs for NativeDialogs {
     fn pick_open(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
         with_directory(rfd::FileDialog::new(), directory)
             .set_title("Open")
-            .add_filter("OpenC4D Document", &[oc4d_io::EXTENSION])
+            .add_filter("Grid4D Document", &grid4d_io::OPEN_EXTENSIONS)
             .pick_file()
     }
 
     fn pick_save(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
         with_directory(rfd::FileDialog::new(), directory)
             .set_title("Save As")
-            .add_filter("OpenC4D Document", &[oc4d_io::EXTENSION])
+            .add_filter("Grid4D Document", &[grid4d_io::EXTENSION])
             .set_file_name(suggested)
             .save_file()
             .map(with_extension)
@@ -53,14 +53,15 @@ fn with_directory(dialog: rfd::FileDialog, directory: Option<&Path>) -> rfd::Fil
 }
 
 /// Some dialogs return the typed name without the extension: append it (rather
-/// than replacing, so `shot.v2` becomes `shot.v2.oc4d`).
+/// than replacing, so `shot.v2` becomes `shot.v2.g4d`). A typed legacy `.oc4d`
+/// name is kept.
 fn with_extension(path: PathBuf) -> PathBuf {
-    if path.extension().is_some_and(|ext| ext == oc4d_io::EXTENSION) {
+    if is_document(&path) {
         return path;
     }
     let mut name = path.into_os_string();
     name.push(".");
-    name.push(oc4d_io::EXTENSION);
+    name.push(grid4d_io::EXTENSION);
     PathBuf::from(name)
 }
 
@@ -168,7 +169,7 @@ impl DocumentFile {
         }
     }
 
-    /// The new window title if it changed since the last call ("shot.oc4d * — OpenC4D").
+    /// The new window title if it changed since the last call ("shot.g4d * — Grid4D").
     /// Allocates only when the title changes.
     pub fn title_update(&mut self, doc: &Document, history: &History) -> Option<String> {
         let dirty = self.is_dirty(history);
@@ -182,11 +183,7 @@ impl DocumentFile {
         self.title_name = self.display_name(doc).into_owned();
         self.title_dirty = dirty;
         self.title_set = true;
-        Some(format!(
-            "{}{} — OpenC4D",
-            self.title_name,
-            if dirty { " *" } else { "" }
-        ))
+        Some(format!("{}{} — Grid4D", self.title_name, if dirty { " *" } else { "" }))
     }
 
     fn directory(&self) -> Option<&Path> {
@@ -242,7 +239,7 @@ fn perform(action: FileAction, doc: &mut Document, editor: &mut EditorState, vie
 /// Loads `path` and makes it the current document. On error the current
 /// document stays and an alert explains why.
 pub(crate) fn open_path(path: PathBuf, doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel) {
-    match oc4d_io::load(&path) {
+    match grid4d_io::load(&path) {
         Ok(loaded) => {
             editor.file.recent.touch(&path);
             replace(doc, editor, viewport, loaded, Some(path));
@@ -250,7 +247,7 @@ pub(crate) fn open_path(path: PathBuf, doc: &mut Document, editor: &mut EditorSt
         }
         Err(err) => {
             // A recent entry whose file is gone is of no further use.
-            if matches!(&err, oc4d_io::IoError::Io(io) if io.kind() == std::io::ErrorKind::NotFound) {
+            if matches!(&err, grid4d_io::IoError::Io(io) if io.kind() == std::io::ErrorKind::NotFound) {
                 editor.file.recent.remove(&path);
             }
             editor.file.alert = Some(Alert {
@@ -285,7 +282,7 @@ pub(crate) fn save(doc: &Document, editor: &mut EditorState, ask_path: bool) -> 
             let suggested = format!(
                 "{}.{}",
                 file_stem_for(&editor.file.display_name(doc)),
-                oc4d_io::EXTENSION
+                grid4d_io::EXTENSION
             );
             let directory = editor.file.directory().map(Path::to_path_buf);
             let Some(path) = editor.file.dialogs.pick_save(directory.as_deref(), &suggested) else {
@@ -294,7 +291,7 @@ pub(crate) fn save(doc: &Document, editor: &mut EditorState, ask_path: bool) -> 
             path
         }
     };
-    match oc4d_io::save(doc, &path) {
+    match grid4d_io::save(doc, &path) {
         Ok(()) => {
             editor.file.recent.touch(&path);
             editor.file.path = Some(path);
@@ -311,12 +308,12 @@ pub(crate) fn save(doc: &Document, editor: &mut EditorState, ask_path: bool) -> 
     }
 }
 
-/// A name usable as a file stem: drops a trailing `.oc4d` and replaces
-/// characters that are invalid in file names on some platform.
+/// A name usable as a file stem: drops a trailing `.g4d` (or legacy `.oc4d`) and
+/// replaces characters that are invalid in file names on some platform.
 fn file_stem_for(name: &str) -> String {
-    let stem = name
-        .strip_suffix(oc4d_io::EXTENSION)
-        .and_then(|s| s.strip_suffix('.'))
+    let stem = grid4d_io::OPEN_EXTENSIONS
+        .iter()
+        .find_map(|ext| name.strip_suffix(ext).and_then(|s| s.strip_suffix('.')))
         .unwrap_or(name);
     let cleaned: String = stem
         .chars()
@@ -334,11 +331,14 @@ fn file_stem_for(name: &str) -> String {
     }
 }
 
-/// `true` for paths with the document extension (any letter case).
+/// `true` for paths with a document extension, `.g4d` or legacy `.oc4d` (any letter case).
 #[must_use]
 pub fn is_document(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case(oc4d_io::EXTENSION))
+    path.extension().is_some_and(|ext| {
+        grid4d_io::OPEN_EXTENSIONS
+            .iter()
+            .any(|known| ext.eq_ignore_ascii_case(known))
+    })
 }
 
 /// Opens a document dropped onto the window (asking "Save changes?" first), or
@@ -357,7 +357,7 @@ pub fn accept_dropped_files(ctx: &egui::Context, editor: &mut EditorState) {
     }
 }
 
-/// The first `.oc4d` among `paths`; `None` if nothing was dropped, an alert if
+/// The first `.g4d` among `paths`; `None` if nothing was dropped, an alert if
 /// none of them is a document. (One document is open at a time, so further
 /// documents in the same drop are ignored.)
 fn choose_dropped(paths: &[&Path]) -> Option<Result<PathBuf, Alert>> {
@@ -368,8 +368,8 @@ fn choose_dropped(paths: &[&Path]) -> Option<Result<PathBuf, Alert>> {
         Some(path) => Ok(path.to_path_buf()),
         None => {
             let mut message = format!(
-                "None of the dropped files is an OpenC4D document (.{}):\n",
-                oc4d_io::EXTENSION
+                "None of the dropped files is a Grid4D document (.{}):\n",
+                grid4d_io::EXTENSION
             );
             for path in paths {
                 message.push('\n');
@@ -406,18 +406,27 @@ mod tests {
 
     #[test]
     fn extensions_are_appended_not_replaced() {
-        assert_eq!(with_extension(PathBuf::from("a/shot")), PathBuf::from("a/shot.oc4d"));
-        assert_eq!(
-            with_extension(PathBuf::from("a/shot.oc4d")),
-            PathBuf::from("a/shot.oc4d")
-        );
-        assert_eq!(with_extension(PathBuf::from("shot.v2")), PathBuf::from("shot.v2.oc4d"));
+        assert_eq!(with_extension(PathBuf::from("a/shot")), PathBuf::from("a/shot.g4d"));
+        assert_eq!(with_extension(PathBuf::from("a/shot.g4d")), PathBuf::from("a/shot.g4d"));
+        assert_eq!(with_extension(PathBuf::from("shot.v2")), PathBuf::from("shot.v2.g4d"));
+        assert_eq!(with_extension(PathBuf::from("old.oc4d")), PathBuf::from("old.oc4d"));
+    }
+
+    #[test]
+    fn legacy_oc4d_files_are_documents() {
+        for path in ["shot.g4d", "SHOT.G4D", "old.oc4d", "a/Old.OC4D"] {
+            assert!(is_document(Path::new(path)), "{path}");
+        }
+        for path in ["notes.txt", "g4d", "shot.g4d.bak", "shot.c4d"] {
+            assert!(!is_document(Path::new(path)), "{path}");
+        }
     }
 
     #[test]
     fn suggested_names_are_valid_file_names() {
         assert_eq!(file_stem_for("Untitled 1"), "Untitled 1");
-        assert_eq!(file_stem_for("shot.oc4d"), "shot");
+        assert_eq!(file_stem_for("shot.g4d"), "shot");
+        assert_eq!(file_stem_for("old.oc4d"), "old");
         assert_eq!(file_stem_for("a/b:c*?"), "a_b_c__");
         assert_eq!(file_stem_for("   "), "Untitled");
     }
@@ -429,7 +438,7 @@ mod tests {
         let mut file = DocumentFile::with_dialogs(Box::new(NativeDialogs));
         assert_eq!(
             file.title_update(&doc, &history).as_deref(),
-            Some("Untitled 1 — OpenC4D")
+            Some("Untitled 1 — Grid4D")
         );
         assert_eq!(file.title_update(&doc, &history), None);
 
@@ -437,18 +446,18 @@ mod tests {
         history.record(
             &mut scratch,
             "Edit",
-            vec![oc4d_scene::SceneEdit::SetName("x".to_owned())],
+            vec![grid4d_scene::SceneEdit::SetName("x".to_owned())],
             crate::Selection::default(),
             crate::Selection::default(),
         );
         assert_eq!(
             file.title_update(&doc, &history).as_deref(),
-            Some("Untitled 1 * — OpenC4D")
+            Some("Untitled 1 * — Grid4D")
         );
-        file.path = Some(PathBuf::from("renders/shot.oc4d"));
+        file.path = Some(PathBuf::from("renders/shot.g4d"));
         assert_eq!(
             file.title_update(&doc, &history).as_deref(),
-            Some("shot.oc4d * — OpenC4D")
+            Some("shot.g4d * — Grid4D")
         );
     }
 
@@ -457,7 +466,7 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     use egui::{RawInput, ViewportEvent, ViewportId, ViewportInfo};
-    use oc4d_scene::ObjectKindTag;
+    use grid4d_scene::ObjectKindTag;
 
     use crate::{EditorCommand, commands};
 
@@ -500,7 +509,7 @@ mod tests {
         /// The demo scene, with dialogs answering `open` / `save` (file names in a
         /// fresh temp directory unique to `test`).
         fn new(test: &str, open: Option<&str>, save: Option<&str>) -> Self {
-            let dir = std::env::temp_dir().join(format!("oc4d-ui-{}-{test}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("grid4d-ui-{}-{test}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let log = Rc::new(RefCell::new(DialogLog::default()));
@@ -547,21 +556,21 @@ mod tests {
 
     #[test]
     fn save_as_writes_the_file_and_marks_the_document_clean() {
-        let mut f = Fixture::new("save_as", None, Some("shot.oc4d"));
+        let mut f = Fixture::new("save_as", None, Some("shot.g4d"));
         f.make_dirty();
         f.run(&[EditorCommand::SaveAs]);
 
-        let path = f.dir.join("shot.oc4d");
+        let path = f.dir.join("shot.g4d");
         assert_eq!(f.editor.file.path(), Some(path.as_path()));
         assert!(!f.dirty());
-        assert_eq!(f.log.borrow().save_suggestions, ["Untitled 1.oc4d"]);
-        assert_eq!(oc4d_io::load(&path).unwrap().scene.len(), f.doc.scene.len());
-        assert_eq!(f.editor.file.display_name(&f.doc), "shot.oc4d");
+        assert_eq!(f.log.borrow().save_suggestions, ["Untitled 1.g4d"]);
+        assert_eq!(grid4d_io::load(&path).unwrap().scene.len(), f.doc.scene.len());
+        assert_eq!(f.editor.file.display_name(&f.doc), "shot.g4d");
     }
 
     #[test]
     fn save_asks_for_a_path_only_once() {
-        let mut f = Fixture::new("save_twice", None, Some("shot.oc4d"));
+        let mut f = Fixture::new("save_twice", None, Some("shot.g4d"));
         f.run(&[EditorCommand::Save]);
         f.make_dirty();
         f.run(&[EditorCommand::Save]);
@@ -571,7 +580,7 @@ mod tests {
             "the second save reuses the path"
         );
         assert!(!f.dirty());
-        let saved = oc4d_io::load(&f.dir.join("shot.oc4d")).unwrap();
+        let saved = grid4d_io::load(&f.dir.join("shot.g4d")).unwrap();
         assert_eq!(
             saved.scene.len(),
             f.doc.scene.len(),
@@ -591,7 +600,7 @@ mod tests {
 
     #[test]
     fn undoing_back_to_the_saved_state_is_clean_again() {
-        let mut f = Fixture::new("undo_clean", None, Some("shot.oc4d"));
+        let mut f = Fixture::new("undo_clean", None, Some("shot.g4d"));
         f.run(&[EditorCommand::Save]);
         f.make_dirty();
         f.run(&[EditorCommand::Undo]);
@@ -602,12 +611,12 @@ mod tests {
 
     #[test]
     fn open_asks_about_unsaved_changes_then_replaces_the_document() {
-        let mut f = Fixture::new("open", Some("other.oc4d"), None);
+        let mut f = Fixture::new("open", Some("other.g4d"), None);
         let mut other = Document::new("Other");
         other
             .scene
-            .insert(oc4d_scene::Node::new("Lonely", oc4d_scene::ObjectKind::Null));
-        oc4d_io::save(&other, &f.dir.join("other.oc4d")).unwrap();
+            .insert(grid4d_scene::Node::new("Lonely", grid4d_scene::ObjectKind::Null));
+        grid4d_io::save(&other, &f.dir.join("other.g4d")).unwrap();
         f.make_dirty();
         let before = f.doc.scene.len();
 
@@ -634,19 +643,19 @@ mod tests {
         assert!(!f.dirty());
         assert!(!f.editor.history.can_undo(), "a loaded document starts a new history");
         assert!(f.editor.selection.is_empty());
-        assert_eq!(f.editor.file.path(), Some(f.dir.join("other.oc4d").as_path()));
+        assert_eq!(f.editor.file.path(), Some(f.dir.join("other.g4d").as_path()));
     }
 
     #[test]
     fn saving_from_the_prompt_then_continues() {
-        let mut f = Fixture::new("save_then_new", None, Some("kept.oc4d"));
+        let mut f = Fixture::new("save_then_new", None, Some("kept.g4d"));
         f.make_dirty();
         let edited = f.doc.scene.len();
         f.run(&[
             EditorCommand::NewDocument,
             EditorCommand::AnswerUnsaved(UnsavedChoice::Save),
         ]);
-        assert_eq!(oc4d_io::load(&f.dir.join("kept.oc4d")).unwrap().scene.len(), edited);
+        assert_eq!(grid4d_io::load(&f.dir.join("kept.g4d")).unwrap().scene.len(), edited);
         assert!(f.doc.scene.is_empty(), "then the new document");
         assert_eq!(f.editor.file.path(), None);
         assert!(!f.dirty());
@@ -654,7 +663,7 @@ mod tests {
 
     #[test]
     fn a_failed_save_keeps_the_document_and_explains() {
-        let mut f = Fixture::new("failed_save", None, Some("missing-dir/shot.oc4d"));
+        let mut f = Fixture::new("failed_save", None, Some("missing-dir/shot.g4d"));
         f.make_dirty();
         let edited = f.doc.scene.len();
         f.run(&[
@@ -670,14 +679,14 @@ mod tests {
 
     #[test]
     fn a_broken_file_shows_an_alert_and_keeps_the_document() {
-        let mut f = Fixture::new("broken", Some("broken.oc4d"), None);
-        std::fs::write(f.dir.join("broken.oc4d"), "{ not json").unwrap();
+        let mut f = Fixture::new("broken", Some("broken.g4d"), None);
+        std::fs::write(f.dir.join("broken.g4d"), "{ not json").unwrap();
         let before = f.doc.scene.len();
         f.run(&[EditorCommand::Open]);
         assert_eq!(f.doc.scene.len(), before);
         let alert = f.editor.file.alert.as_ref().unwrap();
         assert_eq!(alert.title, "Could Not Open Document");
-        assert!(alert.message.contains("broken.oc4d"), "{}", alert.message);
+        assert!(alert.message.contains("broken.g4d"), "{}", alert.message);
     }
 
     #[test]
@@ -734,7 +743,7 @@ mod tests {
         assert!(sent.contains(&ViewportCommand::CancelClose));
         assert!(
             sent.iter()
-                .any(|c| matches!(c, ViewportCommand::Title(t) if t.ends_with("* — OpenC4D")))
+                .any(|c| matches!(c, ViewportCommand::Title(t) if t.ends_with("* — Grid4D")))
         );
         f.run(&[]); // the queued Quit
         assert_eq!(f.editor.file.pending(), Some(&FileAction::Quit));
@@ -750,19 +759,19 @@ mod tests {
 
     #[test]
     fn saving_and_opening_update_the_recent_list() {
-        let mut f = Fixture::new("recent_touch", Some("a.oc4d"), Some("b.oc4d"));
-        oc4d_io::save(&Document::new("A"), &f.dir.join("a.oc4d")).unwrap();
-        f.run(&[EditorCommand::SaveAs]); // b.oc4d
-        f.run(&[EditorCommand::Open]); // a.oc4d (the document is clean, no prompt)
+        let mut f = Fixture::new("recent_touch", Some("a.g4d"), Some("b.g4d"));
+        grid4d_io::save(&Document::new("A"), &f.dir.join("a.g4d")).unwrap();
+        f.run(&[EditorCommand::SaveAs]); // b.g4d
+        f.run(&[EditorCommand::Open]); // a.g4d (the document is clean, no prompt)
         let recent: Vec<_> = f.editor.file.recent.paths().to_vec();
-        assert_eq!(recent, [f.dir.join("a.oc4d"), f.dir.join("b.oc4d")], "newest first");
+        assert_eq!(recent, [f.dir.join("a.g4d"), f.dir.join("b.g4d")], "newest first");
     }
 
     #[test]
     fn open_recent_asks_first_and_opens_the_file() {
         let mut f = Fixture::new("recent_open", None, None);
-        let path = f.dir.join("old.oc4d");
-        oc4d_io::save(&Document::new("Old shot"), &path).unwrap();
+        let path = f.dir.join("old.g4d");
+        grid4d_io::save(&Document::new("Old shot"), &path).unwrap();
         f.make_dirty();
 
         f.run(&[EditorCommand::OpenFile(path.clone())]);
@@ -776,7 +785,7 @@ mod tests {
     #[test]
     fn a_vanished_recent_file_is_dropped_from_the_list() {
         let mut f = Fixture::new("recent_gone", None, None);
-        let gone = f.dir.join("gone.oc4d");
+        let gone = f.dir.join("gone.g4d");
         f.editor.file.recent.touch(&gone);
         f.run(&[EditorCommand::OpenFile(gone)]);
         assert!(f.editor.file.recent.is_empty());
@@ -788,7 +797,7 @@ mod tests {
     #[test]
     fn the_first_document_in_a_drop_is_chosen() {
         assert_eq!(choose_dropped(&[]), None);
-        let picked = choose_dropped(&[Path::new("notes.txt"), Path::new("a/shot.OC4D"), Path::new("b.oc4d")]);
+        let picked = choose_dropped(&[Path::new("notes.txt"), Path::new("a/shot.OC4D"), Path::new("b.g4d")]);
         assert_eq!(picked, Some(Ok(PathBuf::from("a/shot.OC4D"))));
 
         let Some(Err(alert)) = choose_dropped(&[Path::new("a/notes.txt"), Path::new("model.gltf")]) else {
@@ -815,8 +824,8 @@ mod tests {
     #[test]
     fn dropping_a_document_on_the_window_opens_it_after_the_prompt() {
         let mut f = Fixture::new("drop", None, None);
-        let path = f.dir.join("dropped.oc4d");
-        oc4d_io::save(&Document::new("Dropped"), &path).unwrap();
+        let path = f.dir.join("dropped.g4d");
+        grid4d_io::save(&Document::new("Dropped"), &path).unwrap();
         f.make_dirty();
 
         let ctx = egui::Context::default();

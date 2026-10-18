@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Range};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt as _;
 
-use oc4d_eval::MeshKey;
+use grid4d_eval::MeshKey;
 
 use crate::{
     FrameData, InstanceRaw, Vertex, ViewportTarget,
@@ -90,13 +90,13 @@ impl ViewportRenderer {
     #[must_use]
     pub fn new(device: &wgpu::Device, target: &GpuTargetConfig) -> Self {
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("oc4d.camera"),
+            label: Some("grid4d.camera"),
             size: size_of::<CameraUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("oc4d.camera.layout"),
+            label: Some("grid4d.camera.layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
@@ -109,7 +109,7 @@ impl ViewportRenderer {
             }],
         });
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("oc4d.camera.bind_group"),
+            label: Some("grid4d.camera.bind_group"),
             layout: &camera_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -117,7 +117,7 @@ impl ViewportRenderer {
             }],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("oc4d.viewport.layout"),
+            label: Some("grid4d.viewport.layout"),
             bind_group_layouts: &[Some(&camera_layout)],
             immediate_size: 0,
         });
@@ -210,12 +210,12 @@ impl ViewportRenderer {
         }
         let mesh = GpuMesh {
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("oc4d.mesh.vertices"),
+                label: Some("grid4d.mesh.vertices"),
                 contents: bytemuck::cast_slice(&self.vertex_scratch),
                 usage: wgpu::BufferUsages::VERTEX,
             }),
             indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("oc4d.mesh.indices"),
+                label: Some("grid4d.mesh.indices"),
                 contents: bytemuck::cast_slice(&self.index_scratch),
                 usage: wgpu::BufferUsages::INDEX,
             }),
@@ -232,12 +232,12 @@ impl ViewportRenderer {
     pub fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FrameData, target: &ViewportTarget) {
         self.prepare(device, queue, frame);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("oc4d.viewport.encoder"),
+            label: Some("grid4d.viewport.encoder"),
         });
         {
             let (color, depth) = target.attachments();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("oc4d.viewport.pass"),
+                label: Some("grid4d.viewport.pass"),
                 color_attachments: &[Some(color)],
                 depth_stencil_attachment: Some(depth),
                 ..Default::default()
@@ -276,7 +276,7 @@ fn to_u32(n: usize) -> u32 {
 
 fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("oc4d.instances"),
+        label: Some("grid4d.instances"),
         size: capacity as u64 * INSTANCE_STRIDE,
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
@@ -297,11 +297,11 @@ fn create_mesh_pipeline(
     target: &GpuTargetConfig,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("oc4d.mesh.wgsl"),
+        label: Some("grid4d.mesh.wgsl"),
         source: wgpu::ShaderSource::Wgsl(shaders::MESH.into()),
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("oc4d.mesh.pipeline"),
+        label: Some("grid4d.mesh.pipeline"),
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: &shader,
@@ -356,11 +356,11 @@ fn create_grid_pipeline(
     target: &GpuTargetConfig,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("oc4d.grid.wgsl"),
+        label: Some("grid4d.grid.wgsl"),
         source: wgpu::ShaderSource::Wgsl(shaders::GRID.into()),
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("oc4d.grid.pipeline"),
+        label: Some("grid4d.grid.pipeline"),
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: &shader,

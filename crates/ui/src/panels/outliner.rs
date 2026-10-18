@@ -10,7 +10,7 @@ use egui::{
     Align2, Button, CornerRadius, FontId, Id, Key, LayerId, Margin, Order, Rect, RichText, ScrollArea, Sense, Stroke,
     StrokeKind, TextEdit, TextStyle, Ui, Vec2, pos2, vec2,
 };
-use oc4d_scene::{Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit};
+use grid4d_scene::{Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit};
 
 use crate::{
     EditorCommand, EditorState, SelectMode,
@@ -76,7 +76,7 @@ impl OutlinerPanel {
 
         egui::Frame::new().fill(p::BG_PANEL).show(ui, |ui| {
             ScrollArea::vertical()
-                .id_salt("oc4d.outliner.scroll")
+                .id_salt("grid4d.outliner.scroll")
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
@@ -362,7 +362,7 @@ impl OutlinerPanel {
         if let (Some(pointer), Some(node)) = (ui.ctx().pointer_latest_pos(), scene.get(dragged)) {
             let painter = ui
                 .ctx()
-                .layer_painter(LayerId::new(Order::Tooltip, Id::unique("oc4d.outliner.drag")));
+                .layer_painter(LayerId::new(Order::Tooltip, Id::unique("grid4d.outliner.drag")));
             let text = painter.layout_no_wrap(node.data.name.clone(), FontId::proportional(12.0), p::TEXT_STRONG);
             let bg = Rect::from_min_size(pointer + vec2(14.0, 6.0), text.size() + vec2(10.0, 4.0));
             painter.rect_filled(bg, CornerRadius::same(3), p::ACCENT_BG);
@@ -479,7 +479,7 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use oc4d_scene::Document;
+    use grid4d_scene::Document;
 
     use super::{contains_ignore_ascii_case, edit_data};
     use crate::{EditorCommand, EditorState, ViewportPanel, commands};
