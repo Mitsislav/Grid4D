@@ -91,7 +91,9 @@ default-run = "open-c4d"
 [dependencies]
 oc4d-scene.workspace = true
 oc4d-ui.workspace = true
-eframe.workspace = true
+# `persistence`: window size/position, panel splitters (egui memory) and app data
+# such as recent files survive restarts. Only the binary owns storage.
+eframe = { workspace = true, features = ["persistence"] }
 egui.workspace = true
 egui-wgpu.workspace = true
 log.workspace = true

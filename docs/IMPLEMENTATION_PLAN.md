@@ -289,7 +289,7 @@ returns the exact original document and selection; redo ×5 reproduces it;
 |------|------|------|
 | 2.1 ✅ | M | `oc4d-io` crate: DTOs, `save(&Document, path)`, `load(path) -> Result<Document, IoError>`; round-trip test on the demo scene; fixtures — done 2026-10-18: flat pre-order object list with parent indices (no recursion limit, no cycles), HPB radians (exact round trip), atomic save via temp file + rename, non-finite numbers rejected, golden fixture `demo_v1.oc4d` |
 | 2.2 ✅ | M | File menu Open/Save/Save As + `Ctrl+O/S/Shift+S`; dirty flag; title; "Save changes?" modal on New/Open/Quit — done 2026-10-18: `ui/file.rs` (+ `Ctrl+N`), `FileDialogs` seam with rfd, dirty = `History::state_id` ≠ saved, close button intercepted via `CancelClose`, error alert panel. Open: the title shows the file name; the document's own `name` is not renamed on Save As (revisit) |
-| 2.3 | S | Recent files (File ▸ Recent), persisted window/splitter state |
+| 2.3 ✅ | S | Recent files (File ▸ Recent), persisted window/splitter state — done 2026-10-18: `RecentFiles` (10, newest first, vanished files dropped), opening a recent file asks "Save changes?" too; eframe `persistence` on the binary restores window geometry and panel sizes |
 | 2.4 | S | Drag-and-drop a `.oc4d` file onto the window opens it |
 
 **Acceptance:** save → quit → open reproduces the scene exactly (names, order,

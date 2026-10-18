@@ -12,7 +12,7 @@ use std::{
 use egui::ViewportCommand;
 use oc4d_scene::Document;
 
-use crate::{EditorCommand, EditorState, History, ViewportPanel};
+use crate::{EditorCommand, EditorState, History, ViewportPanel, recent::RecentFiles};
 
 /// Native open/save dialogs, behind a trait so tests never open a window.
 pub trait FileDialogs: std::fmt::Debug {
@@ -65,10 +65,13 @@ fn with_extension(path: PathBuf) -> PathBuf {
 }
 
 /// An action that would replace or close the current document.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileAction {
     New,
+    /// Ask for a document, then open it.
     Open,
+    /// Open this document (File ▸ Open Recent).
+    OpenPath(PathBuf),
     Quit,
 }
 
@@ -100,6 +103,8 @@ pub struct DocumentFile {
     pub dialogs: Box<dyn FileDialogs>,
     /// An error to show; the alert panel clears it when dismissed.
     pub alert: Option<Alert>,
+    /// File ▸ Open Recent; the application loads and stores it.
+    pub recent: RecentFiles,
     /// What the window title was last set to (to update it only on change).
     title_name: String,
     title_dirty: bool,
@@ -123,6 +128,7 @@ impl DocumentFile {
             quitting: false,
             dialogs,
             alert: None,
+            recent: RecentFiles::default(),
             title_name: String::new(),
             title_dirty: false,
             title_set: false,
@@ -144,8 +150,8 @@ impl DocumentFile {
 
     /// The action waiting for an answer to "Save changes?", if any.
     #[must_use]
-    pub fn pending(&self) -> Option<FileAction> {
-        self.pending
+    pub fn pending(&self) -> Option<&FileAction> {
+        self.pending.as_ref()
     }
 
     #[must_use]
@@ -228,6 +234,7 @@ fn perform(action: FileAction, doc: &mut Document, editor: &mut EditorState, vie
                 open_path(path, doc, editor, viewport);
             }
         }
+        FileAction::OpenPath(path) => open_path(path, doc, editor, viewport),
         FileAction::Quit => editor.file.quitting = true,
     }
 }
@@ -237,10 +244,15 @@ fn perform(action: FileAction, doc: &mut Document, editor: &mut EditorState, vie
 pub(crate) fn open_path(path: PathBuf, doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel) {
     match oc4d_io::load(&path) {
         Ok(loaded) => {
+            editor.file.recent.touch(&path);
             replace(doc, editor, viewport, loaded, Some(path));
             viewport.frame_scene(&doc.scene);
         }
         Err(err) => {
+            // A recent entry whose file is gone is of no further use.
+            if matches!(&err, oc4d_io::IoError::Io(io) if io.kind() == std::io::ErrorKind::NotFound) {
+                editor.file.recent.remove(&path);
+            }
             editor.file.alert = Some(Alert {
                 title: "Could Not Open Document",
                 message: format!("{}\n\n{err}", path.display()),
@@ -284,6 +296,7 @@ pub(crate) fn save(doc: &Document, editor: &mut EditorState, ask_path: bool) -> 
     };
     match oc4d_io::save(doc, &path) {
         Ok(()) => {
+            editor.file.recent.touch(&path);
             editor.file.path = Some(path);
             editor.file.saved_state = editor.history.state_id();
             true
@@ -550,7 +563,7 @@ mod tests {
         let before = f.doc.scene.len();
 
         f.run(&[EditorCommand::Open]);
-        assert_eq!(f.editor.file.pending(), Some(FileAction::Open));
+        assert_eq!(f.editor.file.pending(), Some(&FileAction::Open));
         assert_eq!(
             f.log.borrow().open_calls,
             0,
@@ -628,7 +641,7 @@ mod tests {
         f.make_dirty();
         f.run(&[EditorCommand::Quit]);
         assert!(!f.editor.file.is_quitting());
-        assert_eq!(f.editor.file.pending(), Some(FileAction::Quit));
+        assert_eq!(f.editor.file.pending(), Some(&FileAction::Quit));
         f.run(&[EditorCommand::AnswerUnsaved(UnsavedChoice::Discard)]);
         assert!(f.editor.file.is_quitting());
     }
@@ -675,7 +688,7 @@ mod tests {
                 .any(|c| matches!(c, ViewportCommand::Title(t) if t.ends_with("* — OpenC4D")))
         );
         f.run(&[]); // the queued Quit
-        assert_eq!(f.editor.file.pending(), Some(FileAction::Quit));
+        assert_eq!(f.editor.file.pending(), Some(&FileAction::Quit));
 
         f.run(&[EditorCommand::AnswerUnsaved(UnsavedChoice::Discard)]);
         let sent = sync_frame(&mut f, true);
@@ -684,5 +697,40 @@ mod tests {
             !sent.contains(&ViewportCommand::CancelClose),
             "a confirmed quit goes through"
         );
+    }
+
+    #[test]
+    fn saving_and_opening_update_the_recent_list() {
+        let mut f = Fixture::new("recent_touch", Some("a.oc4d"), Some("b.oc4d"));
+        oc4d_io::save(&Document::new("A"), &f.dir.join("a.oc4d")).unwrap();
+        f.run(&[EditorCommand::SaveAs]); // b.oc4d
+        f.run(&[EditorCommand::Open]); // a.oc4d (the document is clean, no prompt)
+        let recent: Vec<_> = f.editor.file.recent.paths().to_vec();
+        assert_eq!(recent, [f.dir.join("a.oc4d"), f.dir.join("b.oc4d")], "newest first");
+    }
+
+    #[test]
+    fn open_recent_asks_first_and_opens_the_file() {
+        let mut f = Fixture::new("recent_open", None, None);
+        let path = f.dir.join("old.oc4d");
+        oc4d_io::save(&Document::new("Old shot"), &path).unwrap();
+        f.make_dirty();
+
+        f.run(&[EditorCommand::OpenRecent(path.clone())]);
+        assert_eq!(f.editor.file.pending(), Some(&FileAction::OpenPath(path.clone())));
+        f.run(&[EditorCommand::AnswerUnsaved(UnsavedChoice::Discard)]);
+        assert_eq!(f.doc.name, "Old shot");
+        assert_eq!(f.editor.file.path(), Some(path.as_path()));
+        assert_eq!(f.log.borrow().open_calls, 0, "no dialog for a recent file");
+    }
+
+    #[test]
+    fn a_vanished_recent_file_is_dropped_from_the_list() {
+        let mut f = Fixture::new("recent_gone", None, None);
+        let gone = f.dir.join("gone.oc4d");
+        f.editor.file.recent.touch(&gone);
+        f.run(&[EditorCommand::OpenRecent(gone)]);
+        assert!(f.editor.file.recent.is_empty());
+        assert_eq!(f.editor.file.alert.as_ref().unwrap().title, "Could Not Open Document");
     }
 }

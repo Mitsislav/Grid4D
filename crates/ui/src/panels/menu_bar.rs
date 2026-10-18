@@ -11,6 +11,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
         ui.menu_button("File", |ui| {
             command(ui, editor, "New", "Ctrl+N", EditorCommand::NewDocument);
             command(ui, editor, "Open…", "Ctrl+O", EditorCommand::Open);
+            ui.menu_button("Open Recent", |ui| recent_menu(ui, editor));
             ui.separator();
             command(ui, editor, "Save", "Ctrl+S", EditorCommand::Save);
             command(ui, editor, "Save As…", "Ctrl+Shift+S", EditorCommand::SaveAs);
@@ -208,6 +209,32 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
 fn command(ui: &mut Ui, editor: &mut EditorState, label: &str, shortcut: &str, cmd: EditorCommand) {
     if ui.add(Button::new(label).shortcut_text(shortcut)).clicked() {
         editor.commands.push(cmd);
+        ui.close();
+    }
+}
+
+/// File ▸ Open Recent: newest first, full path on hover, and Clear.
+fn recent_menu(ui: &mut Ui, editor: &mut EditorState) {
+    let mut open = None;
+    if editor.file.recent.is_empty() {
+        ui.add_enabled(false, Button::new("No recent documents"));
+    }
+    for path in editor.file.recent.paths() {
+        let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
+        if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+            open = Some(path.clone());
+        }
+    }
+    ui.separator();
+    if ui
+        .add_enabled(!editor.file.recent.is_empty(), Button::new("Clear Recent"))
+        .clicked()
+    {
+        editor.file.recent.clear();
+        ui.close();
+    }
+    if let Some(path) = open {
+        editor.commands.push(EditorCommand::OpenRecent(path));
         ui.close();
     }
 }

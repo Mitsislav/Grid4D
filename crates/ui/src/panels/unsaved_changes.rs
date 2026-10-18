@@ -45,10 +45,12 @@ pub fn show(ctx: &egui::Context, doc: &Document, editor: &mut EditorState) {
     }
 }
 
-const fn consequence(action: FileAction) -> &'static str {
+const fn consequence(action: &FileAction) -> &'static str {
     match action {
         FileAction::New => "Your changes will be lost if you start a new document without saving.",
-        FileAction::Open => "Your changes will be lost if you open another document without saving.",
+        FileAction::Open | FileAction::OpenPath(_) => {
+            "Your changes will be lost if you open another document without saving."
+        }
         FileAction::Quit => "Your changes will be lost if you quit without saving.",
     }
 }

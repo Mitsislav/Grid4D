@@ -4,9 +4,9 @@
 use egui::{CentralPanel, Margin, Panel};
 use oc4d_scene::Document;
 use oc4d_ui::{
-    AttributesPanel, EditorState, OutlinerPanel, TimelinePanel, ViewportPanel, commands, file,
+    AttributesPanel, EditorState, OutlinerPanel, RecentFiles, TimelinePanel, ViewportPanel, commands, file,
     panels::{about, alert, menu_bar, mode_palette, status_bar, toolbar, unsaved_changes},
-    shortcuts,
+    recent, shortcuts,
     theme::{self, metrics},
 };
 
@@ -49,6 +49,9 @@ impl OpenC4DApp {
             ..EditorState::default()
         };
         log::info!("Renderer: {}", editor.renderer_info);
+        if let Some(stored) = cc.storage.and_then(|s| s.get_string(recent::STORAGE_KEY)) {
+            editor.file.recent = RecentFiles::from_storage(&stored);
+        }
 
         let doc = Document::with_demo_scene();
         // Start with the first object active so the gizmo and Attribute Manager have content.
@@ -69,6 +72,12 @@ impl OpenC4DApp {
 }
 
 impl eframe::App for OpenC4DApp {
+    /// Called by eframe on exit and periodically. Window geometry and panel sizes
+    /// are persisted by eframe itself (the `persistence` feature).
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(recent::STORAGE_KEY, self.editor.file.recent.to_storage());
+    }
+
     /// Advances playback before the UI runs, using real elapsed time.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.doc.time.is_playing() {
