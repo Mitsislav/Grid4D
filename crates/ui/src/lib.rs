@@ -17,6 +17,7 @@
 
 pub mod commands;
 pub mod editor;
+pub mod history;
 pub mod icons;
 pub mod panels;
 pub mod shortcuts;
@@ -25,4 +26,5 @@ mod widgets;
 
 pub use commands::{CommandQueue, EditorCommand, SelectMode};
 pub use editor::{EditMode, EditorState, Selection, Tool};
+pub use history::{History, UndoGroup};
 pub use panels::{AttributesPanel, OutlinerPanel, TimelinePanel, ViewportPanel};

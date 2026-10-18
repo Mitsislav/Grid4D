@@ -242,7 +242,7 @@ interaction end**:
 |------|------|------|-------|
 | 1.1 ✅ | M | `NodeData` split; soft-delete (`detach/attach/purge`), ordered insert/reparent; tests for invariants (no dangling links, detached nodes invisible to `walk`, purge frees) — done 2026-10-18, incl. a seeded random-edit-sequence invariant test | `scene/{node,scene}.rs` |
 | 1.2 ✅ | M | `SceneEdit` + `Document::apply` returning inverse; property test: random edit sequences, apply + inverse ⇒ document equals original — done 2026-10-18: variants `Insert/Detach/Attach/Move/SetData/SetTime/SetName`, atomic `apply_all`, `TimeSettings`, `Scene::transform_keeping_world`; seeded test checks every intermediate undo and redo state | `scene/edit.rs`, `scene/time.rs` |
-| 1.3 | M | `History` + `UndoGroup`; `EditorCommand::{Undo, Redo, CommitData}`; translate existing commands; `NewDocument` clears history and purges | `ui/{history,commands,editor}.rs` |
+| 1.3 ✅ | M | `History` + `UndoGroup`; `EditorCommand::{Undo, Redo, CommitData}`; translate existing commands; `NewDocument` clears history and purges — done 2026-10-18: create/delete/reparent are one step each, detached nodes are purged once no step can restore them (redo discarded, limit, clear), `History::state_id` ready for the dirty flag | `ui/{history,commands,editor}.rs` |
 | 1.4 | M | Gizmo commit-on-release; Attribute Manager `track_edit`; Object Manager rename/visibility via commands | `ui/panels/{viewport/gizmo,attributes,outliner}.rs` |
 | 1.5 | S | Toolbar Undo/Redo enabled state + tooltip with label ("Undo Move"); Edit menu entries; shortcuts `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`; history limit preference (default 100) | `ui/panels/{toolbar,menu_bar}.rs`, `ui/shortcuts.rs` |
 

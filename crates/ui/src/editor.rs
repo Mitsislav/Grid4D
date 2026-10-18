@@ -4,7 +4,7 @@
 use oc4d_scene::{NodeId, Scene};
 use slotmap::SecondaryMap;
 
-use crate::CommandQueue;
+use crate::{CommandQueue, History};
 
 /// The active manipulation tool (top toolbar).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,6 +189,8 @@ pub struct EditorState {
     pub world_coordinates: bool,
     pub snapping: bool,
     pub commands: CommandQueue,
+    /// Undo/redo steps; written only by `commands::apply`.
+    pub history: History,
     /// One-line help for the status bar; set by whatever the pointer is over,
     /// cleared every frame.
     pub status_hint: Option<&'static str>,
@@ -207,6 +209,7 @@ impl Default for EditorState {
             world_coordinates: false,
             snapping: false,
             commands: CommandQueue::default(),
+            history: History::default(),
             status_hint: None,
             renderer_info: String::new(),
             show_about: false,
