@@ -55,12 +55,18 @@ pub enum EditorCommand {
     },
     Undo,
     Redo,
-    /// Records an edit that was already written live (a gizmo drag, a value
-    /// field): `before` is the node's data when the interaction started. Nothing
-    /// is recorded if the data did not change.
-    CommitData {
-        id: NodeId,
-        before: NodeData,
+    /// Applies one discrete document change (a rename, a visibility toggle) as
+    /// an undo step.
+    Edit {
+        edit: SceneEdit,
+        label: &'static str,
+    },
+    /// Records a change that was already written live while the user interacted
+    /// (a gizmo drag, a value field): `inverse` restores the state from before
+    /// the interaction, e.g. `SetData` with the node's old data. Nothing is
+    /// recorded if the live value equals it, i.e. nothing changed.
+    CommitLive {
+        inverse: SceneEdit,
         label: &'static str,
     },
     FrameScene,
@@ -172,10 +178,10 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::Redo => {
             editor.history.redo(doc, &mut editor.selection);
         }
-        EditorCommand::CommitData { id, before, label } => {
-            if doc.scene.get(id).is_some_and(|node| node.data != before) {
+        EditorCommand::Edit { edit, label } => commit(doc, editor, label, vec![edit], |_, _| {}),
+        EditorCommand::CommitLive { inverse, label } => {
+            if !is_current_state(doc, &inverse) {
                 let selection = editor.selection.clone();
-                let inverse = SceneEdit::SetData { id, data: before };
                 editor
                     .history
                     .record(doc, label, vec![inverse], selection.clone(), selection);
@@ -237,6 +243,21 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Plane => {}
     }
     data
+}
+
+/// `true` if applying the value edit `edit` would change nothing, i.e. a live
+/// interaction ended where it started. A missing node counts as unchanged, so a
+/// commit for an object deleted mid-drag records nothing.
+fn is_current_state(doc: &Document, edit: &SceneEdit) -> bool {
+    match edit {
+        SceneEdit::SetData { id, data } => doc.scene.get(*id).is_none_or(|node| node.data == *data),
+        SceneEdit::SetTime(settings) => doc.time.settings() == *settings,
+        SceneEdit::SetName(name) => doc.name == *name,
+        // Structural changes are never made live; record them as given.
+        SceneEdit::Insert { .. } | SceneEdit::Detach { .. } | SceneEdit::Attach { .. } | SceneEdit::Move { .. } => {
+            false
+        }
+    }
 }
 
 fn has_selected_ancestor(scene: &Scene, selection: &Selection, id: NodeId) -> bool {
@@ -554,13 +575,15 @@ mod tests {
     }
 
     #[test]
-    fn commit_data_records_live_edits() {
+    fn commit_live_records_live_edits() {
         let (mut doc, mut editor, mut vp) = demo();
         let sphere = id_of(&doc, "Sphere");
         let before = doc.scene.get(sphere).unwrap().data.clone();
-        let commit = EditorCommand::CommitData {
-            id: sphere,
-            before: before.clone(),
+        let commit = EditorCommand::CommitLive {
+            inverse: SceneEdit::SetData {
+                id: sphere,
+                data: before.clone(),
+            },
             label: "Move",
         };
 
@@ -623,9 +646,8 @@ mod tests {
         step(
             &mut doc,
             &mut editor,
-            &[EditorCommand::CommitData {
-                id: null,
-                before,
+            &[EditorCommand::CommitLive {
+                inverse: SceneEdit::SetData { id: null, data: before },
                 label: "Rename",
             }],
         );
@@ -754,5 +776,80 @@ mod tests {
         assert!(!editor.history.can_undo() && !editor.history.can_redo());
         assert_eq!(editor.history.state_id(), 0);
         assert!(doc.scene.detached_roots().is_empty());
+    }
+
+    #[test]
+    fn edit_and_commit_live_cover_document_settings() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let original = doc.time.settings();
+
+        // A live change (the fps field while dragging), committed on release.
+        doc.time.set_fps(48);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CommitLive {
+                inverse: SceneEdit::SetTime(original),
+                label: "Project Settings",
+            }],
+        );
+        // A discrete change, applied by the command itself.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Edit {
+                edit: SceneEdit::SetName("Shot 010".to_owned()),
+                label: "Rename Project",
+            }],
+        );
+        assert_eq!(doc.time.fps(), 48);
+        assert_eq!(doc.name, "Shot 010");
+        assert_eq!(editor.history.undo_len(), 2);
+
+        // Committing the current state again records nothing.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CommitLive {
+                inverse: SceneEdit::SetName("Shot 010".to_owned()),
+                label: "Rename Project",
+            }],
+        );
+        assert_eq!(editor.history.undo_len(), 2);
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Undo, EditorCommand::Undo],
+        );
+        assert_eq!(doc.name, "Untitled 1");
+        assert_eq!(doc.time.settings(), original);
+    }
+
+    #[test]
+    fn a_commit_for_a_deleted_node_records_nothing() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let sphere = id_of(&doc, "Sphere");
+        let before = doc.scene.get(sphere).unwrap().data.clone();
+        editor.selection.set_single(sphere);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CommitLive {
+                inverse: SceneEdit::SetData {
+                    id: sphere,
+                    data: before,
+                },
+                label: "Move",
+            }],
+        );
+        assert_eq!(editor.history.undo_label(), Some("Delete"));
+        assert_eq!(editor.history.undo_len(), 1);
     }
 }

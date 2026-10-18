@@ -8,10 +8,10 @@ use std::f32::consts::{PI, TAU};
 use egui::{Color32, CornerRadius, PointerButton, Pos2, Rect, Response, Shape, Stroke, Ui, Vec2};
 use glam::{Mat4, Quat, Vec3};
 use oc4d_render::OrbitCamera;
-use oc4d_scene::{NodeId, Scene};
+use oc4d_scene::{NodeData, NodeId, Scene, SceneEdit};
 
 use super::project;
-use crate::{EditorState, Tool, theme::palette as p};
+use crate::{CommandQueue, EditorCommand, EditorState, Tool, theme::palette as p};
 
 /// On-screen length of the axis handles, in points.
 const HANDLE_PX: f32 = 90.0;
@@ -90,6 +90,14 @@ impl GizmoGeometry {
         })
     }
 
+    /// A point on the Move/Scale handle of `axis` and the handle's screen direction.
+    #[cfg(test)]
+    pub(super) fn handle_for_test(&self, axis: usize) -> Option<(Pos2, Vec2)> {
+        let end = self.ends_px[axis]?;
+        let along = end - self.origin_px;
+        Some((self.origin_px + along * 0.6, along.normalized()))
+    }
+
     /// The handle under `pointer`, if any.
     fn hit(&self, pointer: Pos2) -> Option<usize> {
         let mut best: Option<(f32, usize)> = None;
@@ -152,11 +160,14 @@ impl GizmoGeometry {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Drag {
     node: NodeId,
     axis: usize,
     last_pointer: Pos2,
+    /// The node's data when the drag started: the whole drag is one undo step.
+    before: NodeData,
+    label: &'static str,
 }
 
 /// Interaction state that survives between frames.
@@ -177,31 +188,39 @@ pub(super) struct GizmoInteraction {
 
 impl GizmoState {
     pub(super) fn hot_axis(&self) -> Option<usize> {
-        self.drag.map(|d| d.axis).or(self.hot)
+        self.drag.as_ref().map(|d| d.axis).or(self.hot)
     }
 
-    /// Handles hover and drag.
+    /// Handles hover and drag. The transform is written live while dragging;
+    /// when the drag ends, one undo step for it is pushed to `commands`.
     pub(super) fn interact(
         &mut self,
         ui: &Ui,
         response: &Response,
         geo: Option<&GizmoGeometry>,
         scene: &mut Scene,
+        commands: &mut CommandQueue,
     ) -> GizmoInteraction {
         let alt = ui.input(|i| i.modifiers.alt);
 
-        if let Some(mut drag) = self.drag {
+        if let Some(drag) = &mut self.drag {
             let mut moved_object = false;
             if response.dragged_by(PointerButton::Primary)
                 && let (Some(geo), Some(pointer)) = (geo, response.interact_pointer_pos())
                 && geo.node == drag.node
             {
                 moved_object = pointer != drag.last_pointer;
-                apply_drag(geo, &drag, pointer, scene);
+                apply_drag(geo, drag, pointer, scene);
                 drag.last_pointer = pointer;
-                self.drag = Some(drag);
-            } else {
-                self.drag = None;
+            } else if let Some(done) = self.drag.take() {
+                // Recorded only if the drag actually changed something.
+                commands.push(EditorCommand::CommitLive {
+                    inverse: SceneEdit::SetData {
+                        id: done.node,
+                        data: done.before,
+                    },
+                    label: done.label,
+                });
             }
             return GizmoInteraction {
                 owns_pointer: true,
@@ -219,11 +238,14 @@ impl GizmoState {
             let press = ui.input(|i| i.pointer.press_origin());
             if let (Some(geo), Some(press)) = (geo, press)
                 && let Some(axis) = geo.hit(press)
+                && let Some(node) = scene.get(geo.node)
             {
                 self.drag = Some(Drag {
                     node: geo.node,
                     axis,
                     last_pointer: response.interact_pointer_pos().unwrap_or(press),
+                    before: node.data.clone(),
+                    label: geo.tool.label(),
                 });
                 return GizmoInteraction {
                     owns_pointer: true,

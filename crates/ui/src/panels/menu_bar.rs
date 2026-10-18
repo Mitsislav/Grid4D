@@ -2,7 +2,7 @@
 //! disabled so the roadmap is visible in the product itself.
 
 use egui::{Button, Layout, RichText, Ui, ViewportCommand};
-use oc4d_scene::{Document, ObjectKindTag};
+use oc4d_scene::{Document, ObjectKindTag, SceneEdit};
 
 use crate::{EditMode, EditorCommand, EditorState, Tool, theme::palette as p};
 
@@ -146,7 +146,14 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 ui.close();
             }
             ui.separator();
-            ui.checkbox(&mut time.looping, "Loop Playback");
+            // A document setting: applied as an undo step, after layout.
+            let mut settings = time.settings();
+            if ui.checkbox(&mut settings.looping, "Loop Playback").changed() {
+                editor.commands.push(EditorCommand::Edit {
+                    edit: SceneEdit::SetTime(settings),
+                    label: "Loop Playback",
+                });
+            }
             planned(ui, "Record Active Objects", "F9");
         });
 

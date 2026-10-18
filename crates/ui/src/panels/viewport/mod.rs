@@ -36,8 +36,8 @@ pub struct ViewportPanel {
     show_grid: bool,
     show_axis_triad: bool,
     show_hud: bool,
-    /// Height of the 3D area last frame (used by the header's pan handle).
-    view_height: f32,
+    /// The 3D area last frame (the header's pan handle needs its height).
+    view_rect: Rect,
 }
 
 impl ViewportPanel {
@@ -75,7 +75,7 @@ impl ViewportPanel {
             show_grid: true,
             show_axis_triad: true,
             show_hud: true,
-            view_height: 600.0,
+            view_rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0)),
         }
     }
 
@@ -131,7 +131,7 @@ impl ViewportPanel {
         if rect.width() < 1.0 || rect.height() < 1.0 {
             return;
         }
-        self.view_height = rect.height();
+        self.view_rect = rect;
 
         let navigating = self.navigate(ui, &response, rect);
         // Built once per frame (after navigation moved the camera) and shared by
@@ -140,7 +140,9 @@ impl ViewportPanel {
         let gizmo_owns_pointer = if navigating {
             false
         } else {
-            let interaction = self.gizmo.interact(ui, &response, gizmo_geo.as_ref(), &mut doc.scene);
+            let interaction =
+                self.gizmo
+                    .interact(ui, &response, gizmo_geo.as_ref(), &mut doc.scene, &mut editor.commands);
             if interaction.moved_object {
                 gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect);
             }
@@ -264,7 +266,7 @@ impl ViewportPanel {
                         let pan = icon_button(ui, Icon::Move, style, "Drag to pan").interact(Sense::drag());
                         if pan.dragged() {
                             let d = pan.drag_delta();
-                            self.camera.pan(GVec2::new(d.x, d.y), self.view_height);
+                            self.camera.pan(GVec2::new(d.x, d.y), self.view_rect.height());
                         }
                     });
                 });
@@ -364,4 +366,122 @@ pub(super) fn project(view_proj: &Mat4, rect: Rect, point: Vec3) -> Option<Pos2>
         rect.left() + (ndc.x * 0.5 + 0.5) * rect.width(),
         rect.top() + (0.5 - ndc.y * 0.5) * rect.height(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::{Event, Modifiers, RawInput, Vec2, vec2};
+
+    use super::*;
+    use crate::{EditorCommand, Tool, commands};
+
+    /// Runs the viewport headless (no GPU) in a real egui context.
+    struct Harness {
+        ctx: egui::Context,
+        time: f64,
+        doc: Document,
+        editor: EditorState,
+        viewport: ViewportPanel,
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            let doc = Document::with_demo_scene();
+            let mut editor = EditorState {
+                tool: Tool::Move,
+                ..EditorState::default()
+            };
+            let cube = doc.scene.roots()[0];
+            editor.selection.set_single(cube);
+            Self {
+                ctx: egui::Context::default(),
+                time: 0.0,
+                doc,
+                editor,
+                viewport: ViewportPanel::new(None, None, 1),
+            }
+        }
+
+        /// One frame: input events, layout, then the queued commands (as the app does).
+        fn frame(&mut self, events: Vec<Event>) {
+            self.time += 1.0 / 60.0;
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 700.0))),
+                time: Some(self.time),
+                events,
+                ..RawInput::default()
+            };
+            let (doc, editor, viewport) = (&mut self.doc, &mut self.editor, &mut self.viewport);
+            self.ctx
+                .run_ui(input, |ui| {
+                    egui::CentralPanel::no_frame().show(ui, |ui| viewport.show(ui, doc, editor));
+                })
+                // No renderer here: font textures are never uploaded.
+                .drop_without_applying_deltas();
+            commands::apply_pending(doc, editor, viewport);
+        }
+
+        fn button(pos: Pos2, pressed: bool) -> Event {
+            Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            }
+        }
+
+        fn position(&self, id: oc4d_scene::NodeId) -> Vec3 {
+            self.doc.scene.get(id).unwrap().data.transform.position
+        }
+    }
+
+    #[test]
+    fn a_gizmo_drag_is_one_undo_step() {
+        let mut h = Harness::new();
+        h.frame(vec![]); // lay out once so the viewport knows its 3D rect
+        let cube = h.editor.selection.active().unwrap();
+        let geo = GizmoGeometry::new(&h.doc.scene, &h.editor, &h.viewport.camera, h.viewport.view_rect).unwrap();
+        let (start, dir): (Pos2, Vec2) = geo.handle_for_test(0).unwrap();
+        let before = h.position(cube);
+
+        h.frame(vec![Event::PointerMoved(start)]);
+        h.frame(vec![Harness::button(start, true)]);
+        let mut pointer = start;
+        for _ in 0..4 {
+            pointer += dir * 15.0;
+            h.frame(vec![Event::PointerMoved(pointer)]);
+        }
+        let dragged = h.position(cube);
+        assert!(
+            dragged.x > before.x + 1.0,
+            "the X handle moves along X: {before:?} -> {dragged:?}"
+        );
+        assert!((dragged.y - before.y).abs() < 1e-3 && (dragged.z - before.z).abs() < 1e-3);
+        assert!(!h.editor.history.can_undo(), "nothing is recorded while dragging");
+
+        h.frame(vec![Harness::button(pointer, false)]);
+        h.frame(vec![]);
+        assert_eq!(h.editor.history.undo_len(), 1, "the whole drag is one step");
+        assert_eq!(h.editor.history.undo_label(), Some("Move"));
+
+        h.editor.commands.push(EditorCommand::Undo);
+        h.frame(vec![]);
+        assert_eq!(h.position(cube), before);
+        h.editor.commands.push(EditorCommand::Redo);
+        h.frame(vec![]);
+        assert_eq!(h.position(cube), dragged);
+    }
+
+    #[test]
+    fn a_click_without_drag_records_nothing() {
+        let mut h = Harness::new();
+        h.frame(vec![]);
+        let geo = GizmoGeometry::new(&h.doc.scene, &h.editor, &h.viewport.camera, h.viewport.view_rect).unwrap();
+        let (start, _) = geo.handle_for_test(1).unwrap();
+        h.frame(vec![Event::PointerMoved(start)]);
+        h.frame(vec![Harness::button(start, true)]);
+        h.frame(vec![Harness::button(start, false)]);
+        h.frame(vec![]);
+        assert!(!h.editor.history.can_undo());
+    }
 }

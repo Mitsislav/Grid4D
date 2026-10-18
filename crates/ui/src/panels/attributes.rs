@@ -1,14 +1,18 @@
 //! Attribute Manager: parameters of the active object, organised in C4D's
 //! Basic / Coord. / Object tabs. With nothing selected it shows the project
 //! settings, like Cinema 4D does.
+//!
+//! Fields write to the document live; each finished interaction (a drag, a
+//! typed value, a click) is recorded as one undo step through [`LiveEdit`].
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
-use oc4d_scene::{Document, NodeData, NodeId, ObjectKind};
+use oc4d_scene::{Document, NodeData, NodeId, ObjectKind, SceneEdit, TimeSettings};
 
 use crate::{
-    EditorState,
+    CommandQueue, EditorCommand, EditorState,
     commands::tag_color,
     icons::{self, Icon},
+    live_edit::{LiveEdit, interaction_ongoing},
     theme::palette as p,
     widgets::{attr_label, manager_tabs, section_heading},
 };
@@ -24,9 +28,23 @@ enum Tab {
     Object,
 }
 
+impl Tab {
+    /// Undo label for edits made on this tab.
+    const fn edit_label(self) -> &'static str {
+        match self {
+            Self::Basic => "Edit Basic Properties",
+            Self::Coord => "Edit Coordinates",
+            Self::Object => "Edit Object Properties",
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct AttributesPanel {
     tab: Tab,
+    node_edit: LiveEdit<NodeId, NodeData>,
+    name_edit: LiveEdit<(), String>,
+    time_edit: LiveEdit<(), TimeSettings>,
 }
 
 impl AttributesPanel {
@@ -55,15 +73,23 @@ impl AttributesPanel {
             .show(ui, |ui| {
                 egui::Frame::new().inner_margin(Margin::symmetric(8, 6)).show(ui, |ui| {
                     match editor.selection.active() {
-                        Some(id) => self.node_ui(ui, doc, id, editor.selection.len()),
-                        None => project_ui(ui, doc),
+                        Some(id) => self.node_ui(ui, doc, id, editor.selection.len(), &mut editor.commands),
+                        None => self.project_ui(ui, doc, &mut editor.commands),
                     }
                 });
             });
     }
 
-    fn node_ui(&mut self, ui: &mut Ui, doc: &mut Document, id: NodeId, selection_len: usize) {
+    fn node_ui(
+        &mut self,
+        ui: &mut Ui,
+        doc: &mut Document,
+        id: NodeId,
+        selection_len: usize,
+        commands: &mut CommandQueue,
+    ) {
         let Some(node) = doc.scene.get_mut(id) else { return };
+        self.node_edit.begin(id, &node.data);
 
         // Title: "Cube Object [Cube]"
         ui.horizontal(|ui| {
@@ -98,6 +124,33 @@ impl AttributesPanel {
             Tab::Basic => basic_tab(ui, &mut node.data),
             Tab::Coord => coord_tab(ui, &mut node.data),
             Tab::Object => object_tab(ui, &mut node.data),
+        }
+
+        if let Some((id, before)) = self.node_edit.end(id, &node.data, interaction_ongoing(ui)) {
+            commands.push(EditorCommand::CommitLive {
+                inverse: SceneEdit::SetData { id, data: before },
+                label: self.tab.edit_label(),
+            });
+        }
+    }
+
+    fn project_ui(&mut self, ui: &mut Ui, doc: &mut Document, commands: &mut CommandQueue) {
+        self.name_edit.begin((), &doc.name);
+        self.time_edit.begin((), &doc.time.settings());
+        project_settings(ui, doc);
+
+        let ongoing = interaction_ongoing(ui);
+        if let Some(((), before)) = self.name_edit.end((), &doc.name, ongoing) {
+            commands.push(EditorCommand::CommitLive {
+                inverse: SceneEdit::SetName(before),
+                label: "Rename Project",
+            });
+        }
+        if let Some(((), before)) = self.time_edit.end((), &doc.time.settings(), ongoing) {
+            commands.push(EditorCommand::CommitLive {
+                inverse: SceneEdit::SetTime(before),
+                label: "Project Settings",
+            });
         }
     }
 }
@@ -234,7 +287,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
         });
 }
 
-fn project_ui(ui: &mut Ui, doc: &mut Document) {
+fn project_settings(ui: &mut Ui, doc: &mut Document) {
     ui.label(
         RichText::new(format!("Project [{}]", doc.name))
             .strong()

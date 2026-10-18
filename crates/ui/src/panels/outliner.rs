@@ -10,7 +10,7 @@ use egui::{
     Align2, Button, CornerRadius, FontId, Id, Key, LayerId, Margin, Order, Rect, RichText, ScrollArea, Sense, Stroke,
     StrokeKind, TextEdit, TextStyle, Ui, Vec2, pos2, vec2,
 };
-use oc4d_scene::{Document, Node, NodeId, ObjectKindTag, Scene};
+use oc4d_scene::{Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit};
 
 use crate::{
     EditorCommand, EditorState, SelectMode,
@@ -386,7 +386,8 @@ impl OutlinerPanel {
         }
     }
 
-    fn apply_actions(&mut self, doc: &mut Document, editor: &mut EditorState) {
+    /// Applies row interactions; document changes are queued as undoable commands.
+    fn apply_actions(&mut self, doc: &Document, editor: &mut EditorState) {
         let mut actions = std::mem::take(&mut self.actions);
         for action in actions.drain(..) {
             match action {
@@ -397,20 +398,16 @@ impl OutlinerPanel {
                     }
                 }
                 RowAction::ToggleEditorVisibility(id) => {
-                    if let Some(n) = doc.scene.get_mut(id) {
-                        n.data.visible_in_editor = !n.data.visible_in_editor;
-                    }
+                    edit_data(doc, editor, id, "Visible in Editor", |d| {
+                        d.visible_in_editor = !d.visible_in_editor;
+                    });
                 }
                 RowAction::ToggleRenderVisibility(id) => {
-                    if let Some(n) = doc.scene.get_mut(id) {
-                        n.data.visible_in_render = !n.data.visible_in_render;
-                    }
+                    edit_data(doc, editor, id, "Visible in Renderer", |d| {
+                        d.visible_in_render = !d.visible_in_render;
+                    });
                 }
-                RowAction::ToggleEnabled(id) => {
-                    if let Some(n) = doc.scene.get_mut(id) {
-                        n.data.enabled = !n.data.enabled;
-                    }
-                }
+                RowAction::ToggleEnabled(id) => edit_data(doc, editor, id, "Enable", |d| d.enabled = !d.enabled),
                 RowAction::StartRename(id) => {
                     if let Some(n) = doc.scene.get(id) {
                         self.renaming = Some(id);
@@ -421,10 +418,8 @@ impl OutlinerPanel {
                 }
                 RowAction::CommitRename(id) => {
                     let name = self.rename_buffer.trim();
-                    if let Some(n) = doc.scene.get_mut(id)
-                        && !name.is_empty()
-                    {
-                        name.clone_into(&mut n.data.name);
+                    if !name.is_empty() {
+                        edit_data(doc, editor, id, "Rename", |d| name.clone_into(&mut d.name));
                     }
                     self.renaming = None;
                 }
@@ -456,6 +451,26 @@ impl OutlinerPanel {
     }
 }
 
+/// Queues `change`, applied to a copy of the node's data, as one undo step.
+/// Nothing is queued if the node is gone or the change is a no-op.
+fn edit_data(
+    doc: &Document,
+    editor: &mut EditorState,
+    id: NodeId,
+    label: &'static str,
+    change: impl FnOnce(&mut NodeData),
+) {
+    let Some(node) = doc.scene.get(id) else { return };
+    let mut data = node.data.clone();
+    change(&mut data);
+    if data != node.data {
+        editor.commands.push(EditorCommand::Edit {
+            edit: SceneEdit::SetData { id, data },
+            label,
+        });
+    }
+}
+
 /// Allocation-free, ASCII case-insensitive substring search.
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
     let (h, n) = (haystack.as_bytes(), needle.as_bytes());
@@ -464,7 +479,33 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::contains_ignore_ascii_case;
+    use oc4d_scene::Document;
+
+    use super::{contains_ignore_ascii_case, edit_data};
+    use crate::{EditorCommand, EditorState, ViewportPanel, commands};
+
+    #[test]
+    fn row_edits_are_undoable_commands() {
+        let mut doc = Document::with_demo_scene();
+        let mut editor = EditorState::default();
+        let mut viewport = ViewportPanel::new(None, None, 1);
+        let sphere = doc.scene.roots()[1];
+
+        edit_data(&doc, &mut editor, sphere, "Rename", |d| "Ball".clone_into(&mut d.name));
+        edit_data(&doc, &mut editor, sphere, "Enable", |d| d.enabled = true); // already enabled: a no-op
+        assert_eq!(
+            doc.scene.get(sphere).unwrap().data.name,
+            "Sphere",
+            "queued, not applied"
+        );
+        commands::apply_pending(&mut doc, &mut editor, &mut viewport);
+        assert_eq!(doc.scene.get(sphere).unwrap().data.name, "Ball");
+        assert_eq!(editor.history.undo_len(), 1, "the no-op toggle queued nothing");
+
+        editor.commands.push(EditorCommand::Undo);
+        commands::apply_pending(&mut doc, &mut editor, &mut viewport);
+        assert_eq!(doc.scene.get(sphere).unwrap().data.name, "Sphere");
+    }
 
     #[test]
     fn search_is_case_insensitive() {

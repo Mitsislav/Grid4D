@@ -1,15 +1,19 @@
 //! Animation timeline: a frame ruler with a scrubbable playhead, and the
 //! transport row (frame field, play controls, preview range, fps).
+//!
+//! The current frame and playback are session state; the range, fps and loop
+//! setting belong to the document, so their edits become undo steps.
 
 use egui::{
     Align, Align2, ComboBox, CornerRadius, DragValue, FontId, Layout, Rect, RichText, Sense, Stroke, Ui, UiBuilder,
     pos2, vec2,
 };
-use oc4d_scene::{Playback, TimeState};
+use oc4d_scene::{Playback, SceneEdit, TimeSettings, TimeState};
 
 use crate::{
-    EditorState,
+    EditorCommand, EditorState,
     icons::Icon,
+    live_edit::{LiveEdit, interaction_ongoing},
     theme::palette as p,
     widgets::{IconStyle, icon_button},
 };
@@ -24,13 +28,21 @@ const RIGHT_GROUP_WIDTH: f32 = 235.0;
 #[derive(Debug, Default)]
 pub struct TimelinePanel {
     scrubbing: bool,
+    settings_edit: LiveEdit<(), TimeSettings>,
 }
 
 impl TimelinePanel {
     pub fn show(&mut self, ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {
+        self.settings_edit.begin((), &time.settings());
         ui.spacing_mut().item_spacing.y = 0.0;
         self.ruler(ui, time, editor);
         transport(ui, time);
+        if let Some(((), before)) = self.settings_edit.end((), &time.settings(), interaction_ongoing(ui)) {
+            editor.commands.push(EditorCommand::CommitLive {
+                inverse: SceneEdit::SetTime(before),
+                label: "Project Settings",
+            });
+        }
     }
 
     fn ruler(&mut self, ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {

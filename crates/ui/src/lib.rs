@@ -19,6 +19,7 @@ pub mod commands;
 pub mod editor;
 pub mod history;
 pub mod icons;
+mod live_edit;
 pub mod panels;
 pub mod shortcuts;
 pub mod theme;

@@ -221,20 +221,24 @@ pub struct History  { undo: Vec<UndoGroup>, redo: Vec<UndoGroup>, revision: u64,
   `Document::apply`, and pushes the inverses as one `UndoGroup`.
 * Selection is **restored** by undo/redo (stored in the group) but selection
   changes alone do not create entries in v0.2 (decision recorded below).
-* `revision` increments on every push/undo/redo → drives the dirty flag (Phase 2).
+* `History::state_id()` (id of the newest undo group, `0` before any) identifies the
+  document state → drives the dirty flag (Phase 2): `state_id() != saved_state_id`.
+  A plain revision counter would call a document dirty after edit + undo.
 
 **5. Interactive value edits.** Plain value edits may keep writing the scene
 directly for live feedback (ARCHITECTURE.md rule), but commit an undo step **on
 interaction end**:
 
 * Gizmo: snapshot `NodeData` on drag start, write live while dragging, on drag end
-  push `EditorCommand::CommitData { id, before }` (the "after" is the current state;
-  no re-apply).
-* Attribute Manager: a small helper
-  `track_edit(response, id, &mut pending_before)` — snapshot on
-  `drag_started`/`gained_focus`, commit on `drag_stopped`/`lost_focus`, or
-  immediately for click widgets (checkbox, colour picker close).
-* Object Manager: rename and traffic-light toggles become commands.
+  push `EditorCommand::CommitLive { inverse: SetData { id, before }, label }` (the
+  "after" is the current state; no re-apply; nothing recorded if unchanged).
+* Attribute Manager, project settings, timeline: a `LiveEdit<K, T>` tracker keeps
+  the value from before the interaction (cloned only when the value changed), and
+  reports the end of an interaction — pointer released and no text field focused —
+  so a drag, a typed value or a click is exactly one `CommitLive` step. Changes made
+  elsewhere between frames (gizmo, undo) become the new baseline.
+* Object Manager and menus: discrete edits (rename, traffic lights, enable, Loop
+  Playback) push `EditorCommand::Edit { edit, label }`.
 
 ### Steps
 
@@ -243,7 +247,7 @@ interaction end**:
 | 1.1 ✅ | M | `NodeData` split; soft-delete (`detach/attach/purge`), ordered insert/reparent; tests for invariants (no dangling links, detached nodes invisible to `walk`, purge frees) — done 2026-10-18, incl. a seeded random-edit-sequence invariant test | `scene/{node,scene}.rs` |
 | 1.2 ✅ | M | `SceneEdit` + `Document::apply` returning inverse; property test: random edit sequences, apply + inverse ⇒ document equals original — done 2026-10-18: variants `Insert/Detach/Attach/Move/SetData/SetTime/SetName`, atomic `apply_all`, `TimeSettings`, `Scene::transform_keeping_world`; seeded test checks every intermediate undo and redo state | `scene/edit.rs`, `scene/time.rs` |
 | 1.3 ✅ | M | `History` + `UndoGroup`; `EditorCommand::{Undo, Redo, CommitData}`; translate existing commands; `NewDocument` clears history and purges — done 2026-10-18: create/delete/reparent are one step each, detached nodes are purged once no step can restore them (redo discarded, limit, clear), `History::state_id` ready for the dirty flag | `ui/{history,commands,editor}.rs` |
-| 1.4 | M | Gizmo commit-on-release; Attribute Manager `track_edit`; Object Manager rename/visibility via commands | `ui/panels/{viewport/gizmo,attributes,outliner}.rs` |
+| 1.4 ✅ | M | Gizmo commit-on-release; Attribute Manager `track_edit`; Object Manager rename/visibility via commands — done 2026-10-18: generic `EditorCommand::{Edit, CommitLive}` (replacing `CommitData`), `LiveEdit` tracker (interaction = pointer held or text focus), also covers project settings, the timeline's range/fps/loop and the Animate ▸ Loop toggle; headless egui test drags the gizmo | `ui/{live_edit,commands}.rs`, `ui/panels/{viewport/gizmo,attributes,outliner,timeline,menu_bar}.rs` |
 | 1.5 | S | Toolbar Undo/Redo enabled state + tooltip with label ("Undo Move"); Edit menu entries; shortcuts `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`; history limit preference (default 100) | `ui/panels/{toolbar,menu_bar}.rs`, `ui/shortcuts.rs` |
 
 **Acceptance:** create → move (gizmo) → rename → reparent → delete, then undo ×5
