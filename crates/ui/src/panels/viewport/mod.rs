@@ -1,4 +1,5 @@
-//! The 3D viewport: header menus, navigation, picking, gizmo and the GPU view.
+//! The 3D viewport: header menus, navigation, picking (objects, or components
+//! of the active polygon object in a component mode), gizmo and the GPU view.
 
 mod gizmo;
 mod gpu_view;
@@ -7,8 +8,9 @@ mod overlay;
 use egui::{Align, Align2, Layout, Margin, PointerButton, Pos2, Rect, Response, Sense, Ui, pos2};
 use glam::{Mat4, Vec2 as GVec2, Vec3};
 use grid4d_eval::EvaluatedScene;
-use grid4d_render::{FrameData, OrbitCamera, pick};
-use grid4d_scene::{Aabb, Document, ObjectKindTag, Scene, WalkItem};
+use grid4d_geom::Component;
+use grid4d_render::{ComponentHit, ComponentStyle, FrameData, OrbitCamera, ScreenView, pick, pick_component};
+use grid4d_scene::{Aabb, Document, NodeId, ObjectKindTag, Scene, WalkItem};
 
 use self::{gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView};
 use crate::{
@@ -34,6 +36,8 @@ pub struct ViewportPanel {
     gpu: Option<GpuView>,
     walk_stack: Vec<WalkItem>,
     gizmo: GizmoState,
+    /// The component under the cursor in a component mode (pre-selection).
+    hover: Option<ComponentHit>,
     show_grid: bool,
     show_axis_triad: bool,
     show_hud: bool,
@@ -56,6 +60,7 @@ impl ViewportPanel {
             gpu: render_state.map(GpuView::new),
             walk_stack: Vec::with_capacity(64),
             gizmo: GizmoState::default(),
+            hover: None,
             show_grid: true,
             show_axis_triad: true,
             show_hud: true,
@@ -143,11 +148,26 @@ impl ViewportPanel {
         overlay::background(&painter, rect);
         // A gizmo drag above may have moved an object; free if nothing changed.
         self.evaluated.update(&doc.scene);
+        // Component modes: the active polygon object, and its component under the cursor.
+        let target = self.component_target(editor);
+        self.hover = match (target, response.hover_pos()) {
+            (Some((id, component)), Some(pos)) if !navigating && !response.dragged() => pick_component(
+                &self.evaluated,
+                id,
+                component,
+                &self.screen_view(rect),
+                local(pos, rect),
+                metrics::COMPONENT_PICK_RADIUS,
+            ),
+            _ => None,
+        };
 
         if let Some(gpu) = &mut self.gpu {
             self.frame.set_camera(&self.camera, rect.aspect_ratio());
             self.frame.show_grid = self.show_grid;
             self.frame.extract(&self.evaluated, |id| editor.selection.contains(id));
+            self.frame.component_style = component_style(ui.ctx().pixels_per_point());
+            self.frame.extract_components(&self.evaluated, target, self.hover);
             let texture = gpu.render(&self.frame, pixel_size(rect, ui.ctx().pixels_per_point()));
             // Drawn over the background gradient: the target is cleared to transparent.
             painter.image(
@@ -181,7 +201,29 @@ impl ViewportPanel {
 
         if response.hovered() {
             let alt = ui.input(|i| i.modifiers.alt);
-            editor.status_hint = Some(if alt { NAV_HINT } else { editor.tool.hint() });
+            editor.status_hint = Some(match (alt, editor.mode.component()) {
+                (true, _) => NAV_HINT,
+                (false, Some(component)) => component_hint(component, target.is_some()),
+                (false, None) => editor.tool.hint(),
+            });
+        }
+    }
+
+    /// The active object and the component kind of the current mode, when the
+    /// mode is a component mode and the active object a visible polygon object.
+    fn component_target(&self, editor: &EditorState) -> Option<(NodeId, Component)> {
+        let component = editor.mode.component()?;
+        let id = editor.selection.active()?;
+        self.evaluated.polygon(id)?;
+        Some((id, component))
+    }
+
+    /// The camera as screen-space picking sees it, in points relative to `rect`.
+    fn screen_view(&self, rect: Rect) -> ScreenView {
+        ScreenView {
+            view_proj: self.camera.view_projection(rect.aspect_ratio()),
+            eye: self.camera.eye(),
+            size: GVec2::new(rect.width(), rect.height()),
         }
     }
 
@@ -288,6 +330,24 @@ impl ViewportPanel {
         let Some(pointer) = response.interact_pointer_pos() else {
             return;
         };
+        // A component mode on a polygon object picks its components, never objects.
+        if let Some((node, component)) = self.component_target(editor) {
+            let hit = pick_component(
+                &self.evaluated,
+                node,
+                component,
+                &self.screen_view(rect),
+                local(pointer, rect),
+                metrics::COMPONENT_PICK_RADIUS,
+            );
+            editor.commands.push(EditorCommand::SelectComponents {
+                node,
+                component,
+                hit: hit.map(ComponentHit::index),
+                mode: SelectMode::for_components(modifiers),
+            });
+            return;
+        }
         let ray = self.camera.ray_from_ndc(to_ndc(pointer, rect), rect.aspect_ratio());
         let mode = SelectMode::from_modifiers(modifiers);
         match pick(&self.evaluated, ray) {
@@ -343,6 +403,43 @@ fn pixel_size(rect: Rect, pixels_per_point: f32) -> [u32; 2] {
     [px(rect.width()), px(rect.height())]
 }
 
+/// Window position → position in `rect` (points from its top-left corner).
+fn local(pos: Pos2, rect: Rect) -> GVec2 {
+    GVec2::new(pos.x - rect.left(), pos.y - rect.top())
+}
+
+/// The component overlay in the theme's colours, sizes in physical pixels.
+fn component_style(pixels_per_point: f32) -> ComponentStyle {
+    let linear = |c: egui::Color32| egui::Rgba::from(c).to_array();
+    ComponentStyle {
+        wire: linear(p::ACCENT),
+        selected: linear(p::HIGHLIGHT),
+        hover: linear(p::TEXT_STRONG),
+        point_size: metrics::COMPONENT_POINT * pixels_per_point,
+        edge_width: metrics::COMPONENT_EDGE * pixels_per_point,
+        selected_edge_width: metrics::COMPONENT_EDGE_SELECTED * pixels_per_point,
+        ..ComponentStyle::default()
+    }
+}
+
+/// Status-bar help in a component mode (`active`: a polygon object to work on).
+const fn component_hint(component: Component, active: bool) -> &'static str {
+    if !active {
+        return "Component modes work on a polygon object: select one, or press C to make a primitive editable";
+    }
+    match component {
+        Component::Point => {
+            "Points: click to select · Shift adds · Ctrl removes · Shift/Ctrl+click a mode converts the selection"
+        }
+        Component::Edge => {
+            "Edges: click to select · Shift adds · Ctrl removes · Shift/Ctrl+click a mode converts the selection"
+        }
+        Component::Polygon => {
+            "Polygons: click to select · Shift adds · Ctrl removes · Shift/Ctrl+click a mode converts the selection"
+        }
+    }
+}
+
 /// Window position → normalised device coordinates (`[-1, 1]`, Y up).
 fn to_ndc(pos: Pos2, rect: Rect) -> GVec2 {
     GVec2::new(
@@ -369,7 +466,7 @@ mod tests {
     use egui::{Event, Modifiers, RawInput, Vec2, vec2};
 
     use super::*;
-    use crate::{EditorCommand, Tool, commands};
+    use crate::{EditMode, EditorCommand, Tool, commands};
 
     /// Runs the viewport headless (no GPU) in a real egui context.
     struct Harness {
@@ -426,7 +523,7 @@ mod tests {
             }
         }
 
-        fn position(&self, id: grid4d_scene::NodeId) -> Vec3 {
+        fn position(&self, id: NodeId) -> Vec3 {
             self.doc.scene.get(id).unwrap().data.transform.position
         }
     }
@@ -466,6 +563,49 @@ mod tests {
         h.editor.commands.push(EditorCommand::Redo);
         h.frame(vec![]);
         assert_eq!(h.position(cube), dragged);
+    }
+
+    #[test]
+    fn a_click_in_points_mode_selects_the_visible_point_under_the_cursor() {
+        let mut h = Harness::new();
+        h.editor.commands.push(EditorCommand::MakeEditable);
+        h.frame(vec![]);
+        h.editor.mode = EditMode::Points;
+        h.frame(vec![]);
+        let cube = h.editor.selection.active().unwrap();
+        let node = h.doc.scene.get(cube).unwrap();
+        let grid4d_scene::ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
+            panic!("the cube was made editable");
+        };
+        let world = h.doc.scene.world_matrix(cube);
+        let eye = h.viewport.camera.eye();
+        let (nearest, position) = mesh
+            .mesh()
+            .points()
+            .iter()
+            .map(|&p| world.transform_point3(p))
+            .enumerate()
+            .min_by(|a, b| a.1.distance(eye).total_cmp(&b.1.distance(eye)))
+            .unwrap();
+        let rect = h.viewport.view_rect;
+        let view_proj = h.viewport.camera.view_projection(rect.aspect_ratio());
+        let at = project(&view_proj, rect, position).unwrap() + vec2(2.0, 1.0);
+
+        h.frame(vec![Event::PointerMoved(at)]);
+        assert_eq!(
+            h.viewport.hover,
+            Some(ComponentHit::Point(u32::try_from(nearest).unwrap()))
+        );
+        h.frame(vec![Harness::button(at, true)]);
+        h.frame(vec![Harness::button(at, false)]);
+        h.frame(vec![]);
+        let node = h.doc.scene.get(cube).unwrap();
+        let grid4d_scene::ObjectKind::Polygon { components, .. } = &node.data.kind else {
+            panic!();
+        };
+        assert_eq!(components.selected().points.iter().collect::<Vec<_>>(), [nearest]);
+        assert_eq!(h.editor.history.undo_label(), Some("Select Points"));
+        assert_eq!(h.editor.selection.as_slice(), &[cube], "objects stay selected");
     }
 
     #[test]

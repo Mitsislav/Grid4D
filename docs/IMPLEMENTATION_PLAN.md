@@ -407,7 +407,7 @@ implementing): [`reference/modeling-modes.md`](reference/modeling-modes.md) (3.6
 
 | Step | Size | Work |
 |------|------|------|
-| 4.1 | M | Component modes, display, picking of points/edges/polys |
+| 4.1 ✅ | M | Component modes, display, picking of points/edges/polys — done 2026-10-19 per [`reference/modeling-modes.md`](reference/modeling-modes.md) §3–§5: `geom::BitSet` + `ComponentSet` (edges by corner), `selection::convert` (tolerant/strict), `Topology::edge_corners`; `scene::Components` (copy-on-write selected + hidden sets next to the `MeshHandle`, saved in `.g4d` v3 as optional index ranges — v3 grows additively, `demo_v3_initial.g4d` keeps loading); `render::pick_component` (nearest visible point/edge in screen space with BVH occlusion, polygon by ray) and the overlay (`overlay.wgsl`: point squares, pixel-width edges, polygon tint, pulled towards the eye; hover in its own tiny buffers); UI: active object only, click/Shift/Ctrl/empty-space selection as undo steps, Shift/Ctrl+click on a mode converts, Select All/Deselect All on components, gizmo hidden and Delete inert in component modes until 4.3/4.5. Checked on screen. Hover picking projects every point per pointer move — fine for typical meshes, revisit (screen grid) for million-point meshes |
 | 4.2 | M | Live / Rectangle selection, Loop / Ring, Grow / Shrink / Invert / Connected |
 | 4.3 | M | Component transform via gizmo + undo |
 | 4.4 | M | Extrude, Inner Extrude (interactive drag + numeric) |

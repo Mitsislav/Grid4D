@@ -93,18 +93,26 @@ impl Triangulator {
     pub fn triangulate_points(&mut self, mesh: &PolyMesh, triangles: &mut Vec<[u32; 3]>, faces: &mut Vec<u32>) {
         triangles.clear();
         faces.clear();
-        let mut positions = std::mem::take(&mut self.face_positions);
-        for (f, corners) in mesh.faces().enumerate() {
-            positions.clear();
-            positions.extend(corners.iter().map(|&p| mesh.points()[us(p)]));
-            self.triangulate_face(&positions);
-            let face = u32_index(f);
-            for [a, b, c] in self.local.drain(..) {
-                triangles.push([corners[us(a)], corners[us(b)], corners[us(c)]]);
-                faces.push(face);
-            }
+        for f in 0..mesh.face_count() {
+            let before = triangles.len();
+            self.face_triangles(mesh, f, triangles);
+            faces.resize(faces.len() + triangles.len() - before, u32_index(f));
         }
+    }
+
+    /// Appends the triangles of face `face` (point indices) to `triangles`.
+    pub fn face_triangles(&mut self, mesh: &PolyMesh, face: usize, triangles: &mut Vec<[u32; 3]>) {
+        let corners = mesh.face(face);
+        let mut positions = std::mem::take(&mut self.face_positions);
+        positions.clear();
+        positions.extend(corners.iter().map(|&p| mesh.points()[us(p)]));
+        self.triangulate_face(&positions);
         self.face_positions = positions;
+        triangles.extend(
+            self.local
+                .drain(..)
+                .map(|[a, b, c]| [corners[us(a)], corners[us(b)], corners[us(c)]]),
+        );
     }
 
     /// Fills `self.local` with the triangles of one polygon.

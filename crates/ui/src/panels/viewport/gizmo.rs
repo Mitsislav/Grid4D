@@ -11,7 +11,7 @@ use grid4d_render::OrbitCamera;
 use grid4d_scene::{NodeData, NodeId, Scene, SceneEdit};
 
 use super::project;
-use crate::{CommandQueue, EditorCommand, EditorState, Tool, theme::palette as p};
+use crate::{CommandQueue, EditMode, EditorCommand, EditorState, Tool, theme::palette as p};
 
 /// On-screen length of the axis handles, in points.
 const HANDLE_PX: f32 = 90.0;
@@ -38,7 +38,8 @@ pub(super) struct GizmoGeometry {
 impl GizmoGeometry {
     /// Builds the gizmo for the active object, if the active tool has one.
     pub(super) fn new(scene: &Scene, editor: &EditorState, camera: &OrbitCamera, rect: Rect) -> Option<Self> {
-        if !editor.tool.has_gizmo() {
+        // In component modes the gizmo will move components (step 4.3), never the object.
+        if !editor.tool.has_gizmo() || editor.mode != EditMode::Model {
             return None;
         }
         let id = editor.selection.active()?;

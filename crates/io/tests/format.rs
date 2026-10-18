@@ -18,10 +18,13 @@ use std::{
 };
 
 use glam::Vec3;
-use grid4d_scene::{Document, MeshHandle, ObjectKind};
+use grid4d_scene::{ComponentState, Components, Document, MeshHandle, ObjectKind};
 
 /// Written by the current format version (an archive).
 const GOLDEN: &str = "tests/fixtures/demo_v3.g4d";
+/// Version 3 as first released in step 3.6, before component selections were
+/// added (additively): must keep loading.
+const DEMO_V3_INITIAL: &str = "tests/fixtures/demo_v3_initial.g4d";
 /// Written by format version 2 (JSON, before polygon objects); kept to test migration.
 const DEMO_V2: &str = "tests/fixtures/demo_v2.g4d";
 /// Written by format version 1 (before segment counts); kept to test migration.
@@ -58,13 +61,20 @@ const DEMO_OUTLINE: [(u32, &str); 7] = [
     (0, "Camera"),
 ];
 
-/// The demo scene with its "Box" made editable: every kind of object, and a mesh.
+/// The demo scene with its "Box" made editable — every kind of object, a mesh —
+/// and some of its components selected and hidden.
 fn golden_document() -> Document {
     let mut doc = Document::with_demo_scene();
     let id = doc.scene.iter().find(|(_, n)| n.data.name == "Box").unwrap().0;
     let mesh = grid4d_geom::primitives::cube(Vec3::splat(80.0), [1, 2, 1]);
+    let mut state = ComponentState::default();
+    state.selected.points.extend([0, 1, 2]);
+    state.selected.edges.insert_range(0..4);
+    state.selected.polygons.insert(1);
+    state.hidden.polygons.insert(5);
     doc.scene.get_mut(id).unwrap().data.kind = ObjectKind::Polygon {
         mesh: MeshHandle::new(mesh),
+        components: Components::new(state),
     };
     doc
 }
@@ -113,6 +123,18 @@ fn the_golden_file_loads() {
         node.data.kind.clone()
     };
     assert_eq!(kind(&doc), kind(&reference), "the mesh, point for point");
+}
+
+#[test]
+fn the_first_version_3_fixture_still_loads() {
+    let doc = grid4d_io::load(&fixture_path(DEMO_V3_INITIAL)).unwrap();
+    assert_eq!(outline(&doc), DEMO_OUTLINE.map(|(d, n)| (d, n.to_owned())));
+    let node = doc.scene.iter().find(|(_, n)| n.data.name == "Box").unwrap().1;
+    let ObjectKind::Polygon { mesh, components } = &node.data.kind else {
+        panic!("the Box is a polygon object");
+    };
+    assert_eq!(mesh.mesh().point_count(), 12);
+    assert_eq!(*components, Components::default(), "nothing selected before 4.1");
 }
 
 #[test]

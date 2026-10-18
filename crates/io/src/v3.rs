@@ -7,6 +7,10 @@
 //! `points × 3` f32 (x, y, z), then `faces` u32 corner counts, then `corners` u32
 //! point indices (faces counter-clockwise, in order), then — if `uvs` —
 //! `corners × 2` f32 UVs.
+//!
+//! Until a release freezes it, version 3 may only grow **additively**: optional
+//! fields that are omitted when empty (component selections, step 4.1), new
+//! kinds. Every earlier v3 fixture must keep loading.
 
 use std::{
     collections::HashMap,
@@ -14,8 +18,10 @@ use std::{
 };
 
 use glam::{Vec2, Vec3};
-use grid4d_geom::PolyMesh;
-use grid4d_scene::{Document, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, TimeSettings, Transform};
+use grid4d_geom::{BitSet, ComponentSet, PolyMesh};
+use grid4d_scene::{
+    ComponentState, Components, Document, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, TimeSettings, Transform,
+};
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
 
@@ -132,9 +138,71 @@ enum KindDto {
         intensity: f32,
     },
     /// `mesh` indexes the file's `meshes`; objects sharing a mesh share an index.
+    /// `selected` / `hidden` flag components (optional, added in step 4.1).
     Polygon {
         mesh: usize,
+        #[serde(default, skip_serializing_if = "SetDto::is_empty")]
+        selected: SetDto,
+        #[serde(default, skip_serializing_if = "SetDto::is_empty")]
+        hidden: SetDto,
     },
+}
+
+/// Flagged components as inclusive index ranges `[first, last]`, ascending;
+/// edges by corner (see `grid4d_geom::ComponentSet`). Empty lists are omitted.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SetDto {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    points: Vec<[u32; 2]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    edges: Vec<[u32; 2]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    polygons: Vec<[u32; 2]>,
+}
+
+impl SetDto {
+    fn is_empty(&self) -> bool {
+        self.points.is_empty() && self.edges.is_empty() && self.polygons.is_empty()
+    }
+
+    fn new(set: &ComponentSet) -> Self {
+        // Indices of a valid mesh always fit a u32.
+        let ranges = |bits: &BitSet| {
+            bits.ranges()
+                .map(|(first, last)| [first, last].map(|i| u32::try_from(i).unwrap_or(u32::MAX)))
+                .collect()
+        };
+        Self {
+            points: ranges(&set.points),
+            edges: ranges(&set.edges),
+            polygons: ranges(&set.polygons),
+        }
+    }
+
+    /// The flags, checked against `mesh` (`what`/`object` name them in errors).
+    fn into_set(self, mesh: &PolyMesh, object: &str, what: &str) -> Result<ComponentSet, IoError> {
+        let bits = |ranges: Vec<[u32; 2]>, count: usize, kind: &str| {
+            let mut bits = BitSet::new();
+            for [first, last] in ranges {
+                let (first, last) = (
+                    usize::try_from(first).unwrap_or(usize::MAX),
+                    usize::try_from(last).unwrap_or(usize::MAX),
+                );
+                if first > last || last >= count {
+                    return Err(IoError::Invalid(format!(
+                        "object \"{object}\": {what} range {first}…{last} of {kind} does not fit its {count} {kind}"
+                    )));
+                }
+                bits.insert_range(first..last + 1);
+            }
+            Ok(bits)
+        };
+        Ok(ComponentSet {
+            points: bits(self.points, mesh.point_count(), "points")?,
+            edges: bits(self.edges, mesh.corner_count(), "corners")?,
+            polygons: bits(self.polygons, mesh.face_count(), "polygons")?,
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -411,8 +479,13 @@ impl KindDto {
             },
             ObjectKind::Camera { fov_y_deg } => Self::Camera { fov_y_deg },
             ObjectKind::Light { color, intensity } => Self::Light { color, intensity },
-            ObjectKind::Polygon { ref mesh } => Self::Polygon {
+            ObjectKind::Polygon {
+                ref mesh,
+                ref components,
+            } => Self::Polygon {
                 mesh: meshes.index(mesh, object),
+                selected: SetDto::new(components.selected()),
+                hidden: SetDto::new(components.hidden()),
             },
         }
     }
@@ -497,14 +570,22 @@ impl KindDto {
             },
             Self::Camera { fov_y_deg } => ObjectKind::Camera { fov_y_deg },
             Self::Light { color, intensity } => ObjectKind::Light { color, intensity },
-            Self::Polygon { mesh } => ObjectKind::Polygon {
-                mesh: meshes.get(mesh).cloned().ok_or_else(|| {
+            Self::Polygon { mesh, selected, hidden } => {
+                let mesh = meshes.get(mesh).cloned().ok_or_else(|| {
                     IoError::Invalid(format!(
                         "object \"{object}\" uses mesh {mesh}, but the file has {} meshes",
                         meshes.len()
                     ))
-                })?,
-            },
+                })?;
+                let state = ComponentState {
+                    selected: selected.into_set(mesh.mesh(), object, "selection")?,
+                    hidden: hidden.into_set(mesh.mesh(), object, "hidden")?,
+                };
+                ObjectKind::Polygon {
+                    mesh,
+                    components: Components::new(state),
+                }
+            }
         })
     }
 
@@ -682,9 +763,7 @@ mod tests {
     }
 
     fn polygon(mesh: PolyMesh) -> ObjectKind {
-        ObjectKind::Polygon {
-            mesh: MeshHandle::new(mesh),
-        }
+        ObjectKind::polygon(MeshHandle::new(mesh))
     }
 
     /// A triangle and a concave hexagon (an L) sharing an edge, with UVs.
@@ -769,8 +848,7 @@ mod tests {
         let mut doc = Document::new("meshes");
         let shared = MeshHandle::new(grid4d_geom::primitives::sphere(50.0, 16));
         for name in ["a", "b"] {
-            doc.scene
-                .insert(Node::new(name, ObjectKind::Polygon { mesh: shared.clone() }));
+            doc.scene.insert(Node::new(name, ObjectKind::polygon(shared.clone())));
         }
         doc.scene.insert(Node::new("ngons", polygon(ngon_mesh())));
         doc.scene.insert(Node::new("empty", polygon(PolyMesh::new())));
@@ -783,13 +861,55 @@ mod tests {
         assert_eq!(snapshot(&loaded), snapshot(&doc));
         let mesh_of = |name: &str| {
             let node = loaded.scene.iter().find(|(_, n)| n.data.name == name).unwrap().1;
-            let ObjectKind::Polygon { mesh } = &node.data.kind else {
+            let ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
                 panic!()
             };
             mesh.id()
         };
         assert_eq!(mesh_of("a"), mesh_of("b"), "still one shared mesh after loading");
         assert_ne!(mesh_of("a"), mesh_of("ngons"));
+    }
+
+    #[test]
+    fn component_selections_round_trip_and_are_omitted_when_empty() {
+        let mut state = ComponentState::default();
+        state.selected.points.extend([0, 1, 2, 6]);
+        state.selected.edges.insert_range(3..7);
+        state.selected.polygons.insert(1);
+        state.hidden.points.insert(5);
+        let mut doc = Document::new("selections");
+        let kind = ObjectKind::Polygon {
+            mesh: MeshHandle::new(ngon_mesh()),
+            components: Components::new(state),
+        };
+        doc.scene.insert(Node::new("ngons", kind));
+        doc.scene.insert(Node::new("plain", polygon(ngon_mesh())));
+        assert_eq!(snapshot(&round_trip(&doc)), snapshot(&doc));
+
+        let json = document_json(&doc);
+        assert!(json.contains("\"points\": [\n"), "ranges are written: {json}");
+        assert_eq!(json.matches("\"selected\"").count(), 1, "omitted for the plain object");
+        assert_eq!(json.matches("\"hidden\"").count(), 1);
+    }
+
+    #[test]
+    fn selections_outside_the_mesh_are_rejected() {
+        let mut doc = Document::new("mesh");
+        doc.scene.insert(Node::new("ngons", polygon(ngon_mesh())));
+        let json = document_json(&doc);
+        let mesh = entries(&to_bytes(&doc).unwrap()).swap_remove(1).1;
+        let with = |selection: &str| {
+            let json = json.replacen("\"mesh\": 0", &format!("\"mesh\": 0, {selection}"), 1);
+            from_bytes(&archive(&[(DOCUMENT_ENTRY, json.as_bytes()), ("meshes/0.bin", &mesh)]))
+        };
+        assert!(with("\"selected\": { \"points\": [[0, 6]] }").is_ok());
+        for bad in [
+            "\"selected\": { \"points\": [[0, 7]] }",
+            "\"selected\": { \"edges\": [[9, 9]] }",
+            "\"hidden\": { \"polygons\": [[1, 0]] }",
+        ] {
+            assert!(matches!(with(bad), Err(IoError::Invalid(_))), "{bad}");
+        }
     }
 
     #[test]

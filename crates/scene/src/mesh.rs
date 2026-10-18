@@ -1,4 +1,5 @@
-//! Shared, immutable meshes: the geometry of polygon (editable) objects.
+//! Shared, immutable meshes — the geometry of polygon (editable) objects — and
+//! their component selections.
 
 use std::{
     fmt,
@@ -6,7 +7,7 @@ use std::{
 };
 
 use glam::Vec3;
-use grid4d_geom::{Bvh, PolyMesh, RayHit};
+use grid4d_geom::{Bvh, ComponentSet, PolyMesh, RayHit, Topology};
 
 use crate::Aabb;
 
@@ -30,6 +31,8 @@ struct Shared {
     bounds: Option<Aabb>,
     /// Built on the first ray cast (picking), then shared by every clone.
     bvh: OnceLock<Bvh>,
+    /// Built when first needed (component display, picking, conversions).
+    topology: OnceLock<Topology>,
 }
 
 impl MeshHandle {
@@ -41,6 +44,7 @@ impl MeshHandle {
             mesh,
             bounds,
             bvh: OnceLock::new(),
+            topology: OnceLock::new(),
         }))
     }
 
@@ -65,10 +69,23 @@ impl MeshHandle {
     /// every clone of this handle then reuses.
     #[must_use]
     pub fn raycast(&self, origin: Vec3, dir: Vec3) -> Option<RayHit> {
+        self.raycast_where(origin, dir, |_| true)
+    }
+
+    /// Like [`raycast`](Self::raycast), hitting only polygons `accept` returns
+    /// `true` for (hidden polygons are transparent).
+    #[must_use]
+    pub fn raycast_where(&self, origin: Vec3, dir: Vec3, accept: impl Fn(u32) -> bool) -> Option<RayHit> {
         self.0
             .bvh
             .get_or_init(|| Bvh::build(&self.0.mesh))
-            .raycast(self.0.mesh.points(), origin, dir)
+            .raycast_where(self.0.mesh.points(), origin, dir, accept)
+    }
+
+    /// The mesh's adjacency, built on first use and shared by every clone.
+    #[must_use]
+    pub fn topology(&self) -> &Topology {
+        self.0.topology.get_or_init(|| Topology::build(&self.0.mesh))
     }
 }
 
@@ -89,6 +106,66 @@ impl fmt::Debug for MeshHandle {
             .field("points", &self.0.mesh.point_count())
             .field("faces", &self.0.mesh.face_count())
             .finish()
+    }
+}
+
+/// What is selected and hidden on a polygon object, per component kind.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ComponentState {
+    pub selected: ComponentSet,
+    /// Hidden components are neither drawn nor pickable.
+    pub hidden: ComponentSet,
+}
+
+/// A polygon object's [`ComponentState`], shared copy-on-write: snapshots (undo
+/// steps, the evaluated scene) are cheap, and [`make_mut`](Self::make_mut) copies
+/// only while the state is shared. It sits *next to* the [`MeshHandle`], so
+/// selecting never creates a new [`MeshId`] or re-uploads the mesh.
+#[derive(Clone, Default)]
+pub struct Components(Arc<ComponentState>);
+
+impl Components {
+    #[must_use]
+    pub fn new(state: ComponentState) -> Self {
+        Self(Arc::new(state))
+    }
+
+    #[must_use]
+    pub fn selected(&self) -> &ComponentSet {
+        &self.0.selected
+    }
+
+    #[must_use]
+    pub fn hidden(&self) -> &ComponentSet {
+        &self.0.hidden
+    }
+
+    #[must_use]
+    pub fn state(&self) -> &ComponentState {
+        &self.0
+    }
+
+    /// Write access, copying the state first if anything else shares it.
+    pub fn make_mut(&mut self) -> &mut ComponentState {
+        Arc::make_mut(&mut self.0)
+    }
+
+    /// The very same shared state (not merely equal): cheap change detection.
+    #[must_use]
+    pub fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl PartialEq for Components {
+    fn eq(&self, other: &Self) -> bool {
+        self.same(other) || self.0 == other.0
+    }
+}
+
+impl fmt::Debug for Components {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -128,6 +205,34 @@ mod tests {
         assert!((hit.t - 40.0).abs() < 0.1, "front of the sphere, t = {}", hit.t);
         assert!(sphere.0.bvh.get().is_some(), "the original sees the clone's BVH");
         assert_eq!(sphere.raycast(Vec3::new(0.0, 50.0, 50.0), -Vec3::Z), None);
+    }
+
+    #[test]
+    fn components_copy_only_while_shared() {
+        let mut a = Components::default();
+        let before: *const ComponentState = a.state();
+        a.make_mut().selected.points.insert(3);
+        assert!(std::ptr::eq(before, a.state()), "not shared: edited in place");
+        let snapshot = a.clone();
+        assert!(a.same(&snapshot));
+        a.make_mut().selected.points.insert(4);
+        assert!(!a.same(&snapshot), "shared: copied first");
+        assert_eq!(snapshot.selected().points.len(), 1, "the snapshot is untouched");
+        assert_ne!(a, snapshot);
+        a.make_mut().selected.points.remove(4);
+        assert_eq!(a, snapshot, "equal by content");
+    }
+
+    #[test]
+    fn topology_is_built_once_and_hidden_faces_let_rays_through() {
+        let cube = MeshHandle::new(primitives::cube(Vec3::splat(2.0), [1, 1, 1]));
+        assert!(std::ptr::eq(cube.topology(), cube.clone().topology()));
+        assert_eq!(cube.topology().edge_count(), 12);
+        let front = cube.raycast(Vec3::new(0.0, 0.0, 5.0), -Vec3::Z).unwrap();
+        let back = cube
+            .raycast_where(Vec3::new(0.0, 0.0, 5.0), -Vec3::Z, |f| f != front.face)
+            .unwrap();
+        assert!((back.t - 6.0).abs() < 1e-5);
     }
 
     #[test]

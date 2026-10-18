@@ -17,6 +17,7 @@
 //!   cleared and refilled, and GPU buffers only grow (geometrically) when needed.
 
 mod camera;
+mod components;
 mod frame;
 mod gpu;
 mod mesh;
@@ -24,6 +25,7 @@ mod picking;
 mod target;
 
 pub use camera::{OrbitCamera, Ray};
+pub use components::{ComponentHit, ComponentStyle, ScreenView, pick_component};
 pub use frame::{FrameData, InstanceRaw};
 pub use gpu::{GpuTargetConfig, ViewportRenderer};
 pub use mesh::{TessellationScratch, Vertex, tessellate};
@@ -34,4 +36,5 @@ pub use target::ViewportTarget;
 pub mod shaders {
     pub const MESH: &str = include_str!("shaders/mesh.wgsl");
     pub const GRID: &str = include_str!("shaders/grid.wgsl");
+    pub const OVERLAY: &str = include_str!("shaders/overlay.wgsl");
 }

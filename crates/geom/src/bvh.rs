@@ -128,6 +128,19 @@ impl Bvh {
     /// from. Allocation-free.
     #[must_use]
     pub fn raycast(&self, points: &[Vec3], origin: Vec3, dir: Vec3) -> Option<RayHit> {
+        self.raycast_where(points, origin, dir, |_| true)
+    }
+
+    /// Like [`raycast`](Self::raycast), but only polygons for which `accept`
+    /// returns `true` can be hit (others are transparent, e.g. hidden ones).
+    #[must_use]
+    pub fn raycast_where(
+        &self,
+        points: &[Vec3],
+        origin: Vec3,
+        dir: Vec3,
+        accept: impl Fn(u32) -> bool,
+    ) -> Option<RayHit> {
         if self.nodes.is_empty() {
             return None;
         }
@@ -145,6 +158,9 @@ impl Bvh {
             if node.count > 0 {
                 let range = us(node.first)..us(node.first) + us(node.count);
                 for (triangle, &face) in self.triangles[range.clone()].iter().zip(&self.faces[range]) {
+                    if !accept(face) {
+                        continue;
+                    }
                     let [a, b, c] = triangle.map(|p| points.get(us(p)).copied().unwrap_or(Vec3::NAN));
                     if let Some(t) = ray_triangle(origin, dir, a, b, c)
                         && best.is_none_or(|hit| t < hit.t)
@@ -296,6 +312,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn filtered_faces_are_transparent() {
+        let cube = shapes::cube(2.0);
+        let bvh = Bvh::build(&cube);
+        let front = bvh.raycast(cube.points(), Vec3::new(0.0, 0.0, 5.0), -Vec3::Z).unwrap();
+        let behind = bvh
+            .raycast_where(cube.points(), Vec3::new(0.0, 0.0, 5.0), -Vec3::Z, |f| f != front.face)
+            .unwrap();
+        assert!(
+            (behind.t - 6.0).abs() < 1e-6,
+            "through the skipped front face to the back"
+        );
     }
 
     #[test]

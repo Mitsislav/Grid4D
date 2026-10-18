@@ -31,7 +31,20 @@ pub fn show(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 ..IconStyle::default()
             };
             if icon_button(ui, mode_icon(mode), style, mode_tooltip(mode)).clicked() {
-                editor.mode = mode;
+                // Shift/Ctrl+click from one component mode to another converts the selection.
+                let modifiers = ui.input(|i| i.modifiers);
+                let converts = (modifiers.shift || modifiers.command)
+                    && mode != editor.mode
+                    && mode.component().is_some()
+                    && editor.mode.component().is_some();
+                if converts {
+                    editor.commands.push(EditorCommand::ConvertSelection {
+                        to: mode,
+                        tolerant: modifiers.shift,
+                    });
+                } else {
+                    editor.mode = mode;
+                }
             }
         }
         ui.add_space(4.0);
@@ -66,8 +79,14 @@ const fn mode_icon(mode: EditMode) -> Icon {
 const fn mode_tooltip(mode: EditMode) -> &'static str {
     match mode {
         EditMode::Model => "Model mode",
-        EditMode::Points => "Points mode — component editing planned",
-        EditMode::Edges => "Edges mode — component editing planned",
-        EditMode::Polygons => "Polygons mode — component editing planned",
+        EditMode::Points => {
+            "Points mode · Shift+click converts the selection (touching), Ctrl+click strictly (fully covered)"
+        }
+        EditMode::Edges => {
+            "Edges mode · Shift+click converts the selection (touching), Ctrl+click strictly (fully covered)"
+        }
+        EditMode::Polygons => {
+            "Polygons mode · Shift+click converts the selection (touching), Ctrl+click strictly (fully covered)"
+        }
     }
 }

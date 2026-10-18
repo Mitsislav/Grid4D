@@ -148,7 +148,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
             color: light,
             unlit: true,
         }),
-        ObjectKind::Polygon { ref mesh } => {
+        ObjectKind::Polygon { ref mesh, .. } => {
             if mesh.mesh().face_count() == 0 {
                 return None;
             }
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn polygon_objects_draw_their_mesh_unscaled() {
         let mesh = MeshHandle::new(editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap());
-        let kind = ObjectKind::Polygon { mesh: mesh.clone() };
+        let kind = ObjectKind::polygon(mesh.clone());
         let d = drawable(&kind, [0.5; 3]).unwrap();
         assert_eq!(
             (d.key, d.scale, d.unlit),

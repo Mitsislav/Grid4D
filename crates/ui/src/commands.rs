@@ -6,13 +6,15 @@
 //! each step restores the selection it was made with.
 
 use glam::Vec3;
+use grid4d_geom::{Component, selection};
 use grid4d_render::OrbitCamera;
 use grid4d_scene::{
-    Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, SceneEdit, Transform,
+    ComponentState, Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, SceneEdit,
+    Transform,
 };
 
 use crate::{
-    EditorState, Selection, ViewportPanel,
+    EditMode, EditorState, Selection, ViewportPanel,
     file::{self, FileAction, UnsavedChoice},
     theme::palette,
 };
@@ -26,6 +28,8 @@ pub enum SelectMode {
     Toggle,
     /// Shift + click.
     Add,
+    /// Ctrl/Cmd + click in a component mode (C4D removes there, rather than toggling).
+    Remove,
 }
 
 impl SelectMode {
@@ -38,6 +42,15 @@ impl SelectMode {
             Self::Add
         } else {
             Self::Replace
+        }
+    }
+
+    /// The same for components: Shift adds, Ctrl removes.
+    #[must_use]
+    pub fn for_components(m: egui::Modifiers) -> Self {
+        match Self::from_modifiers(m) {
+            Self::Toggle => Self::Remove,
+            other => other,
         }
     }
 }
@@ -64,6 +77,22 @@ pub enum EditorCommand {
     /// Turns the selected primitives into polygon objects that look the same
     /// (C4D's "Make Editable", `C`); other objects are left alone.
     MakeEditable,
+    /// A click in a component mode on polygon object `node`: `hit` is the picked
+    /// point, unique edge or polygon index, `None` for empty space (which clears
+    /// the selection on a plain click). One undo step if anything changed.
+    SelectComponents {
+        node: NodeId,
+        component: Component,
+        hit: Option<u32>,
+        mode: SelectMode,
+    },
+    /// Switches to mode `to`, converting the current mode's component selection
+    /// of the active object (Shift+click on a mode: `tolerant`; Ctrl+click:
+    /// strict). One undo step if the selection changed.
+    ConvertSelection {
+        to: EditMode,
+        tolerant: bool,
+    },
     Select {
         id: NodeId,
         mode: SelectMode,
@@ -160,6 +189,8 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 }
             });
         }
+        // Deleting components comes with step 4.5; objects stay put meanwhile.
+        EditorCommand::DeleteSelected if editor.mode != EditMode::Model => {}
         EditorCommand::DeleteSelected => {
             // Detaching a node takes its descendants along, so only the topmost
             // selected nodes are detached.
@@ -181,9 +212,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     let data = &doc.scene.get(id)?.data;
                     let mesh = grid4d_eval::editable_mesh(&data.kind)?;
                     let mut data = data.clone();
-                    data.kind = ObjectKind::Polygon {
-                        mesh: MeshHandle::new(mesh),
-                    };
+                    data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
                     Some(SceneEdit::SetData { id, data })
                 })
                 .collect();
@@ -195,7 +224,81 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     SelectMode::Replace => editor.selection.set_single(id),
                     SelectMode::Toggle => editor.selection.toggle(id),
                     SelectMode::Add => editor.selection.add(id),
+                    SelectMode::Remove => editor.selection.remove(id),
                 }
+            }
+        }
+        EditorCommand::SelectComponents {
+            node,
+            component,
+            hit,
+            mode,
+        } => edit_components(doc, editor, node, select_label(component), |state, mesh| {
+            // An edge is stored as all of its corners.
+            let indices: Vec<usize> = match (component, hit) {
+                (_, None) => Vec::new(),
+                (Component::Edge, Some(e)) => mesh.topology().edge_corners(idx(e)).iter().map(|&c| idx(c)).collect(),
+                (Component::Point | Component::Polygon, Some(i)) => vec![idx(i)],
+            };
+            let bits = state.selected.get_mut(component);
+            match mode {
+                SelectMode::Replace => {
+                    bits.clear();
+                    bits.extend(indices);
+                }
+                SelectMode::Add => bits.extend(indices),
+                SelectMode::Remove => {
+                    for i in indices {
+                        bits.remove(i);
+                    }
+                }
+                SelectMode::Toggle => {
+                    let on = indices.iter().any(|&i| bits.contains(i));
+                    for i in indices {
+                        if on {
+                            bits.remove(i);
+                        } else {
+                            bits.insert(i);
+                        }
+                    }
+                }
+            }
+        }),
+        EditorCommand::ConvertSelection { to, tolerant } => {
+            if let (Some(from), Some(target), Some(id)) =
+                (editor.mode.component(), to.component(), editor.selection.active())
+                && from != target
+            {
+                edit_components(doc, editor, id, "Convert Selection", |state, mesh| {
+                    let mut converted =
+                        selection::convert(mesh.mesh(), mesh.topology(), &state.selected, from, target, tolerant);
+                    converted.remove_all(state.hidden.get(target)); // hidden components stay unselected
+                    *state.selected.get_mut(target) = converted;
+                });
+            }
+            editor.mode = to;
+        }
+        EditorCommand::SelectAll if editor.mode != EditMode::Model => {
+            if let (Some(component), Some(id)) = (editor.mode.component(), editor.selection.active()) {
+                edit_components(doc, editor, id, "Select All", |state, mesh| {
+                    let count = match component {
+                        Component::Point => mesh.mesh().point_count(),
+                        Component::Edge => mesh.mesh().corner_count(),
+                        Component::Polygon => mesh.mesh().face_count(),
+                    };
+                    let ComponentState { selected, hidden } = state;
+                    let bits = selected.get_mut(component);
+                    bits.clear();
+                    bits.insert_range(0..count);
+                    bits.remove_all(hidden.get(component));
+                });
+            }
+        }
+        EditorCommand::DeselectAll if editor.mode != EditMode::Model => {
+            if let (Some(component), Some(id)) = (editor.mode.component(), editor.selection.active()) {
+                edit_components(doc, editor, id, "Deselect All", |state, _| {
+                    state.selected.get_mut(component).clear();
+                });
             }
         }
         EditorCommand::SelectAll => {
@@ -270,6 +373,45 @@ fn commit(
         }
         Err(err) => log::warn!("{label} rejected: {err}"),
     }
+}
+
+/// Changes the components of polygon object `id` with `change` as one undo step
+/// named `label`; records nothing if they end up unchanged.
+fn edit_components(
+    doc: &mut Document,
+    editor: &mut EditorState,
+    id: NodeId,
+    label: &'static str,
+    change: impl FnOnce(&mut ComponentState, &MeshHandle),
+) {
+    let Some(node) = doc.scene.get(id) else { return };
+    let ObjectKind::Polygon { mesh, components } = &node.data.kind else {
+        return;
+    };
+    let mut updated = components.clone();
+    change(updated.make_mut(), mesh);
+    if updated == *components {
+        return;
+    }
+    let mut data = node.data.clone();
+    data.kind = ObjectKind::Polygon {
+        mesh: mesh.clone(),
+        components: updated,
+    };
+    commit(doc, editor, label, vec![SceneEdit::SetData { id, data }], |_, _| {});
+}
+
+const fn select_label(component: Component) -> &'static str {
+    match component {
+        Component::Point => "Select Points",
+        Component::Edge => "Select Edges",
+        Component::Polygon => "Select Polygons",
+    }
+}
+
+/// `u32` index → `usize` (lossless on every supported platform).
+fn idx(index: u32) -> usize {
+    usize::try_from(index).unwrap_or(usize::MAX)
 }
 
 /// `true` if [`EditorCommand::MakeEditable`] has a primitive to convert in
@@ -450,7 +592,7 @@ mod tests {
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
 
         let data = doc.scene.get(cube).unwrap().data.clone();
-        let ObjectKind::Polygon { mesh } = &data.kind else {
+        let ObjectKind::Polygon { mesh, .. } = &data.kind else {
             panic!("not converted: {:?}", data.kind)
         };
         assert_eq!((mesh.mesh().point_count(), mesh.mesh().face_count()), (8, 6));
@@ -469,7 +611,7 @@ mod tests {
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
         assert_eq!(doc.scene.get(cube).unwrap().data, cube_before);
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
-        let ObjectKind::Polygon { mesh: again } = &doc.scene.get(cube).unwrap().data.kind else {
+        let ObjectKind::Polygon { mesh: again, .. } = &doc.scene.get(cube).unwrap().data.kind else {
             panic!("redo did not restore the mesh")
         };
         assert_eq!(
@@ -477,6 +619,129 @@ mod tests {
             mesh.id(),
             "the same mesh comes back, so its GPU copy is reused"
         );
+    }
+
+    /// A document with one polygon cube (8 points, 6 quads), active, in `mode`.
+    fn polygon_cube(mode: EditMode) -> (Document, EditorState, ViewportPanel, NodeId) {
+        let mesh = grid4d_eval::editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap();
+        let mut doc = Document::new("components");
+        let id = doc
+            .scene
+            .insert(Node::new("Cube", ObjectKind::polygon(MeshHandle::new(mesh))));
+        let mut editor = EditorState {
+            mode,
+            ..EditorState::default()
+        };
+        editor.selection.set_single(id);
+        (doc, editor, viewport(), id)
+    }
+
+    fn selected(doc: &Document, id: NodeId, component: Component) -> Vec<usize> {
+        let ObjectKind::Polygon { components, .. } = &doc.scene.get(id).unwrap().data.kind else {
+            panic!("not a polygon object")
+        };
+        components.selected().get(component).iter().collect()
+    }
+
+    #[test]
+    fn component_clicks_follow_the_modifiers_one_undo_step_each() {
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Points);
+        let click = |hit, mode| EditorCommand::SelectComponents {
+            node: id,
+            component: Component::Point,
+            hit,
+            mode,
+        };
+        run(&mut doc, &mut editor, &mut vp, &[click(Some(2), SelectMode::Replace)]);
+        assert_eq!(selected(&doc, id, Component::Point), [2]);
+        assert_eq!(editor.history.undo_label(), Some("Select Points"));
+        run(&mut doc, &mut editor, &mut vp, &[click(Some(5), SelectMode::Add)]);
+        run(&mut doc, &mut editor, &mut vp, &[click(Some(2), SelectMode::Remove)]);
+        assert_eq!(selected(&doc, id, Component::Point), [5]);
+        run(&mut doc, &mut editor, &mut vp, &[click(None, SelectMode::Replace)]);
+        assert!(selected(&doc, id, Component::Point).is_empty(), "empty space deselects");
+        assert_eq!(editor.history.undo_len(), 4);
+        run(&mut doc, &mut editor, &mut vp, &[click(None, SelectMode::Replace)]);
+        assert_eq!(editor.history.undo_len(), 4, "no change, no step");
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Undo, EditorCommand::Undo],
+        );
+        assert_eq!(selected(&doc, id, Component::Point), [2, 5]);
+    }
+
+    #[test]
+    fn an_edge_is_selected_through_all_of_its_corners() {
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Edges);
+        let pick = |e, mode| EditorCommand::SelectComponents {
+            node: id,
+            component: Component::Edge,
+            hit: Some(e),
+            mode,
+        };
+        run(&mut doc, &mut editor, &mut vp, &[pick(3, SelectMode::Replace)]);
+        assert_eq!(
+            selected(&doc, id, Component::Edge).len(),
+            2,
+            "one corner in each of its two faces"
+        );
+        run(&mut doc, &mut editor, &mut vp, &[pick(3, SelectMode::Toggle)]);
+        assert!(selected(&doc, id, Component::Edge).is_empty());
+    }
+
+    #[test]
+    fn shift_and_ctrl_on_a_mode_convert_the_selection() {
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Points);
+        let select = EditorCommand::SelectComponents {
+            node: id,
+            component: Component::Point,
+            hit: Some(0),
+            mode: SelectMode::Replace,
+        };
+        let convert = |tolerant| EditorCommand::ConvertSelection {
+            to: EditMode::Polygons,
+            tolerant,
+        };
+        run(&mut doc, &mut editor, &mut vp, &[select.clone(), convert(true)]);
+        assert_eq!(editor.mode, EditMode::Polygons);
+        assert_eq!(
+            selected(&doc, id, Component::Polygon).len(),
+            3,
+            "every face using the point"
+        );
+        assert_eq!(editor.history.undo_label(), Some("Convert Selection"));
+
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Points);
+        run(&mut doc, &mut editor, &mut vp, &[select, convert(false)]);
+        assert_eq!(editor.mode, EditMode::Polygons);
+        assert!(
+            selected(&doc, id, Component::Polygon).is_empty(),
+            "strict: no face is fully selected"
+        );
+        assert_eq!(
+            editor.history.undo_label(),
+            Some("Select Points"),
+            "nothing changed, no step"
+        );
+    }
+
+    #[test]
+    fn select_all_and_delete_respect_the_component_mode() {
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Polygons);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SelectAll]);
+        assert_eq!(selected(&doc, id, Component::Polygon), [0, 1, 2, 3, 4, 5]);
+        assert_eq!(editor.selection.as_slice(), &[id], "the object selection is untouched");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
+        assert!(
+            doc.scene.contains(id),
+            "Delete does not remove objects in a component mode"
+        );
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeselectAll]);
+        assert!(selected(&doc, id, Component::Polygon).is_empty());
+        assert_eq!(editor.history.undo_label(), Some("Deselect All"));
     }
 
     #[test]

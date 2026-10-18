@@ -110,9 +110,7 @@ mod tests {
     fn polygon_objects_are_picked_by_their_triangles() {
         let mut doc = Document::new("meshes");
         let torus = grid4d_eval::editable_mesh(&ObjectKindTag::Torus.default_kind()).unwrap();
-        let kind = ObjectKind::Polygon {
-            mesh: MeshHandle::new(torus),
-        };
+        let kind = ObjectKind::polygon(MeshHandle::new(torus));
         let id = doc
             .scene
             .insert(Node::new("Torus", kind).with_position(Vec3::new(0.0, 0.0, 500.0)));

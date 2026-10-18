@@ -1,6 +1,7 @@
 //! Editor (session) state that is *not* part of the document: selection, the
 //! active tool, modes and transient UI flags.
 
+use grid4d_geom::Component;
 use grid4d_scene::{NodeId, Scene};
 use slotmap::SecondaryMap;
 
@@ -56,7 +57,8 @@ impl Tool {
     }
 }
 
-/// Component mode (left palette). Only `Model` is functional until meshes are editable.
+/// Component mode (left palette). Points, Edges and Polygons work on the active
+/// object when it is a polygon object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EditMode {
     Model,
@@ -75,6 +77,17 @@ impl EditMode {
             Self::Points => "Points",
             Self::Edges => "Edges",
             Self::Polygons => "Polygons",
+        }
+    }
+
+    /// The component kind a component mode works on; `None` in Model mode.
+    #[must_use]
+    pub const fn component(self) -> Option<Component> {
+        match self {
+            Self::Model => None,
+            Self::Points => Some(Component::Point),
+            Self::Edges => Some(Component::Edge),
+            Self::Polygons => Some(Component::Polygon),
         }
     }
 }
@@ -138,6 +151,12 @@ impl Selection {
             self.ids.push(id);
         } else {
             self.push(id);
+        }
+    }
+
+    pub fn remove(&mut self, id: NodeId) {
+        if self.members.remove(id).is_some() {
+            self.ids.retain(|&x| x != id);
         }
     }
 

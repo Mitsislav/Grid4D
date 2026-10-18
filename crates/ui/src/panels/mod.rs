@@ -41,10 +41,25 @@ mod tests {
     /// the evaluation skip idle frames.
     #[test]
     fn idle_frames_do_not_touch_the_document() {
-        let ctx = egui::Context::default();
+        let doc = Document::with_demo_scene();
+        let mut editor = EditorState::default();
+        editor.selection.set_single(doc.scene.roots()[0]);
+        assert_idle_frames_leave_the_document_alone(doc, editor);
+    }
+
+    #[test]
+    fn idle_frames_in_a_component_mode_do_not_touch_the_document() {
         let mut doc = Document::with_demo_scene();
         let mut editor = EditorState::default();
         editor.selection.set_single(doc.scene.roots()[0]);
+        editor.commands.push(crate::EditorCommand::MakeEditable);
+        commands::apply_pending(&mut doc, &mut editor, &mut ViewportPanel::new(None));
+        editor.mode = crate::EditMode::Points;
+        assert_idle_frames_leave_the_document_alone(doc, editor);
+    }
+
+    fn assert_idle_frames_leave_the_document_alone(mut doc: Document, mut editor: EditorState) {
+        let ctx = egui::Context::default();
         let mut outliner = OutlinerPanel::default();
         let mut attributes = AttributesPanel::default();
         let mut timeline = TimelinePanel::default();

@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use crate::{Aabb, MeshHandle, Transform};
+use crate::{Aabb, Components, MeshHandle, Transform};
 
 slotmap::new_key_type! {
     /// Stable, generational handle to a node in a [`Scene`](crate::Scene).
@@ -85,9 +85,12 @@ pub enum ObjectKind {
         color: [f32; 3],
         intensity: f32,
     },
-    /// An editable mesh (C4D's "Polygon Object"), in object space.
+    /// An editable mesh (C4D's "Polygon Object"), in object space, with its
+    /// selected and hidden components (they live in the object, like C4D's, so
+    /// they are undoable and saved).
     Polygon {
         mesh: MeshHandle,
+        components: Components,
     },
 }
 
@@ -211,14 +214,21 @@ impl ObjectKindTag {
                 intensity: 1.0,
             },
             // Empty, like C4D's Create ▸ Polygon Object.
-            Self::Polygon => ObjectKind::Polygon {
-                mesh: MeshHandle::new(grid4d_geom::PolyMesh::new()),
-            },
+            Self::Polygon => ObjectKind::polygon(MeshHandle::new(grid4d_geom::PolyMesh::new())),
         }
     }
 }
 
 impl ObjectKind {
+    /// A polygon object with `mesh` and nothing selected or hidden.
+    #[must_use]
+    pub fn polygon(mesh: MeshHandle) -> Self {
+        Self::Polygon {
+            mesh,
+            components: Components::default(),
+        }
+    }
+
     #[must_use]
     pub const fn tag(&self) -> ObjectKindTag {
         match self {
@@ -276,7 +286,7 @@ impl ObjectKind {
             Self::Camera { .. } => Vec3::splat(CAMERA_MARKER_SIZE * 0.5),
             Self::Light { .. } => Vec3::splat(LIGHT_MARKER_RADIUS),
             // Exact and not centred: the mesh's own (cached) bounds.
-            Self::Polygon { ref mesh } => return mesh.bounds(),
+            Self::Polygon { ref mesh, .. } => return mesh.bounds(),
         };
         Some(Aabb::from_half_extents(half.abs()))
     }
@@ -461,9 +471,7 @@ mod tests {
             mesh.add_point(p).unwrap();
         }
         mesh.add_face(&[0, 1, 2]).unwrap();
-        let kind = ObjectKind::Polygon {
-            mesh: MeshHandle::new(mesh),
-        };
+        let kind = ObjectKind::polygon(MeshHandle::new(mesh));
         assert_eq!(
             kind.local_bounds(),
             Some(Aabb {

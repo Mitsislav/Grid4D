@@ -71,6 +71,13 @@ pub mod metrics {
     pub const ROW_HEIGHT: f32 = 21.0;
     pub const STATUS_BAR_HEIGHT: f32 = 22.0;
     pub const ICON_BUTTON: f32 = 28.0;
+    /// Component overlay (points): square size.
+    pub const COMPONENT_POINT: f32 = 5.0;
+    /// Component overlay: edge width, and selected/hovered edge width.
+    pub const COMPONENT_EDGE: f32 = 1.25;
+    pub const COMPONENT_EDGE_SELECTED: f32 = 2.75;
+    /// How close (screen distance) a click must be to a point or edge.
+    pub const COMPONENT_PICK_RADIUS: f32 = 8.0;
 }
 
 /// Installs the theme. Call once at start-up.

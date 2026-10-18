@@ -2,7 +2,8 @@
 //!
 //! Polygon geometry for Grid4D: n-gon meshes ([`PolyMesh`]), their triangulation
 //! for the GPU ([`Triangulator`] → [`TriMesh`]), vertex normals ([`Smoothing`]),
-//! adjacency ([`Topology`]) and ray casting ([`Bvh`]).
+//! adjacency ([`Topology`]), ray casting ([`Bvh`]) and component selections
+//! ([`ComponentSet`], [`selection::convert`]).
 //!
 //! ## Architecture rule
 //!
@@ -17,19 +18,23 @@
 //! to (right-handed), like the rest of Grid4D. A face is a simple polygon of three
 //! or more distinct points; it may be non-convex and slightly non-planar.
 
+mod bitset;
 mod bvh;
 mod mesh;
 mod normals;
 pub mod primitives;
+pub mod selection;
 mod topology;
 mod triangulate;
 
 #[cfg(test)]
 mod shapes;
 
+pub use bitset::BitSet;
 pub use bvh::{Bvh, RayHit};
 pub use mesh::{MeshError, PolyMesh};
 pub use normals::Smoothing;
+pub use selection::{Component, ComponentSet};
 pub use topology::Topology;
 pub use triangulate::{TriMesh, Triangulator};
 

@@ -18,6 +18,8 @@ pub struct Topology {
     corner_edges: Vec<u32>,
     edge_face_offsets: Vec<u32>,
     edge_face_list: Vec<u32>,
+    edge_corner_offsets: Vec<u32>,
+    edge_corner_list: Vec<u32>,
     point_face_offsets: Vec<u32>,
     point_face_list: Vec<u32>,
     /// Points used by at least one face.
@@ -58,6 +60,12 @@ impl Topology {
                 }
             }
         });
+        // Corners per edge (the inverse of `corner_edges`).
+        let (edge_corner_offsets, edge_corner_list) = pack(edges.len(), |emit| {
+            for (c, &e) in corner_edges.iter().enumerate() {
+                emit(us(e), u32_index(c));
+            }
+        });
         // Faces per point.
         let (point_face_offsets, point_face_list) = pack(mesh.point_count(), |emit| {
             for (f, face) in mesh.faces().enumerate() {
@@ -73,6 +81,8 @@ impl Topology {
             corner_edges,
             edge_face_offsets,
             edge_face_list,
+            edge_corner_offsets,
+            edge_corner_list,
             point_face_offsets,
             point_face_list,
             used_points,
@@ -96,6 +106,12 @@ impl Topology {
     #[must_use]
     pub fn corner_edge(&self, corner: usize) -> Option<u32> {
         self.corner_edges.get(corner).copied()
+    }
+
+    /// Corners whose edge is `edge` — one per face using it (empty if out of range).
+    #[must_use]
+    pub fn edge_corners(&self, edge: usize) -> &[u32] {
+        slice(&self.edge_corner_offsets, &self.edge_corner_list, edge)
     }
 
     /// Faces that use edge `edge` (empty if out of range).
@@ -222,6 +238,14 @@ mod tests {
         for c in 0..cube.corner_count() {
             let [a, b] = t.edges()[us(t.corner_edge(c).unwrap())];
             assert!(cube.corner_points()[c] == a || cube.corner_points()[c] == b);
+        }
+        for e in 0..t.edge_count() {
+            assert_eq!(t.edge_corners(e).len(), 2, "a closed edge has a corner in each face");
+            assert!(
+                t.edge_corners(e)
+                    .iter()
+                    .all(|&c| t.corner_edge(us(c)) == Some(u32_index(e)))
+            );
         }
         assert!(t.point_faces(99).is_empty());
     }

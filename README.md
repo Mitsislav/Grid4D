@@ -23,6 +23,12 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
 - **Make Editable** (`C`, Mesh ▸ Conversion, or the top of the left palette): turns
   primitives into polygon objects (triangles, quads and n-gons) that look the same,
   in one undo step; polygon objects are picked by their actual triangles.
+- **Component modes** (Points / Edges / Polygons, left palette) on the active
+  polygon object: points, edges and selected polygons drawn over the surface (hidden
+  ones stay hidden), the component under the cursor highlighted; click selects, Shift
+  adds, Ctrl removes, empty space deselects (each an undo step, saved with the file);
+  Shift/Ctrl+click on another mode converts the selection; Select All / Deselect All
+  work on components.
 - **wgpu viewport**: renders into its own offscreen target (4× MSAA, depth) shown as
   an image; generated meshes cached per shape and drawn instanced, Phong-angle
   smoothing, anti-aliased adaptive grid, orange selection rim, axis triad and

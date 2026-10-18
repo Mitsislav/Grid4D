@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
 use grid4d_eval::{EvaluatedScene, MeshKey};
+use grid4d_geom::Component;
 use grid4d_scene::{MeshHandle, NodeId};
 
-use crate::OrbitCamera;
+use crate::{ComponentHit, ComponentStyle, OrbitCamera, components::ComponentOverlay};
 
 /// Per-instance GPU data. Layout must match `InstanceIn` in `shaders/mesh.wgsl`.
 #[repr(C)]
@@ -46,6 +47,10 @@ pub struct FrameData {
     /// Half-size of the grid quad; the grid fades out towards this distance.
     pub grid_extent: f32,
     pub show_grid: bool,
+    /// Colours and sizes of the component overlay.
+    pub component_style: ComponentStyle,
+    /// Points, edges and polygons of the active object in a component mode.
+    pub(crate) components: ComponentOverlay,
     /// One batch per mesh key seen recently; emptied (capacity kept) every frame.
     batches: Vec<Batch>,
     batch_index: HashMap<MeshKey, usize>,
@@ -68,6 +73,8 @@ impl FrameData {
             grid_spacing: 100.0,
             grid_extent: 20_000.0,
             show_grid: true,
+            component_style: ComponentStyle::default(),
+            components: ComponentOverlay::default(),
             batches: Vec::with_capacity(16),
             batch_index: HashMap::with_capacity(16),
             frame: 0,
@@ -144,6 +151,18 @@ impl FrameData {
         if frame.is_multiple_of(BATCH_TTL_FRAMES) {
             self.drop_stale_batches();
         }
+    }
+
+    /// Updates the component overlay: `target` is the polygon object and the
+    /// component kind of the current mode (`None` in Model mode), `hover` the
+    /// component under the cursor. Hot path: rebuilds only what changed.
+    pub fn extract_components(
+        &mut self,
+        scene: &EvaluatedScene,
+        target: Option<(NodeId, Component)>,
+        hover: Option<ComponentHit>,
+    ) {
+        self.components.update(scene, target, hover);
     }
 
     /// Forgets shapes that have not been drawn for a while (edited away, deleted).
@@ -287,13 +306,12 @@ mod tests {
         let mesh = MeshHandle::new(grid4d_eval::editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap());
         let mut doc = Document::new("meshes");
         for x in [0.0, 300.0] {
-            let kind = ObjectKind::Polygon { mesh: mesh.clone() };
+            let kind = ObjectKind::polygon(mesh.clone());
             doc.scene
                 .insert(Node::new("Shared", kind).with_position(Vec3::new(x, 0.0, 0.0)));
         }
         let other = MeshHandle::new(grid4d_eval::editable_mesh(&ObjectKindTag::Sphere.default_kind()).unwrap());
-        doc.scene
-            .insert(Node::new("Own", ObjectKind::Polygon { mesh: other.clone() }));
+        doc.scene.insert(Node::new("Own", ObjectKind::polygon(other.clone())));
         let mut frame = FrameData::new();
         frame.extract(&evaluated(&doc), |_| false);
         let batches: Vec<(MeshKey, Option<&MeshHandle>, usize)> =

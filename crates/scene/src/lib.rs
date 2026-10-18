@@ -31,7 +31,7 @@ mod test_util;
 pub use bounds::Aabb;
 pub use document::Document;
 pub use edit::SceneEdit;
-pub use mesh::{MeshHandle, MeshId};
+pub use mesh::{ComponentState, Components, MeshHandle, MeshId};
 pub use node::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, Node, NodeData, NodeId, ObjectKind, ObjectKindTag};
 pub use scene::{Detached, Scene, SceneError, WalkItem};
 pub use time::{Playback, TimeSettings, TimeState};
