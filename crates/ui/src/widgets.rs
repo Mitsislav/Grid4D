@@ -29,6 +29,12 @@ impl Default for IconStyle {
 
 /// A square, frameless toolbar button showing a painted icon.
 pub(crate) fn icon_button(ui: &mut Ui, icon: Icon, style: IconStyle, tooltip: &'static str) -> Response {
+    icon_button_bare(ui, icon, style).on_hover_text(tooltip)
+}
+
+/// [`icon_button`] without a tooltip, for callers whose tooltip is built on
+/// demand (`response.on_hover_ui(…)` only runs while hovered).
+pub(crate) fn icon_button_bare(ui: &mut Ui, icon: Icon, style: IconStyle) -> Response {
     let sense = if style.enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(style.size), sense);
     if ui.is_rect_visible(rect) {
@@ -67,7 +73,7 @@ pub(crate) fn icon_button(ui: &mut Ui, icon: Icon, style: IconStyle, tooltip: &'
         };
         icons::paint(painter, rect.shrink(style.size * 0.21), icon, color);
     }
-    response.on_hover_text(tooltip)
+    response
 }
 
 /// A C4D-style manager tab strip ("Objects | Takes"). Returns the clicked tab.

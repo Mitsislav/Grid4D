@@ -26,8 +26,25 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
         });
 
         ui.menu_button("Edit", |ui| {
-            planned(ui, "Undo", "Ctrl+Z");
-            planned(ui, "Redo", "Ctrl+Y");
+            // The menu is only built while open, so formatting the labels is cheap.
+            let undo = editor.history.undo_label();
+            let redo = editor.history.redo_label();
+            history_item(
+                ui,
+                editor,
+                undo.map_or_else(|| "Undo".to_owned(), |l| format!("Undo {l}")),
+                "Ctrl+Z",
+                undo.is_some(),
+                EditorCommand::Undo,
+            );
+            history_item(
+                ui,
+                editor,
+                redo.map_or_else(|| "Redo".to_owned(), |l| format!("Redo {l}")),
+                "Ctrl+Y",
+                redo.is_some(),
+                EditorCommand::Redo,
+            );
             ui.separator();
             command(ui, editor, "Delete", "Del", EditorCommand::DeleteSelected);
             command(ui, editor, "Select All", "Ctrl+A", EditorCommand::SelectAll);
@@ -193,6 +210,23 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
 
 fn command(ui: &mut Ui, editor: &mut EditorState, label: &str, shortcut: &str, cmd: EditorCommand) {
     if ui.add(Button::new(label).shortcut_text(shortcut)).clicked() {
+        editor.commands.push(cmd);
+        ui.close();
+    }
+}
+
+fn history_item(
+    ui: &mut Ui,
+    editor: &mut EditorState,
+    label: String,
+    shortcut: &str,
+    enabled: bool,
+    cmd: EditorCommand,
+) {
+    if ui
+        .add_enabled(enabled, Button::new(label).shortcut_text(shortcut))
+        .clicked()
+    {
         editor.commands.push(cmd);
         ui.close();
     }

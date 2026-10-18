@@ -89,6 +89,12 @@ impl CommandQueue {
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
+
+    /// The queued commands, oldest first.
+    #[cfg(test)]
+    pub(crate) fn pending(&self) -> &[EditorCommand] {
+        &self.pending
+    }
 }
 
 /// Applies every queued command. Returns `true` if anything was applied, so the

@@ -9,7 +9,7 @@ use crate::{
     commands::tag_color,
     icons::Icon,
     theme::{metrics, palette as p},
-    widgets::{IconStyle, icon_button},
+    widgets::{IconStyle, icon_button, icon_button_bare},
 };
 
 pub fn show(ui: &mut Ui, editor: &mut EditorState) {
@@ -20,8 +20,8 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
             enabled: false,
             ..IconStyle::default()
         };
-        icon_button(ui, Icon::Undo, disabled, "Undo (Ctrl+Z) — planned");
-        icon_button(ui, Icon::Redo, disabled, "Redo (Ctrl+Y) — planned");
+        history_button(ui, editor, HistoryStep::Undo);
+        history_button(ui, editor, HistoryStep::Redo);
         group_gap(ui);
 
         for tool in Tool::ALL {
@@ -85,6 +85,51 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
             }
         }
     });
+}
+
+#[derive(Clone, Copy)]
+enum HistoryStep {
+    Undo,
+    Redo,
+}
+
+/// Undo or Redo, enabled when there is a step, with the step's name as tooltip
+/// ("Undo Move (Ctrl+Z)").
+fn history_button(ui: &mut Ui, editor: &mut EditorState, step: HistoryStep) {
+    let (icon, verb, shortcut, empty, label, command) = match step {
+        HistoryStep::Undo => (
+            Icon::Undo,
+            "Undo",
+            "Ctrl+Z",
+            "Undo (Ctrl+Z) — nothing to undo",
+            editor.history.undo_label(),
+            EditorCommand::Undo,
+        ),
+        HistoryStep::Redo => (
+            Icon::Redo,
+            "Redo",
+            "Ctrl+Y",
+            "Redo (Ctrl+Y) — nothing to redo",
+            editor.history.redo_label(),
+            EditorCommand::Redo,
+        ),
+    };
+    let style = IconStyle {
+        enabled: label.is_some(),
+        ..IconStyle::default()
+    };
+    // The tooltip text is only built while hovered.
+    let response = icon_button_bare(ui, icon, style).on_hover_ui(|ui| match label {
+        Some(label) => {
+            ui.label(format!("{verb} {label} ({shortcut})"));
+        }
+        None => {
+            ui.label(empty);
+        }
+    });
+    if response.clicked() {
+        editor.commands.push(command);
+    }
 }
 
 fn group_gap(ui: &mut Ui) {

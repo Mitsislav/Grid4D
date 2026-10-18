@@ -5,9 +5,10 @@ workflow and layout inspired by Cinema 4D.
 
 ![OpenC4D workspace](docs/screenshot.png)
 
-**Status: v0.1 — editor shell.** The workspace, scene graph, GPU viewport,
-selection and transform tools work; modelling, keyframes, file I/O and
-rendering are on the roadmap (see `ARCHITECTURE.md`).
+**Status: v0.1 — editor shell, with undo/redo.** The workspace, scene graph,
+GPU viewport, selection and transform tools work, and every edit can be undone;
+file I/O, modelling, keyframes and rendering are on the roadmap (see
+[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)).
 
 ## What works today
 
@@ -30,6 +31,9 @@ rendering are on the roadmap (see `ARCHITECTURE.md`).
   primitive parameters, and project settings when nothing is selected.
 - **Timeline**: ruler with scrubbable playhead, play/pause/step/loop
   (`F8`, `F6`, `F7`, `F`, `G`), preview range and fps.
+- **Undo / redo** (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`, toolbar, Edit menu): create,
+  delete, re-parent, gizmo drags, attribute and project-setting edits, renames and
+  visibility toggles — one step per interaction, restoring the selection too.
 
 ## Build & run
 

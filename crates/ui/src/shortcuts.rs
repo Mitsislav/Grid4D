@@ -9,6 +9,8 @@
 //! | `Delete`/`⌫`   | Delete selection           |
 //! | `Ctrl+A`       | Select all                 |
 //! | `Ctrl+Shift+A` | Deselect all               |
+//! | `Ctrl+Z`       | Undo                       |
+//! | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo            |
 //! | `F6` / `F7` / `F8` | Play backwards / stop / play forwards |
 //! | `F` / `G`      | Previous / next frame      |
 
@@ -17,7 +19,8 @@ use oc4d_scene::Document;
 
 use crate::{EditorCommand, EditorState, Tool};
 
-/// Handles global shortcuts. Ignored while a text field has keyboard focus.
+/// Handles global shortcuts. Ignored while a text field has keyboard focus
+/// (text fields have their own undo).
 pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState) {
     if ctx.egui_wants_keyboard_input() {
         return;
@@ -71,5 +74,76 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                 EditorCommand::SelectAll
             });
         }
+        // Not in the middle of a drag: the drag records its own step on release,
+        // starting from the document it began with.
+        if i.modifiers.command && !i.pointer.any_down() {
+            if i.key_pressed(Key::Z) {
+                editor.commands.push(if i.modifiers.shift {
+                    EditorCommand::Redo
+                } else {
+                    EditorCommand::Undo
+                });
+            } else if i.key_pressed(Key::Y) {
+                editor.commands.push(EditorCommand::Redo);
+            }
+        }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::{Event, Modifiers, PointerButton, Pos2, RawInput};
+
+    use super::*;
+
+    /// Presses `key` with `modifiers` in one headless frame and returns the
+    /// queued commands. With `dragging`, the primary mouse button is held.
+    fn press(key: Key, modifiers: Modifiers, dragging: bool) -> Vec<EditorCommand> {
+        let ctx = egui::Context::default();
+        let (mut doc, mut editor) = (Document::default(), EditorState::default());
+        let mut events = vec![Event::ModifiersChanged(modifiers)];
+        if dragging {
+            let pos = Pos2::new(100.0, 100.0);
+            events.push(Event::PointerMoved(pos));
+            events.push(Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers,
+            });
+        }
+        events.push(Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        });
+        let input = RawInput {
+            events,
+            ..RawInput::default()
+        };
+        ctx.run_ui(input, |ui| handle(ui.ctx(), &mut doc, &mut editor))
+            .drop_without_applying_deltas();
+        editor.commands.pending().to_vec()
+    }
+
+    #[test]
+    fn undo_and_redo_follow_c4d() {
+        let ctrl = Modifiers::COMMAND;
+        let ctrl_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+        assert_eq!(press(Key::Z, ctrl, false), [EditorCommand::Undo]);
+        assert_eq!(press(Key::Y, ctrl, false), [EditorCommand::Redo]);
+        assert_eq!(press(Key::Z, ctrl_shift, false), [EditorCommand::Redo]);
+    }
+
+    #[test]
+    fn plain_keys_and_drags_never_undo() {
+        assert!(press(Key::Z, Modifiers::NONE, false).is_empty());
+        assert!(press(Key::Y, Modifiers::NONE, false).is_empty());
+        assert!(
+            press(Key::Z, Modifiers::COMMAND, true).is_empty(),
+            "a drag in progress must finish first"
+        );
+    }
 }
