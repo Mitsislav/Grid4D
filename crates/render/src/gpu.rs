@@ -1,9 +1,13 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt as _;
 
-use crate::{FrameData, InstanceRaw, MeshKind, Vertex, shaders};
+use crate::{
+    FrameData, InstanceRaw, Vertex,
+    mesh::{MeshKey, TessellationScratch},
+    shaders,
+};
 
 /// Describes the render target the viewport draws into. Must match the host's
 /// render pass (egui's surface), or wgpu validation will reject the pipelines.
@@ -29,10 +33,23 @@ struct GpuMesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
+    /// Last frame this mesh was drawn, for eviction.
+    last_used: u64,
+}
+
+/// One instanced draw: a cached mesh and its instances in the instance buffer.
+#[derive(Clone, Debug)]
+struct Draw {
+    key: MeshKey,
+    instances: Range<u32>,
 }
 
 const INSTANCE_STRIDE: u64 = size_of::<InstanceRaw>() as u64;
 const INITIAL_INSTANCE_CAPACITY: usize = 256;
+/// GPU meshes not drawn for this many frames are freed.
+const MESH_TTL_FRAMES: u64 = 600;
+/// How often (in frames) the cache looks for meshes to free.
+const EVICTION_INTERVAL: u64 = 120;
 
 const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
 const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
@@ -45,17 +62,24 @@ const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array!
 /// Owns every GPU resource of the 3D viewport and records its draw commands.
 ///
 /// Usage per frame: [`prepare`](Self::prepare) (uploads) → [`paint`](Self::paint)
-/// (inside the host's render pass).
+/// (inside the host's render pass). Meshes are generated and uploaded the first
+/// frame their [`MeshKey`] appears and freed when unused for a while.
 #[derive(Debug)]
 pub struct ViewportRenderer {
     mesh_pipeline: wgpu::RenderPipeline,
     grid_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    meshes: [GpuMesh; MeshKind::COUNT],
+    meshes: HashMap<MeshKey, GpuMesh>,
+    /// Reused while generating meshes for new keys.
+    tessellation: TessellationScratch,
+    vertex_scratch: Vec<Vertex>,
+    index_scratch: Vec<u32>,
     instance_buffer: wgpu::Buffer,
     instance_capacity: usize,
-    batch_ranges: [Range<u32>; MeshKind::COUNT],
+    /// This frame's draws; cleared (capacity kept) every frame.
+    draws: Vec<Draw>,
+    frame: u64,
     encode_srgb: bool,
     draw_grid: bool,
 }
@@ -96,45 +120,32 @@ impl ViewportRenderer {
             immediate_size: 0,
         });
 
-        let mesh_pipeline = create_mesh_pipeline(device, &layout, target);
-        let grid_pipeline = create_grid_pipeline(device, &layout, target);
-
-        let meshes = MeshKind::ALL.map(|kind| {
-            let data = kind.build();
-            GpuMesh {
-                vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("oc4d.mesh.vertices"),
-                    contents: bytemuck::cast_slice(&data.vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                }),
-                indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("oc4d.mesh.indices"),
-                    contents: bytemuck::cast_slice(&data.indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                }),
-                index_count: u32::try_from(data.indices.len()).unwrap_or(u32::MAX),
-            }
-        });
-
         Self {
-            mesh_pipeline,
-            grid_pipeline,
+            mesh_pipeline: create_mesh_pipeline(device, &layout, target),
+            grid_pipeline: create_grid_pipeline(device, &layout, target),
             camera_buffer,
             camera_bind_group,
-            meshes,
+            meshes: HashMap::new(),
+            tessellation: TessellationScratch::default(),
+            vertex_scratch: Vec::new(),
+            index_scratch: Vec::new(),
             instance_buffer: create_instance_buffer(device, INITIAL_INSTANCE_CAPACITY),
             instance_capacity: INITIAL_INSTANCE_CAPACITY,
-            batch_ranges: std::array::from_fn(|_| 0..0),
+            draws: Vec::with_capacity(16),
+            frame: 0,
             encode_srgb: !target.color_format.is_srgb(),
             draw_grid: true,
         }
     }
 
-    /// Uploads the frame's camera and instances. Called before the render pass.
+    /// Uploads the frame's camera and instances, generating meshes for shapes
+    /// seen for the first time. Called before the render pass.
     ///
-    /// Allocation-free in steady state: the instance buffer is only recreated
-    /// (with doubled capacity) when the scene outgrows it.
+    /// Allocation-free in steady state: meshes are only created for new keys, and
+    /// the instance buffer is only recreated (with doubled capacity) when the
+    /// scene outgrows it.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FrameData) {
+        self.frame += 1;
         let uniform = CameraUniform {
             view_proj: frame.view_proj.to_cols_array_2d(),
             eye: frame.eye.extend(if self.encode_srgb { 1.0 } else { 0.0 }).to_array(),
@@ -154,21 +165,62 @@ impl ViewportRenderer {
             self.instance_buffer = create_instance_buffer(device, self.instance_capacity);
         }
 
+        self.draws.clear();
         let mut offset = 0usize;
-        for kind in MeshKind::ALL {
-            let batch = frame.batch(kind);
-            if !batch.is_empty() {
-                queue.write_buffer(
-                    &self.instance_buffer,
-                    offset as u64 * INSTANCE_STRIDE,
-                    bytemuck::cast_slice(batch),
-                );
+        for (key, instances) in frame.batches() {
+            if !self.ensure_mesh(device, key) {
+                continue; // nothing to draw for this shape
             }
-            let end = offset + batch.len();
-            self.batch_ranges[kind.index()] = to_u32(offset)..to_u32(end);
+            queue.write_buffer(
+                &self.instance_buffer,
+                offset as u64 * INSTANCE_STRIDE,
+                bytemuck::cast_slice(instances),
+            );
+            let end = offset + instances.len();
+            self.draws.push(Draw {
+                key,
+                instances: to_u32(offset)..to_u32(end),
+            });
             offset = end;
         }
+        if self.frame.is_multiple_of(EVICTION_INTERVAL) {
+            let frame_now = self.frame;
+            self.meshes
+                .retain(|_, mesh| mesh.last_used + MESH_TTL_FRAMES > frame_now);
+        }
         self.draw_grid = frame.show_grid;
+    }
+
+    /// Makes sure the mesh for `key` is on the GPU; `false` if it has no triangles.
+    fn ensure_mesh(&mut self, device: &wgpu::Device, key: MeshKey) -> bool {
+        if let Some(mesh) = self.meshes.get_mut(&key) {
+            mesh.last_used = self.frame;
+            return true;
+        }
+        key.tessellate(
+            &mut self.tessellation,
+            &mut self.vertex_scratch,
+            &mut self.index_scratch,
+        );
+        if self.index_scratch.is_empty() {
+            return false;
+        }
+        let mesh = GpuMesh {
+            vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("oc4d.mesh.vertices"),
+                contents: bytemuck::cast_slice(&self.vertex_scratch),
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("oc4d.mesh.indices"),
+                contents: bytemuck::cast_slice(&self.index_scratch),
+                usage: wgpu::BufferUsages::INDEX,
+            }),
+            index_count: to_u32(self.index_scratch.len()),
+            last_used: self.frame,
+        };
+        self.meshes.insert(key, mesh);
+        true
     }
 
     /// Records the viewport draw calls into the host's render pass.
@@ -177,15 +229,13 @@ impl ViewportRenderer {
 
         pass.set_pipeline(&self.mesh_pipeline);
         pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        for kind in MeshKind::ALL {
-            let range = self.batch_ranges[kind.index()].clone();
-            if range.is_empty() {
+        for draw in &self.draws {
+            let Some(mesh) = self.meshes.get(&draw.key) else {
                 continue;
-            }
-            let mesh = &self.meshes[kind.index()];
+            };
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.index_count, 0, range);
+            pass.draw_indexed(0..mesh.index_count, 0, draw.instances.clone());
         }
 
         // The grid is drawn last: depth-tested against the meshes, alpha-blended.

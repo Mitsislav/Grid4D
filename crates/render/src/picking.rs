@@ -23,7 +23,7 @@ pub fn pick(scene: &Scene, ray: Ray, stack: &mut Vec<WalkItem>) -> Option<NodeId
         let origin = inv.transform_point3(ray.origin);
         let dir = inv.transform_vector3(ray.dir);
         let hit = match node.data.kind {
-            ObjectKind::Sphere { radius } => ray_sphere(origin, dir, radius),
+            ObjectKind::Sphere { radius, .. } => ray_sphere(origin, dir, radius),
             ObjectKind::Light { .. } => ray_sphere(origin, dir, LIGHT_MARKER_RADIUS),
             _ => bounds.ray_intersect(origin, dir),
         };

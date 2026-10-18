@@ -19,6 +19,7 @@
 
 mod mesh;
 mod normals;
+pub mod primitives;
 mod topology;
 mod triangulate;
 

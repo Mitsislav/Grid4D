@@ -268,7 +268,11 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Cube
         | ObjectKindTag::Sphere
         | ObjectKindTag::Cylinder
-        | ObjectKindTag::Plane => {}
+        | ObjectKindTag::Plane
+        | ObjectKindTag::Cone
+        | ObjectKindTag::Torus
+        | ObjectKindTag::Disc
+        | ObjectKindTag::Capsule => {}
     }
     data
 }
@@ -306,9 +310,14 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         ObjectKindTag::Null => palette::ICON_NULL,
         ObjectKindTag::Camera => palette::ICON_CAMERA,
         ObjectKindTag::Light => palette::ICON_LIGHT,
-        ObjectKindTag::Cube | ObjectKindTag::Sphere | ObjectKindTag::Cylinder | ObjectKindTag::Plane => {
-            palette::ICON_PRIMITIVE
-        }
+        ObjectKindTag::Cube
+        | ObjectKindTag::Sphere
+        | ObjectKindTag::Cylinder
+        | ObjectKindTag::Plane
+        | ObjectKindTag::Cone
+        | ObjectKindTag::Torus
+        | ObjectKindTag::Disc
+        | ObjectKindTag::Capsule => palette::ICON_PRIMITIVE,
     }
 }
 

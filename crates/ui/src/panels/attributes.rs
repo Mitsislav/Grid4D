@@ -6,6 +6,7 @@
 //! typed value, a click) is recorded as one undo step through [`LiveEdit`].
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
+use oc4d_geom::primitives::MAX_SEGMENTS;
 use oc4d_scene::{Document, NodeData, NodeId, ObjectKind, SceneEdit, TimeSettings};
 
 use crate::{
@@ -245,19 +246,87 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 );
                 ui.end_row();
             }
-            ObjectKind::Cube { size } => {
+            ObjectKind::Cube { size, segments } => {
                 for (axis, label) in ["Size . X", "Size . Y", "Size . Z"].into_iter().enumerate() {
                     length_row(ui, label, &mut size[axis]);
                 }
+                for (axis, label) in ["Segments X", "Segments Y", "Segments Z"].into_iter().enumerate() {
+                    segments_row(ui, label, &mut segments[axis], 1);
+                }
             }
-            ObjectKind::Sphere { radius } => length_row(ui, "Radius", radius),
-            ObjectKind::Cylinder { radius, height } => {
+            ObjectKind::Sphere { radius, segments } => {
+                length_row(ui, "Radius", radius);
+                segments_row(ui, "Segments", segments, 3);
+            }
+            ObjectKind::Cylinder {
+                radius,
+                height,
+                rotation_segments,
+                height_segments,
+            } => {
                 length_row(ui, "Radius", radius);
                 length_row(ui, "Height", height);
+                segments_row(ui, "Height Segments", height_segments, 1);
+                segments_row(ui, "Rotation Segments", rotation_segments, 3);
             }
-            ObjectKind::Plane { width, depth } => {
+            ObjectKind::Plane {
+                width,
+                depth,
+                width_segments,
+                depth_segments,
+            } => {
                 length_row(ui, "Width", width);
                 length_row(ui, "Height", depth);
+                segments_row(ui, "Width Segments", width_segments, 1);
+                segments_row(ui, "Height Segments", depth_segments, 1);
+            }
+            ObjectKind::Cone {
+                bottom_radius,
+                top_radius,
+                height,
+                rotation_segments,
+                height_segments,
+            } => {
+                length_row(ui, "Top Radius", top_radius);
+                length_row(ui, "Bottom Radius", bottom_radius);
+                length_row(ui, "Height", height);
+                segments_row(ui, "Height Segments", height_segments, 1);
+                segments_row(ui, "Rotation Segments", rotation_segments, 3);
+            }
+            ObjectKind::Torus {
+                ring_radius,
+                pipe_radius,
+                ring_segments,
+                pipe_segments,
+            } => {
+                length_row(ui, "Ring Radius", ring_radius);
+                segments_row(ui, "Ring Segments", ring_segments, 3);
+                length_row(ui, "Pipe Radius", pipe_radius);
+                segments_row(ui, "Pipe Segments", pipe_segments, 3);
+            }
+            ObjectKind::Disc {
+                inner_radius,
+                outer_radius,
+                rotation_segments,
+                disc_segments,
+            } => {
+                length_row(ui, "Inner Radius", inner_radius);
+                length_row(ui, "Outer Radius", outer_radius);
+                segments_row(ui, "Disc Segments", disc_segments, 1);
+                segments_row(ui, "Rotation Segments", rotation_segments, 3);
+            }
+            ObjectKind::Capsule {
+                radius,
+                height,
+                rotation_segments,
+                height_segments,
+                cap_segments,
+            } => {
+                length_row(ui, "Radius", radius);
+                length_row(ui, "Height", height);
+                segments_row(ui, "Height Segments", height_segments, 1);
+                segments_row(ui, "Cap Segments", cap_segments, 1);
+                segments_row(ui, "Rotation Segments", rotation_segments, 3);
             }
             ObjectKind::Camera { fov_y_deg } => {
                 attr_label(ui, "Field of View (Vertical)", LABEL_WIDTH);
@@ -338,6 +407,16 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
         });
     ui.add_space(8.0);
     ui.label(RichText::new("Select an object to edit its attributes.").color(p::TEXT_DIM));
+}
+
+/// A segment count, from `min` up to what the geometry generators accept.
+fn segments_row(ui: &mut Ui, label: &str, value: &mut u32, min: u32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        DragValue::new(value).speed(0.1).range(min..=MAX_SEGMENTS),
+    );
+    ui.end_row();
 }
 
 fn length_row(ui: &mut Ui, label: &str, value: &mut f32) {

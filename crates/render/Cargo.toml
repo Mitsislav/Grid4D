@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 oc4d-scene.workspace = true
+oc4d-geom.workspace = true
 glam.workspace = true
 wgpu.workspace = true
 bytemuck.workspace = true

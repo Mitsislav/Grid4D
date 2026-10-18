@@ -273,7 +273,10 @@ mod tests {
         let sphere = id_of(&doc, "Sphere");
         let mut data = doc.scene.get(sphere).unwrap().data.clone();
         data.name = "Ball".to_owned();
-        data.kind = ObjectKind::Sphere { radius: 12.5 };
+        data.kind = ObjectKind::Sphere {
+            radius: 12.5,
+            segments: 8,
+        };
         data.visible_in_editor = false;
         data.transform.rotation.x = 1.25;
         assert_round_trip(&mut doc, SceneEdit::SetData { id: sphere, data });

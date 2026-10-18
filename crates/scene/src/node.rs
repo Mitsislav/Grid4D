@@ -17,24 +17,64 @@ pub const CAMERA_MARKER_SIZE: f32 = 40.0;
 
 /// What a node *is*, together with its type-specific parameters.
 ///
-/// Primitive parameters mirror Cinema 4D's "Object" tab (sizes in cm).
+/// Primitive parameters mirror Cinema 4D's "Object" tab: sizes in cm, the axis
+/// along +Y, and segment counts that decide how finely the shape is tessellated
+/// (geometry comes from `oc4d_geom::primitives`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum ObjectKind {
     /// Empty transform used to group other objects.
     Null,
+    /// Box; `segments` subdivide X, Y and Z.
     Cube {
         size: Vec3,
+        segments: [u32; 3],
     },
+    /// UV sphere; `segments` around the axis, half as many from pole to pole.
     Sphere {
         radius: f32,
+        segments: u32,
     },
     Cylinder {
         radius: f32,
         height: f32,
+        rotation_segments: u32,
+        height_segments: u32,
     },
     Plane {
         width: f32,
         depth: f32,
+        width_segments: u32,
+        depth_segments: u32,
+    },
+    /// Frustum; a zero radius ends in a point.
+    Cone {
+        bottom_radius: f32,
+        top_radius: f32,
+        height: f32,
+        rotation_segments: u32,
+        height_segments: u32,
+    },
+    /// `ring_radius` to the centre of the tube, `pipe_radius` of the tube.
+    Torus {
+        ring_radius: f32,
+        pipe_radius: f32,
+        ring_segments: u32,
+        pipe_segments: u32,
+    },
+    /// Flat ring on the XZ plane; a zero `inner_radius` makes a solid disc.
+    Disc {
+        inner_radius: f32,
+        outer_radius: f32,
+        rotation_segments: u32,
+        disc_segments: u32,
+    },
+    /// Cylinder with hemispherical ends; `height` is the total height.
+    Capsule {
+        radius: f32,
+        height: f32,
+        rotation_segments: u32,
+        height_segments: u32,
+        cap_segments: u32,
     },
     Camera {
         fov_y_deg: f32,
@@ -54,23 +94,40 @@ pub enum ObjectKindTag {
     Sphere,
     Cylinder,
     Plane,
+    Cone,
+    Torus,
+    Disc,
+    Capsule,
     Camera,
     Light,
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 11] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
         Self::Cylinder,
         Self::Plane,
+        Self::Cone,
+        Self::Torus,
+        Self::Disc,
+        Self::Capsule,
         Self::Camera,
         Self::Light,
     ];
 
     /// Geometric primitives (the "Create ▸ Object" family).
-    pub const PRIMITIVES: [Self; 4] = [Self::Cube, Self::Sphere, Self::Cylinder, Self::Plane];
+    pub const PRIMITIVES: [Self; 8] = [
+        Self::Cube,
+        Self::Sphere,
+        Self::Cylinder,
+        Self::Plane,
+        Self::Cone,
+        Self::Torus,
+        Self::Disc,
+        Self::Capsule,
+    ];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
@@ -80,6 +137,10 @@ impl ObjectKindTag {
             Self::Sphere => "Sphere",
             Self::Cylinder => "Cylinder",
             Self::Plane => "Plane",
+            Self::Cone => "Cone",
+            Self::Torus => "Torus",
+            Self::Disc => "Disc",
+            Self::Capsule => "Capsule",
             Self::Camera => "Camera",
             Self::Light => "Light",
         }
@@ -92,15 +153,49 @@ impl ObjectKindTag {
             Self::Null => ObjectKind::Null,
             Self::Cube => ObjectKind::Cube {
                 size: Vec3::splat(200.0),
+                segments: [1, 1, 1],
             },
-            Self::Sphere => ObjectKind::Sphere { radius: 100.0 },
+            Self::Sphere => ObjectKind::Sphere {
+                radius: 100.0,
+                segments: 24,
+            },
             Self::Cylinder => ObjectKind::Cylinder {
                 radius: 50.0,
                 height: 200.0,
+                rotation_segments: 36,
+                height_segments: 4,
             },
             Self::Plane => ObjectKind::Plane {
                 width: 400.0,
                 depth: 400.0,
+                width_segments: 20,
+                depth_segments: 20,
+            },
+            Self::Cone => ObjectKind::Cone {
+                bottom_radius: 100.0,
+                top_radius: 0.0,
+                height: 200.0,
+                rotation_segments: 36,
+                height_segments: 8,
+            },
+            Self::Torus => ObjectKind::Torus {
+                ring_radius: 200.0,
+                pipe_radius: 50.0,
+                ring_segments: 36,
+                pipe_segments: 18,
+            },
+            Self::Disc => ObjectKind::Disc {
+                inner_radius: 0.0,
+                outer_radius: 100.0,
+                rotation_segments: 36,
+                disc_segments: 2,
+            },
+            Self::Capsule => ObjectKind::Capsule {
+                radius: 50.0,
+                height: 200.0,
+                rotation_segments: 36,
+                height_segments: 4,
+                cap_segments: 8,
             },
             Self::Camera => ObjectKind::Camera { fov_y_deg: 40.0 },
             Self::Light => ObjectKind::Light {
@@ -120,6 +215,10 @@ impl ObjectKind {
             Self::Sphere { .. } => ObjectKindTag::Sphere,
             Self::Cylinder { .. } => ObjectKindTag::Cylinder,
             Self::Plane { .. } => ObjectKindTag::Plane,
+            Self::Cone { .. } => ObjectKindTag::Cone,
+            Self::Torus { .. } => ObjectKindTag::Torus,
+            Self::Disc { .. } => ObjectKindTag::Disc,
+            Self::Capsule { .. } => ObjectKindTag::Capsule,
             Self::Camera { .. } => ObjectKindTag::Camera,
             Self::Light { .. } => ObjectKindTag::Light,
         }
@@ -136,11 +235,31 @@ impl ObjectKind {
     pub fn local_bounds(&self) -> Option<Aabb> {
         let half = match *self {
             Self::Null => return None,
-            Self::Cube { size } => size * 0.5,
-            Self::Sphere { radius } => Vec3::splat(radius),
-            Self::Cylinder { radius, height } => Vec3::new(radius, height * 0.5, radius),
-            // Give the infinitely thin plane 1 cm of thickness so it can be picked edge-on.
-            Self::Plane { width, depth } => Vec3::new(width * 0.5, 0.5, depth * 0.5),
+            Self::Cube { size, .. } => size * 0.5,
+            Self::Sphere { radius, .. } => Vec3::splat(radius),
+            Self::Cylinder { radius, height, .. } => Vec3::new(radius, height * 0.5, radius),
+            // Give infinitely thin shapes 1 cm of thickness so they can be picked edge-on.
+            Self::Plane { width, depth, .. } => Vec3::new(width * 0.5, 0.5, depth * 0.5),
+            Self::Cone {
+                bottom_radius,
+                top_radius,
+                height,
+                ..
+            } => {
+                let r = bottom_radius.abs().max(top_radius.abs());
+                Vec3::new(r, height * 0.5, r)
+            }
+            Self::Torus {
+                ring_radius,
+                pipe_radius,
+                ..
+            } => {
+                let r = ring_radius.abs() + pipe_radius.abs();
+                Vec3::new(r, pipe_radius, r)
+            }
+            Self::Disc { outer_radius, .. } => Vec3::new(outer_radius, 0.5, outer_radius),
+            // The ends are hemispheres, so a capsule is never shorter than its diameter.
+            Self::Capsule { radius, height, .. } => Vec3::new(radius, (height * 0.5).max(radius.abs()), radius),
             Self::Camera { .. } => Vec3::splat(CAMERA_MARKER_SIZE * 0.5),
             Self::Light { .. } => Vec3::splat(LIGHT_MARKER_RADIUS),
         };
@@ -264,5 +383,43 @@ impl Node {
     #[must_use]
     pub fn children(&self) -> &[NodeId] {
         &self.children
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn half(kind: &ObjectKind) -> Vec3 {
+        kind.local_bounds().map_or(Vec3::ZERO, |b| b.max)
+    }
+
+    #[test]
+    fn every_tag_has_a_matching_default() {
+        for tag in ObjectKindTag::ALL {
+            assert_eq!(tag.default_kind().tag(), tag);
+        }
+        assert!(ObjectKindTag::PRIMITIVES.iter().all(|t| ObjectKindTag::ALL.contains(t)));
+    }
+
+    #[test]
+    fn bounds_of_the_round_primitives() {
+        assert_eq!(
+            half(&ObjectKindTag::Torus.default_kind()),
+            Vec3::new(250.0, 50.0, 250.0)
+        );
+        assert_eq!(
+            half(&ObjectKindTag::Cone.default_kind()),
+            Vec3::new(100.0, 100.0, 100.0)
+        );
+        assert_eq!(half(&ObjectKindTag::Disc.default_kind()), Vec3::new(100.0, 0.5, 100.0));
+        let squat = ObjectKind::Capsule {
+            radius: 50.0,
+            height: 20.0,
+            rotation_segments: 8,
+            height_segments: 1,
+            cap_segments: 4,
+        };
+        assert_eq!(half(&squat), Vec3::splat(50.0), "never shorter than its diameter");
     }
 }

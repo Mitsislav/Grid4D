@@ -1,9 +1,10 @@
-//! File-level tests: the golden fixture pins the on-disk format, and save/load
-//! go through the real filesystem.
+//! File-level tests: the golden fixture pins the on-disk format, older fixtures
+//! must keep loading, and save/load go through the real filesystem.
 //!
-//! Regenerate the fixture after an *intentional* format change (which also needs
-//! a new format version and a migration) with:
+//! Regenerate the current golden file after an *intentional* format change (which
+//! also needs a new format version and a migration) with:
 //! `OC4D_UPDATE_FIXTURES=1 cargo test -p oc4d-io --test format`
+//! Older fixtures (`demo_v1.oc4d`, …) are never regenerated.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -12,8 +13,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use oc4d_scene::Document;
+use oc4d_scene::{Document, ObjectKind};
 
+/// Written by the current format version.
+const GOLDEN: &str = "tests/fixtures/demo_v2.oc4d";
+/// Written by format version 1 (before segment counts); kept to test migration.
 const DEMO_V1: &str = "tests/fixtures/demo_v1.oc4d";
 
 fn fixture_path(relative: &str) -> PathBuf {
@@ -28,42 +32,64 @@ fn temp_dir(test: &str) -> PathBuf {
     dir
 }
 
+fn outline(doc: &Document) -> Vec<(u32, String)> {
+    let mut out = Vec::new();
+    doc.scene.walk(&mut Vec::new(), |_, node, _, depth| {
+        out.push((depth, node.data.name.clone()));
+        true
+    });
+    out
+}
+
+const DEMO_OUTLINE: [(u32, &str); 7] = [
+    (0, "Cube"),
+    (0, "Sphere"),
+    (0, "Group"),
+    (1, "Cylinder"),
+    (1, "Box"),
+    (0, "Light"),
+    (0, "Camera"),
+];
+
 #[test]
 fn the_demo_scene_matches_the_golden_file() {
     let text = oc4d_io::to_string(&Document::with_demo_scene()).unwrap();
-    let path = fixture_path(DEMO_V1);
+    let path = fixture_path(GOLDEN);
     if std::env::var_os("OC4D_UPDATE_FIXTURES").is_some() {
         fs::write(&path, &text).unwrap();
     }
     let golden = fs::read_to_string(&path).unwrap();
     assert_eq!(
         text, golden,
-        "the version 1 format changed; see the note at the top of this file"
+        "the current file format changed; see the note at the top of this file"
     );
 }
 
 #[test]
 fn the_golden_file_loads() {
-    let doc = oc4d_io::load(&fixture_path(DEMO_V1)).unwrap();
-    let names: Vec<(u32, String)> = {
-        let mut out = Vec::new();
-        doc.scene.walk(&mut Vec::new(), |_, node, _, depth| {
-            out.push((depth, node.data.name.clone()));
-            true
-        });
-        out
-    };
-    let expected = [
-        (0, "Cube"),
-        (0, "Sphere"),
-        (0, "Group"),
-        (1, "Cylinder"),
-        (1, "Box"),
-        (0, "Light"),
-        (0, "Camera"),
-    ];
-    assert_eq!(names, expected.map(|(d, n)| (d, n.to_owned())));
+    let doc = oc4d_io::load(&fixture_path(GOLDEN)).unwrap();
+    assert_eq!(outline(&doc), DEMO_OUTLINE.map(|(d, n)| (d, n.to_owned())));
     assert_eq!(doc.time.fps(), 30);
+}
+
+#[test]
+fn the_version_1_fixture_still_loads() {
+    let doc = oc4d_io::load(&fixture_path(DEMO_V1)).unwrap();
+    assert_eq!(outline(&doc), DEMO_OUTLINE.map(|(d, n)| (d, n.to_owned())));
+    let sphere = doc.scene.iter().find(|(_, n)| n.data.name == "Sphere").unwrap().1;
+    assert_eq!(
+        sphere.data.kind,
+        ObjectKind::Sphere {
+            radius: 80.0,
+            segments: 24
+        },
+        "migrated with default segments"
+    );
+    // Migrating then saving gives exactly what the current version writes.
+    assert_eq!(
+        oc4d_io::to_string(&doc).unwrap(),
+        oc4d_io::to_string(&Document::with_demo_scene()).unwrap()
+    );
 }
 
 #[test]

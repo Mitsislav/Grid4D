@@ -15,9 +15,12 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
 - C4D-style **Standard layout**: menu bar, command palette, mode palette,
   3D viewport, Object Manager, Attribute Manager, timeline, status bar — all
   panels resize with the window and the right-hand managers can be dragged wider.
-- **wgpu viewport**: instanced, MSAA, depth-tested primitives (cube, sphere,
-  cylinder, plane, light and camera markers), anti-aliased adaptive grid,
-  orange selection rim, axis triad and "Grid Spacing" HUD.
+- **Parametric primitives** with Cinema 4D-style parameters and segment counts:
+  cube, sphere, cylinder, plane, cone, torus, disc and capsule, plus nulls, cameras
+  and lights.
+- **wgpu viewport**: generated meshes cached per shape and drawn instanced, MSAA,
+  depth testing, Phong-angle smoothing, anti-aliased adaptive grid, orange selection
+  rim, axis triad and "Grid Spacing" HUD.
 - **Navigation**: Alt+LMB orbit · Alt+MMB / MMB pan · Alt+RMB / wheel zoom ·
   `H` frame scene · `O` frame selection. Drag the icons at the top-right of the
   viewport header to orbit / zoom / pan with one button.
@@ -35,8 +38,9 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
   `Ctrl+Shift+S`) with native dialogs; `.oc4d` is versioned JSON. The title shows
   the file name and `*` for unsaved changes, and New, Open, Quit and the window's
   close button ask "Save changes?" first. File ▸ Open Recent remembers the last ten
-  documents, a `.oc4d` dropped onto the window opens it, and the window size and
-  panel layout are restored on the next start.
+  documents, a `.oc4d` dropped onto the window (or given on the command line:
+  `open-c4d scene.oc4d`) opens it, and the window size and panel layout are
+  restored on the next start.
 - **Undo / redo** (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`, toolbar, Edit menu): create,
   delete, re-parent, gizmo drags, attribute and project-setting edits, renames and
   visibility toggles — one step per interaction, restoring the selection too.

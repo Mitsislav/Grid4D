@@ -358,11 +358,11 @@ arbitrary meshes efficiently; the viewport renders into its own target.
 | Step | Size | Work |
 |------|------|------|
 | 3.1 ✅ | M | `oc4d-geom` crate: `PolyMesh`, triangulation, normals, tests (Euler characteristic, winding — port `winding_matches_normals`) — done 2026-10-18: CSR face-vertex storage with validation, Newell face vectors, `Topology` (edges, edge/point → faces, closed, manifold & orientation, Euler), `Smoothing` (flat / smooth / Phong angle 80°), `Triangulator` (shorter-diagonal quads, ear clipping with fan fallback, per-corner vertices, reused buffers) |
-| 3.2 | M | Parametric primitives (+ Cone, Torus, Disc, Capsule); Attribute Manager segment fields; render consumes generated meshes |
+| 3.2 ✅ | M | Parametric primitives (+ Cone, Torus, Disc, Capsule); Attribute Manager segment fields; render consumes generated meshes — done 2026-10-18: `oc4d_geom::primitives` (lathe-based round shapes, welded cube lattice), segment fields on every primitive, `.oc4d` **format v2** with v1 migration, and the renderer's part of 3.4 (`MeshKey`-keyed batches + GPU mesh cache with eviction); `open-c4d file.oc4d` opens a file at start-up |
 | 3.3 | L | `oc4d-eval` + `EvaluatedScene`, node revisions; render/picking migrate; `extract_reuses_capacity`-style test for evaluation |
-| 3.4 | M | `GeometryHandle`-keyed batches + `GpuMeshCache` |
+| 3.4 | S | ~~`GeometryHandle`-keyed batches + `GpuMeshCache`~~ — done early in 3.2 for primitives (`MeshKey`); what remains is a key for editable meshes (mesh `Arc` + revision) once 3.6 adds them |
 | 3.5 | M | Offscreen viewport target (colour/depth/MSAA, resize handling) |
-| 3.6 | M | `ObjectKind::Polygon`, Make Editable (`C`), BVH picking, `.oc4d` v2 (zip + binary geometry) with migration |
+| 3.6 | M | `ObjectKind::Polygon`, Make Editable (`C`), BVH picking, `.oc4d` **v3** (zip + binary geometry) with migration (v2 was taken by segment counts) |
 
 **Acceptance:** 10 000 cubes and a 1 M-triangle mesh render at interactive rates
 (see performance budget); editing a primitive's segments updates instantly;

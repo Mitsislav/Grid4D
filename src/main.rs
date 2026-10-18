@@ -23,6 +23,10 @@ fn main() -> eframe::Result {
     )
     .init();
 
+    // `open-c4d scene.oc4d` opens that document (how "Open with" and file
+    // associations launch the app).
+    let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
+
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("OpenC4D")
@@ -45,6 +49,7 @@ fn main() -> eframe::Result {
                     depth_bits: DEPTH_BITS,
                     msaa_samples: u32::from(MSAA_SAMPLES),
                 },
+                open,
             )))
         }),
     )

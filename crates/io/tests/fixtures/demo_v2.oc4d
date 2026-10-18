@@ -1,0 +1,253 @@
+{
+  "format": "oc4d",
+  "version": 2,
+  "document": {
+    "name": "Untitled 1",
+    "time": {
+      "fps": 30,
+      "start": 0,
+      "end": 90,
+      "looping": true
+    },
+    "objects": [
+      {
+        "name": "Cube",
+        "kind": {
+          "type": "cube",
+          "size": [
+            200.0,
+            200.0,
+            200.0
+          ],
+          "segments": [
+            1,
+            1,
+            1
+          ]
+        },
+        "position": [
+          0.0,
+          100.0,
+          0.0
+        ],
+        "rotation_hpb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "display_color": [
+          0.62,
+          0.62,
+          0.64
+        ],
+        "visible_in_editor": true,
+        "visible_in_render": true,
+        "enabled": true
+      },
+      {
+        "name": "Sphere",
+        "kind": {
+          "type": "sphere",
+          "radius": 80.0,
+          "segments": 24
+        },
+        "position": [
+          -320.0,
+          80.0,
+          140.0
+        ],
+        "rotation_hpb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "display_color": [
+          0.18,
+          0.36,
+          0.62
+        ],
+        "visible_in_editor": true,
+        "visible_in_render": true,
+        "enabled": true
+      },
+      {
+        "name": "Group",
+        "kind": {
+          "type": "null"
+        },
+        "position": [
+          320.0,
+          0.0,
+          -80.0
+        ],
+        "rotation_hpb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "display_color": [
+          0.55,
+          0.56,
+          0.58
+        ],
+        "visible_in_editor": true,
+        "visible_in_render": true,
+        "enabled": true
+      },
+      {
+        "name": "Cylinder",
+        "parent": 2,
+        "kind": {
+          "type": "cylinder",
+          "radius": 50.0,
+          "height": 200.0,
+          "rotation_segments": 36,
+          "height_segments": 4
+        },
+        "position": [
+          0.0,
+          100.0,
+          0.0
+        ],
+        "rotation_hpb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "display_color": [
+          0.78,
+          0.47,
+          0.16
+        ],
+        "visible_in_editor": true,
+        "visible_in_render": true,
+        "enabled": true
+      },
+      {
+        "name": "Box",
+        "parent": 2,
+        "kind": {
+          "type": "cube",
+          "size": [
+            80.0,
+            80.0,
+            80.0
+          ],
+          "segments": [
+            1,
+            1,
+            1
+          ]
+        },
+        "position": [
+          130.0,
+          40.0,
+          110.0
+        ],
+        "rotation_hpb": [
+          0.5235988,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "display_color": [
+          0.48,
+          0.5,
+          0.53
+        ],
+        "visible_in_editor": true,
+        "visible_in_render": true,
+        "enabled": true
+      },
+      {
+        "name": "Light",
+        "kind": {
+          "type": "light",
+          "color": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "intensity": 1.0
+        },
+        "position": [
+          -400.0,
+          650.0,
+          450.0
+        ],
+        "rotation_hpb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "display_color": [
+          1.0,
+          0.92,
+          0.75
+        ],
+        "visible_in_editor": true,
+        "visible_in_render": true,
+        "enabled": true
+      },
+      {
+        "name": "Camera",
+        "kind": {
+          "type": "camera",
+          "fov_y_deg": 40.0
+        },
+        "position": [
+          0.0,
+          260.0,
+          950.0
+        ],
+        "rotation_hpb": [
+          0.0,
+          -0.20943952,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "display_color": [
+          0.3,
+          0.3,
+          0.32
+        ],
+        "visible_in_editor": true,
+        "visible_in_render": true,
+        "enabled": true
+      }
+    ]
+  }
+}

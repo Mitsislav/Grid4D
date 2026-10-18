@@ -9,12 +9,12 @@
 //! format version has its own module; older versions are migrated on load.
 //! This crate never depends on `wgpu`, `egui` or `oc4d-ui`.
 //!
-//! ## Format, version 1
+//! ## Format, version 2 (current)
 //!
 //! UTF-8 JSON:
 //!
 //! ```text
-//! { "format": "oc4d", "version": 1,
+//! { "format": "oc4d", "version": 2,
 //!   "document": { "name": …, "time": { "fps", "start", "end", "looping" },
 //!                 "objects": [ { "name", "parent"?, "kind": { "type": "cube", … },
 //!                                "position", "rotation_hpb", "scale", "display_color",
@@ -26,9 +26,15 @@
 //!   without recursion, and cycles cannot be expressed.
 //! * Units are centimetres, rotations are HPB Euler angles in **radians**, colours
 //!   are linear RGB — the scene's own conventions, so a round trip is exact.
+//! * Primitive kinds carry their segment counts (`"segments"`, `"rotation_segments"`, …).
 //! * Detached (deleted but undoable) nodes and editor state are never saved.
+//!
+//! Version 1 (no segment counts; no cone, torus, disc or capsule) is still read and
+//! migrated on load; files are always written in the current version.
 
+mod common;
 mod v1;
+mod v2;
 
 use std::{
     fmt, fs, io,
@@ -41,7 +47,7 @@ use serde::Deserialize;
 /// File extension, without the dot.
 pub const EXTENSION: &str = "oc4d";
 /// The format version this build writes (and the newest it reads).
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 const FORMAT_TAG: &str = "oc4d";
 
 /// Why a document could not be saved or loaded.
@@ -107,7 +113,7 @@ impl From<serde_json::Error> for IoError {
 
 /// Serialises `doc` in the current format (pretty-printed, trailing newline).
 pub fn to_string(doc: &Document) -> Result<String, IoError> {
-    let mut text = serde_json::to_string_pretty(&v1::File::from_document(doc)?)?;
+    let mut text = serde_json::to_string_pretty(&v2::File::from_document(doc)?)?;
     text.push('\n');
     Ok(text)
 }
@@ -127,6 +133,7 @@ pub fn from_str(text: &str) -> Result<Document, IoError> {
     };
     match version {
         1 => v1::File::parse(text)?.into_document(),
+        2 => v2::File::parse(text)?.into_document(),
         found => Err(IoError::UnsupportedVersion {
             found,
             newest: FORMAT_VERSION,

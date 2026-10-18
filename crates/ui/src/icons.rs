@@ -266,6 +266,47 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.fill_with(&quad, soft);
             c.polyline(&quad, true);
         }
+        ObjectKindTag::Cone => {
+            // Apex plus the front half of the base ellipse: a convex outline.
+            let mut outline: Vec<P> = vec![(0.5, 0.1)];
+            outline.extend((0..=16).map(|i| {
+                let a = PI * i as f32 / 16.0;
+                (0.5 + 0.36 * a.cos(), 0.78 + 0.11 * a.sin())
+            }));
+            c.fill_with(&outline, soft);
+            c.ellipse((0.5, 0.78), (0.36, 0.11));
+            c.line((0.5, 0.1), (0.14, 0.78));
+            c.line((0.5, 0.1), (0.86, 0.78));
+        }
+        ObjectKindTag::Torus => {
+            c.painter
+                .add(Shape::ellipse_filled(c.p(0.5, 0.52), c.v(0.43, 0.27), soft));
+            c.ellipse((0.5, 0.52), (0.43, 0.27));
+            c.ellipse((0.5, 0.47), (0.17, 0.08));
+        }
+        ObjectKindTag::Disc => {
+            c.painter
+                .add(Shape::ellipse_filled(c.p(0.5, 0.55), c.v(0.43, 0.2), soft));
+            c.ellipse((0.5, 0.55), (0.43, 0.2));
+            c.disc((0.5, 0.55), 0.05);
+        }
+        ObjectKindTag::Capsule => {
+            let (r, top, bottom) = (0.2, 0.28, 0.72);
+            // Upper half circle left to right, then the lower one right to left.
+            let mut outline: Vec<P> = (0..=12)
+                .map(|i| {
+                    let a = PI + PI * i as f32 / 12.0;
+                    (0.5 + r * a.cos(), top + r * a.sin())
+                })
+                .collect();
+            outline.extend((0..=12).map(|i| {
+                let a = PI * i as f32 / 12.0;
+                (0.5 + r * a.cos(), bottom + r * a.sin())
+            }));
+            c.fill_with(&outline, soft);
+            c.polyline(&outline, true);
+            c.ellipse((0.5, 0.5), (0.2, 0.06));
+        }
         ObjectKindTag::Null => {
             c.circle((0.5, 0.5), 0.2);
             c.line((0.5, 0.06), (0.5, 0.3));

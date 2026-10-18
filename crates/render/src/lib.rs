@@ -23,9 +23,9 @@ mod mesh;
 mod picking;
 
 pub use camera::{OrbitCamera, Ray};
-pub use frame::{FrameData, InstanceRaw, MeshKind};
+pub use frame::{FrameData, InstanceRaw};
 pub use gpu::{GpuTargetConfig, ViewportRenderer};
-pub use mesh::{MeshData, Vertex};
+pub use mesh::{MeshKey, Ratio, Vertex};
 pub use picking::pick;
 
 /// WGSL sources, exposed for offline validation and tooling.

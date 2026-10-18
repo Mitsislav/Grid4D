@@ -40,9 +40,15 @@ impl Document {
                 .with_color([0.62, 0.62, 0.64]),
         );
         scene.insert(
-            Node::new("Sphere", ObjectKind::Sphere { radius: 80.0 })
-                .with_position(Vec3::new(-320.0, 80.0, 140.0))
-                .with_color([0.18, 0.36, 0.62]),
+            Node::new(
+                "Sphere",
+                ObjectKind::Sphere {
+                    radius: 80.0,
+                    segments: 24,
+                },
+            )
+            .with_position(Vec3::new(-320.0, 80.0, 140.0))
+            .with_color([0.18, 0.36, 0.62]),
         );
 
         let group = scene.insert(Node::new("Group", ObjectKind::Null).with_position(Vec3::new(320.0, 0.0, -80.0)));
@@ -59,6 +65,7 @@ impl Document {
                 "Box",
                 ObjectKind::Cube {
                     size: Vec3::splat(80.0),
+                    segments: [1, 1, 1],
                 },
             )
             .with_transform(

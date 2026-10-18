@@ -2481,6 +2481,7 @@ dependencies = [
  "bytemuck",
  "glam",
  "naga",
+ "oc4d-geom",
  "oc4d-scene",
  "wgpu",
 ]
@@ -2501,6 +2502,7 @@ dependencies = [
  "egui-wgpu",
  "glam",
  "log",
+ "oc4d-geom",
  "oc4d-io",
  "oc4d-render",
  "oc4d-scene",

@@ -67,15 +67,8 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
         );
         group_gap(ui);
 
-        for tag in [
-            ObjectKindTag::Cube,
-            ObjectKindTag::Sphere,
-            ObjectKindTag::Cylinder,
-            ObjectKindTag::Plane,
-            ObjectKindTag::Null,
-            ObjectKindTag::Camera,
-            ObjectKindTag::Light,
-        ] {
+        let others = [ObjectKindTag::Null, ObjectKindTag::Camera, ObjectKindTag::Light];
+        for tag in ObjectKindTag::PRIMITIVES.into_iter().chain(others) {
             let style = IconStyle {
                 tint: Some(tag_color(tag)),
                 ..IconStyle::default()
@@ -190,6 +183,10 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Sphere => "Add Sphere",
         ObjectKindTag::Cylinder => "Add Cylinder",
         ObjectKindTag::Plane => "Add Plane",
+        ObjectKindTag::Cone => "Add Cone",
+        ObjectKindTag::Torus => "Add Torus",
+        ObjectKindTag::Disc => "Add Disc",
+        ObjectKindTag::Capsule => "Add Capsule",
         ObjectKindTag::Camera => "Add Camera (at the current view)",
         ObjectKindTag::Light => "Add Light",
     }

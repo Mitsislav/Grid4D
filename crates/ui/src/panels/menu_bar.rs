@@ -60,7 +60,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     create(ui, editor, tag);
                 }
                 ui.separator();
-                for name in ["Cone", "Torus", "Disc", "Capsule", "Platonic"] {
+                for name in ["Platonic", "Landscape"] {
                     planned(ui, name, "");
                 }
             });

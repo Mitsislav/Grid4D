@@ -4,7 +4,8 @@
 use egui::{CentralPanel, Margin, Panel};
 use oc4d_scene::Document;
 use oc4d_ui::{
-    AttributesPanel, EditorState, OutlinerPanel, RecentFiles, TimelinePanel, ViewportPanel, commands, file,
+    AttributesPanel, EditorCommand, EditorState, OutlinerPanel, RecentFiles, TimelinePanel, ViewportPanel, commands,
+    file,
     panels::{about, alert, drop_overlay, menu_bar, mode_palette, status_bar, toolbar, unsaved_changes},
     recent, shortcuts,
     theme::{self, metrics},
@@ -31,7 +32,8 @@ pub struct OpenC4DApp {
 }
 
 impl OpenC4DApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, gpu: GpuSettings) -> Self {
+    /// `open`: a document to open instead of the demo scene (from the command line).
+    pub fn new(cc: &eframe::CreationContext<'_>, gpu: GpuSettings, open: Option<std::path::PathBuf>) -> Self {
         theme::apply(&cc.egui_ctx);
 
         let render_state = cc.wgpu_render_state.as_ref();
@@ -57,6 +59,11 @@ impl OpenC4DApp {
         // Start with the first object active so the gizmo and Attribute Manager have content.
         if let Some(&first) = doc.scene.roots().first() {
             editor.selection.set_single(first);
+        }
+        // Opened on the first frame, through the same command as File ▸ Open Recent
+        // (errors show the usual alert).
+        if let Some(path) = open {
+            editor.commands.push(EditorCommand::OpenFile(path));
         }
 
         Self {
