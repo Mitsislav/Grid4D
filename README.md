@@ -5,10 +5,10 @@ workflow and layout inspired by Cinema 4D.
 
 ![OpenC4D workspace](docs/screenshot.png)
 
-**Status: v0.1 — editor shell, with undo/redo.** The workspace, scene graph,
-GPU viewport, selection and transform tools work, and every edit can be undone;
-file I/O, modelling, keyframes and rendering are on the roadmap (see
-[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)).
+**Status: v0.1 — editor shell, with undo/redo and files.** The workspace, scene
+graph, GPU viewport, selection and transform tools work, every edit can be undone,
+and documents are saved as `.oc4d` files; modelling, keyframes, glTF and rendering
+are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)).
 
 ## What works today
 
@@ -31,6 +31,10 @@ file I/O, modelling, keyframes and rendering are on the roadmap (see
   primitive parameters, and project settings when nothing is selected.
 - **Timeline**: ruler with scrubbable playhead, play/pause/step/loop
   (`F8`, `F6`, `F7`, `F`, `G`), preview range and fps.
+- **Files**: New / Open / Save / Save As (`Ctrl+N`, `Ctrl+O`, `Ctrl+S`,
+  `Ctrl+Shift+S`) with native dialogs; `.oc4d` is versioned JSON. The title shows
+  the file name and `*` for unsaved changes, and New, Open, Quit and the window's
+  close button ask "Save changes?" first.
 - **Undo / redo** (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`, toolbar, Edit menu): create,
   delete, re-parent, gizmo drags, attribute and project-setting edits, renames and
   visibility toggles — one step per interaction, restoring the selection too.

@@ -11,6 +11,7 @@
 //! ```
 
 pub mod about;
+pub mod alert;
 pub mod attributes;
 pub mod menu_bar;
 pub mod mode_palette;
@@ -18,6 +19,7 @@ pub mod outliner;
 pub mod status_bar;
 pub mod timeline;
 pub mod toolbar;
+pub mod unsaved_changes;
 pub mod viewport;
 
 pub use attributes::AttributesPanel;

@@ -4,8 +4,8 @@
 use egui::{CentralPanel, Margin, Panel};
 use oc4d_scene::Document;
 use oc4d_ui::{
-    AttributesPanel, EditorState, OutlinerPanel, TimelinePanel, ViewportPanel, commands,
-    panels::{about, menu_bar, mode_palette, status_bar, toolbar},
+    AttributesPanel, EditorState, OutlinerPanel, TimelinePanel, ViewportPanel, commands, file,
+    panels::{about, alert, menu_bar, mode_palette, status_bar, toolbar, unsaved_changes},
     shortcuts,
     theme::{self, metrics},
 };
@@ -139,9 +139,13 @@ impl eframe::App for OpenC4DApp {
         CentralPanel::no_frame().show(ui, |ui| self.viewport.show(ui, &mut self.doc, &mut self.editor));
 
         about::show(&ctx, &mut self.editor);
+        unsaved_changes::show(&ctx, &self.doc, &mut self.editor);
+        alert::show(&ctx, &mut self.editor);
 
         if commands::apply_pending(&mut self.doc, &mut self.editor, &mut self.viewport) {
             ctx.request_repaint();
         }
+        // Title, close button and confirmed quit follow the document's file state.
+        file::sync_window(&ctx, &self.doc, &mut self.editor);
     }
 }

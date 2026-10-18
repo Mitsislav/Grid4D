@@ -9,7 +9,11 @@ use glam::Vec3;
 use oc4d_render::OrbitCamera;
 use oc4d_scene::{Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit, Transform};
 
-use crate::{EditorState, Selection, ViewportPanel, theme::palette};
+use crate::{
+    EditorState, Selection, ViewportPanel,
+    file::{self, FileAction, UnsavedChoice},
+    theme::palette,
+};
 
 /// How a click changes the selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,8 +42,18 @@ impl SelectMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EditorCommand {
-    /// Replaces the document with an empty one and clears the history.
+    /// Replaces the document with an empty one (asks to save unsaved changes first).
     NewDocument,
+    /// Asks for a document to open (asks to save unsaved changes first).
+    Open,
+    /// Saves to the current file, asking for a path if there is none yet.
+    Save,
+    /// Asks for a path and saves there.
+    SaveAs,
+    /// Closes the window (asks to save unsaved changes first).
+    Quit,
+    /// The answer to a pending "Save changes?" prompt.
+    AnswerUnsaved(UnsavedChoice),
     CreateObject(ObjectKindTag),
     DeleteSelected,
     Select {
@@ -114,12 +128,16 @@ pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mu
 
 fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel) {
     match command {
-        EditorCommand::NewDocument => {
-            editor.history.clear(doc);
-            *doc = Document::new("Untitled 1");
-            editor.selection.clear();
-            viewport.reset_view();
+        EditorCommand::NewDocument => file::request(FileAction::New, doc, editor, viewport),
+        EditorCommand::Open => file::request(FileAction::Open, doc, editor, viewport),
+        EditorCommand::Save => {
+            file::save(doc, editor, false);
         }
+        EditorCommand::SaveAs => {
+            file::save(doc, editor, true);
+        }
+        EditorCommand::Quit => file::request(FileAction::Quit, doc, editor, viewport),
+        EditorCommand::AnswerUnsaved(choice) => file::answer(choice, doc, editor, viewport),
         EditorCommand::CreateObject(tag) => {
             let edit = SceneEdit::Insert {
                 parent: None,
@@ -779,9 +797,21 @@ mod tests {
                 EditorCommand::NewDocument,
             ],
         );
+        // The document has unsaved changes: New asks first.
+        assert_eq!(editor.file.pending(), Some(FileAction::New));
+        assert!(editor.history.can_undo());
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AnswerUnsaved(UnsavedChoice::Discard)],
+        );
         assert!(!editor.history.can_undo() && !editor.history.can_redo());
         assert_eq!(editor.history.state_id(), 0);
         assert!(doc.scene.detached_roots().is_empty());
+        assert!(doc.scene.is_empty());
+        assert!(!editor.file.is_dirty(&editor.history));
     }
 
     #[test]

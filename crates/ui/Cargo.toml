@@ -10,11 +10,13 @@ publish.workspace = true
 [dependencies]
 oc4d-scene.workspace = true
 oc4d-render.workspace = true
+oc4d-io.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
 glam.workspace = true
 log.workspace = true
 slotmap.workspace = true
+rfd.workspace = true
 
 [lints]
 workspace = true

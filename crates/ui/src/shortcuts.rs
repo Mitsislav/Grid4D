@@ -9,6 +9,8 @@
 //! | `Delete`/`⌫`   | Delete selection           |
 //! | `Ctrl+A`       | Select all                 |
 //! | `Ctrl+Shift+A` | Deselect all               |
+//! | `Ctrl+N` / `Ctrl+O` | New / open document   |
+//! | `Ctrl+S` / `Ctrl+Shift+S` | Save / save as  |
 //! | `Ctrl+Z`       | Undo                       |
 //! | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo            |
 //! | `F6` / `F7` / `F8` | Play backwards / stop / play forwards |
@@ -77,7 +79,17 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         // Not in the middle of a drag: the drag records its own step on release,
         // starting from the document it began with.
         if i.modifiers.command && !i.pointer.any_down() {
-            if i.key_pressed(Key::Z) {
+            if i.key_pressed(Key::N) {
+                editor.commands.push(EditorCommand::NewDocument);
+            } else if i.key_pressed(Key::O) {
+                editor.commands.push(EditorCommand::Open);
+            } else if i.key_pressed(Key::S) {
+                editor.commands.push(if i.modifiers.shift {
+                    EditorCommand::SaveAs
+                } else {
+                    EditorCommand::Save
+                });
+            } else if i.key_pressed(Key::Z) {
                 editor.commands.push(if i.modifiers.shift {
                     EditorCommand::Redo
                 } else {
@@ -135,6 +147,16 @@ mod tests {
         assert_eq!(press(Key::Z, ctrl, false), [EditorCommand::Undo]);
         assert_eq!(press(Key::Y, ctrl, false), [EditorCommand::Redo]);
         assert_eq!(press(Key::Z, ctrl_shift, false), [EditorCommand::Redo]);
+    }
+
+    #[test]
+    fn file_shortcuts() {
+        let ctrl = Modifiers::COMMAND;
+        assert_eq!(press(Key::N, ctrl, false), [EditorCommand::NewDocument]);
+        assert_eq!(press(Key::O, ctrl, false), [EditorCommand::Open]);
+        assert_eq!(press(Key::S, ctrl, false), [EditorCommand::Save]);
+        assert_eq!(press(Key::S, ctrl | Modifiers::SHIFT, false), [EditorCommand::SaveAs]);
+        assert!(press(Key::S, Modifiers::NONE, false).is_empty());
     }
 
     #[test]

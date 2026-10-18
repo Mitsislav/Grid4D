@@ -1,7 +1,7 @@
 //! Main menu bar. Menus mirror Cinema 4D's; unimplemented entries are shown
 //! disabled so the roadmap is visible in the product itself.
 
-use egui::{Button, Layout, RichText, Ui, ViewportCommand};
+use egui::{Button, Layout, RichText, Ui};
 use oc4d_scene::{Document, ObjectKindTag, SceneEdit};
 
 use crate::{EditMode, EditorCommand, EditorState, Tool, theme::palette as p};
@@ -9,20 +9,17 @@ use crate::{EditMode, EditorCommand, EditorState, Tool, theme::palette as p};
 pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
     egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
-            if ui.button("New").clicked() {
-                editor.commands.push(EditorCommand::NewDocument);
-                ui.close();
-            }
-            planned(ui, "Open…", "Ctrl+O");
-            planned(ui, "Save", "Ctrl+S");
-            planned(ui, "Save As…", "Ctrl+Shift+S");
+            command(ui, editor, "New", "Ctrl+N", EditorCommand::NewDocument);
+            command(ui, editor, "Open…", "Ctrl+O", EditorCommand::Open);
+            ui.separator();
+            command(ui, editor, "Save", "Ctrl+S", EditorCommand::Save);
+            command(ui, editor, "Save As…", "Ctrl+Shift+S", EditorCommand::SaveAs);
             ui.separator();
             planned(ui, "Import…", "");
             planned(ui, "Export…", "");
             ui.separator();
-            if ui.button("Quit").clicked() {
-                ui.ctx().send_viewport_cmd(ViewportCommand::Close);
-            }
+            // Asks to save unsaved changes before the window closes.
+            command(ui, editor, "Quit", "", EditorCommand::Quit);
         });
 
         ui.menu_button("Edit", |ui| {
