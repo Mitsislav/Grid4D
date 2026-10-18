@@ -18,14 +18,19 @@
 
 mod bounds;
 mod document;
+mod edit;
 mod node;
 mod scene;
 mod time;
 mod transform;
 
+#[cfg(test)]
+mod test_util;
+
 pub use bounds::Aabb;
 pub use document::Document;
+pub use edit::SceneEdit;
 pub use node::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, Node, NodeData, NodeId, ObjectKind, ObjectKindTag};
 pub use scene::{Detached, Scene, SceneError, WalkItem};
-pub use time::{Playback, TimeState};
+pub use time::{Playback, TimeSettings, TimeState};
 pub use transform::Transform;

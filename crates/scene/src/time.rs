@@ -6,6 +6,17 @@ pub enum Playback {
     Backward,
 }
 
+/// The document-level, undoable part of [`TimeState`]: frame rate, range and
+/// looping. The current time and the transport state are session state and are
+/// never part of an undo step (as in Cinema 4D).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimeSettings {
+    pub fps: u32,
+    pub start: i32,
+    pub end: i32,
+    pub looping: bool,
+}
+
 /// Document time: frame rate, preview range and the current time.
 ///
 /// Time is kept as a fractional frame (`f64`) so playback stays smooth and
@@ -61,6 +72,24 @@ impl TimeState {
         self.start = start;
         self.end = end.max(start.saturating_add(1));
         self.current = self.current.clamp(f64::from(self.start), f64::from(self.end));
+    }
+
+    #[must_use]
+    pub fn settings(&self) -> TimeSettings {
+        TimeSettings {
+            fps: self.fps,
+            start: self.start,
+            end: self.end,
+            looping: self.looping,
+        }
+    }
+
+    /// Applies `settings` with the same validation as [`TimeState::set_fps`] and
+    /// [`TimeState::set_range`].
+    pub fn set_settings(&mut self, settings: TimeSettings) {
+        self.set_fps(settings.fps);
+        self.set_range(settings.start, settings.end);
+        self.looping = settings.looping;
     }
 
     /// Number of frames in the range (inclusive).
@@ -204,6 +233,35 @@ mod tests {
         t.advance(100.0);
         assert_eq!(t.frame(), 90);
         assert!(!t.is_playing());
+    }
+
+    #[test]
+    fn settings_round_trip_and_are_validated() {
+        let mut t = TimeState::default();
+        let custom = TimeSettings {
+            fps: 24,
+            start: -10,
+            end: 48,
+            looping: false,
+        };
+        t.set_settings(custom);
+        assert_eq!(t.settings(), custom);
+
+        t.set_settings(TimeSettings {
+            fps: 0,
+            start: 5,
+            end: 1,
+            looping: true,
+        });
+        assert_eq!(
+            t.settings(),
+            TimeSettings {
+                fps: 1,
+                start: 5,
+                end: 6,
+                looping: true
+            }
+        );
     }
 
     #[test]

@@ -266,18 +266,34 @@ impl Scene {
         keep_world: bool,
     ) -> Result<(), SceneError> {
         self.check_move(id, new_parent)?;
-        let world = keep_world.then(|| self.world_matrix(id));
+        // Computed before the move; valid after it, because `check_move` ruled out
+        // `new_parent` being inside the moved subtree.
+        let kept = if keep_world {
+            self.transform_keeping_world(id, new_parent)
+        } else {
+            None
+        };
         self.unlink(id).ok_or(SceneError::NodeNotFound)?;
         self.link(id, new_parent, index);
-
-        if let Some(world) = world {
-            let parent_world = new_parent.map_or(Mat4::IDENTITY, |p| self.world_matrix(p));
-            let local = parent_world.inverse() * world;
-            if let Some(node) = self.nodes.get_mut(id) {
-                node.data.transform = Transform::from_matrix(&local);
-            }
+        if let Some(transform) = kept
+            && let Some(node) = self.nodes.get_mut(id)
+        {
+            node.data.transform = transform;
         }
         Ok(())
+    }
+
+    /// The local transform that keeps `id` where it is in world space once it is
+    /// a child of `new_parent` (`None` = a root). `None` if `id` is not attached.
+    ///
+    /// Used to build world-preserving [`SceneEdit::Move`](crate::SceneEdit::Move)s.
+    #[must_use]
+    pub fn transform_keeping_world(&self, id: NodeId, new_parent: Option<NodeId>) -> Option<Transform> {
+        self.get(id)?;
+        let parent_world = new_parent.map_or(Mat4::IDENTITY, |p| self.world_matrix(p));
+        Some(Transform::from_matrix(
+            &(parent_world.inverse() * self.world_matrix(id)),
+        ))
     }
 
     /// World matrix of `id` (identity if unknown or detached).
@@ -447,7 +463,7 @@ mod tests {
     use glam::Vec3;
 
     use super::*;
-    use crate::ObjectKind;
+    use crate::{ObjectKind, test_util::Rng};
 
     fn null(name: &str) -> Node {
         Node::new(name, ObjectKind::Null)
@@ -700,31 +716,31 @@ mod tests {
         assert_eq!(s.children(p), &[x, y], "reparent does not reorder");
     }
 
-    /// Minimal deterministic xorshift generator, so the test needs no dependency.
-    struct Rng(u64);
-
-    impl Rng {
-        fn below(&mut self, n: usize) -> usize {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            usize::try_from(self.0 % u64::try_from(n.max(1)).unwrap()).unwrap()
-        }
-
-        fn pick<T: Copy>(&mut self, items: &[T]) -> Option<T> {
-            (!items.is_empty()).then(|| items[self.below(items.len())])
-        }
+    #[test]
+    fn transform_keeping_world_preserves_placement() {
+        let mut s = Scene::new();
+        let parent = s.insert(null("p").with_transform(
+            Transform::from_position(Vec3::new(10.0, 0.0, 0.0)).with_rotation_deg(Vec3::new(90.0, 0.0, 0.0)),
+        ));
+        let child = s.insert(null("c").with_position(Vec3::new(0.0, 5.0, -30.0)));
+        let world_before = s.world_matrix(child);
+        let local = s.transform_keeping_world(child, Some(parent)).unwrap();
+        s.reparent(child, Some(parent), false).unwrap();
+        s.get_mut(child).unwrap().data.transform = local;
+        assert!(s.world_matrix(child).abs_diff_eq(world_before, 1e-3));
+        s.detach(child).unwrap();
+        assert_eq!(s.transform_keeping_world(child, None), None, "detached");
     }
 
     #[test]
     fn random_edit_sequences_keep_every_invariant() {
         for seed in 1..=8u64 {
-            let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ seed);
+            let mut rng = Rng::new(seed);
             let mut s = Scene::new();
             for step in 0..400 {
                 let attached: Vec<NodeId> = s.iter().map(|(id, _)| id).collect();
                 let detached = s.detached_roots().to_vec();
-                let parent = if rng.below(4) == 0 { None } else { rng.pick(&attached) };
+                let parent = if rng.chance(4) { None } else { rng.pick(&attached) };
                 let index = rng.below(6);
                 match rng.below(7) {
                     0 | 1 => {
@@ -751,7 +767,7 @@ mod tests {
                     }
                     5 => {
                         if let Some(id) = rng.pick(&attached) {
-                            match s.reparent_at(id, parent, index, rng.below(2) == 0) {
+                            match s.reparent_at(id, parent, index, rng.chance(2)) {
                                 Ok(()) => assert_eq!(s.get(id).unwrap().parent(), parent),
                                 Err(e) => assert_eq!(e, SceneError::WouldCreateCycle),
                             }
