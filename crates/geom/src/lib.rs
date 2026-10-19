@@ -20,6 +20,7 @@
 
 mod bitset;
 mod bvh;
+pub mod loops;
 mod mesh;
 mod normals;
 pub mod primitives;

@@ -29,7 +29,7 @@ mod widgets;
 pub mod window;
 
 pub use commands::{CommandQueue, EditorCommand, SelectMode};
-pub use editor::{EditMode, EditorState, Selection, Tool};
+pub use editor::{EditMode, EditorState, Selection, SelectionSettings, Tool};
 pub use file::{DocumentFile, FileAction, FileDialogs, NativeDialogs, UnsavedChoice};
 pub use history::{History, UndoGroup};
 pub use panels::{AttributesPanel, OutlinerPanel, TimelinePanel, ViewportPanel};

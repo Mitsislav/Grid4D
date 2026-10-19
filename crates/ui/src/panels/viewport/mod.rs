@@ -4,6 +4,7 @@
 mod gizmo;
 mod gpu_view;
 mod overlay;
+mod select_tools;
 
 use egui::{Align, Align2, Layout, Margin, PointerButton, Pos2, Rect, Response, Sense, Ui, pos2};
 use glam::{Mat4, Vec2 as GVec2, Vec3};
@@ -12,9 +13,9 @@ use grid4d_geom::Component;
 use grid4d_render::{ComponentHit, ComponentStyle, FrameData, OrbitCamera, ScreenView, pick, pick_component};
 use grid4d_scene::{Aabb, Document, NodeId, ObjectKindTag, Scene, WalkItem};
 
-use self::{gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView};
+use self::{gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView, select_tools::Gesture};
 use crate::{
-    EditorCommand, EditorState, SelectMode, Selection,
+    EditorCommand, EditorState, SelectMode, Selection, Tool,
     icons::Icon,
     theme::{metrics, palette as p},
     widgets::{IconStyle, icon_button},
@@ -36,8 +37,11 @@ pub struct ViewportPanel {
     gpu: Option<GpuView>,
     walk_stack: Vec<WalkItem>,
     gizmo: GizmoState,
-    /// The component under the cursor in a component mode (pre-selection).
-    hover: Option<ComponentHit>,
+    /// What a click would select in a component mode (pre-selection): the
+    /// component under the cursor, or the loop/ring of the loop tools.
+    hover: Vec<ComponentHit>,
+    /// A Live Selection stroke or Rectangle Selection frame in progress.
+    gesture: Gesture,
     show_grid: bool,
     show_axis_triad: bool,
     show_hud: bool,
@@ -60,7 +64,8 @@ impl ViewportPanel {
             gpu: render_state.map(GpuView::new),
             walk_stack: Vec::with_capacity(64),
             gizmo: GizmoState::default(),
-            hover: None,
+            hover: Vec::new(),
+            gesture: Gesture::None,
             show_grid: true,
             show_axis_triad: true,
             show_hud: true,
@@ -122,7 +127,10 @@ impl ViewportPanel {
         }
         self.view_rect = rect;
 
-        let navigating = self.navigate(ui, &response, rect);
+        // With Live Selection in a component mode, a middle drag sizes the brush.
+        let brush = (editor.tool == Tool::LiveSelection && editor.mode.component().is_some())
+            .then_some(&mut editor.selection_settings.radius);
+        let navigating = self.navigate(ui, &response, rect, brush);
         // Built once per frame (after navigation moved the camera) and shared by
         // interaction and painting; rebuilt only if a drag just moved the object.
         let mut gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect);
@@ -139,7 +147,9 @@ impl ViewportPanel {
         };
         if !navigating && !gizmo_owns_pointer {
             self.evaluated.update(&doc.scene);
-            self.pick_on_click(ui, &response, rect, editor);
+            if !self.selection_tools(ui, &response, rect, doc, editor) {
+                self.pick_on_click(ui, &response, rect, editor);
+            }
         }
         self.context_menu(&response, editor);
 
@@ -148,26 +158,16 @@ impl ViewportPanel {
         overlay::background(&painter, rect);
         // A gizmo drag above may have moved an object; free if nothing changed.
         self.evaluated.update(&doc.scene);
-        // Component modes: the active polygon object, and its component under the cursor.
+        // Component modes: the active polygon object, and what a click would select.
         let target = self.component_target(editor);
-        self.hover = match (target, response.hover_pos()) {
-            (Some((id, component)), Some(pos)) if !navigating && !response.dragged() => pick_component(
-                &self.evaluated,
-                id,
-                component,
-                &self.screen_view(rect),
-                local(pos, rect),
-                metrics::COMPONENT_PICK_RADIUS,
-            ),
-            _ => None,
-        };
+        self.update_hover(target, &response, rect, editor, navigating);
 
         if let Some(gpu) = &mut self.gpu {
             self.frame.set_camera(&self.camera, rect.aspect_ratio());
             self.frame.show_grid = self.show_grid;
             self.frame.extract(&self.evaluated, |id| editor.selection.contains(id));
             self.frame.component_style = component_style(ui.ctx().pixels_per_point());
-            self.frame.extract_components(&self.evaluated, target, self.hover);
+            self.frame.extract_components(&self.evaluated, target, &self.hover);
             let texture = gpu.render(&self.frame, pixel_size(rect, ui.ctx().pixels_per_point()));
             // Drawn over the background gradient: the target is cleared to transparent.
             painter.image(
@@ -198,12 +198,22 @@ impl ViewportPanel {
         if self.show_hud {
             overlay::hud(&painter, rect, &self.camera);
         }
+        match &self.gesture {
+            Gesture::Frame { start, end } => overlay::marquee(&painter, Rect::from_two_pos(*start, *end)),
+            Gesture::None | Gesture::Stroke(_) | Gesture::Cancelled => {}
+        }
+        if target.is_some()
+            && editor.tool == Tool::LiveSelection
+            && let Some(pos) = response.hover_pos()
+        {
+            overlay::brush(&painter, pos, editor.selection_settings.radius);
+        }
 
         if response.hovered() {
             let alt = ui.input(|i| i.modifiers.alt);
             editor.status_hint = Some(match (alt, editor.mode.component()) {
                 (true, _) => NAV_HINT,
-                (false, Some(component)) => component_hint(component, target.is_some()),
+                (false, Some(component)) => component_hint(component, editor.tool, target.is_some()),
                 (false, None) => editor.tool.hint(),
             });
         }
@@ -216,6 +226,44 @@ impl ViewportPanel {
         let id = editor.selection.active()?;
         self.evaluated.polygon(id)?;
         Some((id, component))
+    }
+
+    /// Recomputes what a click would select (none while navigating or dragging).
+    fn update_hover(
+        &mut self,
+        target: Option<(NodeId, Component)>,
+        response: &Response,
+        rect: Rect,
+        editor: &EditorState,
+        navigating: bool,
+    ) {
+        self.hover.clear();
+        let (Some((node, component)), Some(pos)) = (target, response.hover_pos()) else {
+            return;
+        };
+        if navigating || response.dragged() || !matches!(self.gesture, Gesture::None) {
+            return;
+        }
+        let cursor = local(pos, rect);
+        let wrap = |i: u32| match component {
+            Component::Point => ComponentHit::Point(i),
+            Component::Edge => ComponentHit::Edge(i),
+            Component::Polygon => ComponentHit::Polygon(i),
+        };
+        match editor.tool {
+            Tool::LoopSelection | Tool::RingSelection => {
+                let hits = self.loop_hits(rect, node, component, editor, cursor);
+                self.hover.extend(hits.into_iter().map(wrap));
+            }
+            // The brush circle shows what Live Selection will paint.
+            Tool::LiveSelection => {}
+            Tool::RectangleSelection | Tool::Move | Tool::Scale | Tool::Rotate => {
+                let view = self.screen_view(rect);
+                let radius = metrics::COMPONENT_PICK_RADIUS;
+                self.hover
+                    .extend(pick_component(&self.evaluated, node, component, &view, cursor, radius));
+            }
+        }
     }
 
     /// The camera as screen-space picking sees it, in points relative to `rect`.
@@ -297,13 +345,17 @@ impl ViewportPanel {
     }
 
     /// Cinema 4D navigation. Returns `true` while the camera is being moved.
-    fn navigate(&mut self, ui: &Ui, response: &Response, rect: Rect) -> bool {
+    /// With a `brush` (Live Selection), a plain middle drag sizes it instead of panning.
+    fn navigate(&mut self, ui: &Ui, response: &Response, rect: Rect, brush: Option<&mut f32>) -> bool {
         let (alt, scroll) = ui.input(|i| (i.modifiers.alt, i.smooth_scroll_delta.y));
         let d = response.drag_delta();
         let mut active = false;
 
         if response.dragged_by(PointerButton::Middle) {
-            self.camera.pan(GVec2::new(d.x, d.y), rect.height());
+            match brush {
+                Some(radius) if !alt => *radius = (*radius + d.x).clamp(1.0, 1000.0),
+                _ => self.camera.pan(GVec2::new(d.x, d.y), rect.height()),
+            }
             active = true;
         } else if alt && response.dragged_by(PointerButton::Primary) {
             self.camera.orbit(-d.x * ORBIT_SPEED, d.y * ORBIT_SPEED);
@@ -343,7 +395,7 @@ impl ViewportPanel {
             editor.commands.push(EditorCommand::SelectComponents {
                 node,
                 component,
-                hit: hit.map(ComponentHit::index),
+                hits: hit.map(ComponentHit::index).into_iter().collect(),
                 mode: SelectMode::for_components(modifiers),
             });
             return;
@@ -423,19 +475,32 @@ fn component_style(pixels_per_point: f32) -> ComponentStyle {
 }
 
 /// Status-bar help in a component mode (`active`: a polygon object to work on).
-const fn component_hint(component: Component, active: bool) -> &'static str {
+const fn component_hint(component: Component, tool: Tool, active: bool) -> &'static str {
     if !active {
         return "Component modes work on a polygon object: select one, or press C to make a primitive editable";
+    }
+    match tool {
+        Tool::LiveSelection => {
+            return "Live Selection: paint to select · Shift adds · Ctrl removes · middle-drag sizes the brush · Esc cancels";
+        }
+        Tool::RectangleSelection => {
+            return "Rectangle Selection: drag a frame · Shift adds · Ctrl removes · Esc cancels";
+        }
+        Tool::LoopSelection => {
+            return "Loop Selection: click to select the highlighted loop · Shift adds · Ctrl removes";
+        }
+        Tool::RingSelection => {
+            return "Ring Selection: click to select the highlighted ring · Shift adds · Ctrl removes";
+        }
+        Tool::Move | Tool::Scale | Tool::Rotate => {}
     }
     match component {
         Component::Point => {
             "Points: click to select · Shift adds · Ctrl removes · Shift/Ctrl+click a mode converts the selection"
         }
-        Component::Edge => {
-            "Edges: click to select · Shift adds · Ctrl removes · Shift/Ctrl+click a mode converts the selection"
-        }
+        Component::Edge => "Edges: click to select · Shift adds · Ctrl removes · double-click selects a loop",
         Component::Polygon => {
-            "Polygons: click to select · Shift adds · Ctrl removes · Shift/Ctrl+click a mode converts the selection"
+            "Polygons: click to select · Shift adds · Ctrl removes · double-click selects the connected part"
         }
     }
 }
@@ -523,6 +588,37 @@ mod tests {
             }
         }
 
+        /// Makes the object named `name` active and editable, then enters `mode` with `tool`.
+        fn edit(&mut self, name: &str, mode: EditMode, tool: Tool) -> NodeId {
+            let id = self.doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+            self.editor.selection.set_single(id);
+            self.editor.commands.push(EditorCommand::MakeEditable);
+            self.frame(vec![]);
+            self.editor.mode = mode;
+            self.editor.tool = tool;
+            self.frame(vec![]);
+            id
+        }
+
+        /// Press at `from`, drag in steps to `to`, release.
+        fn drag(&mut self, from: Pos2, to: Pos2) {
+            self.frame(vec![Event::PointerMoved(from)]);
+            self.frame(vec![Self::button(from, true)]);
+            for step in 1..=4u8 {
+                self.frame(vec![Event::PointerMoved(from + (to - from) * f32::from(step) / 4.0)]);
+            }
+            self.frame(vec![Self::button(to, false)]);
+            self.frame(vec![]);
+        }
+
+        fn selected(&self, id: NodeId, component: Component) -> Vec<usize> {
+            let grid4d_scene::ObjectKind::Polygon { components, .. } = &self.doc.scene.get(id).unwrap().data.kind
+            else {
+                panic!("not a polygon object");
+            };
+            components.selected().get(component).iter().collect()
+        }
+
         fn position(&self, id: NodeId) -> Vec3 {
             self.doc.scene.get(id).unwrap().data.transform.position
         }
@@ -566,6 +662,122 @@ mod tests {
     }
 
     #[test]
+    fn a_rectangle_frame_selects_the_visible_points_inside_it() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Points, Tool::RectangleSelection);
+        let rect = h.viewport.view_rect;
+        h.drag(rect.min + vec2(4.0, 4.0), rect.max - vec2(4.0, 4.0));
+        assert_eq!(
+            h.selected(cube, Component::Point).len(),
+            7,
+            "the corner behind the cube stays out"
+        );
+        assert_eq!(h.editor.history.undo_label(), Some("Select Points"));
+        assert!(h.viewport.gesture_is_idle());
+    }
+
+    #[test]
+    fn a_live_selection_stroke_is_one_undo_step_and_esc_cancels_one() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Points, Tool::LiveSelection);
+        h.editor.selection_settings.radius = 2000.0;
+        let centre = h.viewport.view_rect.center();
+        let steps = h.editor.history.undo_len();
+        h.drag(centre, centre + vec2(30.0, 10.0));
+        assert_eq!(h.selected(cube, Component::Point).len(), 7);
+        assert_eq!(h.editor.history.undo_len(), steps + 1, "the whole stroke is one step");
+        assert_eq!(h.editor.history.undo_label(), Some("Live Selection"));
+
+        // A Ctrl stroke would remove everything; Esc puts it back and records nothing.
+        let ctrl = Modifiers::COMMAND;
+        h.frame(vec![Event::ModifiersChanged(ctrl), Event::PointerMoved(centre)]);
+        h.frame(vec![Event::PointerButton {
+            pos: centre,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: ctrl,
+        }]);
+        h.frame(vec![Event::PointerMoved(centre + vec2(20.0, 0.0))]);
+        assert!(h.selected(cube, Component::Point).is_empty(), "painted away live");
+        h.frame(vec![Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: ctrl,
+        }]);
+        h.frame(vec![
+            Harness::button(centre, false),
+            Event::ModifiersChanged(Modifiers::NONE),
+        ]);
+        h.frame(vec![]);
+        assert_eq!(
+            h.selected(cube, Component::Point).len(),
+            7,
+            "Esc restored the selection"
+        );
+        assert_eq!(
+            h.editor.history.undo_len(),
+            steps + 1,
+            "a cancelled stroke records nothing"
+        );
+    }
+
+    #[test]
+    fn loop_selection_takes_the_whole_equator() {
+        let mut h = Harness::new();
+        let sphere = h.edit("Sphere", EditMode::Edges, Tool::LoopSelection);
+        let node = h.doc.scene.get(sphere).unwrap();
+        let grid4d_scene::ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
+            panic!("the sphere was made editable");
+        };
+        let mesh = mesh.clone();
+        let world = h.doc.scene.world_matrix(sphere);
+        let eye = h.viewport.camera.eye();
+        let points = mesh.mesh().points();
+        // The equator edge nearest to the camera, at its middle.
+        let middle = mesh
+            .topology()
+            .edges()
+            .iter()
+            .filter(|&&[a, b]| points[a as usize].y.abs() < 1e-3 && points[b as usize].y.abs() < 1e-3)
+            .map(|&[a, b]| world.transform_point3((points[a as usize] + points[b as usize]) * 0.5))
+            .min_by(|a, b| a.distance(eye).total_cmp(&b.distance(eye)))
+            .unwrap();
+        let rect = h.viewport.view_rect;
+        let view_proj = h.viewport.camera.view_projection(rect.aspect_ratio());
+        let at = project(&view_proj, rect, middle).unwrap();
+        h.frame(vec![Event::PointerMoved(at)]);
+        assert_eq!(h.viewport.hover.len(), 24, "the loop is previewed under the cursor");
+        h.frame(vec![Harness::button(at, true)]);
+        h.frame(vec![Harness::button(at, false)]);
+        h.frame(vec![]);
+        let corners = h.selected(sphere, Component::Edge);
+        let topology = mesh.topology();
+        let edges: std::collections::BTreeSet<u32> = corners.iter().filter_map(|&c| topology.corner_edge(c)).collect();
+        assert_eq!(edges.len(), 24, "24 segments around");
+        assert_eq!(h.editor.history.undo_label(), Some("Select Edges"));
+    }
+
+    #[test]
+    fn a_rectangle_in_model_mode_selects_objects() {
+        let mut h = Harness::new();
+        h.editor.tool = Tool::RectangleSelection;
+        h.frame(vec![]);
+        let rect = h.viewport.view_rect;
+        h.drag(rect.min + vec2(2.0, 2.0), rect.max - vec2(2.0, 2.0));
+        let names: Vec<&str> = h
+            .editor
+            .selection
+            .as_slice()
+            .iter()
+            .map(|&id| h.doc.scene.get(id).unwrap().data.name.as_str())
+            .collect();
+        assert!(names.contains(&"Cube") && names.contains(&"Sphere"), "{names:?}");
+        assert!(!names.contains(&"Group"), "Nulls are not picked in the viewport");
+    }
+
+    #[test]
     fn a_click_in_points_mode_selects_the_visible_point_under_the_cursor() {
         let mut h = Harness::new();
         h.editor.commands.push(EditorCommand::MakeEditable);
@@ -592,10 +804,7 @@ mod tests {
         let at = project(&view_proj, rect, position).unwrap() + vec2(2.0, 1.0);
 
         h.frame(vec![Event::PointerMoved(at)]);
-        assert_eq!(
-            h.viewport.hover,
-            Some(ComponentHit::Point(u32::try_from(nearest).unwrap()))
-        );
+        assert_eq!(h.viewport.hover, [ComponentHit::Point(u32::try_from(nearest).unwrap())]);
         h.frame(vec![Harness::button(at, true)]);
         h.frame(vec![Harness::button(at, false)]);
         h.frame(vec![]);

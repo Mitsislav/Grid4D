@@ -1,5 +1,6 @@
 //! Component selections: which points, edges and polygons of a mesh are flagged
-//! (selected, or hidden), and converting a selection between component kinds.
+//! (selected, or hidden), converting a selection between component kinds, and
+//! the Select menu's operations (grow, shrink, connected, invert).
 
 use crate::{BitSet, PolyMesh, Topology, us};
 
@@ -178,6 +179,171 @@ pub fn convert(
     }
 }
 
+/// `hidden` plus the points and edges whose polygons are all hidden (hiding
+/// polygons hides their points and edges too). Edges by corner.
+#[must_use]
+pub fn hidden_closure(mesh: &PolyMesh, topology: &Topology, hidden: &ComponentSet) -> ComponentSet {
+    let mut closure = hidden.clone();
+    if hidden.polygons.is_empty() {
+        return closure;
+    }
+    let all_hidden = |faces: &[u32]| !faces.is_empty() && faces.iter().all(|&f| hidden.polygons.contains(us(f)));
+    closure
+        .points
+        .extend((0..mesh.point_count()).filter(|&p| all_hidden(topology.point_faces(p))));
+    let edges: BitSet = (0..topology.edge_count())
+        .filter(|&e| all_hidden(topology.edge_faces(e)))
+        .collect();
+    closure.edges.extend(corners_from_edges(&edges, topology).iter());
+    closure
+}
+
+/// How many components of a kind there are (unique edges for edges).
+fn count(mesh: &PolyMesh, topology: &Topology, component: Component) -> usize {
+    match component {
+        Component::Point => mesh.point_count(),
+        Component::Edge => topology.edge_count(),
+        Component::Polygon => mesh.face_count(),
+    }
+}
+
+/// A stored selection in element space: edges by unique edge, the rest as is.
+fn elements(set: &BitSet, component: Component, topology: &Topology) -> BitSet {
+    match component {
+        Component::Edge => edges_from_corners(set, topology),
+        Component::Point | Component::Polygon => set.clone(),
+    }
+}
+
+/// Back from element space to storage (edges by corner).
+fn stored(set: BitSet, component: Component, topology: &Topology) -> BitSet {
+    match component {
+        Component::Edge => corners_from_edges(&set, topology),
+        Component::Point | Component::Polygon => set,
+    }
+}
+
+/// Appends the neighbours of `element`: points through edges, edges through
+/// their points, polygons through shared edges (`by_edge`) or shared points.
+fn neighbours(
+    mesh: &PolyMesh,
+    topology: &Topology,
+    component: Component,
+    element: usize,
+    by_edge: bool,
+    out: &mut Vec<usize>,
+) {
+    match component {
+        Component::Point => {
+            for &e in topology.point_edges(element) {
+                let [a, b] = topology.edges()[us(e)];
+                out.push(us(if us(a) == element { b } else { a }));
+            }
+        }
+        Component::Edge => {
+            for &p in topology.edges().get(element).into_iter().flatten() {
+                out.extend(
+                    topology
+                        .point_edges(us(p))
+                        .iter()
+                        .map(|&e| us(e))
+                        .filter(|&e| e != element),
+                );
+            }
+        }
+        Component::Polygon if by_edge => {
+            for c in mesh.corner_range(element) {
+                if let Some(e) = topology.corner_edge(c) {
+                    out.extend(
+                        topology
+                            .edge_faces(us(e))
+                            .iter()
+                            .map(|&f| us(f))
+                            .filter(|&f| f != element),
+                    );
+                }
+            }
+        }
+        Component::Polygon => {
+            for &p in mesh.face(element) {
+                out.extend(
+                    topology
+                        .point_faces(us(p))
+                        .iter()
+                        .map(|&f| us(f))
+                        .filter(|&f| f != element),
+                );
+            }
+        }
+    }
+}
+
+/// Grow Selection: `set` plus every neighbour of its members (for polygons,
+/// through shared edges when `edges_only`, else through shared points).
+#[must_use]
+pub fn grow(mesh: &PolyMesh, topology: &Topology, set: &BitSet, component: Component, edges_only: bool) -> BitSet {
+    let members = elements(set, component, topology);
+    let mut grown = members.clone();
+    let mut around = Vec::new();
+    for element in members.iter() {
+        around.clear();
+        neighbours(mesh, topology, component, element, edges_only, &mut around);
+        grown.extend(around.iter().copied());
+    }
+    stored(grown, component, topology)
+}
+
+/// Shrink Selection: drops the members on the selection's border — those with
+/// a neighbour outside it (same neighbourhood as [`grow`]). A selection with no
+/// border, such as every polygon of a closed mesh, stays as it is.
+#[must_use]
+pub fn shrink(mesh: &PolyMesh, topology: &Topology, set: &BitSet, component: Component, edges_only: bool) -> BitSet {
+    let members = elements(set, component, topology);
+    let mut around = Vec::new();
+    let kept = members
+        .iter()
+        .filter(|&element| {
+            around.clear();
+            neighbours(mesh, topology, component, element, edges_only, &mut around);
+            around.iter().all(|&n| members.contains(n))
+        })
+        .collect();
+    stored(kept, component, topology)
+}
+
+/// Select Connected: every component reachable from the selection through
+/// shared geometry (polygons through shared points), as one flood fill.
+#[must_use]
+pub fn connected(mesh: &PolyMesh, topology: &Topology, set: &BitSet, component: Component) -> BitSet {
+    let mut reached = elements(set, component, topology);
+    let mut pending: Vec<usize> = reached.iter().collect();
+    let mut around = Vec::new();
+    while let Some(element) = pending.pop() {
+        around.clear();
+        neighbours(mesh, topology, component, element, false, &mut around);
+        for &n in &around {
+            if reached.insert(n) {
+                pending.push(n);
+            }
+        }
+    }
+    stored(reached, component, topology)
+}
+
+/// Invert: every component not in `set` and not in `hidden` (both stored
+/// sets of `component`; edges are inverted as edges, not corner by corner).
+#[must_use]
+pub fn invert(mesh: &PolyMesh, topology: &Topology, set: &BitSet, component: Component, hidden: &BitSet) -> BitSet {
+    let (members, hidden) = (
+        elements(set, component, topology),
+        elements(hidden, component, topology),
+    );
+    let inverted = (0..count(mesh, topology, component))
+        .filter(|&e| !members.contains(e) && !hidden.contains(e))
+        .collect();
+    stored(inverted, component, topology)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,6 +436,134 @@ mod tests {
         assert!(
             convert(&mesh, &topology, &edges, Component::Edge, Component::Point, false).is_empty(),
             "every point has a third, unselected edge"
+        );
+    }
+
+    /// A 2 × 2 patch of faces in the middle of a 6 × 6 grid.
+    fn patch(grid: &PolyMesh) -> BitSet {
+        (0..grid.face_count())
+            .filter(|&f| {
+                let c = grid.face_center(f);
+                (2.0..4.0).contains(&c.x) && (2.0..4.0).contains(&c.z)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn grow_then_shrink_restores_an_interior_patch() {
+        let grid = shapes::grid(6, 6);
+        let topology = Topology::build(&grid);
+        let start = patch(&grid);
+        assert_eq!(start.len(), 4);
+        for edges_only in [true, false] {
+            let grown = grow(&grid, &topology, &start, Component::Polygon, edges_only);
+            assert_eq!(
+                grown.len(),
+                if edges_only { 4 + 8 } else { 16 },
+                "edges_only = {edges_only}"
+            );
+            assert_eq!(shrink(&grid, &topology, &grown, Component::Polygon, edges_only), start);
+        }
+    }
+
+    #[test]
+    fn a_selection_without_border_does_not_shrink() {
+        let (mesh, topology) = cube();
+        let all: BitSet = (0..6).collect();
+        assert_eq!(shrink(&mesh, &topology, &all, Component::Polygon, true), all);
+        let every_point: BitSet = (0..8).collect();
+        assert_eq!(
+            shrink(&mesh, &topology, &every_point, Component::Point, true),
+            every_point
+        );
+    }
+
+    #[test]
+    fn points_and_edges_grow_along_edges() {
+        let grid = shapes::grid(4, 4);
+        let topology = Topology::build(&grid);
+        let centre = grid.points().iter().position(|p| p.x == 2.0 && p.z == 2.0).unwrap();
+        let one: BitSet = [centre].into_iter().collect();
+        assert_eq!(
+            grow(&grid, &topology, &one, Component::Point, true).len(),
+            5,
+            "itself and 4 neighbours"
+        );
+        let edge = us(topology.point_edges(centre)[0]);
+        let corners = corners_from_edges(&[edge].into_iter().collect(), &topology);
+        let grown = grow(&grid, &topology, &corners, Component::Edge, true);
+        assert_eq!(
+            edges_from_corners(&grown, &topology).len(),
+            7,
+            "itself and 3 more at each end"
+        );
+    }
+
+    #[test]
+    fn connected_floods_one_island_only() {
+        // Two cubes in one mesh, sharing nothing.
+        let a = shapes::cube(1.0);
+        let mut points = a.points().to_vec();
+        points.extend(a.points().iter().map(|p| *p + glam::Vec3::X * 5.0));
+        let faces: Vec<Vec<u32>> = a
+            .faces()
+            .map(<[u32]>::to_vec)
+            .chain(a.faces().map(|f| f.iter().map(|&p| p + 8).collect()))
+            .collect();
+        let two = PolyMesh::from_faces(points, faces).unwrap();
+        let topology = Topology::build(&two);
+        let seed: BitSet = [7].into_iter().collect(); // a face of the second cube
+        assert_eq!(
+            sorted(&connected(&two, &topology, &seed, Component::Polygon)),
+            [6, 7, 8, 9, 10, 11]
+        );
+        let point: BitSet = [0].into_iter().collect();
+        assert_eq!(connected(&two, &topology, &point, Component::Point).len(), 8);
+    }
+
+    #[test]
+    fn invert_skips_hidden_components_and_treats_edges_as_edges() {
+        let (mesh, topology) = cube();
+        let selected: BitSet = [0, 1].into_iter().collect();
+        let hidden: BitSet = [5].into_iter().collect();
+        assert_eq!(
+            sorted(&invert(&mesh, &topology, &selected, Component::Polygon, &hidden)),
+            [2, 3, 4]
+        );
+        // One corner of an edge selects the edge: inverting must drop the whole edge.
+        let corner = us(topology.edge_corners(0)[0]);
+        let one_corner: BitSet = [corner].into_iter().collect();
+        let inverted = invert(&mesh, &topology, &one_corner, Component::Edge, &BitSet::new());
+        let edges = edges_from_corners(&inverted, &topology);
+        assert_eq!(edges.len(), 11);
+        assert!(!edges.contains(0));
+    }
+
+    #[test]
+    fn hiding_polygons_hides_their_points_and_edges() {
+        let (mesh, topology) = cube();
+        let hidden = ComponentSet {
+            polygons: [0, 2].into_iter().collect(), // +X and +Y share an edge
+            ..ComponentSet::default()
+        };
+        let closure = hidden_closure(&mesh, &topology, &hidden);
+        assert!(closure.points.is_empty(), "every point still has a visible face");
+        assert_eq!(
+            edges_from_corners(&closure.edges, &topology).len(),
+            1,
+            "the shared edge"
+        );
+        let all = ComponentSet {
+            polygons: (0..6).collect(),
+            ..ComponentSet::default()
+        };
+        let closure = hidden_closure(&mesh, &topology, &all);
+        assert_eq!(
+            (
+                closure.points.len(),
+                edges_from_corners(&closure.edges, &topology).len()
+            ),
+            (8, 12)
         );
     }
 

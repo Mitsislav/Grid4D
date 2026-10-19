@@ -22,6 +22,8 @@ pub struct Topology {
     edge_corner_list: Vec<u32>,
     point_face_offsets: Vec<u32>,
     point_face_list: Vec<u32>,
+    point_edge_offsets: Vec<u32>,
+    point_edge_list: Vec<u32>,
     /// Points used by at least one face.
     used_points: usize,
     face_count: usize,
@@ -74,6 +76,13 @@ impl Topology {
                 }
             }
         });
+        // Edges per point.
+        let (point_edge_offsets, point_edge_list) = pack(mesh.point_count(), |emit| {
+            for (e, &[a, b]) in edges.iter().enumerate() {
+                emit(us(a), u32_index(e));
+                emit(us(b), u32_index(e));
+            }
+        });
         let used_points = point_face_offsets.windows(2).filter(|w| w[1] > w[0]).count();
 
         Self {
@@ -85,6 +94,8 @@ impl Topology {
             edge_corner_list,
             point_face_offsets,
             point_face_list,
+            point_edge_offsets,
+            point_edge_list,
             used_points,
             face_count: mesh.face_count(),
             consistently_oriented,
@@ -118,6 +129,12 @@ impl Topology {
     #[must_use]
     pub fn edge_faces(&self, edge: usize) -> &[u32] {
         slice(&self.edge_face_offsets, &self.edge_face_list, edge)
+    }
+
+    /// Unique edges that end at point `point` (empty if out of range or unused).
+    #[must_use]
+    pub fn point_edges(&self, point: usize) -> &[u32] {
+        slice(&self.point_edge_offsets, &self.point_edge_list, point)
     }
 
     /// Faces that use point `point` (empty if out of range or unused).
@@ -227,6 +244,12 @@ mod tests {
         let t = Topology::build(&cube);
         for p in 0..8 {
             assert_eq!(t.point_faces(p).len(), 3, "every cube corner touches three faces");
+            assert_eq!(t.point_edges(p).len(), 3, "…and three edges");
+            assert!(
+                t.point_edges(p)
+                    .iter()
+                    .all(|&e| t.edges()[us(e)].contains(&u32_index(p)))
+            );
         }
         for (e, &[a, b]) in t.edges().iter().enumerate() {
             assert!(a < b);

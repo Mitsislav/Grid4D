@@ -153,7 +153,7 @@ impl GizmoGeometry {
                         );
                     }
                 }
-                Tool::LiveSelection => {}
+                Tool::LiveSelection | Tool::RectangleSelection | Tool::LoopSelection | Tool::RingSelection => {}
             }
         }
         painter.circle_filled(self.origin_px, 3.5, p::TEXT_STRONG);
@@ -303,7 +303,7 @@ fn apply_drag(geo: &GizmoGeometry, drag: &Drag, pointer: Pos2, scene: &mut Scene
             let local = parent_rotation.inverse() * world_delta * parent_rotation * t.rotation_quat();
             t.set_rotation_quat(local);
         }
-        Tool::LiveSelection => {}
+        Tool::LiveSelection | Tool::RectangleSelection | Tool::LoopSelection | Tool::RingSelection => {}
     }
 }
 

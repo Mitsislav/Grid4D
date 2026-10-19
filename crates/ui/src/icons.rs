@@ -14,6 +14,9 @@ pub enum Icon {
     Object(ObjectKindTag),
     // Tools
     LiveSelection,
+    RectangleSelection,
+    LoopSelection,
+    RingSelection,
     Move,
     Scale,
     Rotate,
@@ -69,6 +72,42 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::LiveSelection => {
             c.circle((0.42, 0.42), 0.3);
             c.fill(&[(0.55, 0.52), (0.95, 0.72), (0.72, 0.95)]);
+        }
+        Icon::RectangleSelection => {
+            // A dashed frame and the pointer dragging it.
+            for (a, b) in [
+                ((0.08, 0.12), (0.32, 0.12)),
+                ((0.48, 0.12), (0.72, 0.12)),
+                ((0.08, 0.12), (0.08, 0.34)),
+                ((0.08, 0.5), (0.08, 0.72)),
+                ((0.08, 0.72), (0.3, 0.72)),
+                ((0.72, 0.12), (0.72, 0.32)),
+            ] {
+                c.line(a, b);
+            }
+            c.fill(&[(0.55, 0.52), (0.95, 0.72), (0.72, 0.95)]);
+        }
+        Icon::LoopSelection => {
+            // A quad grid with one row of edges picked out along it.
+            let faint = color.gamma_multiply(0.4);
+            for x in [0.1, 0.5, 0.9] {
+                c.polyline_stroke(&[(x, 0.1), (x, 0.9)], false, Stroke::new(c.stroke.width, faint));
+            }
+            c.polyline_stroke(&[(0.1, 0.1), (0.9, 0.1)], false, Stroke::new(c.stroke.width, faint));
+            c.polyline_stroke(&[(0.1, 0.9), (0.9, 0.9)], false, Stroke::new(c.stroke.width, faint));
+            let thick = Stroke::new(c.stroke.width * 1.7, color);
+            c.polyline_stroke(&[(0.04, 0.5), (0.96, 0.5)], false, thick);
+        }
+        Icon::RingSelection => {
+            // The same grid with the parallel edges across a row picked out.
+            let faint = color.gamma_multiply(0.4);
+            for y in [0.1, 0.5, 0.9] {
+                c.polyline_stroke(&[(0.1, y), (0.9, y)], false, Stroke::new(c.stroke.width, faint));
+            }
+            let thick = Stroke::new(c.stroke.width * 1.7, color);
+            for x in [0.1, 0.5, 0.9] {
+                c.polyline_stroke(&[(x, 0.08), (x, 0.52)], false, thick);
+            }
         }
         Icon::Move => {
             c.line((0.5, 0.14), (0.5, 0.86));

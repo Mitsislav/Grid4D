@@ -154,13 +154,14 @@ impl FrameData {
     }
 
     /// Updates the component overlay: `target` is the polygon object and the
-    /// component kind of the current mode (`None` in Model mode), `hover` the
-    /// component under the cursor. Hot path: rebuilds only what changed.
+    /// component kind of the current mode (`None` in Model mode), `hover` what
+    /// the cursor would select (one component, or a loop). Hot path: rebuilds only
+    /// what changed.
     pub fn extract_components(
         &mut self,
         scene: &EvaluatedScene,
         target: Option<(NodeId, Component)>,
-        hover: Option<ComponentHit>,
+        hover: &[ComponentHit],
     ) {
         self.components.update(scene, target, hover);
     }

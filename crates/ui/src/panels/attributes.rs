@@ -1,16 +1,19 @@
 //! Attribute Manager: parameters of the active object, organised in C4D's
 //! Basic / Coord. / Object tabs. With nothing selected it shows the project
-//! settings, like Cinema 4D does.
+//! settings, like Cinema 4D does. In Tool mode it shows the active tool's
+//! options instead; choosing a selection tool switches to Tool mode, changing
+//! the object selection switches back.
 //!
 //! Fields write to the document live; each finished interaction (a drag, a
 //! typed value, a click) is recorded as one undo step through [`LiveEdit`].
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
+use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_scene::{Document, NodeData, NodeId, ObjectKind, SceneEdit, TimeSettings};
 
 use crate::{
-    CommandQueue, EditorCommand, EditorState,
+    CommandQueue, EditorCommand, EditorState, Tool,
     commands::tag_color,
     icons::{self, Icon},
     live_edit::{LiveEdit, interaction_ongoing},
@@ -40,8 +43,20 @@ impl Tab {
     }
 }
 
+/// What the Attribute Manager shows (its Mode menu).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum View {
+    #[default]
+    Objects,
+    Tool,
+}
+
 #[derive(Debug, Default)]
 pub struct AttributesPanel {
+    view: View,
+    /// The tool and active object last frame, to switch views when they change.
+    seen_tool: Option<Tool>,
+    seen_active: Option<NodeId>,
     tab: Tab,
     node_edit: LiveEdit<NodeId, NodeData>,
     name_edit: LiveEdit<(), String>,
@@ -50,11 +65,32 @@ pub struct AttributesPanel {
 
 impl AttributesPanel {
     pub fn show(&mut self, ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
+        // Like C4D: picking a selection tool shows its options, selecting objects shows them.
+        if self.seen_tool != Some(editor.tool) {
+            if self.seen_tool.is_some() {
+                self.view = if editor.tool.is_selection_tool() {
+                    View::Tool
+                } else {
+                    View::Objects
+                };
+            }
+            self.seen_tool = Some(editor.tool);
+        }
+        if self.seen_active != editor.selection.active() {
+            self.view = View::Objects;
+            self.seen_active = editor.selection.active();
+        }
+
         let _ = manager_tabs(ui, &["Attributes", "Layers"], 0);
         egui::Frame::new().inner_margin(Margin::symmetric(4, 1)).show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("Mode", |ui| {
-                    ui.add(Button::new("Objects").selected(true));
+                    for (view, label) in [(View::Objects, "Objects"), (View::Tool, "Tool")] {
+                        if ui.add(Button::new(label).selected(self.view == view)).clicked() {
+                            self.view = view;
+                            ui.close();
+                        }
+                    }
                     ui.add_enabled(false, Button::new("Tags"));
                     ui.add_enabled(false, Button::new("Materials"));
                 });
@@ -73,9 +109,12 @@ impl AttributesPanel {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 egui::Frame::new().inner_margin(Margin::symmetric(8, 6)).show(ui, |ui| {
-                    match editor.selection.active() {
-                        Some(id) => self.node_ui(ui, doc, id, editor.selection.len(), &mut editor.commands),
-                        None => self.project_ui(ui, doc, &mut editor.commands),
+                    match (self.view, editor.selection.active()) {
+                        (View::Tool, _) => tool_ui(ui, editor),
+                        (View::Objects, Some(id)) => {
+                            self.node_ui(ui, doc, id, editor.selection.len(), &mut editor.commands);
+                        }
+                        (View::Objects, None) => self.project_ui(ui, doc, &mut editor.commands),
                     }
                 });
             });
@@ -372,6 +411,59 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 }
             }
         });
+}
+
+/// The active tool's options (editor state: no undo, not saved).
+fn tool_ui(ui: &mut Ui, editor: &mut EditorState) {
+    let tool = editor.tool;
+    ui.label(
+        RichText::new(format!("{} [Tool]", tool.label()))
+            .strong()
+            .color(p::TEXT_STRONG),
+    );
+    section_heading(ui, "Options");
+    let s = &mut editor.selection_settings;
+    Grid::new("grid4d.attr.tool")
+        .num_columns(2)
+        .spacing([6.0, 4.0])
+        .show(ui, |ui| match tool {
+            Tool::LiveSelection => {
+                attr_label(ui, "Radius", LABEL_WIDTH);
+                ui.add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    DragValue::new(&mut s.radius)
+                        .speed(0.5)
+                        .range(1.0..=1000.0)
+                        .suffix(" px"),
+                )
+                .on_hover_text("Middle-drag in the viewport changes it too");
+                ui.end_row();
+                check_row(ui, "Only Select Visible Elements", &mut s.live_visible_only);
+                check_row(ui, "Tolerant Selection", &mut s.live_tolerant);
+            }
+            Tool::RectangleSelection => {
+                check_row(ui, "Only Select Visible Elements", &mut s.rectangle_visible_only);
+                check_row(ui, "Tolerant Selection", &mut s.rectangle_tolerant);
+            }
+            Tool::LoopSelection => walk_rows(ui, &mut s.loop_options),
+            Tool::RingSelection => walk_rows(ui, &mut s.ring_options),
+            Tool::Move | Tool::Scale | Tool::Rotate => {
+                ui.label(RichText::new("This tool has no options yet.").color(p::TEXT_DIM));
+                ui.end_row();
+            }
+        });
+}
+
+fn check_row(ui: &mut Ui, label: &str, value: &mut bool) {
+    attr_label(ui, label, LABEL_WIDTH);
+    ui.checkbox(value, "");
+    ui.end_row();
+}
+
+fn walk_rows(ui: &mut Ui, options: &mut WalkOptions) {
+    check_row(ui, "Stop at Selections", &mut options.stop_at_selections);
+    check_row(ui, "Stop at Non-Quads", &mut options.stop_at_non_quads);
+    check_row(ui, "Stop at Poles", &mut options.stop_at_poles);
 }
 
 fn project_settings(ui: &mut Ui, doc: &mut Document) {

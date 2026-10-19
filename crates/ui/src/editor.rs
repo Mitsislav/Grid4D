@@ -1,7 +1,7 @@
 //! Editor (session) state that is *not* part of the document: selection, the
 //! active tool, modes and transient UI flags.
 
-use grid4d_geom::Component;
+use grid4d_geom::{Component, loops::WalkOptions};
 use grid4d_scene::{NodeId, Scene};
 use slotmap::SecondaryMap;
 
@@ -11,29 +11,44 @@ use crate::{CommandQueue, History, file::DocumentFile};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
     LiveSelection,
+    RectangleSelection,
+    LoopSelection,
+    RingSelection,
     Move,
     Scale,
     Rotate,
 }
 
 impl Tool {
-    pub const ALL: [Self; 4] = [Self::LiveSelection, Self::Move, Self::Scale, Self::Rotate];
+    pub const ALL: [Self; 7] = [
+        Self::LiveSelection,
+        Self::RectangleSelection,
+        Self::LoopSelection,
+        Self::RingSelection,
+        Self::Move,
+        Self::Scale,
+        Self::Rotate,
+    ];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::LiveSelection => "Live Selection",
+            Self::RectangleSelection => "Rectangle Selection",
+            Self::LoopSelection => "Loop Selection",
+            Self::RingSelection => "Ring Selection",
             Self::Move => "Move",
             Self::Scale => "Scale",
             Self::Rotate => "Rotate",
         }
     }
 
-    /// Cinema 4D keyboard shortcut.
+    /// Cinema 4D keyboard shortcut; empty until verified against Maxon's docs.
     #[must_use]
     pub const fn shortcut(self) -> &'static str {
         match self {
             Self::LiveSelection => "9",
+            Self::RectangleSelection | Self::LoopSelection | Self::RingSelection => "",
             Self::Move => "E",
             Self::Scale => "T",
             Self::Rotate => "R",
@@ -45,6 +60,11 @@ impl Tool {
     pub const fn hint(self) -> &'static str {
         match self {
             Self::LiveSelection => "Live Selection: click an object to select it · Shift adds · Ctrl toggles",
+            Self::RectangleSelection => {
+                "Rectangle Selection: drag a frame around objects · Shift adds · Ctrl removes · Esc cancels"
+            }
+            Self::LoopSelection => "Loop Selection works on the points, edges or polygons of a polygon object",
+            Self::RingSelection => "Ring Selection works on the points, edges or polygons of a polygon object",
             Self::Move => "Move: drag an axis handle to move along it · Alt+drag to navigate",
             Self::Scale => "Scale: drag an axis handle to scale along it · Alt+drag to navigate",
             Self::Rotate => "Rotate: drag a ring to rotate around its axis · Alt+drag to navigate",
@@ -53,7 +73,45 @@ impl Tool {
 
     #[must_use]
     pub const fn has_gizmo(self) -> bool {
-        !matches!(self, Self::LiveSelection)
+        matches!(self, Self::Move | Self::Scale | Self::Rotate)
+    }
+
+    /// The Select menu's tools (their options show in the Attribute Manager).
+    #[must_use]
+    pub const fn is_selection_tool(self) -> bool {
+        !self.has_gizmo()
+    }
+}
+
+/// Options of the selection tools, edited in the Attribute Manager's Tool mode.
+/// Editor state: not saved, not undoable.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelectionSettings {
+    /// Live Selection brush radius, in points (middle-drag changes it).
+    pub radius: f32,
+    pub live_visible_only: bool,
+    pub live_tolerant: bool,
+    pub rectangle_visible_only: bool,
+    pub rectangle_tolerant: bool,
+    pub loop_options: WalkOptions,
+    pub ring_options: WalkOptions,
+    /// Grow Selection: polygons must share an edge (else sharing a point is enough).
+    pub grow_edges_only: bool,
+}
+
+impl Default for SelectionSettings {
+    fn default() -> Self {
+        Self {
+            // The reference's default radius is still to be verified (spec open question).
+            radius: 10.0,
+            live_visible_only: true,
+            live_tolerant: false,
+            rectangle_visible_only: true,
+            rectangle_tolerant: false,
+            loop_options: WalkOptions::default(),
+            ring_options: WalkOptions::default(),
+            grow_edges_only: true,
+        }
     }
 }
 
@@ -202,6 +260,7 @@ pub struct EditorState {
     pub selection: Selection,
     pub tool: Tool,
     pub mode: EditMode,
+    pub selection_settings: SelectionSettings,
     /// X / Y / Z axis buttons. `true` = the axis is enabled (C4D semantics).
     pub axes: [bool; 3],
     /// World (`true`) or object (`false`) coordinate system for the gizmo.
@@ -226,6 +285,7 @@ impl Default for EditorState {
             selection: Selection::default(),
             tool: Tool::Move,
             mode: EditMode::Model,
+            selection_settings: SelectionSettings::default(),
             axes: [true; 3],
             world_coordinates: false,
             snapping: false,

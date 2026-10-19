@@ -161,6 +161,9 @@ fn axis_toggle(ui: &mut Ui, enabled: &mut bool, label: &'static str, color: egui
 const fn tool_icon(tool: Tool) -> Icon {
     match tool {
         Tool::LiveSelection => Icon::LiveSelection,
+        Tool::RectangleSelection => Icon::RectangleSelection,
+        Tool::LoopSelection => Icon::LoopSelection,
+        Tool::RingSelection => Icon::RingSelection,
         Tool::Move => Icon::Move,
         Tool::Scale => Icon::Scale,
         Tool::Rotate => Icon::Rotate,
@@ -170,6 +173,9 @@ const fn tool_icon(tool: Tool) -> Icon {
 const fn tool_tooltip(tool: Tool) -> &'static str {
     match tool {
         Tool::LiveSelection => "Live Selection (9)",
+        Tool::RectangleSelection => "Rectangle Selection",
+        Tool::LoopSelection => "Loop Selection",
+        Tool::RingSelection => "Ring Selection",
         Tool::Move => "Move (E)",
         Tool::Scale => "Scale (T)",
         Tool::Rotate => "Rotate (R)",

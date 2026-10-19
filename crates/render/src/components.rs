@@ -1,10 +1,16 @@
 //! Component modes in the viewport: picking points, edges and polygons of the
-//! active polygon object, and the overlay that shows them.
+//! active polygon object (a click, a rectangle, a brush stroke), and the overlay
+//! that shows them.
+
+use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use grid4d_eval::EvaluatedScene;
-use grid4d_geom::{BitSet, Component, Triangulator, selection::edges_from_corners};
+use grid4d_geom::{
+    BitSet, Component, Triangulator,
+    selection::{edges_from_corners, hidden_closure},
+};
 use grid4d_scene::{ComponentState, Components, MeshHandle, MeshId, NodeId};
 
 /// A picked component of a polygon object: a point index, a unique edge index
@@ -57,9 +63,69 @@ fn idx(index: u32) -> usize {
     usize::try_from(index).unwrap_or(usize::MAX)
 }
 
+/// `usize` index of a validated mesh → `u32`.
+fn index_u32(index: usize) -> u32 {
+    u32::try_from(index).unwrap_or(u32::MAX)
+}
+
 /// Ray parameters closer than this to the target (along eye → target) still
 /// count as reaching it: the component's own faces must not hide it.
 const VISIBLE_TOLERANCE: f32 = 1e-3;
+
+/// A visible polygon object as screen-space selection sees it.
+struct ObjectView<'a> {
+    handle: &'a MeshHandle,
+    world: Mat4,
+    /// The camera position in object space.
+    eye: Vec3,
+    view: &'a ScreenView,
+    hidden: Hidden,
+}
+
+impl<'a> ObjectView<'a> {
+    fn new(scene: &'a EvaluatedScene, node: NodeId, view: &'a ScreenView) -> Option<Self> {
+        let (evaluated, handle, components) = scene.polygon(node)?;
+        let world = evaluated.world;
+        if world.determinant().abs() <= f32::EPSILON {
+            return None;
+        }
+        Some(Self {
+            handle,
+            world,
+            eye: world.inverse().transform_point3(view.eye),
+            view,
+            hidden: Hidden::new(handle, components.state()),
+        })
+    }
+
+    fn clip(&self, p: Vec3) -> Vec4 {
+        self.view.view_proj * self.world.transform_point3(p).extend(1.0)
+    }
+
+    /// Screen position of object-space point `p`; `None` behind the camera.
+    fn screen(&self, p: Vec3) -> Option<Vec2> {
+        let clip = self.clip(p);
+        (clip.w > 1e-6 && clip.z >= 0.0).then(|| self.view.to_screen(clip))
+    }
+
+    /// No (unhidden) polygon lies between the camera and object-space point `target`.
+    fn visible(&self, target: Vec3) -> bool {
+        self.handle
+            .raycast_where(self.eye, target - self.eye, |f| !self.hidden.polygons.contains(idx(f)))
+            .is_none_or(|hit| hit.t >= 1.0 - VISIBLE_TOLERANCE)
+    }
+
+    /// A polygon is visible if its centre or a point near one of its corners is.
+    fn face_visible(&self, face: usize) -> bool {
+        let mesh = self.handle.mesh();
+        let centre = mesh.face_center(face);
+        self.visible(centre)
+            || mesh
+                .face(face)
+                .iter()
+                .any(|&p| self.visible(mesh.points()[idx(p)].lerp(centre, 0.2)))
+    }
+}
 
 /// The visible component of kind `component` of polygon object `node` under
 /// `cursor`: the nearest point or edge within `radius` (screen distance) that no
@@ -78,74 +144,290 @@ pub fn pick_component(
     cursor: Vec2,
     radius: f32,
 ) -> Option<ComponentHit> {
-    let (evaluated, handle, components) = scene.polygon(node)?;
-    let world = evaluated.world;
-    if world.determinant().abs() <= f32::EPSILON {
-        return None;
-    }
-    let to_object = world.inverse();
-    let eye = to_object.transform_point3(view.eye);
-    let hidden = Hidden::new(handle, components.state());
-    let mesh = handle.mesh();
-    let visible = |target: Vec3| {
-        handle
-            .raycast_where(eye, target - eye, |f| !hidden.polygons.contains(idx(f)))
-            .is_none_or(|hit| hit.t >= 1.0 - VISIBLE_TOLERANCE)
-    };
-    let clip_of = |p: Vec3| view.view_proj * world.transform_point3(p).extend(1.0);
-
+    let o = ObjectView::new(scene, node, view)?;
+    let mesh = o.handle.mesh();
     match component {
         Component::Polygon => {
             let ndc = Vec2::new(cursor.x / view.size.x * 2.0 - 1.0, 1.0 - cursor.y / view.size.y * 2.0);
-            let inverse = view.view_proj.inverse();
-            let far = inverse.project_point3(ndc.extend(1.0));
-            let near = inverse.project_point3(ndc.extend(0.0));
-            let (origin, dir) = (
-                to_object.transform_point3(near),
-                to_object.transform_vector3(far - near),
-            );
-            handle
-                .raycast_where(origin, dir, |f| !hidden.polygons.contains(idx(f)))
+            let to_object = (view.view_proj * o.world).inverse();
+            let far = to_object.project_point3(ndc.extend(1.0));
+            let near = to_object.project_point3(ndc.extend(0.0));
+            o.handle
+                .raycast_where(near, far - near, |f| !o.hidden.polygons.contains(idx(f)))
                 .map(|hit| ComponentHit::Polygon(hit.face))
         }
         Component::Point => {
-            let mut candidates: Vec<(f32, u32)> = mesh
-                .points()
-                .iter()
-                .enumerate()
-                .filter(|&(p, _)| !hidden.points.contains(p))
-                .filter_map(|(p, &position)| {
-                    let clip = clip_of(position);
-                    (clip.w > 1e-6).then(|| (view.to_screen(clip).distance(cursor), u32::try_from(p).ok()))
-                })
-                .filter_map(|(d, p)| Some((d, p?)))
+            let mut candidates: Vec<(f32, usize)> = (0..mesh.point_count())
+                .filter(|&p| !o.hidden.points.contains(p))
+                .filter_map(|p| Some((o.screen(mesh.points()[p])?.distance(cursor), p)))
                 .filter(|&(d, _)| d <= radius)
                 .collect();
             candidates.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
             candidates
                 .into_iter()
-                .find(|&(_, p)| visible(mesh.points()[idx(p)]))
-                .map(|(_, p)| ComponentHit::Point(p))
+                .find(|&(_, p)| o.visible(mesh.points()[p]))
+                .map(|(_, p)| ComponentHit::Point(index_u32(p)))
         }
         Component::Edge => {
-            let topology = handle.topology();
-            let mut candidates: Vec<(f32, u32, Vec3)> = topology
+            let topology = o.handle.topology();
+            let mut candidates: Vec<(f32, usize, Vec3)> = topology
                 .edges()
                 .iter()
                 .enumerate()
-                .filter(|&(e, _)| !hidden.edges.contains(e))
+                .filter(|&(e, _)| !o.hidden.edges.contains(e))
                 .filter_map(|(e, &[a, b])| {
                     let (a, b) = (mesh.points()[idx(a)], mesh.points()[idx(b)]);
-                    let (d, closest) = edge_distance(view, clip_of(a), clip_of(b), a, b, cursor)?;
-                    Some((d, u32::try_from(e).ok()?, closest))
+                    let (d, closest) = edge_distance(view, o.clip(a), o.clip(b), a, b, cursor)?;
+                    Some((d, e, closest))
                 })
                 .filter(|&(d, _, _)| d <= radius)
                 .collect();
             candidates.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
             candidates
                 .into_iter()
-                .find(|&(_, _, closest)| visible(closest))
-                .map(|(_, e, _)| ComponentHit::Edge(e))
+                .find(|&(_, _, closest)| o.visible(closest))
+                .map(|(_, e, _)| ComponentHit::Edge(index_u32(e)))
+        }
+    }
+}
+
+/// The edge of polygon `face` nearest to `cursor` on screen (a unique edge index):
+/// which way a polygon loop or ring through that polygon runs.
+#[must_use]
+pub fn nearest_face_edge(
+    scene: &EvaluatedScene,
+    node: NodeId,
+    face: u32,
+    view: &ScreenView,
+    cursor: Vec2,
+) -> Option<u32> {
+    let o = ObjectView::new(scene, node, view)?;
+    let (mesh, topology) = (o.handle.mesh(), o.handle.topology());
+    mesh.corner_range(idx(face))
+        .filter_map(|c| {
+            let e = topology.corner_edge(c)?;
+            let [a, b] = topology.edges()[idx(e)];
+            let (a, b) = (mesh.points()[idx(a)], mesh.points()[idx(b)]);
+            Some((edge_distance(view, o.clip(a), o.clip(b), a, b, cursor)?.0, e))
+        })
+        .min_by(|x, y| x.0.total_cmp(&y.0))
+        .map(|(_, e)| e)
+}
+
+/// How a frame or brush decides which components it takes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RegionRules {
+    /// Take an edge or polygon as soon as any part of it is inside, not only
+    /// when all of it (or, for the brush, three quarters of it) is.
+    pub tolerant: bool,
+    /// Leave out components hidden behind other polygons.
+    pub visible_only: bool,
+}
+
+/// The components of kind `component` inside the screen rectangle spanned by
+/// `corners` (points, unique edge indices or polygons), as the Rectangle
+/// Selection tool takes them (see [`RegionRules`]): an edge or polygon counts
+/// when all of its points are inside, or — tolerant — when any part of it is.
+#[must_use]
+pub fn components_in_rect(
+    scene: &EvaluatedScene,
+    node: NodeId,
+    component: Component,
+    view: &ScreenView,
+    corners: [Vec2; 2],
+    rules: RegionRules,
+) -> Vec<u32> {
+    let RegionRules { tolerant, visible_only } = rules;
+    let [corner_a, corner_b] = corners;
+    let Some(o) = ObjectView::new(scene, node, view) else {
+        return Vec::new();
+    };
+    let (min, max) = (corner_a.min(corner_b), corner_a.max(corner_b));
+    let inside = |s: Option<Vec2>| s.is_some_and(|s| s.cmpge(min).all() && s.cmple(max).all());
+    let (mesh, topology) = (o.handle.mesh(), o.handle.topology());
+    let points = mesh.points();
+    let found = match component {
+        Component::Point => (0..mesh.point_count())
+            .filter(|&p| !o.hidden.points.contains(p) && inside(o.screen(points[p])))
+            .filter(|&p| !visible_only || o.visible(points[p]))
+            .collect::<Vec<_>>(),
+        Component::Edge => topology
+            .edges()
+            .iter()
+            .enumerate()
+            .filter(|&(e, _)| !o.hidden.edges.contains(e))
+            .filter(|&(_, &[a, b])| {
+                let (pa, pb) = (points[idx(a)], points[idx(b)]);
+                let (sa, sb) = (o.screen(pa), o.screen(pb));
+                let taken = if tolerant {
+                    inside(sa)
+                        || inside(sb)
+                        || sa
+                            .zip(sb)
+                            .is_some_and(|(sa, sb)| segment_crosses_rect(sa, sb, min, max))
+                } else {
+                    inside(sa) && inside(sb)
+                };
+                taken && (!visible_only || o.visible(pa.lerp(pb, 0.5)))
+            })
+            .map(|(e, _)| e)
+            .collect(),
+        Component::Polygon => (0..mesh.face_count())
+            .filter(|&f| !o.hidden.polygons.contains(f))
+            .filter(|&f| {
+                let corners: Vec<Option<Vec2>> = mesh.face(f).iter().map(|&p| o.screen(points[idx(p)])).collect();
+                let taken = if tolerant {
+                    corners.iter().any(|&s| inside(s)) || {
+                        let outline: Option<Vec<Vec2>> = corners.iter().copied().collect();
+                        outline.is_some_and(|outline| {
+                            point_in_polygon((min + max) * 0.5, &outline)
+                                || (0..outline.len()).any(|i| {
+                                    segment_crosses_rect(outline[i], outline[(i + 1) % outline.len()], min, max)
+                                })
+                        })
+                    }
+                } else {
+                    corners.iter().all(|&s| inside(s))
+                };
+                taken && (!visible_only || o.face_visible(f))
+            })
+            .collect(),
+    };
+    found.into_iter().map(index_u32).collect()
+}
+
+/// Does the segment `a`–`b` cross the rectangle `[min, max]`'s outline?
+fn segment_crosses_rect(a: Vec2, b: Vec2, min: Vec2, max: Vec2) -> bool {
+    let corners = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
+    (0..4).any(|i| segments_cross(a, b, corners[i], corners[(i + 1) % 4]))
+}
+
+fn segments_cross(p1: Vec2, p2: Vec2, q1: Vec2, q2: Vec2) -> bool {
+    let side = |a: Vec2, b: Vec2, c: Vec2| (b - a).perp_dot(c - a);
+    let (d1, d2) = (side(q1, q2, p1), side(q1, q2, p2));
+    let (d3, d4) = (side(p1, p2, q1), side(p1, p2, q2));
+    (d1 * d2 <= 0.0) && (d3 * d4 <= 0.0) && !(d1 == 0.0 && d2 == 0.0)
+}
+
+/// Even-odd rule.
+fn point_in_polygon(point: Vec2, polygon: &[Vec2]) -> bool {
+    let mut inside = false;
+    for i in 0..polygon.len() {
+        let (a, b) = (polygon[i], polygon[(i + polygon.len() - 1) % polygon.len()]);
+        if (a.y > point.y) != (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// Samples along an edge for the brush's coverage.
+const EDGE_SAMPLES: u32 = 8;
+/// At most this many samples per polygon (the centre, corners, edge midpoints).
+const MAX_FACE_SAMPLES: usize = 32;
+
+/// What a Live Selection stroke has painted so far: for each component, which of
+/// its sample points the brush has covered. Keep one per stroke.
+#[derive(Debug, Default)]
+pub struct BrushCoverage {
+    /// Component → (covered samples as bits, sample count).
+    covered: HashMap<u32, (u32, u32)>,
+}
+
+impl BrushCoverage {
+    pub fn clear(&mut self) {
+        self.covered.clear();
+    }
+
+    /// The components painted enough: any part (`tolerant`) or at least three
+    /// quarters of their samples (a point has one sample).
+    pub fn painted(&self, tolerant: bool) -> impl Iterator<Item = u32> + '_ {
+        self.covered.iter().filter_map(move |(&element, &(mask, samples))| {
+            let enough = if tolerant {
+                mask != 0
+            } else {
+                mask.count_ones() * 4 >= samples * 3
+            };
+            enough.then_some(element)
+        })
+    }
+}
+
+/// A Live Selection brush stamp, in screen units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Brush {
+    pub centre: Vec2,
+    pub radius: f32,
+    /// Leave out samples hidden behind other polygons.
+    pub visible_only: bool,
+}
+
+/// Paints one `brush` stamp onto `coverage`: every sample point of a component
+/// inside the brush (and, if `visible_only`, not hidden behind other polygons)
+/// counts as painted.
+pub fn paint_brush(
+    scene: &EvaluatedScene,
+    node: NodeId,
+    component: Component,
+    view: &ScreenView,
+    brush: Brush,
+    coverage: &mut BrushCoverage,
+) {
+    let Brush {
+        centre,
+        radius,
+        visible_only,
+    } = brush;
+    let Some(o) = ObjectView::new(scene, node, view) else {
+        return;
+    };
+    let (mesh, topology) = (o.handle.mesh(), o.handle.topology());
+    let points = mesh.points();
+    let r2 = radius * radius;
+    let mut stamp = |element: usize, sample: u32, samples: u32, p: Vec3| {
+        let painted = o.screen(p).is_some_and(|s| s.distance_squared(centre) <= r2) && (!visible_only || o.visible(p));
+        if painted {
+            let entry = coverage.covered.entry(index_u32(element)).or_insert((0, samples));
+            entry.0 |= 1 << sample;
+        }
+    };
+    match component {
+        Component::Point => {
+            for p in (0..mesh.point_count()).filter(|&p| !o.hidden.points.contains(p)) {
+                stamp(p, 0, 1, points[p]);
+            }
+        }
+        Component::Edge => {
+            for (e, &[a, b]) in topology.edges().iter().enumerate() {
+                if o.hidden.edges.contains(e) {
+                    continue;
+                }
+                for i in 0..EDGE_SAMPLES {
+                    let t = (f32::from(u8::try_from(i).unwrap_or(0)) + 0.5)
+                        / f32::from(u8::try_from(EDGE_SAMPLES).unwrap_or(1));
+                    stamp(e, i, EDGE_SAMPLES, points[idx(a)].lerp(points[idx(b)], t));
+                }
+            }
+        }
+        Component::Polygon => {
+            let mut samples = Vec::with_capacity(MAX_FACE_SAMPLES);
+            for f in (0..mesh.face_count()).filter(|&f| !o.hidden.polygons.contains(f)) {
+                let face = mesh.face(f);
+                let centre = mesh.face_center(f);
+                samples.clear();
+                samples.push(centre);
+                // Corners and edge midpoints, pulled in a little so neighbours do not share them.
+                let step = face.len().div_ceil((MAX_FACE_SAMPLES - 1) / 2).max(1);
+                for i in (0..face.len()).step_by(step) {
+                    let (a, b) = (points[idx(face[i])], points[idx(face[(i + 1) % face.len()])]);
+                    samples.push(a.lerp(centre, 0.15));
+                    samples.push(a.lerp(b, 0.5).lerp(centre, 0.15));
+                }
+                let count = index_u32(samples.len());
+                for (i, &p) in samples.iter().enumerate() {
+                    stamp(f, index_u32(i), count, p);
+                }
+            }
         }
     }
 }
@@ -191,7 +473,7 @@ fn edge_distance(
 }
 
 /// What is hidden, per kind: flagged components, plus points and edges whose
-/// polygons are all hidden (hiding faces hides their points).
+/// polygons are all hidden ([`hidden_closure`]).
 struct Hidden {
     points: BitSet,
     /// By unique edge index.
@@ -201,20 +483,12 @@ struct Hidden {
 
 impl Hidden {
     fn new(handle: &MeshHandle, state: &ComponentState) -> Self {
-        let flags = &state.hidden;
         let topology = handle.topology();
-        let mut points = flags.points.clone();
-        let mut edges = edges_from_corners(&flags.edges, topology);
-        if !flags.polygons.is_empty() {
-            let all_hidden =
-                |faces: &[u32]| !faces.is_empty() && faces.iter().all(|&f| flags.polygons.contains(idx(f)));
-            points.extend((0..handle.mesh().point_count()).filter(|&p| all_hidden(topology.point_faces(p))));
-            edges.extend((0..topology.edge_count()).filter(|&e| all_hidden(topology.edge_faces(e))));
-        }
+        let closure = hidden_closure(handle.mesh(), topology, &state.hidden);
         Self {
-            points,
-            edges,
-            polygons: flags.polygons.clone(),
+            edges: edges_from_corners(&closure.edges, topology),
+            points: closure.points,
+            polygons: closure.polygons,
         }
     }
 }
@@ -321,7 +595,8 @@ pub(crate) struct ComponentOverlay {
     /// Bumped whenever the hover arrays change.
     pub(crate) hover_generation: u64,
     built: Option<Built>,
-    hover: Option<ComponentHit>,
+    /// What the hover arrays show: one component, or a whole loop about to be selected.
+    hover: Vec<ComponentHit>,
     triangulator: Triangulator,
     triangles: Vec<[u32; 3]>,
 }
@@ -331,7 +606,7 @@ impl ComponentOverlay {
         &mut self,
         scene: &EvaluatedScene,
         target: Option<(NodeId, Component)>,
-        hover: Option<ComponentHit>,
+        hover: &[ComponentHit],
     ) {
         let Some((node, component)) = target else {
             self.clear();
@@ -359,17 +634,15 @@ impl ComponentOverlay {
                 component,
             });
             self.generation += 1;
-            self.hover = None; // the hover arrays may refer to the old mesh
-            self.set_hover(handle, world, None);
-        }
-        let hover = hover.filter(|h| h.component() == component);
-        if hover != self.hover {
+            // The hover arrays may refer to the old mesh or placement.
+            self.set_hover(handle, world, hover);
+        } else if hover != self.hover.as_slice() {
             self.set_hover(handle, world, hover);
         }
     }
 
     fn clear(&mut self) {
-        if self.built.is_none() && self.hover.is_none() {
+        if self.built.is_none() && self.hover.is_empty() {
             return;
         }
         for v in [&mut self.points, &mut self.hover_points] {
@@ -382,7 +655,7 @@ impl ComponentOverlay {
             v.clear();
         }
         self.built = None;
-        self.hover = None;
+        self.hover.clear();
         self.generation += 1;
         self.hover_generation += 1;
     }
@@ -447,51 +720,53 @@ impl ComponentOverlay {
         }
     }
 
-    fn set_hover(&mut self, handle: &MeshHandle, world: Mat4, hover: Option<ComponentHit>) {
+    fn set_hover(&mut self, handle: &MeshHandle, world: Mat4, hover: &[ComponentHit]) {
         self.hover_points.clear();
         self.hover_edges.clear();
         self.hover_faces.clear();
         let mesh = handle.mesh();
         let at = |p: u32| mesh.points().get(idx(p)).map(|&q| world.transform_point3(q).to_array());
-        match hover {
-            None => {}
-            Some(ComponentHit::Point(p)) => {
-                if let Some(position) = at(p) {
-                    self.hover_points.push(PointInstance {
-                        position,
-                        flags: HOVERED,
-                    });
+        for &hit in hover {
+            match hit {
+                ComponentHit::Point(p) => {
+                    if let Some(position) = at(p) {
+                        self.hover_points.push(PointInstance {
+                            position,
+                            flags: HOVERED,
+                        });
+                    }
                 }
-            }
-            Some(ComponentHit::Edge(e)) => {
-                if let Some(&[a, b]) = handle.topology().edges().get(idx(e))
-                    && let (Some(a), Some(b)) = (at(a), at(b))
-                {
-                    self.hover_edges.push(EdgeInstance {
-                        a,
-                        b,
-                        flags: HOVERED,
-                        pad: 0,
-                    });
+                ComponentHit::Edge(e) => {
+                    if let Some(&[a, b]) = handle.topology().edges().get(idx(e))
+                        && let (Some(a), Some(b)) = (at(a), at(b))
+                    {
+                        self.hover_edges.push(EdgeInstance {
+                            a,
+                            b,
+                            flags: HOVERED,
+                            pad: 0,
+                        });
+                    }
                 }
-            }
-            Some(ComponentHit::Polygon(f)) if idx(f) < mesh.face_count() => {
-                self.triangles.clear();
-                self.triangulator.face_triangles(mesh, idx(f), &mut self.triangles);
-                for &[a, b, c] in &self.triangles {
-                    for p in [a, b, c] {
-                        if let Some(position) = at(p) {
-                            self.hover_faces.push(FaceVertex {
-                                position,
-                                flags: HOVERED,
-                            });
+                ComponentHit::Polygon(f) if idx(f) < mesh.face_count() => {
+                    self.triangles.clear();
+                    self.triangulator.face_triangles(mesh, idx(f), &mut self.triangles);
+                    for &[a, b, c] in &self.triangles {
+                        for p in [a, b, c] {
+                            if let Some(position) = at(p) {
+                                self.hover_faces.push(FaceVertex {
+                                    position,
+                                    flags: HOVERED,
+                                });
+                            }
                         }
                     }
                 }
+                ComponentHit::Polygon(_) => {}
             }
-            Some(ComponentHit::Polygon(_)) => {}
         }
-        self.hover = hover;
+        self.hover.clear();
+        self.hover.extend_from_slice(hover);
         self.hover_generation += 1;
     }
 }
@@ -610,7 +885,7 @@ mod tests {
         state.selected.points.insert(2);
         let (_, id, eval) = scene_with_cube(state);
         let mut overlay = ComponentOverlay::default();
-        overlay.update(&eval, Some((id, Component::Point)), None);
+        overlay.update(&eval, Some((id, Component::Point)), &[]);
         assert_eq!(overlay.points.len(), 8);
         assert_eq!(overlay.points.iter().filter(|p| p.flags == SELECTED).count(), 1);
         assert_eq!(overlay.edges.len(), 12, "context edges");
@@ -619,11 +894,11 @@ mod tests {
         let capacity = (overlay.points.capacity(), overlay.edges.capacity());
 
         for _ in 0..3 {
-            overlay.update(&eval, Some((id, Component::Point)), None);
+            overlay.update(&eval, Some((id, Component::Point)), &[]);
         }
         assert_eq!(overlay.generation, generation, "idle frames rebuild nothing");
 
-        overlay.update(&eval, Some((id, Component::Point)), Some(ComponentHit::Point(5)));
+        overlay.update(&eval, Some((id, Component::Point)), &[ComponentHit::Point(5)]);
         assert_eq!(
             overlay.generation, generation,
             "hovering does not touch the main arrays"
@@ -631,13 +906,13 @@ mod tests {
         assert_eq!(overlay.hover_points.len(), 1);
         assert_eq!((overlay.points.capacity(), overlay.edges.capacity()), capacity);
 
-        overlay.update(&eval, Some((id, Component::Polygon)), None);
+        overlay.update(&eval, Some((id, Component::Polygon)), &[]);
         assert!(overlay.generation > generation, "another mode rebuilds");
         assert!(
             overlay.points.is_empty() && overlay.faces.is_empty(),
             "nothing selected in Polygons"
         );
-        overlay.update(&eval, None, None);
+        overlay.update(&eval, None, &[]);
         assert!(overlay.edges.is_empty() && overlay.hover_points.is_empty());
     }
 
@@ -648,10 +923,186 @@ mod tests {
         state.selected.edges.insert(0);
         let (_, id, eval) = scene_with_cube(state);
         let mut overlay = ComponentOverlay::default();
-        overlay.update(&eval, Some((id, Component::Polygon)), None);
+        overlay.update(&eval, Some((id, Component::Polygon)), &[]);
         assert_eq!(overlay.faces.len(), 6, "one quad = two triangles");
-        overlay.update(&eval, Some((id, Component::Edge)), None);
+        overlay.update(&eval, Some((id, Component::Edge)), &[]);
         assert_eq!(overlay.edges.iter().filter(|e| e.flags == SELECTED).count(), 1);
+    }
+
+    #[test]
+    fn a_rectangle_takes_only_whole_visible_components_unless_tolerant() {
+        let (_, id, eval) = scene_with_cube(ComponentState::default());
+        let view = view();
+        let mesh = mesh_of(&eval, id);
+        let points = mesh.mesh().points();
+        let everything = (Vec2::ZERO, view.size);
+        let visible = components_in_rect(
+            &eval,
+            id,
+            Component::Point,
+            &view,
+            [everything.0, everything.1],
+            RegionRules {
+                tolerant: false,
+                visible_only: true,
+            },
+        );
+        assert_eq!(visible.len(), 7, "the corner at the back is hidden by the cube");
+        let all = components_in_rect(
+            &eval,
+            id,
+            Component::Point,
+            &view,
+            [everything.0, everything.1],
+            RegionRules {
+                tolerant: false,
+                visible_only: false,
+            },
+        );
+        assert_eq!(all.len(), 8, "visible only off");
+
+        // A rectangle around the top face's centre only: no face fully inside…
+        let top = (0..mesh.mesh().face_count())
+            .find(|&f| mesh.mesh().face_normal(f).abs_diff_eq(Vec3::Y, 1e-5))
+            .unwrap();
+        let centre = screen(&view, mesh.mesh().face_center(top));
+        let (a, b) = (centre - Vec2::splat(3.0), centre + Vec2::splat(3.0));
+        assert!(
+            components_in_rect(
+                &eval,
+                id,
+                Component::Polygon,
+                &view,
+                [a, b],
+                RegionRules {
+                    tolerant: false,
+                    visible_only: true
+                }
+            )
+            .is_empty()
+        );
+        // …but the top face is touched.
+        let touched = components_in_rect(
+            &eval,
+            id,
+            Component::Polygon,
+            &view,
+            [a, b],
+            RegionRules {
+                tolerant: true,
+                visible_only: true,
+            },
+        );
+        assert_eq!(touched, [u32::try_from(top).unwrap()]);
+        // A rectangle around all of the top face's corners takes it whole.
+        let corners: Vec<Vec2> = mesh
+            .mesh()
+            .face(top)
+            .iter()
+            .map(|&p| screen(&view, points[p as usize]))
+            .collect();
+        let (lo, hi) = corners
+            .iter()
+            .fold((Vec2::INFINITY, Vec2::NEG_INFINITY), |(lo, hi), &c| {
+                (lo.min(c), hi.max(c))
+            });
+        let whole = components_in_rect(
+            &eval,
+            id,
+            Component::Polygon,
+            &view,
+            [lo - 2.0, hi + 2.0],
+            RegionRules {
+                tolerant: false,
+                visible_only: true,
+            },
+        );
+        assert!(whole.contains(&u32::try_from(top).unwrap()));
+    }
+
+    #[test]
+    fn the_brush_paints_points_and_needs_most_of_a_polygon() {
+        let (_, id, eval) = scene_with_cube(ComponentState::default());
+        let view = view();
+        let mesh = mesh_of(&eval, id);
+        let top = (0..mesh.mesh().face_count())
+            .find(|&f| mesh.mesh().face_normal(f).abs_diff_eq(Vec3::Y, 1e-5))
+            .unwrap();
+        let centre = screen(&view, mesh.mesh().face_center(top));
+
+        let mut coverage = BrushCoverage::default();
+        paint_brush(
+            &eval,
+            id,
+            Component::Polygon,
+            &view,
+            Brush {
+                centre,
+                radius: 4.0,
+                visible_only: true,
+            },
+            &mut coverage,
+        );
+        let top = u32::try_from(top).unwrap();
+        assert!(coverage.painted(true).any(|f| f == top), "tolerant: touched is enough");
+        assert!(
+            !coverage.painted(false).any(|f| f == top),
+            "strict: a dab in the middle is not enough"
+        );
+        paint_brush(
+            &eval,
+            id,
+            Component::Polygon,
+            &view,
+            Brush {
+                centre,
+                radius: 400.0,
+                visible_only: true,
+            },
+            &mut coverage,
+        );
+        assert!(coverage.painted(false).any(|f| f == top), "covered everywhere");
+
+        let mut points = BrushCoverage::default();
+        paint_brush(
+            &eval,
+            id,
+            Component::Point,
+            &view,
+            Brush {
+                centre: view.size * 0.5,
+                radius: 2000.0,
+                visible_only: true,
+            },
+            &mut points,
+        );
+        assert_eq!(points.painted(false).count(), 7, "the hidden corner is not painted");
+        let mut through = BrushCoverage::default();
+        paint_brush(
+            &eval,
+            id,
+            Component::Point,
+            &view,
+            Brush {
+                centre: view.size * 0.5,
+                radius: 2000.0,
+                visible_only: false,
+            },
+            &mut through,
+        );
+        assert_eq!(through.painted(false).count(), 8);
+    }
+
+    #[test]
+    fn loops_can_be_previewed_under_the_cursor() {
+        let (_, id, eval) = scene_with_cube(ComponentState::default());
+        let mut overlay = ComponentOverlay::default();
+        let loop_edges = [ComponentHit::Edge(0), ComponentHit::Edge(1), ComponentHit::Edge(2)];
+        overlay.update(&eval, Some((id, Component::Edge)), &loop_edges);
+        assert_eq!(overlay.hover_edges.len(), 3);
+        let generation = overlay.hover_generation;
+        overlay.update(&eval, Some((id, Component::Edge)), &loop_edges);
+        assert_eq!(overlay.hover_generation, generation, "same preview, no re-upload");
     }
 
     #[test]

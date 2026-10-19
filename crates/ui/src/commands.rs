@@ -6,7 +6,10 @@
 //! each step restores the selection it was made with.
 
 use glam::Vec3;
-use grid4d_geom::{Component, selection};
+use grid4d_geom::{
+    BitSet, Component,
+    selection::{self, corners_from_edges, edges_from_corners},
+};
 use grid4d_render::OrbitCamera;
 use grid4d_scene::{
     ComponentState, Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, SceneEdit,
@@ -77,15 +80,28 @@ pub enum EditorCommand {
     /// Turns the selected primitives into polygon objects that look the same
     /// (C4D's "Make Editable", `C`); other objects are left alone.
     MakeEditable,
-    /// A click in a component mode on polygon object `node`: `hit` is the picked
-    /// point, unique edge or polygon index, `None` for empty space (which clears
-    /// the selection on a plain click). One undo step if anything changed.
+    /// A click, frame or loop in a component mode on polygon object `node`:
+    /// `hits` are the picked points, unique edges or polygons — none for empty
+    /// space, which clears the selection on a plain click. One undo step if
+    /// anything changed.
     SelectComponents {
         node: NodeId,
         component: Component,
-        hit: Option<u32>,
+        hits: Vec<u32>,
         mode: SelectMode,
     },
+    /// Select ▸ Grow Selection (neighbours of the selection, current mode).
+    GrowSelection,
+    /// Select ▸ Shrink Selection (drops the selection's border).
+    ShrinkSelection,
+    /// Select ▸ Invert (every visible component not selected).
+    InvertSelection,
+    /// Select ▸ Select Connected (everything reachable from the selection).
+    SelectConnected,
+    /// Select ▸ Hide Selected / Hide Unselected / Unhide All.
+    HideSelected,
+    HideUnselected,
+    UnhideAll,
     /// Switches to mode `to`, converting the current mode's component selection
     /// of the active object (Shift+click on a mode: `tolerant`; Ctrl+click:
     /// strict). One undo step if the selection changed.
@@ -231,15 +247,14 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::SelectComponents {
             node,
             component,
-            hit,
+            hits,
             mode,
         } => edit_components(doc, editor, node, select_label(component), |state, mesh| {
-            // An edge is stored as all of its corners.
-            let indices: Vec<usize> = match (component, hit) {
-                (_, None) => Vec::new(),
-                (Component::Edge, Some(e)) => mesh.topology().edge_corners(idx(e)).iter().map(|&c| idx(c)).collect(),
-                (Component::Point | Component::Polygon, Some(i)) => vec![idx(i)],
-            };
+            let picked: BitSet = hits.iter().map(|&i| idx(i)).collect();
+            // An edge is stored as all of its corners; hidden components stay unselected.
+            let mut picked = stored(picked, component, mesh);
+            picked.remove_all(&hidden_mask(state, mesh, component));
+            let indices: Vec<usize> = picked.iter().collect();
             let bits = state.selected.get_mut(component);
             match mode {
                 SelectMode::Replace => {
@@ -264,6 +279,75 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 }
             }
         }),
+        EditorCommand::GrowSelection => {
+            let edges_only = editor.selection_settings.grow_edges_only;
+            in_component_mode(doc, editor, "Grow Selection", |state, mesh, component| {
+                let grown = selection::grow(
+                    mesh.mesh(),
+                    mesh.topology(),
+                    state.selected.get(component),
+                    component,
+                    edges_only,
+                );
+                set_selected(state, mesh, component, grown);
+            });
+        }
+        EditorCommand::ShrinkSelection => {
+            let edges_only = editor.selection_settings.grow_edges_only;
+            in_component_mode(doc, editor, "Shrink Selection", |state, mesh, component| {
+                let shrunk = selection::shrink(
+                    mesh.mesh(),
+                    mesh.topology(),
+                    state.selected.get(component),
+                    component,
+                    edges_only,
+                );
+                set_selected(state, mesh, component, shrunk);
+            });
+        }
+        EditorCommand::InvertSelection => {
+            in_component_mode(doc, editor, "Invert Selection", |state, mesh, component| {
+                let hidden = hidden_mask(state, mesh, component);
+                let inverted = selection::invert(
+                    mesh.mesh(),
+                    mesh.topology(),
+                    state.selected.get(component),
+                    component,
+                    &hidden,
+                );
+                set_selected(state, mesh, component, inverted);
+            })
+        }
+        EditorCommand::SelectConnected => {
+            in_component_mode(doc, editor, "Select Connected", |state, mesh, component| {
+                let reached =
+                    selection::connected(mesh.mesh(), mesh.topology(), state.selected.get(component), component);
+                set_selected(state, mesh, component, reached);
+            })
+        }
+        EditorCommand::HideSelected => in_component_mode(doc, editor, "Hide Selected", |state, mesh, component| {
+            let selected = stored(
+                elements(state.selected.get(component), component, mesh),
+                component,
+                mesh,
+            );
+            state.hidden.get_mut(component).extend(selected.iter());
+            state.selected.get_mut(component).clear();
+        }),
+        EditorCommand::HideUnselected => in_component_mode(doc, editor, "Hide Unselected", |state, mesh, component| {
+            let hidden = hidden_mask(state, mesh, component);
+            let others = selection::invert(
+                mesh.mesh(),
+                mesh.topology(),
+                state.selected.get(component),
+                component,
+                &hidden,
+            );
+            state.hidden.get_mut(component).extend(others.iter());
+        }),
+        EditorCommand::UnhideAll => in_component_mode(doc, editor, "Unhide All", |state, _, _| {
+            state.hidden = grid4d_geom::ComponentSet::default();
+        }),
         EditorCommand::ConvertSelection { to, tolerant } => {
             if let (Some(from), Some(target), Some(id)) =
                 (editor.mode.component(), to.component(), editor.selection.active())
@@ -279,20 +363,16 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             editor.mode = to;
         }
         EditorCommand::SelectAll if editor.mode != EditMode::Model => {
-            if let (Some(component), Some(id)) = (editor.mode.component(), editor.selection.active()) {
-                edit_components(doc, editor, id, "Select All", |state, mesh| {
-                    let count = match component {
-                        Component::Point => mesh.mesh().point_count(),
-                        Component::Edge => mesh.mesh().corner_count(),
-                        Component::Polygon => mesh.mesh().face_count(),
-                    };
-                    let ComponentState { selected, hidden } = state;
-                    let bits = selected.get_mut(component);
-                    bits.clear();
-                    bits.insert_range(0..count);
-                    bits.remove_all(hidden.get(component));
-                });
-            }
+            in_component_mode(doc, editor, "Select All", |state, mesh, component| {
+                let count = match component {
+                    Component::Point => mesh.mesh().point_count(),
+                    Component::Edge => mesh.mesh().corner_count(),
+                    Component::Polygon => mesh.mesh().face_count(),
+                };
+                let mut all = BitSet::new();
+                all.insert_range(0..count);
+                set_selected(state, mesh, component, all);
+            });
         }
         EditorCommand::DeselectAll if editor.mode != EditMode::Model => {
             if let (Some(component), Some(id)) = (editor.mode.component(), editor.selection.active()) {
@@ -372,6 +452,57 @@ fn commit(
                 .record(doc, label, inverses, selection_before, selection_after);
         }
         Err(err) => log::warn!("{label} rejected: {err}"),
+    }
+}
+
+/// The active object and the current mode's component kind, when the mode is a
+/// component mode and the active object a polygon object.
+#[must_use]
+pub fn component_target(doc: &Document, editor: &EditorState) -> Option<(NodeId, Component)> {
+    let component = editor.mode.component()?;
+    let id = editor.selection.active()?;
+    matches!(doc.scene.get(id)?.data.kind, ObjectKind::Polygon { .. }).then_some((id, component))
+}
+
+/// Runs `change` on the active polygon object's components in the current
+/// component mode, as one undo step named `label` (nothing outside such a mode).
+fn in_component_mode(
+    doc: &mut Document,
+    editor: &mut EditorState,
+    label: &'static str,
+    change: impl FnOnce(&mut ComponentState, &MeshHandle, Component),
+) {
+    if let Some((id, component)) = component_target(doc, editor) {
+        edit_components(doc, editor, id, label, |state, mesh| change(state, mesh, component));
+    }
+}
+
+/// Every stored flag that hides a component of kind `component`: hidden ones,
+/// the points/edges of hidden polygons, and every corner of a hidden edge.
+fn hidden_mask(state: &ComponentState, mesh: &MeshHandle, component: Component) -> BitSet {
+    let closure = selection::hidden_closure(mesh.mesh(), mesh.topology(), &state.hidden);
+    stored(elements(closure.get(component), component, mesh), component, mesh)
+}
+
+/// Replaces the selection of `component` with `bits` (stored form), minus hidden ones.
+fn set_selected(state: &mut ComponentState, mesh: &MeshHandle, component: Component, mut bits: BitSet) {
+    bits.remove_all(&hidden_mask(state, mesh, component));
+    *state.selected.get_mut(component) = bits;
+}
+
+/// A stored selection as elements: edges as unique edges, the rest as is.
+fn elements(bits: &BitSet, component: Component, mesh: &MeshHandle) -> BitSet {
+    match component {
+        Component::Edge => edges_from_corners(bits, mesh.topology()),
+        Component::Point | Component::Polygon => bits.clone(),
+    }
+}
+
+/// Elements in stored form: an edge as all of its corners.
+fn stored(bits: BitSet, component: Component, mesh: &MeshHandle) -> BitSet {
+    match component {
+        Component::Edge => corners_from_edges(&bits, mesh.topology()),
+        Component::Point | Component::Polygon => bits,
     }
 }
 
@@ -646,22 +777,22 @@ mod tests {
     #[test]
     fn component_clicks_follow_the_modifiers_one_undo_step_each() {
         let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Points);
-        let click = |hit, mode| EditorCommand::SelectComponents {
+        let click = |hits: &[u32], mode| EditorCommand::SelectComponents {
             node: id,
             component: Component::Point,
-            hit,
+            hits: hits.to_vec(),
             mode,
         };
-        run(&mut doc, &mut editor, &mut vp, &[click(Some(2), SelectMode::Replace)]);
+        run(&mut doc, &mut editor, &mut vp, &[click(&[2], SelectMode::Replace)]);
         assert_eq!(selected(&doc, id, Component::Point), [2]);
         assert_eq!(editor.history.undo_label(), Some("Select Points"));
-        run(&mut doc, &mut editor, &mut vp, &[click(Some(5), SelectMode::Add)]);
-        run(&mut doc, &mut editor, &mut vp, &[click(Some(2), SelectMode::Remove)]);
+        run(&mut doc, &mut editor, &mut vp, &[click(&[5], SelectMode::Add)]);
+        run(&mut doc, &mut editor, &mut vp, &[click(&[2], SelectMode::Remove)]);
         assert_eq!(selected(&doc, id, Component::Point), [5]);
-        run(&mut doc, &mut editor, &mut vp, &[click(None, SelectMode::Replace)]);
+        run(&mut doc, &mut editor, &mut vp, &[click(&[], SelectMode::Replace)]);
         assert!(selected(&doc, id, Component::Point).is_empty(), "empty space deselects");
         assert_eq!(editor.history.undo_len(), 4);
-        run(&mut doc, &mut editor, &mut vp, &[click(None, SelectMode::Replace)]);
+        run(&mut doc, &mut editor, &mut vp, &[click(&[], SelectMode::Replace)]);
         assert_eq!(editor.history.undo_len(), 4, "no change, no step");
 
         run(
@@ -679,7 +810,7 @@ mod tests {
         let pick = |e, mode| EditorCommand::SelectComponents {
             node: id,
             component: Component::Edge,
-            hit: Some(e),
+            hits: vec![e],
             mode,
         };
         run(&mut doc, &mut editor, &mut vp, &[pick(3, SelectMode::Replace)]);
@@ -698,7 +829,7 @@ mod tests {
         let select = EditorCommand::SelectComponents {
             node: id,
             component: Component::Point,
-            hit: Some(0),
+            hits: vec![0],
             mode: SelectMode::Replace,
         };
         let convert = |tolerant| EditorCommand::ConvertSelection {
@@ -742,6 +873,82 @@ mod tests {
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeselectAll]);
         assert!(selected(&doc, id, Component::Polygon).is_empty());
         assert_eq!(editor.history.undo_label(), Some("Deselect All"));
+    }
+
+    #[test]
+    fn grow_shrink_invert_and_connected_work_on_the_current_mode() {
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Polygons);
+        let select = |f: u32| EditorCommand::SelectComponents {
+            node: id,
+            component: Component::Polygon,
+            hits: vec![f],
+            mode: SelectMode::Replace,
+        };
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[select(0), EditorCommand::GrowSelection],
+        );
+        assert_eq!(
+            selected(&doc, id, Component::Polygon).len(),
+            5,
+            "the face and its 4 neighbours"
+        );
+        assert_eq!(editor.history.undo_label(), Some("Grow Selection"));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::InvertSelection]);
+        assert_eq!(selected(&doc, id, Component::Polygon).len(), 1, "the opposite face");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SelectConnected]);
+        assert_eq!(selected(&doc, id, Component::Polygon).len(), 6, "the whole cube");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ShrinkSelection]);
+        assert_eq!(selected(&doc, id, Component::Polygon).len(), 6, "no border, no shrink");
+    }
+
+    #[test]
+    fn hidden_components_drop_out_of_select_all_and_invert() {
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Polygons);
+        let select = |f: u32| EditorCommand::SelectComponents {
+            node: id,
+            component: Component::Polygon,
+            hits: vec![f],
+            mode: SelectMode::Replace,
+        };
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[select(2), EditorCommand::HideSelected],
+        );
+        assert!(
+            selected(&doc, id, Component::Polygon).is_empty(),
+            "hidden ones are not selected"
+        );
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SelectAll]);
+        assert_eq!(selected(&doc, id, Component::Polygon), [0, 1, 3, 4, 5]);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[select(0), EditorCommand::InvertSelection],
+        );
+        assert_eq!(selected(&doc, id, Component::Polygon), [1, 3, 4, 5]);
+        run(&mut doc, &mut editor, &mut vp, &[select(2)]);
+        assert!(
+            selected(&doc, id, Component::Polygon).is_empty(),
+            "a hidden face cannot be picked"
+        );
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::UnhideAll, EditorCommand::SelectAll],
+        );
+        assert_eq!(selected(&doc, id, Component::Polygon).len(), 6);
+        // Undo walks back through every step, the hide included.
+        for _ in 0..5 {
+            run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        }
+        assert_eq!(selected(&doc, id, Component::Polygon), [0, 1, 3, 4, 5]);
     }
 
     #[test]

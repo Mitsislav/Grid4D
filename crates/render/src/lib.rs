@@ -25,7 +25,10 @@ mod picking;
 mod target;
 
 pub use camera::{OrbitCamera, Ray};
-pub use components::{ComponentHit, ComponentStyle, ScreenView, pick_component};
+pub use components::{
+    Brush, BrushCoverage, ComponentHit, ComponentStyle, RegionRules, ScreenView, components_in_rect, nearest_face_edge,
+    paint_brush, pick_component,
+};
 pub use frame::{FrameData, InstanceRaw};
 pub use gpu::{GpuTargetConfig, ViewportRenderer};
 pub use mesh::{TessellationScratch, Vertex, tessellate};

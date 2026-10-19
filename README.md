@@ -29,6 +29,12 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
   adds, Ctrl removes, empty space deselects (each an undo step, saved with the file);
   Shift/Ctrl+click on another mode converts the selection; Select All / Deselect All
   work on components.
+- **Selection tools**: Live Selection (paint, middle-drag sizes the brush), Rectangle
+  Selection (also selects objects in Model mode), Loop and Ring Selection with a
+  preview under the cursor; Select ▸ Invert, Select Connected, Grow / Shrink, Hide
+  Selected / Unselected, Unhide All; double-click an edge for its loop or a polygon for
+  its connected part. Options (visible only, tolerant, stop at …) in the Attribute
+  Manager's Tool mode.
 - **wgpu viewport**: renders into its own offscreen target (4× MSAA, depth) shown as
   an image; generated meshes cached per shape and drawn instanced, Phong-angle
   smoothing, anti-aliased adaptive grid, orange selection rim, axis triad and

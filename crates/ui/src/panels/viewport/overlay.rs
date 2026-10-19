@@ -1,6 +1,6 @@
 //! 2D overlays drawn on top of the 3D view: background, labels, axis triad, HUD.
 
-use egui::{Align2, FontId, Mesh, Painter, Rect, Shape, Stroke, pos2, vec2};
+use egui::{Align2, CornerRadius, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
 use glam::{Mat4, Vec3};
 use grid4d_eval::EvaluatedScene;
 use grid4d_render::OrbitCamera;
@@ -106,5 +106,21 @@ pub(super) fn hud(painter: &Painter, rect: Rect, camera: &OrbitCamera) {
         format!("Grid Spacing : {} cm", camera.grid_spacing()),
         FontId::proportional(11.5),
         p::TEXT_DIM,
+    );
+}
+
+/// The Live Selection brush around the pointer.
+pub(super) fn brush(painter: &Painter, center: Pos2, radius: f32) {
+    painter.circle_stroke(center, radius, Stroke::new(1.0, p::TEXT_STRONG.gamma_multiply(0.8)));
+}
+
+/// The Rectangle Selection frame being dragged.
+pub(super) fn marquee(painter: &Painter, frame: Rect) {
+    painter.rect_filled(frame, CornerRadius::ZERO, p::ACCENT.gamma_multiply(0.12));
+    painter.rect_stroke(
+        frame,
+        CornerRadius::ZERO,
+        Stroke::new(1.0, p::ACCENT),
+        StrokeKind::Inside,
     );
 }

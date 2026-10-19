@@ -94,10 +94,40 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
         });
 
         ui.menu_button("Select", |ui| {
-            tool_item(ui, editor, Tool::LiveSelection);
+            for tool in [
+                Tool::LiveSelection,
+                Tool::RectangleSelection,
+                Tool::LoopSelection,
+                Tool::RingSelection,
+            ] {
+                tool_item(ui, editor, tool);
+            }
             ui.separator();
             command(ui, editor, "Select All", "Ctrl+A", EditorCommand::SelectAll);
             command(ui, editor, "Deselect All", "Ctrl+Shift+A", EditorCommand::DeselectAll);
+            // The rest works on components: a component mode on a polygon object.
+            let components = crate::commands::component_target(doc, editor).is_some();
+            let item = |ui: &mut Ui, editor: &mut EditorState, label: &str, cmd: EditorCommand| {
+                if ui
+                    .add_enabled(components, Button::new(label))
+                    .on_disabled_hover_text("Works on the points, edges or polygons of a polygon object")
+                    .clicked()
+                {
+                    editor.commands.push(cmd);
+                    ui.close();
+                }
+            };
+            item(ui, editor, "Invert", EditorCommand::InvertSelection);
+            ui.separator();
+            item(ui, editor, "Select Connected", EditorCommand::SelectConnected);
+            item(ui, editor, "Grow Selection", EditorCommand::GrowSelection);
+            item(ui, editor, "Shrink Selection", EditorCommand::ShrinkSelection);
+            ui.checkbox(&mut editor.selection_settings.grow_edges_only, "Grow Using Edges Only")
+                .on_hover_text("Polygons grow into neighbours sharing an edge; off: sharing a point is enough");
+            ui.separator();
+            item(ui, editor, "Hide Selected", EditorCommand::HideSelected);
+            item(ui, editor, "Hide Unselected", EditorCommand::HideUnselected);
+            item(ui, editor, "Unhide All", EditorCommand::UnhideAll);
         });
 
         ui.menu_button("Tools", |ui| {
