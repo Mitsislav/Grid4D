@@ -40,7 +40,13 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
 - **Modelling tools**: Extrude (`D`) for polygons and border edges, Inset (`I`) for
   polygons — drag left/right in the viewport (Esc cancels) or set the options and
   *Apply* in the Attribute Manager; Preserve Groups, Maximum Angle, Subdivision,
-  N-gons, Caps. Each operation is one undo step.
+  N-gons, Caps. Loop/Path Cut (`K~L`: hover an edge to preview the loop, click to cut,
+  several evenly spaced cuts), Line Cut (`K~K`: drag a line across the object, visible
+  only or through), Connect Points/Edges (`M~M`), Melt (`U~Z`), Dissolve (`M~N`) and
+  Delete in every component mode. Each operation is one undo step, and selections
+  follow their components.
+- **Cinema 4D shortcuts**, including two-key chords such as `U~L` (Loop Selection) and
+  `M~N` (Dissolve); the status bar shows a pending first key.
 - **wgpu viewport**: renders into its own offscreen target (4× MSAA, depth) shown as
   an image; generated meshes cached per shape and drawn instanced, Phong-angle
   smoothing, anti-aliased adaptive grid, orange selection rim, axis triad and

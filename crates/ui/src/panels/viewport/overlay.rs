@@ -115,6 +115,23 @@ pub(super) fn brush(painter: &Painter, center: Pos2, radius: f32) {
 }
 
 /// The Rectangle Selection frame being dragged.
+/// Line Cut: the line being drawn, with its ends.
+pub(super) fn cut_line(painter: &Painter, start: Pos2, end: Pos2) {
+    painter.line_segment([start, end], Stroke::new(1.5, p::ACCENT));
+    for end in [start, end] {
+        painter.circle_filled(end, 3.0, p::ACCENT);
+    }
+}
+
+/// Loop/Path Cut: the edges a click would add (world space).
+pub(super) fn cut_preview(painter: &Painter, rect: Rect, view_proj: &Mat4, segments: &[[Vec3; 2]]) {
+    for &[a, b] in segments {
+        if let (Some(a), Some(b)) = (project(view_proj, rect, a), project(view_proj, rect, b)) {
+            painter.line_segment([a, b], Stroke::new(1.5, p::ACCENT));
+        }
+    }
+}
+
 pub(super) fn marquee(painter: &Painter, frame: Rect) {
     painter.rect_filled(frame, CornerRadius::ZERO, p::ACCENT.gamma_multiply(0.12));
     painter.rect_stroke(

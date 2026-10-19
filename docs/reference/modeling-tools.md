@@ -6,14 +6,20 @@
 > [Extrude Inner / Inset](https://help.maxon.net/c4d/s22/us/html/TOOLEXTRUDEINNER.html) and its
 > [options](https://help.maxon.net/c4d/s22/us/html/TOOLEXTRUDEINNER-MDATA_MAINGROUP.html),
 > [Quick Start](https://help.maxon.net/c4d/en-us/Content/html/CINEMA_4D_QUICKSTART.html)
-> (shortcuts D and I), [Hide Selected](https://help.maxon.net/c4d/s22/us/html/5651.html) /
+> (shortcuts D and I), [Keyboard Shortcuts](https://help.maxon.net/c4d/2025/en-us/Content/html/Shortcuts.html)
+> (2025: chords such as K L, M M), [Loop/Path Cut](https://help.maxon.net/c4d/s22/us/html/TOOLKNIFEPATH-MDATA_MAINGROUP.html)
+> and its [interaction](https://help.maxon.net/c4d/s22/us/html/TOOLKNIFEPATH-MDATA_KNIFEPATH_INTERACTION_GROUP.html),
+> [Line Cut](https://help.maxon.net/c4d/s22/us/html/TOOLKNIFELINE-MDATA_MAINGROUP.html),
+> [Dissolve](https://help.maxon.net/c4d/r23/en-us/Content/html/15945.html),
+> [Connect Points/Edges](https://help.maxon.net/c4d/r23/en-us/Content/html/15943.html),
+> [Edges](https://help.maxon.net/c4d/s22/us/html/5492.html) (Delete in Edges mode), [Hide Selected](https://help.maxon.net/c4d/s22/us/html/5651.html) /
 > Mesh menu (hidden elements are left alone); parameter IDs from the
 > [Python SDK resource pages](https://developers.maxon.net/docs/py/2026_3_0/cinema_resource/tool/toolextrude.html)
 > (`MDATA_EXTRUDE_*`, `MDATA_EXTRUDEINNER_*`). Written in our own words — no copied
 > text or images.
 >
-> Covers implementation-plan step **4.4**. Bevel, cuts, Bridge, Weld (4.5–4.6) will be
-> added here.
+> Covers implementation-plan steps **4.4** (Extrude, Inset) and **4.5** (Delete, Melt,
+> Dissolve, Connect, Loop/Path Cut, Line Cut). Bevel, Bridge, Weld (4.6) will be added here.
 
 ## Purpose
 
@@ -119,6 +125,89 @@ Polygons mode only (the manual: Inset needs Polygons mode).
   outlines.
 - Too large an Offset makes the outlines cross, as in the reference: lower the Offset.
 
+## Shortcuts
+
+Single keys: **0** Rectangle Selection, **Backspace / Delete** Delete, **Ctrl+Backspace**
+Dissolve, **Alt+Backspace** Melt. **Chords**: press the first key, then the second
+(the status bar shows the pending prefix; any other key or Esc cancels it).
+
+| Chord | Command | Chord | Command |
+|-------|---------|-------|---------|
+| U L | Loop Selection | K L / M L | Loop/Path Cut |
+| U B | Ring Selection | K K / M K | Line Cut |
+| U W | Select Connected | M M | Connect Points/Edges |
+| U Y | Grow Selection | M N | Dissolve |
+| U K | Shrink Selection | M T | Extrude |
+| U I | Invert | M W | Inset |
+| U Z | Melt | | |
+
+## Delete, Melt, Dissolve (components)
+
+All three work on the selection of the current mode of the active polygon object
+(nothing selected: nothing happens), as one undo step. Points that no polygon uses
+any more are removed and the remaining indices close up; selections and hidden flags
+follow their components.
+
+| Mode | Delete | Melt | Dissolve |
+|------|--------|------|----------|
+| Points | the points and every polygon using one | each point's polygons merge into one, without the point | as Melt |
+| Edges | the polygons using the edges (the manual: edges go *with* their polygons) | the two polygons of each edge merge into one; the edge's points stay | as Melt, then points left between just two edges of the merged polygon are removed |
+| Polygons | the polygons | each connected group merges into one n-gon | as Melt |
+
+- Merging needs the merged region to have a single outline (a disc): a group with a
+  hole, or one touching itself at a point, is left as it is.
+- A border edge (one polygon) cannot melt: there is nothing to merge with.
+- Dissolve with Shift (respecting the Phong angle) is **later**.
+
+## Connect Points/Edges
+
+- **Points**: in every polygon with two or more selected points, the selected points
+  are joined in their order around the polygon (pairs that are already neighbours need
+  no new edge). Two points split the polygon in two; three or more cut out the polygon
+  of the selected points plus the pieces around it.
+- **Edges**: every selected edge gets a point in its middle (shared by both of its
+  polygons); in every polygon those new points are then joined as for points. A polygon
+  with one selected edge only gains the point. On an edge ring this cuts a loop through
+  the middle.
+- The new edges are selected (Edges mode); new polygons inherit the selection of the
+  polygon they were cut from.
+
+## Loop/Path Cut
+
+| Name | Type / range | Default | Effect |
+|------|--------------|---------|--------|
+| Offset | 0-100 % | 50 % (1) | Where the cut crosses the edge, from its reference end; the click sets it. |
+| Number of Cuts | 1 ... | 1 | Several cuts, evenly spaced across the edges (the click position is then ignored). |
+| Select Cuts | bool | on (1) | The new edges become the edge selection. |
+| Mode (Path), Offset Mode (Edge Distance), Restrict to Selection, Quantize, Bidirectional, Range | - | - | **later** |
+
+(1) Our defaults: the manual states none.
+
+- Hover an edge: a preview shows the loop a click would cut. It runs through the
+  ring of quads across the edge, both ways, until it meets a border or a non-quad
+  polygon, or closes. Click: cut (one undo step).
+- The reference end is carried along the ring, so the cut stays on the same side of
+  every quad; on the hovered edge it is the edge's first point.
+- Polygons at the ends of an open loop that are not quads gain the new points on their
+  edge, so the mesh stays closed.
+
+## Line Cut (Knife)
+
+| Name | Type | Default | Effect |
+|------|------|---------|--------|
+| Visible Only | bool | on | Cut only where the surface is visible from the camera (not back sides or covered parts). |
+| Infinite Cut | bool | off | The line extends beyond its ends across the whole view. |
+| Connect Cut Edges | bool | on | Also split the polygons; off: only points are added on the cut edges. |
+| Select Cuts | bool | on (1) | The new edges become the edge selection. |
+| Slice Mode (Split, Remove Part), multi-point paths, Auto Snap, Angle Constrain | - | - | **later** |
+
+- Drag a line across the object in the viewport (the reference's Single Line); the
+  release cuts, as one undo step; Esc cancels.
+- The cut is the plane through the eye and the line, limited to the wedge between the
+  two ends (unless Infinite). Every edge crossing it gets a new point (a crossing at a
+  point uses that point). Every polygon crossed twice is split between the two
+  crossings; with more crossings they are paired along the line.
+
 ## Grid4D mapping
 
 | Piece | Where |
@@ -128,7 +217,9 @@ Polygons mode only (the manual: Inset needs Polygons mode).
 | Shared step | `ui/src/modeling.rs`: a tool on a polygon object's selection (all visible components when none), new mesh + updated components |
 | Drag | viewport `mesh_tools.rs`: rebuilds from the mesh at the press every frame (like a component transform), one `CommitLive` on release, Esc restores |
 | Apply | `EditorCommand::ApplyMeshTool` → `commit` with one `SetData` |
-| Menu / keys | Mesh menu *Extrude* (D), *Inset* (I); `shortcuts.rs`, Help ▸ About |
+| Menu / keys | Mesh menu *Extrude* (D), *Inset* (I), *Loop/Path Cut*, *Line Cut*, *Connect*, *Melt*, *Dissolve*; `shortcuts.rs` (single keys and chords), Help ▸ About |
+| 4.5 algorithms | `grid4d_geom::ops` — `delete`, `melt`, `dissolve`, `connect`, `loop_cut`, `line_cut`, returning a `Rebuilt` mesh with the origin of every point and polygon; `selection::remap` carries selections and hidden flags across |
+| 4.5 commands | `EditorCommand::{DeleteSelected (component modes), MeltSelected, DissolveSelected, ConnectSelected, LoopCut, LineCut}`; tools `Tool::LoopCut`, `Tool::LineCut` |
 
 ## Acceptance criteria
 
@@ -152,3 +243,19 @@ Polygons mode only (the manual: Inset needs Polygons mode).
 - [ ] A drag is one undo step that restores the exact mesh and selection; Esc
       restores the mesh; a click without drag records nothing.
 - [ ] Apply with the shown options gives the same result as a drag to that Offset.
+
+- [ ] Delete in Points mode on a cube's corner removes the 3 polygons using it and the
+      point; no point is left unused and the mesh stays valid.
+- [ ] Delete in Edges mode removes the edge's two polygons; Melt merges them into one,
+      keeping all points; Dissolve on a middle edge of a 3 × 1 plane also removes the
+      points left between two edges.
+- [ ] Melt of a 2 × 2 patch of quads gives one 8-point polygon without the middle
+      point; Melt of a ring of quads around a hole changes nothing.
+- [ ] Connect of two opposite points of a quad splits it into two triangles; Connect of
+      an edge ring around a cylinder's side cuts a loop around it.
+- [ ] A loop cut at 50 % on a cube's side edge adds a loop of 4 points and 4 polygons,
+      all quads, still closed; 3 cuts add 12 points and 12 polygons.
+- [ ] A line cut across a plane splits every crossed quad in two; with Visible Only a
+      cut across a closed cube leaves its back side whole.
+- [ ] Chords: U then L picks Loop Selection; U then an unbound key does nothing and
+      clears the chord.

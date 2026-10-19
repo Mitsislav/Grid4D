@@ -187,7 +187,7 @@ undoable). Grid4D follows that:
 |------|---------|
 | Model | the selected objects (existing behaviour) |
 | Points | the selected points and every face that uses one of them |
-| Edges | the selected edges together with the faces that use them (as the manual describes; verify against current C4D, which may dissolve instead) |
+| Edges | the selected edges together with the faces that use them (confirmed in the manual; to keep the faces use *Melt* or *Dissolve*, see `modeling-tools.md`) |
 | Polygons | the selected faces; points no other face uses are removed too |
 
 Afterwards unused points are dropped and indices compacted (the same clean-up as
@@ -225,7 +225,8 @@ whole mesh when nothing is selected. Faces that collapse while merging are delet
 
 1. **Live Selection default radius** and the mode shortcuts: confirm from the manual's
    shortcut list / a running copy before binding.
-2. **Edge delete**: remove faces (manual text) or dissolve edges (newer behaviour)?
+2. ~~**Edge delete**~~: settled 2026-10-19 — Delete removes the edges' faces; Melt /
+   Dissolve keep them (`modeling-tools.md`).
 
 ## Acceptance criteria
 

@@ -478,7 +478,40 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 check_row(ui, "Preserve Groups", &mut m.inset.preserve_groups);
                 angle_row(ui, "Maximum Angle", &mut m.inset.max_angle, 0.0..=180.0);
             }
+            Tool::LoopCut => {
+                let m = &mut editor.modeling_settings.loop_cut;
+                attr_label(ui, "Offset", LABEL_WIDTH);
+                let mut percent = m.offset * 100.0;
+                if ui
+                    .add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut percent).speed(0.5).range(1.0..=99.0).suffix(" %"),
+                    )
+                    .on_hover_text("A click sets it from where the cursor is on the edge")
+                    .changed()
+                {
+                    m.offset = percent / 100.0;
+                }
+                ui.end_row();
+                count_row(ui, "Number of Cuts", &mut m.cuts, 1);
+                check_row(ui, "Select Cuts", &mut m.select_cuts);
+            }
+            Tool::LineCut => {
+                let m = &mut editor.modeling_settings.line_cut;
+                check_row(ui, "Visible Only", &mut m.visible_only);
+                check_row(ui, "Infinite Cut", &mut m.infinite);
+                check_row(ui, "Connect Cut Edges", &mut m.connect);
+                check_row(ui, "Select Cuts", &mut m.select_cuts);
+            }
         });
+    if tool.is_cut_tool() {
+        ui.add_space(6.0);
+        let how = match tool {
+            Tool::LoopCut => "Hover an edge to see the loop, click to cut it",
+            _ => "Drag a line across the object; release cuts, Esc cancels",
+        };
+        ui.label(RichText::new(how).color(p::TEXT_DIM));
+    }
     if tool.is_mesh_tool() {
         ui.add_space(6.0);
         let target = crate::commands::component_target(doc, editor)

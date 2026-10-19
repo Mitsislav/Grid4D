@@ -54,6 +54,12 @@ pub(super) enum Gesture {
     },
     /// A modelling tool's drag (Extrude, Inset).
     MeshTool(super::mesh_tools::MeshDrag),
+    /// A Line Cut being drawn on polygon object `node`.
+    LineCut {
+        node: NodeId,
+        start: Pos2,
+        end: Pos2,
+    },
     /// Esc cancelled the gesture: ignore the pointer until it is released.
     Cancelled,
 }

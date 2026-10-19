@@ -1,15 +1,10 @@
-//! Modelling operations: pure functions from a mesh, its [`Topology`] and a
-//! selection to a new mesh.
-//!
-//! Existing points and faces keep their indices and new ones are appended, so
-//! selections, hidden flags and per-corner data of untouched components stay
-//! valid. A face that moves (an extruded or inset polygon) keeps its index and its
-//! corner layout: only the points its corners refer to change.
+//! Extrude and Inset: existing point and face indices are kept, new ones appended.
 
 use std::collections::{HashMap, hash_map::Entry};
 
 use glam::Vec3;
 
+use super::{corner_faces, next_corner};
 use crate::{BitSet, MeshError, PolyMesh, Topology, u32_index, us};
 
 /// Polygon Extrude options (see `docs/reference/modeling-tools.md`).
@@ -400,24 +395,6 @@ fn mitre(cos: f32) -> f32 {
 fn fraction(k: u32, n: u32) -> f32 {
     let f = |v: u32| f32::from(u16::try_from(v).unwrap_or(u16::MAX));
     f(k) / f(n)
-}
-
-/// The face of every corner.
-fn corner_faces(mesh: &PolyMesh) -> Vec<u32> {
-    let mut faces = Vec::with_capacity(mesh.corner_count());
-    for f in 0..mesh.face_count() {
-        faces.extend(mesh.corner_range(f).map(|_| u32_index(f)));
-    }
-    faces
-}
-
-fn next_corner(mesh: &PolyMesh, face: usize, corner: usize) -> usize {
-    let range = mesh.corner_range(face);
-    if corner + 1 == range.end {
-        range.start
-    } else {
-        corner + 1
-    }
 }
 
 /// Walks the corners of a set of pieces: their outlines and the faces around a point.

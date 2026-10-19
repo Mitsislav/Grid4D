@@ -157,17 +157,38 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             });
             ui.separator();
             let polygon_object = crate::commands::component_target(doc, editor).is_some();
-            for tool in [Tool::Extrude, Tool::Inset] {
+            for tool in [Tool::Extrude, Tool::Inset, Tool::LoopCut, Tool::LineCut] {
+                let how = if tool.is_cut_tool() {
+                    "Then hover an edge and click (Loop/Path Cut) or drag a line (Line Cut) in the viewport"
+                } else {
+                    "Then drag left or right in the viewport, or Apply in the Attribute Manager"
+                };
                 let item = ui
                     .add_enabled(polygon_object, Button::new(tool.label()).shortcut_text(tool.shortcut()))
-                    .on_hover_text("Then drag left or right in the viewport, or Apply in the Attribute Manager")
+                    .on_hover_text(how)
                     .on_disabled_hover_text(tool.hint());
                 if item.clicked() {
                     editor.tool = tool;
                     ui.close();
                 }
             }
-            for name in ["Bevel", "Knife", "Loop/Path Cut", "Subdivide"] {
+            ui.separator();
+            for (label, shortcut, command) in [
+                ("Connect Points/Edges", "M~M", EditorCommand::ConnectSelected),
+                ("Melt", "U~Z", EditorCommand::MeltSelected),
+                ("Dissolve", "M~N", EditorCommand::DissolveSelected),
+            ] {
+                if ui
+                    .add_enabled(polygon_object, Button::new(label).shortcut_text(shortcut))
+                    .on_disabled_hover_text("Works on the points, edges or polygons of a polygon object")
+                    .clicked()
+                {
+                    editor.commands.push(command);
+                    ui.close();
+                }
+            }
+            ui.separator();
+            for name in ["Bevel", "Subdivide"] {
                 planned(ui, name, "");
             }
         });

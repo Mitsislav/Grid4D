@@ -1,6 +1,7 @@
 //! The 3D viewport: header menus, navigation, picking (objects, or components
 //! of the active polygon object in a component mode), gizmo and the GPU view.
 
+mod cut_tools;
 mod gizmo;
 mod gpu_view;
 mod mesh_tools;
@@ -48,6 +49,8 @@ pub struct ViewportPanel {
     show_hud: bool,
     /// The 3D area last frame (the header's pan handle needs its height).
     view_rect: Rect,
+    /// Loop/Path Cut: the loop a click would cut.
+    loop_preview: Option<cut_tools::LoopPreview>,
 }
 
 impl ViewportPanel {
@@ -71,6 +74,7 @@ impl ViewportPanel {
             show_axis_triad: true,
             show_hud: true,
             view_rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0)),
+            loop_preview: None,
         }
     }
 
@@ -149,6 +153,7 @@ impl ViewportPanel {
         if !navigating && !gizmo_owns_pointer {
             self.evaluated.update(&doc.scene);
             if !self.mesh_tools(ui, &response, rect, doc, editor)
+                && !self.cut_tools(ui, &response, rect, editor)
                 && !self.selection_tools(ui, &response, rect, doc, editor)
             {
                 self.pick_on_click(ui, &response, rect, editor);
@@ -203,7 +208,11 @@ impl ViewportPanel {
         }
         match &self.gesture {
             Gesture::Frame { start, end } => overlay::marquee(&painter, Rect::from_two_pos(*start, *end)),
+            Gesture::LineCut { start, end, .. } => overlay::cut_line(&painter, *start, *end),
             Gesture::None | Gesture::Stroke(_) | Gesture::Tweak { .. } | Gesture::MeshTool(_) | Gesture::Cancelled => {}
+        }
+        if let Some(preview) = &self.loop_preview {
+            overlay::cut_preview(&painter, rect, &view_proj, &preview.segments);
         }
         if target.is_some()
             && editor.tool == Tool::LiveSelection
@@ -258,8 +267,9 @@ impl ViewportPanel {
                 let hits = self.loop_hits(rect, node, component, editor, cursor);
                 self.hover.extend(hits.into_iter().map(wrap));
             }
-            // The brush circle shows what Live Selection will paint.
-            Tool::LiveSelection => {}
+            // The brush circle shows what Live Selection will paint; the cut
+            // tools draw their own preview.
+            Tool::LiveSelection | Tool::LoopCut | Tool::LineCut => {}
             // Mesh tools: a click still selects, a drag runs the tool.
             Tool::RectangleSelection | Tool::Move | Tool::Scale | Tool::Rotate | Tool::Extrude | Tool::Inset => {
                 let view = self.screen_view(rect);
@@ -515,6 +525,10 @@ const fn component_hint(component: Component, tool: Tool, active: bool) -> &'sta
                 Component::Point | Component::Edge => "Inset works in Polygons mode",
             };
         }
+        Tool::LoopCut => {
+            return "Loop/Path Cut: hover an edge to see the loop · click cuts it there · Number of Cuts spaces them evenly";
+        }
+        Tool::LineCut => return "Line Cut: drag a line across the object · release cuts · Esc cancels",
         Tool::Move | Tool::Scale | Tool::Rotate => {}
     }
     match component {
@@ -1050,6 +1064,103 @@ mod tests {
             "nothing selected: every polygon"
         );
         assert_eq!(h.editor.history.undo_label(), Some("Inset"));
+    }
+
+    #[test]
+    fn a_loop_cut_click_cuts_where_the_cursor_is() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Edges, Tool::LoopCut);
+        let before = h.mesh(cube);
+        // The middle of a vertical edge facing the camera, on screen.
+        let world = h.doc.scene.world_matrix(cube);
+        let eye = h.viewport.camera.eye();
+        let topology = before.topology();
+        let points = before.mesh().points();
+        let vertical = (0..topology.edge_count())
+            .filter(|&e| {
+                let [a, b] = topology.edges()[e];
+                let (pa, pb) = (points[a as usize], points[b as usize]);
+                (pa.x - pb.x).abs() < 1e-3 && (pa.z - pb.z).abs() < 1e-3
+            })
+            .min_by(|&e, &f| {
+                let middle = |e: usize| {
+                    let [a, b] = topology.edges()[e];
+                    world.transform_point3((points[a as usize] + points[b as usize]) * 0.5)
+                };
+                middle(e).distance(eye).total_cmp(&middle(f).distance(eye))
+            })
+            .unwrap();
+        let [a, b] = topology.edges()[vertical];
+        let middle = world.transform_point3((points[a as usize] + points[b as usize]) * 0.5);
+        let rect = h.viewport.view_rect;
+        let at = project(&h.viewport.camera.view_projection(rect.aspect_ratio()), rect, middle).unwrap();
+
+        h.frame(vec![Event::PointerMoved(at)]);
+        h.frame(vec![]);
+        let preview = h.viewport.loop_preview.as_ref().expect("a preview of the loop");
+        assert_eq!(preview.segments.len(), 4, "round the four sides");
+        h.frame(vec![Harness::button(at, true)]);
+        h.frame(vec![Harness::button(at, false)]);
+        h.frame(vec![]);
+        let after = h.mesh(cube);
+        assert_eq!((after.mesh().point_count(), after.mesh().face_count()), (12, 10));
+        assert_eq!(h.editor.history.undo_label(), Some("Loop Cut"));
+        let offset = h.editor.modeling_settings.loop_cut.offset;
+        assert!((offset - 0.5).abs() < 0.05, "clicked in the middle: {offset}");
+
+        // A click with no hover before it (move, press and release in one frame).
+        h.editor.commands.push(EditorCommand::Undo);
+        h.frame(vec![Event::PointerGone]);
+        h.frame(vec![]);
+        h.frame(vec![
+            Event::PointerMoved(at),
+            Harness::button(at, true),
+            Harness::button(at, false),
+            Event::PointerGone,
+        ]);
+        h.frame(vec![]);
+        assert_eq!(
+            h.mesh(cube).mesh().face_count(),
+            10,
+            "cut in one frame, even if the pointer left right after"
+        );
+    }
+
+    #[test]
+    fn a_line_cut_drag_cuts_and_esc_cancels() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Polygons, Tool::LineCut);
+        let before = h.mesh(cube);
+        let world = h.doc.scene.world_matrix(cube);
+        let rect = h.viewport.view_rect;
+        let view_proj = h.viewport.camera.view_projection(rect.aspect_ratio());
+        let centre = project(&view_proj, rect, world.transform_point3(Vec3::ZERO)).unwrap();
+        let (from, to) = (centre - vec2(200.0, 0.0), centre + vec2(200.0, 0.0));
+
+        // Esc while drawing: nothing.
+        h.frame(vec![Event::PointerMoved(from)]);
+        h.frame(vec![Harness::button(from, true)]);
+        h.frame(vec![Event::PointerMoved(to)]);
+        h.frame(vec![Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }]);
+        h.frame(vec![Harness::button(to, false)]);
+        h.frame(vec![]);
+        assert_eq!(h.mesh(cube).id(), before.id(), "Esc cancels");
+
+        h.drag(from, to);
+        let after = h.mesh(cube);
+        assert!(
+            after.mesh().face_count() > 6,
+            "the visible faces were cut: {}",
+            after.mesh().face_count()
+        );
+        assert_eq!(h.editor.history.undo_label(), Some("Line Cut"));
+        assert!(!h.selected(cube, Component::Edge).is_empty(), "the cuts are selected");
     }
 
     #[test]

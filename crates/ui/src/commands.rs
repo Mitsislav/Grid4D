@@ -7,7 +7,7 @@
 
 use glam::Vec3;
 use grid4d_geom::{
-    BitSet, Component,
+    BitSet, Component, MeshError, PolyMesh, Topology, ops,
     selection::{self, corners_from_edges, edges_from_corners},
 };
 use grid4d_render::OrbitCamera;
@@ -80,6 +80,31 @@ pub enum EditorCommand {
     /// Turns the selected primitives into polygon objects that look the same
     /// (C4D's "Make Editable", `C`); other objects are left alone.
     MakeEditable,
+    /// Component modes: merges the selected points, edges or polygons into the
+    /// polygons around them (Melt, U~Z / Alt+Backspace). One undo step.
+    MeltSelected,
+    /// Like Melt; for edges also removes the points left between two edges
+    /// (Dissolve, M~N / Ctrl+Backspace). One undo step.
+    DissolveSelected,
+    /// Joins the selected points, or the middles of the selected edges, that share
+    /// a polygon (Connect Points/Edges, M~M). One undo step.
+    ConnectSelected,
+    /// Loop/Path Cut on polygon object `node` across unique edge `edge` at
+    /// `fractions` along it (from the edge's first point). One undo step.
+    LoopCut {
+        node: NodeId,
+        edge: u32,
+        fractions: Vec<f32>,
+    },
+    /// Line Cut on polygon object `node`: the plane through `eye` and the world
+    /// directions `from` and `to` (the rays through the line's ends), with the Line
+    /// Cut tool's options. One undo step.
+    LineCut {
+        node: NodeId,
+        eye: Vec3,
+        from: Vec3,
+        to: Vec3,
+    },
     /// Runs the current modelling tool (Extrude, Inset) once with its options on
     /// the active polygon object's selection in the current mode (its Apply
     /// button). One undo step if anything changed.
@@ -210,7 +235,74 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             });
         }
         // Deleting components comes with step 4.5; objects stay put meanwhile.
-        EditorCommand::DeleteSelected if editor.mode != EditMode::Model => {}
+        EditorCommand::DeleteSelected if editor.mode != EditMode::Model => {
+            let label = match editor.mode {
+                EditMode::Points => "Delete Points",
+                EditMode::Edges => "Delete Edges",
+                EditMode::Polygons | EditMode::Model => "Delete Polygons",
+            };
+            rebuild_selection(doc, editor, label, ops::delete, false);
+        }
+        EditorCommand::MeltSelected => rebuild_selection(doc, editor, "Melt", ops::melt, false),
+        EditorCommand::DissolveSelected => rebuild_selection(doc, editor, "Dissolve", ops::dissolve, false),
+        EditorCommand::ConnectSelected => rebuild_selection(doc, editor, "Connect", ops::connect, true),
+        EditorCommand::LoopCut { node, edge, fractions } => {
+            let select_cuts = editor.modeling_settings.loop_cut.select_cuts;
+            let data = doc.scene.get(node).and_then(|n| {
+                let ObjectKind::Polygon { mesh, .. } = &n.data.kind else {
+                    return None;
+                };
+                let rebuilt = crate::modeling::loop_cut(mesh, idx(edge), &fractions)?;
+                crate::modeling::rebuilt_data(&n.data, rebuilt, select_cuts)
+            });
+            if let Some(data) = data {
+                commit(
+                    doc,
+                    editor,
+                    "Loop Cut",
+                    vec![SceneEdit::SetData { id: node, data }],
+                    |_, _| {},
+                );
+            }
+        }
+        EditorCommand::LineCut { node, eye, from, to } => {
+            let settings = editor.modeling_settings.line_cut;
+            let world = doc.scene.world_matrix(node);
+            let data = doc.scene.get(node).and_then(|n| {
+                let ObjectKind::Polygon { mesh, .. } = &n.data.kind else {
+                    return None;
+                };
+                // The cut runs in the object's space.
+                let local = world.inverse();
+                let cut = ops::LineCut {
+                    eye: local.transform_point3(eye),
+                    from: local.transform_vector3(from),
+                    to: local.transform_vector3(to),
+                    infinite: settings.infinite,
+                    connect: settings.connect,
+                };
+                let visible = |x: Vec3| {
+                    !settings.visible_only || {
+                        let to_x = x - cut.eye;
+                        let distance = to_x.length();
+                        // Seen if nothing is hit clearly before the crossing.
+                        mesh.raycast(cut.eye, to_x / distance.max(f32::EPSILON))
+                            .is_none_or(|hit| hit.t >= distance * (1.0 - 1e-4) - 1e-4)
+                    }
+                };
+                let rebuilt = ops::line_cut(mesh.mesh(), mesh.topology(), &cut, visible).ok()?;
+                crate::modeling::rebuilt_data(&n.data, rebuilt, settings.select_cuts)
+            });
+            if let Some(data) = data {
+                commit(
+                    doc,
+                    editor,
+                    "Line Cut",
+                    vec![SceneEdit::SetData { id: node, data }],
+                    |_, _| {},
+                );
+            }
+        }
         EditorCommand::DeleteSelected => {
             // Detaching a node takes its descendants along, so only the topmost
             // selected nodes are detached.
@@ -487,6 +579,41 @@ pub fn component_target(doc: &Document, editor: &EditorState) -> Option<(NodeId,
     matches!(doc.scene.get(id)?.data.kind, ObjectKind::Polygon { .. }).then_some((id, component))
 }
 
+/// Runs a rebuilding operation (Delete, Melt, Dissolve, Connect) on the active
+/// polygon object's selection in the current component mode, carrying its
+/// selection and hidden flags across: one undo step named `label` if the mesh
+/// changed. With `select_cuts` the new edges become the edge selection.
+fn rebuild_selection(
+    doc: &mut Document,
+    editor: &mut EditorState,
+    label: &'static str,
+    operation: impl FnOnce(&PolyMesh, &Topology, Component, &BitSet) -> Result<ops::Rebuilt, MeshError>,
+    select_cuts: bool,
+) {
+    let Some((id, component)) = component_target(doc, editor) else {
+        return;
+    };
+    let data = doc.scene.get(id).and_then(|n| {
+        let ObjectKind::Polygon { mesh, components } = &n.data.kind else {
+            return None;
+        };
+        let topology = mesh.topology();
+        let selected = match component {
+            Component::Point => components.selected().points.clone(),
+            Component::Edge => edges_from_corners(&components.selected().edges, topology),
+            Component::Polygon => components.selected().polygons.clone(),
+        };
+        if selected.is_empty() {
+            return None;
+        }
+        let rebuilt = operation(mesh.mesh(), topology, component, &selected).ok()?;
+        crate::modeling::rebuilt_data(&n.data, rebuilt, select_cuts)
+    });
+    if let Some(data) = data {
+        commit(doc, editor, label, vec![SceneEdit::SetData { id, data }], |_, _| {});
+    }
+}
+
 /// Runs `change` on the active polygon object's components in the current
 /// component mode, as one undo step named `label` (nothing outside such a mode).
 fn in_component_mode(
@@ -737,6 +864,187 @@ mod tests {
         assert_eq!(faces(&doc), 6);
     }
 
+    fn mesh_of(doc: &Document, id: NodeId) -> MeshHandle {
+        let ObjectKind::Polygon { mesh, .. } = &doc.scene.get(id).unwrap().data.kind else {
+            panic!("not a polygon object")
+        };
+        mesh.clone()
+    }
+
+    fn select_in(
+        doc: &mut Document,
+        editor: &mut EditorState,
+        vp: &mut ViewportPanel,
+        id: NodeId,
+        component: Component,
+        hits: Vec<u32>,
+    ) {
+        run(
+            doc,
+            editor,
+            vp,
+            &[EditorCommand::SelectComponents {
+                node: id,
+                component,
+                hits,
+                mode: SelectMode::Replace,
+            }],
+        );
+    }
+
+    #[test]
+    fn deleting_components_rebuilds_the_mesh_as_one_step() {
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Points);
+        let before = mesh_of(&doc, id);
+        select_in(&mut doc, &mut editor, &mut vp, id, Component::Point, vec![0]);
+        let steps = editor.history.undo_len();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
+        let after = mesh_of(&doc, id);
+        assert_eq!((after.mesh().point_count(), after.mesh().face_count()), (7, 3));
+        assert!(
+            selected(&doc, id, Component::Point).is_empty(),
+            "the deleted point was the selection"
+        );
+        assert_eq!(editor.history.undo_len(), steps + 1);
+        assert_eq!(editor.history.undo_label(), Some("Delete Points"));
+        assert!(doc.scene.contains(id), "the object stays");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(mesh_of(&doc, id).id(), before.id());
+        assert_eq!(
+            selected(&doc, id, Component::Point),
+            [0],
+            "undo brings the selection back too"
+        );
+
+        // Nothing selected: nothing happens.
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Polygons);
+        let steps = editor.history.undo_len();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
+        assert_eq!(
+            (mesh_of(&doc, id).mesh().face_count(), editor.history.undo_len()),
+            (6, steps)
+        );
+    }
+
+    #[test]
+    fn melt_dissolve_and_connect_are_one_step_each() {
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Polygons);
+        let faces = |doc: &Document| mesh_of(doc, id).mesh().face_count();
+        select_in(&mut doc, &mut editor, &mut vp, id, Component::Polygon, vec![0, 1]);
+        let adjacent = {
+            let mesh = mesh_of(&doc, id);
+            let shared = mesh
+                .mesh()
+                .face(0)
+                .iter()
+                .filter(|p| mesh.mesh().face(1).contains(p))
+                .count();
+            shared == 2
+        };
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MeltSelected]);
+        assert_eq!(faces(&doc), if adjacent { 5 } else { 6 });
+        if adjacent {
+            assert_eq!(editor.history.undo_label(), Some("Melt"));
+            assert_eq!(
+                selected(&doc, id, Component::Polygon).len(),
+                1,
+                "the merged polygon stays selected"
+            );
+        }
+
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Points);
+        // Two opposite corners of one face.
+        let mesh = mesh_of(&doc, id);
+        let face = mesh.mesh().face(0).to_vec();
+        select_in(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            id,
+            Component::Point,
+            vec![face[0], face[2]],
+        );
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ConnectSelected]);
+        assert_eq!(mesh_of(&doc, id).mesh().face_count(), 7, "the face split in two");
+        assert_eq!(editor.history.undo_label(), Some("Connect"));
+        assert_eq!(mesh_of(&doc, id).topology().edge_count(), 12 + 1, "one new edge");
+        assert!(
+            selected(&doc, id, Component::Point).len() == 2,
+            "the points stay selected"
+        );
+
+        editor.mode = EditMode::Edges;
+        let topology = mesh_of(&doc, id).topology().clone();
+        let new_edge = topology.edge_count() - 1;
+        let corner = topology.edge_corners(new_edge)[0];
+        select_in(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            id,
+            Component::Edge,
+            vec![u32::try_from(new_edge).unwrap()],
+        );
+        assert!(!selected(&doc, id, Component::Edge).is_empty(), "{corner}");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DissolveSelected]);
+        assert_eq!(
+            mesh_of(&doc, id).mesh().face_count(),
+            6,
+            "dissolving the new edge undoes the split"
+        );
+        assert_eq!(editor.history.undo_label(), Some("Dissolve"));
+    }
+
+    #[test]
+    fn loop_and_line_cuts_are_one_step_each() {
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Edges);
+        let mesh = mesh_of(&doc, id);
+        // A vertical edge: its ring runs round the four sides.
+        let vertical = (0..mesh.topology().edge_count())
+            .find(|&e| {
+                let [a, b] = mesh.topology().edges()[e];
+                let (pa, pb) = (mesh.mesh().points()[a as usize], mesh.mesh().points()[b as usize]);
+                (pa.x - pb.x).abs() < 1e-3 && (pa.z - pb.z).abs() < 1e-3
+            })
+            .unwrap();
+        let cut = EditorCommand::LoopCut {
+            node: id,
+            edge: u32::try_from(vertical).unwrap(),
+            fractions: vec![0.5],
+        };
+        run(&mut doc, &mut editor, &mut vp, &[cut]);
+        let after = mesh_of(&doc, id);
+        assert_eq!((after.mesh().point_count(), after.mesh().face_count()), (12, 10));
+        assert_eq!(editor.history.undo_label(), Some("Loop Cut"));
+        assert_eq!(
+            selected(&doc, id, Component::Edge).len(),
+            8,
+            "the 4 new edges, from both sides"
+        );
+
+        // A line straight down through the moved cube, in world space.
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Polygons);
+        doc.scene.get_mut(id).unwrap().data.transform.position = Vec3::new(500.0, 0.0, 0.0);
+        let eye = Vec3::new(500.0, 1000.0, 0.0);
+        let line = EditorCommand::LineCut {
+            node: id,
+            eye,
+            from: Vec3::new(500.0, 0.0, -300.0) - eye,
+            to: Vec3::new(500.0, 0.0, 300.0) - eye,
+        };
+        run(&mut doc, &mut editor, &mut vp, std::slice::from_ref(&line));
+        assert_eq!(
+            mesh_of(&doc, id).mesh().face_count(),
+            6 + 1,
+            "visible only: the top face splits, the sides are seen edge-on, the bottom is hidden"
+        );
+        assert_eq!(editor.history.undo_label(), Some("Line Cut"));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        editor.modeling_settings.line_cut.visible_only = false;
+        run(&mut doc, &mut editor, &mut vp, &[line]);
+        assert_eq!(mesh_of(&doc, id).mesh().face_count(), 6 + 4, "all the way round");
+    }
+
     #[test]
     fn new_camera_is_placed_at_the_current_view() {
         let (mut doc, mut editor, mut vp) = (Document::default(), EditorState::default(), viewport());
@@ -778,7 +1086,7 @@ mod tests {
             panic!("not converted: {:?}", data.kind)
         };
         assert_eq!((mesh.mesh().point_count(), mesh.mesh().face_count()), (8, 6));
-        let topology = grid4d_geom::Topology::build(mesh.mesh());
+        let topology = Topology::build(mesh.mesh());
         assert!(topology.is_closed() && topology.is_manifold(), "a closed, manifold box");
         let bounds = mesh.bounds().unwrap();
         assert!(
@@ -916,14 +1224,21 @@ mod tests {
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SelectAll]);
         assert_eq!(selected(&doc, id, Component::Polygon), [0, 1, 2, 3, 4, 5]);
         assert_eq!(editor.selection.as_slice(), &[id], "the object selection is untouched");
-        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
-        assert!(
-            doc.scene.contains(id),
-            "Delete does not remove objects in a component mode"
-        );
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeselectAll]);
         assert!(selected(&doc, id, Component::Polygon).is_empty());
         assert_eq!(editor.history.undo_label(), Some("Deselect All"));
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::SelectAll, EditorCommand::DeleteSelected],
+        );
+        assert!(
+            doc.scene.contains(id),
+            "Delete removes the polygons, not the object, in a component mode"
+        );
+        assert_eq!(mesh_of(&doc, id).mesh().face_count(), 0);
+        assert_eq!(editor.history.undo_label(), Some("Delete Polygons"));
     }
 
     #[test]

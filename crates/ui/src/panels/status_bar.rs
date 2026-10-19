@@ -7,7 +7,11 @@ use crate::{EditorState, theme::palette as p};
 
 pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
     ui.horizontal_centered(|ui| {
-        let hint = editor.status_hint.unwrap_or_else(|| editor.tool.hint());
+        let hint = editor
+            .chord
+            .map(crate::shortcuts::Chord::hint)
+            .or(editor.status_hint)
+            .unwrap_or_else(|| editor.tool.hint());
         ui.label(RichText::new(hint).color(p::TEXT_DIM).size(11.5));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.label(

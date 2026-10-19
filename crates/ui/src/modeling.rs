@@ -4,10 +4,11 @@
 
 use grid4d_geom::{
     BitSet, Component,
-    ops::{self, EdgeExtrudeOptions, ExtrudeOptions, InsetOptions},
+    loops::{self, WalkOptions},
+    ops::{self, EdgeExtrudeOptions, ExtrudeOptions, InsetOptions, Rebuilt},
     selection,
 };
-use grid4d_scene::{MeshHandle, NodeData, ObjectKind};
+use grid4d_scene::{ComponentState, Components, MeshHandle, NodeData, ObjectKind};
 
 use crate::{ModelingSettings, Tool};
 
@@ -31,8 +32,48 @@ pub(crate) fn offset_mut(tool: Tool, settings: &mut ModelingSettings) -> Option<
         | Tool::RingSelection
         | Tool::Move
         | Tool::Scale
-        | Tool::Rotate => None,
+        | Tool::Rotate
+        | Tool::LoopCut
+        | Tool::LineCut => None,
     }
+}
+
+/// `data` (a polygon object) with the mesh `rebuilt` from it: its selection and
+/// hidden flags carried across; with `select_cuts` the new edges become the edge
+/// selection. `None` if the mesh did not change.
+pub(crate) fn rebuilt_data(data: &NodeData, rebuilt: Rebuilt, select_cuts: bool) -> Option<NodeData> {
+    let ObjectKind::Polygon { mesh, components } = &data.kind else {
+        return None;
+    };
+    if rebuilt.mesh == *mesh.mesh() {
+        return None;
+    }
+    let topology = mesh.topology();
+    let mut state = ComponentState {
+        selected: rebuilt.carry(components.selected(), topology),
+        hidden: rebuilt.carry(components.hidden(), topology),
+    };
+    if select_cuts && !rebuilt.new_edges.is_empty() {
+        state.selected.edges = rebuilt.new_edge_corners();
+    }
+    let mut data = data.clone();
+    data.kind = ObjectKind::Polygon {
+        mesh: MeshHandle::new(rebuilt.mesh),
+        components: Components::new(state),
+    };
+    Some(data)
+}
+
+/// A Loop/Path Cut of `mesh` across unique edge `edge` at `fractions` (the ring
+/// runs through quads only).
+pub(crate) fn loop_cut(mesh: &MeshHandle, edge: usize, fractions: &[f32]) -> Option<Rebuilt> {
+    let (source, topology) = (mesh.mesh(), mesh.topology());
+    let options = WalkOptions {
+        stop_at_non_quads: true,
+        ..WalkOptions::default()
+    };
+    let ring = loops::edge_ring(source, topology, edge, options, &BitSet::new(), &BitSet::new());
+    ops::loop_cut(source, topology, &ring, edge, fractions).ok()
 }
 
 /// `data` (a polygon object) with `tool` applied at `offset` to its selected

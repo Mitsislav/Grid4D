@@ -167,22 +167,24 @@ const fn tool_icon(tool: Tool) -> Icon {
         Tool::Move => Icon::Move,
         Tool::Scale => Icon::Scale,
         Tool::Rotate => Icon::Rotate,
-        // Not on the toolbar (Mesh menu, D / I); a plain arrow if ever shown.
-        Tool::Extrude | Tool::Inset => Icon::Move,
+        // Not on the toolbar (Mesh menu and shortcuts); a plain arrow if ever shown.
+        Tool::Extrude | Tool::Inset | Tool::LoopCut | Tool::LineCut => Icon::Move,
     }
 }
 
 const fn tool_tooltip(tool: Tool) -> &'static str {
     match tool {
         Tool::LiveSelection => "Live Selection (9)",
-        Tool::RectangleSelection => "Rectangle Selection",
-        Tool::LoopSelection => "Loop Selection",
-        Tool::RingSelection => "Ring Selection",
+        Tool::RectangleSelection => "Rectangle Selection (0)",
+        Tool::LoopSelection => "Loop Selection (U~L)",
+        Tool::RingSelection => "Ring Selection (U~B)",
         Tool::Move => "Move (E)",
         Tool::Scale => "Scale (T)",
         Tool::Rotate => "Rotate (R)",
         Tool::Extrude => "Extrude (D)",
         Tool::Inset => "Inset (I)",
+        Tool::LoopCut => "Loop/Path Cut (K~L)",
+        Tool::LineCut => "Line Cut (K~K)",
     }
 }
 

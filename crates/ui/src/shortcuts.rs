@@ -3,7 +3,10 @@
 //! | Key            | Action                     |
 //! |----------------|----------------------------|
 //! | `E` / `T` / `R`| Move / Scale / Rotate tool |
-//! | `9`            | Live Selection tool        |
+//! | `9` / `0`      | Live / Rectangle Selection tool |
+//! | `D` / `I`      | Extrude / Inset tool       |
+//! | `C`            | Make Editable              |
+//! | `Ctrl+⌫` / `Alt+⌫` | Dissolve / Melt        |
 //! | `H`            | Frame scene                |
 //! | `O`            | Frame selected objects     |
 //! | `Delete`/`⌫`   | Delete selection           |
@@ -15,11 +18,73 @@
 //! | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo            |
 //! | `F6` / `F7` / `F8` | Play backwards / stop / play forwards |
 //! | `F` / `G`      | Previous / next frame      |
+//!
+//! Two-key chords (press the first key, then the second) are listed in
+//! [`Chord::complete`]: `U~L` Loop Selection, `K~L` Loop/Path Cut, `M~M` Connect, …
 
-use egui::Key;
+use egui::{Event, Key};
 use grid4d_scene::Document;
 
 use crate::{EditorCommand, EditorState, Tool};
+
+/// The first key of a two-key shortcut, Cinema 4D style (`U~L`: U, then L).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Chord {
+    /// Selection commands.
+    U,
+    /// Knife tools.
+    K,
+    /// Modelling commands.
+    M,
+}
+
+/// What a completed chord does.
+enum Action {
+    Tool(Tool),
+    Command(EditorCommand),
+}
+
+impl Chord {
+    fn of(key: Key) -> Option<Self> {
+        match key {
+            Key::U => Some(Self::U),
+            Key::K => Some(Self::K),
+            Key::M => Some(Self::M),
+            _ => None,
+        }
+    }
+
+    /// Status-bar help while the chord waits for its second key.
+    #[must_use]
+    pub const fn hint(self) -> &'static str {
+        match self {
+            Self::U => "U…  L Loop · B Ring · W Connected · Y Grow · K Shrink · I Invert · Z Melt · Esc cancels",
+            Self::K => "K…  L Loop/Path Cut · K Line Cut · Esc cancels",
+            Self::M => "M…  M Connect · N Dissolve · T Extrude · W Inset · L Loop/Path Cut · K Line Cut · Esc cancels",
+        }
+    }
+
+    /// The chord's second key, from Maxon's shortcut list.
+    fn complete(self, key: Key) -> Option<Action> {
+        use Action::{Command, Tool as Pick};
+        Some(match (self, key) {
+            (Self::U, Key::L) => Pick(Tool::LoopSelection),
+            (Self::U, Key::B) => Pick(Tool::RingSelection),
+            (Self::U, Key::W) => Command(EditorCommand::SelectConnected),
+            (Self::U, Key::Y) => Command(EditorCommand::GrowSelection),
+            (Self::U, Key::K) => Command(EditorCommand::ShrinkSelection),
+            (Self::U, Key::I) => Command(EditorCommand::InvertSelection),
+            (Self::U, Key::Z) => Command(EditorCommand::MeltSelected),
+            (Self::K | Self::M, Key::L) => Pick(Tool::LoopCut),
+            (Self::K | Self::M, Key::K) => Pick(Tool::LineCut),
+            (Self::M, Key::M) => Command(EditorCommand::ConnectSelected),
+            (Self::M, Key::N) => Command(EditorCommand::DissolveSelected),
+            (Self::M, Key::T) => Pick(Tool::Extrude),
+            (Self::M, Key::W) => Pick(Tool::Inset),
+            _ => return None,
+        })
+    }
+}
 
 /// Handles global shortcuts. Ignored while a text field has keyboard focus
 /// (text fields have their own undo).
@@ -31,12 +96,50 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         let plain = i.modifiers.is_none();
         let time = &mut doc.time;
 
+        // Chords first: a pending first key takes the next plain key (any other
+        // key, Esc included, just cancels it); U, K or M start one.
+        let mut chorded = false;
+        for event in &i.events {
+            let Event::Key {
+                key,
+                pressed: true,
+                repeat: false,
+                modifiers,
+                ..
+            } = event
+            else {
+                continue;
+            };
+            if let Some(chord) = editor.chord.take() {
+                chorded = true;
+                if modifiers.is_none() {
+                    match chord.complete(*key) {
+                        Some(Action::Tool(tool)) => editor.tool = tool,
+                        Some(Action::Command(command)) => editor.commands.push(command),
+                        None => {}
+                    }
+                }
+            } else if modifiers.is_none()
+                && let Some(chord) = Chord::of(*key)
+            {
+                editor.chord = Some(chord);
+                chorded = true;
+            }
+        }
+        if i.pointer.any_pressed() {
+            editor.chord = None;
+        }
+        if chorded {
+            return;
+        }
+
         if plain {
             for (key, tool) in [
                 (Key::E, Tool::Move),
                 (Key::T, Tool::Scale),
                 (Key::R, Tool::Rotate),
                 (Key::Num9, Tool::LiveSelection),
+                (Key::Num0, Tool::RectangleSelection),
                 (Key::D, Tool::Extrude),
                 (Key::I, Tool::Inset),
             ] {
@@ -73,6 +176,13 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                 time.stop();
                 time.step(1);
             }
+        }
+        let backspace = i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete);
+        if backspace && i.modifiers.command && !i.modifiers.alt && !i.modifiers.shift {
+            editor.commands.push(EditorCommand::DissolveSelected);
+        }
+        if backspace && i.modifiers.alt && !i.modifiers.command && !i.modifiers.shift {
+            editor.commands.push(EditorCommand::MeltSelected);
         }
         if i.modifiers.command && i.key_pressed(Key::A) {
             editor.commands.push(if i.modifiers.shift {
@@ -192,6 +302,83 @@ mod tests {
                 .drop_without_applying_deltas();
             assert_eq!(editor.tool, tool);
         }
+    }
+
+    fn keys(sequence: &[(Key, Modifiers)]) -> (EditorState, Vec<EditorCommand>) {
+        let ctx = egui::Context::default();
+        let (mut doc, mut editor) = (Document::default(), EditorState::default());
+        for &(key, modifiers) in sequence {
+            let input = RawInput {
+                events: vec![
+                    Event::ModifiersChanged(modifiers),
+                    Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    },
+                    // Released again, as real keys are (a key still down repeats).
+                    Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: false,
+                        repeat: false,
+                        modifiers,
+                    },
+                ],
+                ..RawInput::default()
+            };
+            ctx.run_ui(input, |ui| handle(ui.ctx(), &mut doc, &mut editor))
+                .drop_without_applying_deltas();
+        }
+        let commands = editor.commands.pending().to_vec();
+        (editor, commands)
+    }
+
+    #[test]
+    fn chords_follow_maxons_list() {
+        let none = Modifiers::NONE;
+        let (editor, _) = keys(&[(Key::U, none)]);
+        assert_eq!(editor.chord, Some(Chord::U), "U waits for the second key");
+        let (editor, commands) = keys(&[(Key::U, none), (Key::L, none)]);
+        assert_eq!(
+            (editor.tool, editor.chord, commands.len()),
+            (Tool::LoopSelection, None, 0)
+        );
+        assert_eq!(keys(&[(Key::K, none), (Key::K, none)]).0.tool, Tool::LineCut);
+        assert_eq!(keys(&[(Key::M, none), (Key::L, none)]).0.tool, Tool::LoopCut);
+        assert_eq!(
+            keys(&[(Key::M, none), (Key::M, none)]).1,
+            [EditorCommand::ConnectSelected]
+        );
+        assert_eq!(
+            keys(&[(Key::M, none), (Key::N, none)]).1,
+            [EditorCommand::DissolveSelected]
+        );
+        assert_eq!(keys(&[(Key::U, none), (Key::Z, none)]).1, [EditorCommand::MeltSelected]);
+        // An unbound second key does nothing, not even its own shortcut.
+        let (editor, commands) = keys(&[(Key::U, none), (Key::E, none)]);
+        assert_eq!((editor.tool, editor.chord, commands.len()), (Tool::Move, None, 0));
+        let (editor, _) = keys(&[(Key::U, none), (Key::Escape, none), (Key::T, none)]);
+        assert_eq!(editor.tool, Tool::Scale, "Esc cancels the chord, then T works again");
+    }
+
+    #[test]
+    fn single_keys_for_rectangle_selection_dissolve_and_melt() {
+        assert_eq!(keys(&[(Key::Num0, Modifiers::NONE)]).0.tool, Tool::RectangleSelection);
+        assert_eq!(
+            keys(&[(Key::Backspace, Modifiers::COMMAND)]).1,
+            [EditorCommand::DissolveSelected]
+        );
+        assert_eq!(
+            keys(&[(Key::Backspace, Modifiers::ALT)]).1,
+            [EditorCommand::MeltSelected]
+        );
+        assert_eq!(
+            keys(&[(Key::Backspace, Modifiers::NONE)]).1,
+            [EditorCommand::DeleteSelected]
+        );
     }
 
     #[test]

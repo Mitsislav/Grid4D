@@ -25,6 +25,10 @@ pub enum Tool {
     Extrude,
     /// Mesh ▸ Inset (I), once called Extrude Inner: drag to inset polygons.
     Inset,
+    /// Mesh ▸ Loop/Path Cut (K~L): hover an edge to preview the loop, click to cut.
+    LoopCut,
+    /// Mesh ▸ Line Cut (K~K), the knife: drag a line across the object.
+    LineCut,
 }
 
 impl Tool {
@@ -51,15 +55,22 @@ impl Tool {
             Self::Rotate => "Rotate",
             Self::Extrude => "Extrude",
             Self::Inset => "Inset",
+            Self::LoopCut => "Loop/Path Cut",
+            Self::LineCut => "Line Cut",
         }
     }
 
-    /// Cinema 4D keyboard shortcut; empty until verified against Maxon's docs.
+    /// Cinema 4D keyboard shortcut (verified against Maxon's shortcut list); `U~L`
+    /// is a chord: U, then L.
     #[must_use]
     pub const fn shortcut(self) -> &'static str {
         match self {
             Self::LiveSelection => "9",
-            Self::RectangleSelection | Self::LoopSelection | Self::RingSelection => "",
+            Self::RectangleSelection => "0",
+            Self::LoopSelection => "U~L",
+            Self::RingSelection => "U~B",
+            Self::LoopCut => "K~L",
+            Self::LineCut => "K~K",
             Self::Move => "E",
             Self::Scale => "T",
             Self::Rotate => "R",
@@ -83,6 +94,8 @@ impl Tool {
             Self::Rotate => "Rotate: drag a ring to rotate around its axis · Alt+drag to navigate",
             Self::Extrude => "Extrude works on the polygons or border edges of a polygon object",
             Self::Inset => "Inset works on the polygons of a polygon object (Polygons mode)",
+            Self::LoopCut => "Loop/Path Cut: in a component mode, hover an edge of a polygon object and click to cut",
+            Self::LineCut => "Line Cut: in a component mode, drag a line across a polygon object",
         }
     }
 
@@ -106,10 +119,16 @@ impl Tool {
         matches!(self, Self::Extrude | Self::Inset)
     }
 
+    /// The cutting tools: Loop/Path Cut (click) and Line Cut (drag).
+    #[must_use]
+    pub const fn is_cut_tool(self) -> bool {
+        matches!(self, Self::LoopCut | Self::LineCut)
+    }
+
     /// The tool's options are worth showing in the Attribute Manager as it is picked.
     #[must_use]
     pub const fn shows_options(self) -> bool {
-        self.is_selection_tool() || self.is_mesh_tool()
+        self.is_selection_tool() || self.is_mesh_tool() || self.is_cut_tool()
     }
 }
 
@@ -146,6 +165,45 @@ pub struct ModelingSettings {
     /// Extrude in Edges mode: tilt of the new polygons around their edge.
     pub edge_rotation: f32,
     pub inset: InsetOptions,
+    pub loop_cut: LoopCutSettings,
+    pub line_cut: LineCutSettings,
+}
+
+/// Loop/Path Cut options.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LoopCutSettings {
+    /// Where a single cut crosses the edge, `0..1` from its reference end (the click sets it).
+    pub offset: f32,
+    /// Cuts, evenly spaced when more than one.
+    pub cuts: u32,
+    /// The new edges become the edge selection.
+    pub select_cuts: bool,
+}
+
+/// Line Cut options.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[expect(clippy::struct_excessive_bools, reason = "independent options of the reference tool")]
+pub struct LineCutSettings {
+    pub visible_only: bool,
+    pub infinite: bool,
+    /// Split the polygons too (else only points on the cut edges).
+    pub connect: bool,
+    pub select_cuts: bool,
+}
+
+impl LoopCutSettings {
+    /// Fractions along the edge for a cut at `offset`: the offset itself for one
+    /// cut, evenly spaced otherwise.
+    #[must_use]
+    pub fn fractions(&self, offset: f32) -> Vec<f32> {
+        if self.cuts <= 1 {
+            return vec![offset.clamp(0.01, 0.99)];
+        }
+        let n = f32::from(u16::try_from(self.cuts).unwrap_or(u16::MAX));
+        (1..=self.cuts)
+            .map(|k| f32::from(u16::try_from(k).unwrap_or(u16::MAX)) / (n + 1.0))
+            .collect()
+    }
 }
 
 impl Default for ModelingSettings {
@@ -168,6 +226,17 @@ impl Default for ModelingSettings {
                 create_ngons: false,
                 preserve_groups: true,
                 max_angle,
+            },
+            loop_cut: LoopCutSettings {
+                offset: 0.5,
+                cuts: 1,
+                select_cuts: true,
+            },
+            line_cut: LineCutSettings {
+                visible_only: true,
+                infinite: false,
+                connect: true,
+                select_cuts: true,
             },
         }
     }
@@ -337,6 +406,8 @@ pub struct EditorState {
     pub selection_settings: SelectionSettings,
     pub transform_settings: TransformSettings,
     pub modeling_settings: ModelingSettings,
+    /// The first key of a two-key shortcut, waiting for the second (`U`, then `L`).
+    pub chord: Option<crate::shortcuts::Chord>,
     /// X / Y / Z axis buttons. `true` = the axis is enabled (C4D semantics).
     pub axes: [bool; 3],
     /// World (`true`) or object (`false`) coordinate system for the gizmo.
@@ -364,6 +435,7 @@ impl Default for EditorState {
             selection_settings: SelectionSettings::default(),
             transform_settings: TransformSettings::default(),
             modeling_settings: ModelingSettings::default(),
+            chord: None,
             axes: [true; 3],
             world_coordinates: false,
             snapping: false,
