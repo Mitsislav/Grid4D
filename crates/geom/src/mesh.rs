@@ -152,6 +152,13 @@ impl PolyMesh {
         &mut self.points
     }
 
+    /// Points corner `corner` at `point`. Crate-internal: the modelling operations
+    /// swap a face's point for a new copy, which keeps every face's points distinct.
+    pub(crate) fn set_corner_point(&mut self, corner: usize, point: u32) {
+        debug_assert!(us(point) < self.points.len(), "point {point} out of range");
+        self.face_points[corner] = point;
+    }
+
     #[must_use]
     pub fn point_count(&self) -> usize {
         self.points.len()
@@ -227,6 +234,26 @@ impl PolyMesh {
         let corners = self.face(face);
         let sum: Vec3 = corners.iter().map(|&p| self.points[us(p)]).sum();
         sum / f32::from(u16::try_from(corners.len()).unwrap_or(u16::MAX).max(1))
+    }
+
+    /// The same points with only the faces `keep` accepts, in their order (UVs
+    /// follow their corners). Point indices stay valid; unused points remain.
+    #[must_use]
+    pub fn with_faces_where(&self, keep: impl Fn(usize) -> bool) -> Self {
+        let mut mesh = Self {
+            points: self.points.clone(),
+            uvs: self.uvs.as_ref().map(|_| Vec::new()),
+            ..Self::new()
+        };
+        for face in (0..self.face_count()).filter(|&f| keep(f)) {
+            let range = self.corner_range(face);
+            mesh.face_points.extend_from_slice(&self.face_points[range.clone()]);
+            mesh.face_starts.push(u32_index(mesh.face_points.len()));
+            if let (Some(kept), Some(uvs)) = (&mut mesh.uvs, &self.uvs) {
+                kept.extend_from_slice(&uvs[range]);
+            }
+        }
+        mesh
     }
 
     /// Axis-aligned bounds of all points, as `(min, max)`; `None` without points.
@@ -307,6 +334,22 @@ mod tests {
         assert!((l.face_area(0) - 3.0).abs() < 1e-5);
         assert!(l.face_normal(0).abs_diff_eq(Vec3::Z, 1e-6));
         assert_eq!(cube.bounds(), Some((Vec3::splat(-1.0), Vec3::splat(1.0))));
+    }
+
+    #[test]
+    fn keeping_some_faces_keeps_points_and_uvs() {
+        let mut mesh = shapes::grid(2, 1);
+        let uvs: Vec<Vec2> = (0..mesh.corner_count())
+            .map(|c| Vec2::splat(f32::from(u16::try_from(c).unwrap())))
+            .collect();
+        mesh.set_uvs(Some(uvs)).unwrap();
+        let kept = mesh.with_faces_where(|f| f == 1);
+        assert_eq!(kept.points(), mesh.points(), "indices stay valid");
+        assert_eq!(kept.face_count(), 1);
+        assert_eq!(kept.face(0), mesh.face(1));
+        assert_eq!(kept.uvs().unwrap(), &mesh.uvs().unwrap()[mesh.corner_range(1)]);
+        assert_eq!(mesh.with_faces_where(|_| true), mesh);
+        assert_eq!(mesh.with_faces_where(|_| false).face_count(), 0);
     }
 
     #[test]

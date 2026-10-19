@@ -3,7 +3,7 @@
 //! Polygon geometry for Grid4D: n-gon meshes ([`PolyMesh`]), their triangulation
 //! for the GPU ([`Triangulator`] → [`TriMesh`]), vertex normals ([`Smoothing`]),
 //! adjacency ([`Topology`]), ray casting ([`Bvh`]) and component selections
-//! ([`ComponentSet`], [`selection::convert`]).
+//! ([`ComponentSet`], [`selection::convert`]) and modelling operations ([`ops`]).
 //!
 //! ## Architecture rule
 //!
@@ -23,6 +23,7 @@ mod bvh;
 pub mod loops;
 mod mesh;
 mod normals;
+pub mod ops;
 pub mod primitives;
 pub mod selection;
 mod topology;

@@ -156,14 +156,18 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 }
             });
             ui.separator();
-            for name in [
-                "Extrude",
-                "Inner Extrude",
-                "Bevel",
-                "Knife",
-                "Loop/Path Cut",
-                "Subdivide",
-            ] {
+            let polygon_object = crate::commands::component_target(doc, editor).is_some();
+            for tool in [Tool::Extrude, Tool::Inset] {
+                let item = ui
+                    .add_enabled(polygon_object, Button::new(tool.label()).shortcut_text(tool.shortcut()))
+                    .on_hover_text("Then drag left or right in the viewport, or Apply in the Attribute Manager")
+                    .on_disabled_hover_text(tool.hint());
+                if item.clicked() {
+                    editor.tool = tool;
+                    ui.close();
+                }
+            }
+            for name in ["Bevel", "Knife", "Loop/Path Cut", "Subdivide"] {
                 planned(ui, name, "");
             }
         });

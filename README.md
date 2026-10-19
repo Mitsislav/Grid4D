@@ -36,7 +36,11 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
   preview under the cursor; Select ▸ Invert, Select Connected, Grow / Shrink, Hide
   Selected / Unselected, Unhide All; double-click an edge for its loop or a polygon for
   its connected part. Options (visible only, tolerant, stop at …) in the Attribute
-  Manager's Tool mode.
+  Manager's Tool mode. Hidden polygons disappear from the viewport until Unhide All.
+- **Modelling tools**: Extrude (`D`) for polygons and border edges, Inset (`I`) for
+  polygons — drag left/right in the viewport (Esc cancels) or set the options and
+  *Apply* in the Attribute Manager; Preserve Groups, Maximum Angle, Subdivision,
+  N-gons, Caps. Each operation is one undo step.
 - **wgpu viewport**: renders into its own offscreen target (4× MSAA, depth) shown as
   an image; generated meshes cached per shape and drawn instanced, Phong-angle
   smoothing, anti-aliased adaptive grid, orange selection rim, axis triad and

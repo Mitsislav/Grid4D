@@ -80,6 +80,10 @@ pub enum EditorCommand {
     /// Turns the selected primitives into polygon objects that look the same
     /// (C4D's "Make Editable", `C`); other objects are left alone.
     MakeEditable,
+    /// Runs the current modelling tool (Extrude, Inset) once with its options on
+    /// the active polygon object's selection in the current mode (its Apply
+    /// button). One undo step if anything changed.
+    ApplyMeshTool,
     /// A click, frame or loop in a component mode on polygon object `node`:
     /// `hits` are the picked points, unique edges or polygons — none for empty
     /// space, which clears the selection on a plain click. One undo step if
@@ -233,6 +237,25 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 })
                 .collect();
             commit(doc, editor, "Make Editable", edits, |_, _| {});
+        }
+        EditorCommand::ApplyMeshTool => {
+            let tool = editor.tool;
+            let mut settings = editor.modeling_settings;
+            let offset = crate::modeling::offset_mut(tool, &mut settings).map_or(0.0, |o| *o);
+            if let Some((id, component)) = component_target(doc, editor)
+                && let Some(data) = doc
+                    .scene
+                    .get(id)
+                    .and_then(|n| crate::modeling::apply(&n.data, tool, component, &settings, offset))
+            {
+                commit(
+                    doc,
+                    editor,
+                    tool.label(),
+                    vec![SceneEdit::SetData { id, data }],
+                    |_, _| {},
+                );
+            }
         }
         EditorCommand::Select { id, mode } => {
             if doc.scene.contains(id) {
@@ -684,6 +707,34 @@ mod tests {
             doc.scene.get(second).unwrap().data.kind,
             ObjectKindTag::Cube.default_kind()
         );
+    }
+
+    #[test]
+    fn apply_mesh_tool_is_one_undo_step_in_a_component_mode() {
+        let (mut doc, mut editor, mut vp) = (Document::with_demo_scene(), EditorState::default(), viewport());
+        let cube = id_of(&doc, "Cube");
+        editor.selection.set_single(cube);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let faces = |doc: &Document| match &doc.scene.get(cube).unwrap().data.kind {
+            ObjectKind::Polygon { mesh, .. } => mesh.mesh().face_count(),
+            _ => 0,
+        };
+        editor.tool = crate::Tool::Extrude;
+        let steps = editor.history.undo_len();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ApplyMeshTool]);
+        assert_eq!(
+            (faces(&doc), editor.history.undo_len()),
+            (6, steps),
+            "Model mode: nothing"
+        );
+
+        editor.mode = EditMode::Polygons;
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ApplyMeshTool]);
+        assert_eq!(faces(&doc), 6 + 6 * 4, "every face is its own piece at 90°");
+        assert_eq!(editor.history.undo_label(), Some("Extrude"));
+        assert_eq!(editor.history.undo_len(), steps + 1);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(faces(&doc), 6);
     }
 
     #[test]

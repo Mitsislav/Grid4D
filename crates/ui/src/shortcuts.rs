@@ -37,6 +37,8 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                 (Key::T, Tool::Scale),
                 (Key::R, Tool::Rotate),
                 (Key::Num9, Tool::LiveSelection),
+                (Key::D, Tool::Extrude),
+                (Key::I, Tool::Inset),
             ] {
                 if i.key_pressed(key) {
                     editor.tool = tool;
@@ -169,6 +171,27 @@ mod tests {
             press(Key::C, Modifiers::COMMAND, false).is_empty(),
             "Ctrl+C is not Make Editable"
         );
+    }
+
+    #[test]
+    fn d_and_i_pick_extrude_and_inset() {
+        for (key, tool) in [(Key::D, Tool::Extrude), (Key::I, Tool::Inset)] {
+            let ctx = egui::Context::default();
+            let (mut doc, mut editor) = (Document::default(), EditorState::default());
+            let input = RawInput {
+                events: vec![Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                }],
+                ..RawInput::default()
+            };
+            ctx.run_ui(input, |ui| handle(ui.ctx(), &mut doc, &mut editor))
+                .drop_without_applying_deltas();
+            assert_eq!(editor.tool, tool);
+        }
     }
 
     #[test]

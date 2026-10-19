@@ -21,6 +21,7 @@ pub mod file;
 pub mod history;
 pub mod icons;
 mod live_edit;
+mod modeling;
 pub mod panels;
 pub mod recent;
 pub mod shortcuts;
@@ -29,7 +30,7 @@ mod widgets;
 pub mod window;
 
 pub use commands::{CommandQueue, EditorCommand, SelectMode};
-pub use editor::{EditMode, EditorState, Selection, SelectionSettings, Tool, TransformSettings};
+pub use editor::{EditMode, EditorState, ModelingSettings, Selection, SelectionSettings, Tool, TransformSettings};
 pub use file::{DocumentFile, FileAction, FileDialogs, NativeDialogs, UnsavedChoice};
 pub use history::{History, UndoGroup};
 pub use panels::{AttributesPanel, OutlinerPanel, TimelinePanel, ViewportPanel};

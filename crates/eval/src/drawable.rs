@@ -15,6 +15,9 @@ pub struct Drawable {
     pub scale: Vec3,
     pub color: [f32; 3],
     pub unlit: bool,
+    /// A viewport marker (camera, light) rather than geometry: not drawn while the
+    /// eye is inside it, so a camera created at the view does not block the view.
+    pub marker: bool,
 }
 
 /// The unit mesh, scale and colour for an object; `None` for objects without
@@ -27,6 +30,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
             scale,
             color,
             unlit: false,
+            marker: false,
         })
     };
     match *kind {
@@ -141,12 +145,19 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
                 Vec3::splat(r),
             )
         }
-        ObjectKind::Camera { .. } => shaded(MeshKey::Cube { segments: [1, 1, 1] }, Vec3::splat(CAMERA_MARKER_SIZE)),
+        ObjectKind::Camera { .. } => Some(Drawable {
+            key: MeshKey::Cube { segments: [1, 1, 1] },
+            scale: Vec3::splat(CAMERA_MARKER_SIZE),
+            color,
+            unlit: false,
+            marker: true,
+        }),
         ObjectKind::Light { color: light, .. } => Some(Drawable {
             key: MeshKey::Sphere { segments: 24 },
             scale: Vec3::splat(LIGHT_MARKER_RADIUS),
             color: light,
             unlit: true,
+            marker: true,
         }),
         ObjectKind::Polygon { ref mesh, .. } => {
             if mesh.mesh().face_count() == 0 {

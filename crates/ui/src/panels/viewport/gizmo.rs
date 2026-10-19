@@ -182,7 +182,12 @@ impl GizmoGeometry {
                         );
                     }
                 }
-                Tool::LiveSelection | Tool::RectangleSelection | Tool::LoopSelection | Tool::RingSelection => {}
+                Tool::LiveSelection
+                | Tool::RectangleSelection
+                | Tool::LoopSelection
+                | Tool::RingSelection
+                | Tool::Extrude
+                | Tool::Inset => {}
             }
         }
         painter.circle_filled(self.origin_px, 3.5, p::TEXT_STRONG);
@@ -248,9 +253,13 @@ impl PointEdit {
                 around(Mat4::from_mat3(m))
             }
             Tool::Rotate => around(Mat4::from_quat(Quat::from_axis_angle(axis, self.angle))),
-            Tool::Move | Tool::LiveSelection | Tool::RectangleSelection | Tool::LoopSelection | Tool::RingSelection => {
-                Mat4::from_translation(self.moved)
-            }
+            Tool::Move
+            | Tool::LiveSelection
+            | Tool::RectangleSelection
+            | Tool::LoopSelection
+            | Tool::RingSelection
+            | Tool::Extrude
+            | Tool::Inset => Mat4::from_translation(self.moved),
         }
     }
 
@@ -458,7 +467,12 @@ fn apply_component_drag(geo: &GizmoGeometry, drag: &mut Drag, pointer: Pos2, sce
                 edit.angle += angle;
             }
         }
-        Tool::LiveSelection | Tool::RectangleSelection | Tool::LoopSelection | Tool::RingSelection => return,
+        Tool::LiveSelection
+        | Tool::RectangleSelection
+        | Tool::LoopSelection
+        | Tool::RingSelection
+        | Tool::Extrude
+        | Tool::Inset => return,
     }
     edit.apply(edit.delta(geo.tool, geo.axes[axis]), scene, drag.node);
 }
@@ -490,7 +504,12 @@ fn apply_drag(geo: &GizmoGeometry, drag: &Drag, pointer: Pos2, scene: &mut Scene
             let local = parent_rotation.inverse() * world_delta * parent_rotation * t.rotation_quat();
             t.set_rotation_quat(local);
         }
-        Tool::LiveSelection | Tool::RectangleSelection | Tool::LoopSelection | Tool::RingSelection => {}
+        Tool::LiveSelection
+        | Tool::RectangleSelection
+        | Tool::LoopSelection
+        | Tool::RingSelection
+        | Tool::Extrude
+        | Tool::Inset => {}
     }
 }
 

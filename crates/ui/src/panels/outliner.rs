@@ -508,6 +508,67 @@ mod tests {
     }
 
     #[test]
+    fn double_clicking_a_row_starts_renaming_it() {
+        use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
+
+        let mut doc = Document::with_demo_scene();
+        let mut editor = EditorState::default();
+        let mut panel = super::OutlinerPanel::default();
+        let mut viewport = ViewportPanel::new(None);
+        let sphere = doc.scene.roots()[1];
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut frame =
+            |events: Vec<Event>, doc: &mut Document, editor: &mut EditorState, panel: &mut super::OutlinerPanel| {
+                time += 1.0 / 60.0;
+                let input = RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 500.0))),
+                    time: Some(time),
+                    events,
+                    ..RawInput::default()
+                };
+                ctx.run_ui(input, |ui| {
+                    egui::CentralPanel::no_frame().show(ui, |ui| panel.show(ui, doc, editor));
+                })
+                .drop_without_applying_deltas();
+                commands::apply_pending(doc, editor, &mut viewport);
+            };
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        frame(vec![], &mut doc, &mut editor, &mut panel);
+        // Find the Sphere's row by clicking down the list (below the tabs and the menu).
+        let row = (0..100)
+            .map(|i| pos2(120.0, 60.0 + 4.0 * f32::from(u8::try_from(i).unwrap())))
+            .find(|&at| {
+                frame(vec![Event::PointerMoved(at)], &mut doc, &mut editor, &mut panel);
+                frame(vec![button(at, true)], &mut doc, &mut editor, &mut panel);
+                frame(vec![button(at, false)], &mut doc, &mut editor, &mut panel);
+                for _ in 0..30 {
+                    frame(vec![], &mut doc, &mut editor, &mut panel); // past the double-click delay
+                }
+                editor.selection.active() == Some(sphere)
+            })
+            .expect("a row selects the Sphere");
+        assert_eq!(panel.renaming, None);
+        for _ in 0..2 {
+            frame(
+                vec![Event::PointerMoved(row), button(row, true)],
+                &mut doc,
+                &mut editor,
+                &mut panel,
+            );
+            frame(vec![button(row, false)], &mut doc, &mut editor, &mut panel);
+        }
+        frame(vec![], &mut doc, &mut editor, &mut panel);
+        assert_eq!(panel.renaming, Some(sphere));
+        assert_eq!(panel.rename_buffer, "Sphere");
+    }
+
+    #[test]
     fn search_is_case_insensitive() {
         assert!(contains_ignore_ascii_case("Cylinder.1", "cyl"));
         assert!(contains_ignore_ascii_case("Cube", ""));

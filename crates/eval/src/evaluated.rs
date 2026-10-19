@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use glam::Mat4;
+use grid4d_geom::BitSet;
 use grid4d_scene::{Aabb, Components, LIGHT_MARKER_RADIUS, MeshHandle, MeshId, NodeId, ObjectKind, Scene, WalkItem};
 
-use crate::{Drawable, drawable};
+use crate::{Drawable, MeshKey, drawable};
 
 /// How picking tests a ray against a node, in its object space.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -14,7 +15,7 @@ pub enum PickShape {
     Bounds,
     /// An exact sphere of this radius around the origin.
     Sphere { radius: f32 },
-    /// A polygon object's mesh, exactly (see [`EvaluatedScene::mesh`]).
+    /// A polygon object's shown mesh, exactly (see [`EvaluatedScene::mesh`]).
     Mesh(MeshId),
 }
 
@@ -41,10 +42,14 @@ pub struct EvaluatedNode {
 #[derive(Debug, Default)]
 pub struct EvaluatedScene {
     nodes: Vec<EvaluatedNode>,
-    /// The meshes of the visible polygon objects, for drawing and picking.
+    /// The meshes of the visible polygon objects as shown (hidden polygons left
+    /// out), for drawing and picking.
     meshes: HashMap<MeshId, MeshHandle>,
-    /// Selected/hidden components of the visible polygon objects (component modes).
-    components: HashMap<NodeId, Components>,
+    /// The visible polygon objects' own meshes and components (component modes).
+    polygons: HashMap<NodeId, (MeshHandle, Components)>,
+    /// Shown meshes of polygon objects with hidden polygons, kept across updates
+    /// so one is built only when the mesh or its hidden polygons change.
+    shown: HashMap<NodeId, Shown>,
     walk_stack: Vec<WalkItem>,
     /// [`Scene::revision`] of the scene `nodes` were built from.
     revision: Option<u64>,
@@ -67,31 +72,42 @@ impl EvaluatedScene {
         }
         self.nodes.clear();
         self.meshes.clear();
-        self.components.clear();
-        let (nodes, meshes, components) = (&mut self.nodes, &mut self.meshes, &mut self.components);
+        self.polygons.clear();
+        let (nodes, meshes, polygons, shown) = (&mut self.nodes, &mut self.meshes, &mut self.polygons, &mut self.shown);
         scene.walk(&mut self.walk_stack, |id, node, world, depth| {
             let data = &node.data;
             if !data.visible_in_editor || !data.enabled {
                 return false;
             }
-            if let ObjectKind::Polygon {
-                mesh,
-                components: flags,
-            } = &data.kind
-            {
+            let mut drawable = drawable(&data.kind, data.display_color);
+            let mut pick = pick_shape(&data.kind);
+            if let ObjectKind::Polygon { mesh, components } = &data.kind {
+                polygons.insert(id, (mesh.clone(), components.clone()));
+                let hidden = &components.hidden().polygons;
+                let mesh = if hidden.is_empty() {
+                    mesh
+                } else {
+                    &shown_mesh(shown, id, mesh, hidden).mesh
+                };
                 meshes.insert(mesh.id(), mesh.clone());
-                components.insert(id, flags.clone());
+                pick = PickShape::Mesh(mesh.id());
+                drawable = drawable.filter(|_| mesh.mesh().face_count() > 0).map(|d| Drawable {
+                    key: MeshKey::Polygon(mesh.id()),
+                    ..d
+                });
             }
             nodes.push(EvaluatedNode {
                 id,
                 depth,
                 world: *world,
                 bounds: data.kind.local_bounds(),
-                drawable: drawable(&data.kind, data.display_color),
-                pick: pick_shape(&data.kind),
+                drawable,
+                pick,
             });
             true
         });
+        // Objects gone, hidden or with nothing hidden any more.
+        self.shown.retain(|_, entry| self.meshes.contains_key(&entry.mesh.id()));
         self.revision = Some(scene.revision());
         true
     }
@@ -109,15 +125,40 @@ impl EvaluatedScene {
         self.meshes.get(&id)
     }
 
-    /// A visible polygon object's node, mesh and components; `None` for anything
-    /// else (hidden, not a polygon object).
+    /// A visible polygon object's node, own mesh (hidden polygons included: the
+    /// indices components refer to) and components; `None` for anything else
+    /// (hidden, not a polygon object).
     #[must_use]
     pub fn polygon(&self, id: NodeId) -> Option<(&EvaluatedNode, &MeshHandle, &Components)> {
-        let components = self.components.get(&id)?;
+        let (mesh, components) = self.polygons.get(&id)?;
         let node = self.nodes.iter().find(|n| n.id == id)?;
-        let PickShape::Mesh(mesh) = node.pick else { return None };
-        Some((node, self.meshes.get(&mesh)?, components))
+        Some((node, mesh, components))
     }
+}
+
+/// A polygon object's mesh without its hidden polygons.
+#[derive(Debug)]
+struct Shown {
+    source: MeshId,
+    hidden: BitSet,
+    mesh: MeshHandle,
+}
+
+/// The cached shown mesh of `id`, rebuilt if its mesh or hidden polygons changed.
+fn shown_mesh<'a>(shown: &'a mut HashMap<NodeId, Shown>, id: NodeId, mesh: &MeshHandle, hidden: &BitSet) -> &'a Shown {
+    let build = || Shown {
+        source: mesh.id(),
+        hidden: hidden.clone(),
+        mesh: MeshHandle::new(mesh.mesh().with_faces_where(|f| !hidden.contains(f))),
+    };
+    shown
+        .entry(id)
+        .and_modify(|entry| {
+            if entry.source != mesh.id() || entry.hidden != *hidden {
+                *entry = build();
+            }
+        })
+        .or_insert_with(build)
 }
 
 fn pick_shape(kind: &ObjectKind) -> PickShape {
@@ -179,7 +220,8 @@ mod tests {
             (
                 e.nodes.capacity(),
                 e.meshes.capacity(),
-                e.components.capacity(),
+                e.polygons.capacity(),
+                e.shown.capacity(),
                 e.walk_stack.capacity(),
             )
         };
@@ -220,6 +262,66 @@ mod tests {
         eval.update(&doc.scene);
         assert_eq!(eval.mesh(mesh.id()), None, "hidden objects are not drawn or picked");
         assert!(eval.polygon(id).is_none());
+    }
+
+    #[test]
+    fn hidden_polygons_are_neither_drawn_nor_picked() {
+        let mut doc = Document::new("hidden");
+        let kind = polygon_cube();
+        let ObjectKind::Polygon { mesh, .. } = &kind else {
+            unreachable!()
+        };
+        let own = mesh.clone();
+        let id = doc.scene.insert(Node::new("Mesh", kind));
+        let hide = |doc: &mut Document, faces: &[usize]| {
+            let ObjectKind::Polygon { components, .. } = &mut doc.scene.get_mut(id).unwrap().data.kind else {
+                unreachable!()
+            };
+            let hidden = &mut components.make_mut().hidden.polygons;
+            hidden.clear();
+            for &f in faces {
+                hidden.insert(f);
+            }
+        };
+        let shown = |eval: &EvaluatedScene| {
+            let node = eval.nodes()[0];
+            let PickShape::Mesh(pick) = node.pick else {
+                panic!("{:?}", node.pick)
+            };
+            assert_eq!(
+                node.drawable.map(|d| d.key),
+                Some(MeshKey::Polygon(pick)),
+                "drawn as picked"
+            );
+            eval.mesh(pick).unwrap().clone()
+        };
+        let mut eval = EvaluatedScene::new();
+
+        hide(&mut doc, &[0, 2]);
+        eval.update(&doc.scene);
+        let first = shown(&eval);
+        assert_ne!(first.id(), own.id());
+        assert_eq!(first.mesh().face_count(), 4);
+        assert_eq!(first.mesh().face(0), own.mesh().face(1), "the other faces, in order");
+        let (_, mesh, _) = eval.polygon(id).unwrap();
+        assert_eq!(mesh.id(), own.id(), "components keep the object's own mesh");
+
+        doc.scene.get_mut(id).unwrap().data.transform.position.x = 5.0;
+        eval.update(&doc.scene);
+        assert_eq!(
+            shown(&eval).id(),
+            first.id(),
+            "built again only when the hidden set changes"
+        );
+
+        hide(&mut doc, &[0, 1, 2, 3, 4, 5]);
+        eval.update(&doc.scene);
+        assert_eq!(eval.nodes()[0].drawable, None, "nothing left to draw");
+
+        hide(&mut doc, &[]);
+        eval.update(&doc.scene);
+        assert_eq!(shown(&eval).id(), own.id());
+        assert!(eval.shown.is_empty(), "the shown mesh is dropped");
     }
 
     #[test]

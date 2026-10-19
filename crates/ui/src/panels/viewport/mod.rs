@@ -3,6 +3,7 @@
 
 mod gizmo;
 mod gpu_view;
+mod mesh_tools;
 mod overlay;
 mod select_tools;
 
@@ -147,7 +148,9 @@ impl ViewportPanel {
         };
         if !navigating && !gizmo_owns_pointer {
             self.evaluated.update(&doc.scene);
-            if !self.selection_tools(ui, &response, rect, doc, editor) {
+            if !self.mesh_tools(ui, &response, rect, doc, editor)
+                && !self.selection_tools(ui, &response, rect, doc, editor)
+            {
                 self.pick_on_click(ui, &response, rect, editor);
             }
         }
@@ -200,7 +203,7 @@ impl ViewportPanel {
         }
         match &self.gesture {
             Gesture::Frame { start, end } => overlay::marquee(&painter, Rect::from_two_pos(*start, *end)),
-            Gesture::None | Gesture::Stroke(_) | Gesture::Tweak { .. } | Gesture::Cancelled => {}
+            Gesture::None | Gesture::Stroke(_) | Gesture::Tweak { .. } | Gesture::MeshTool(_) | Gesture::Cancelled => {}
         }
         if target.is_some()
             && editor.tool == Tool::LiveSelection
@@ -257,7 +260,8 @@ impl ViewportPanel {
             }
             // The brush circle shows what Live Selection will paint.
             Tool::LiveSelection => {}
-            Tool::RectangleSelection | Tool::Move | Tool::Scale | Tool::Rotate => {
+            // Mesh tools: a click still selects, a drag runs the tool.
+            Tool::RectangleSelection | Tool::Move | Tool::Scale | Tool::Rotate | Tool::Extrude | Tool::Inset => {
                 let view = self.screen_view(rect);
                 let radius = metrics::COMPONENT_PICK_RADIUS;
                 self.hover
@@ -491,6 +495,25 @@ const fn component_hint(component: Component, tool: Tool, active: bool) -> &'sta
         }
         Tool::RingSelection => {
             return "Ring Selection: click to select the highlighted ring · Shift adds · Ctrl removes";
+        }
+        Tool::Extrude => {
+            return match component {
+                Component::Polygon => {
+                    "Extrude: drag left/right to extrude the selected polygons (all when none is) · click selects · Esc cancels"
+                }
+                Component::Edge => {
+                    "Extrude: drag left/right to extrude the selected border edges (all when none is) · click selects · Esc cancels"
+                }
+                Component::Point => "Extrude does not work on points yet: use Edges or Polygons mode",
+            };
+        }
+        Tool::Inset => {
+            return match component {
+                Component::Polygon => {
+                    "Inset: drag left/right to inset the selected polygons (all when none is) · click selects · Esc cancels"
+                }
+                Component::Point | Component::Edge => "Inset works in Polygons mode",
+            };
         }
         Tool::Move | Tool::Scale | Tool::Rotate => {}
     }
@@ -955,6 +978,78 @@ mod tests {
             "the selection is left alone"
         );
         assert_eq!(h.editor.history.undo_label(), Some("Move Points"));
+    }
+
+    #[test]
+    fn an_extrude_drag_is_one_undo_step_and_esc_cancels_one() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Polygons, Tool::Extrude);
+        let before = h.mesh(cube);
+        let top = (0..before.mesh().face_count())
+            .find(|&f| before.mesh().face_normal(f).abs_diff_eq(Vec3::Y, 1e-5))
+            .unwrap();
+        h.select(cube, Component::Polygon, vec![u32::try_from(top).unwrap()]);
+        let steps = h.editor.history.undo_len();
+        let centre = h.viewport.view_rect.center();
+
+        h.drag(centre, centre + vec2(60.0, 0.0));
+        let after = h.mesh(cube);
+        assert_eq!(after.mesh().face_count(), 6 + 4, "the top face extruded");
+        assert!(
+            after.mesh().face_center(top).y > before.mesh().face_center(top).y + 1.0,
+            "dragging right extrudes outwards"
+        );
+        assert_eq!(
+            h.selected(cube, Component::Polygon),
+            [top],
+            "the moved face stays selected"
+        );
+        assert_eq!(h.editor.history.undo_len(), steps + 1);
+        assert_eq!(h.editor.history.undo_label(), Some("Extrude"));
+        let offset = h.editor.modeling_settings.extrude.offset;
+        assert!(offset > 1.0, "the dragged offset is kept: {offset}");
+
+        // Esc mid-drag restores the mesh and records nothing.
+        let to = centre + vec2(40.0, 0.0);
+        h.frame(vec![Event::PointerMoved(centre)]);
+        h.frame(vec![Harness::button(centre, true)]);
+        h.frame(vec![Event::PointerMoved(to)]);
+        assert_ne!(h.mesh(cube).id(), after.id(), "live while dragging");
+        h.frame(vec![Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }]);
+        h.frame(vec![Harness::button(to, false)]);
+        h.frame(vec![]);
+        assert_eq!(h.mesh(cube).id(), after.id(), "Esc restores");
+        assert_eq!(h.editor.history.undo_len(), steps + 1);
+
+        h.editor.commands.push(EditorCommand::Undo);
+        h.frame(vec![]);
+        assert_eq!(h.mesh(cube).id(), before.id(), "undo brings the cube back");
+    }
+
+    #[test]
+    fn inset_needs_polygons_mode_and_a_click_still_selects() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Edges, Tool::Inset);
+        let before = h.mesh(cube);
+        let centre = h.viewport.view_rect.center();
+        h.drag(centre, centre + vec2(60.0, 0.0));
+        assert_eq!(h.mesh(cube).id(), before.id(), "Inset does nothing in Edges mode");
+
+        h.editor.mode = EditMode::Polygons;
+        h.frame(vec![]);
+        h.drag(centre, centre + vec2(30.0, 0.0));
+        assert_eq!(
+            h.mesh(cube).mesh().face_count(),
+            6 + 6 * 4,
+            "nothing selected: every polygon"
+        );
+        assert_eq!(h.editor.history.undo_label(), Some("Inset"));
     }
 
     #[test]

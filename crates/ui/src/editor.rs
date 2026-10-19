@@ -1,7 +1,11 @@
 //! Editor (session) state that is *not* part of the document: selection, the
 //! active tool, modes and transient UI flags.
 
-use grid4d_geom::{Component, loops::WalkOptions};
+use grid4d_geom::{
+    Component,
+    loops::WalkOptions,
+    ops::{ExtrudeOptions, InsetOptions},
+};
 use grid4d_scene::{NodeId, Scene};
 use slotmap::SecondaryMap;
 
@@ -17,10 +21,15 @@ pub enum Tool {
     Move,
     Scale,
     Rotate,
+    /// Mesh ▸ Extrude (D): drag to extrude polygons or border edges.
+    Extrude,
+    /// Mesh ▸ Inset (I), once called Extrude Inner: drag to inset polygons.
+    Inset,
 }
 
 impl Tool {
-    pub const ALL: [Self; 7] = [
+    /// The top toolbar's tools (the modelling tools live in the Mesh menu).
+    pub const TOOLBAR: [Self; 7] = [
         Self::LiveSelection,
         Self::RectangleSelection,
         Self::LoopSelection,
@@ -40,6 +49,8 @@ impl Tool {
             Self::Move => "Move",
             Self::Scale => "Scale",
             Self::Rotate => "Rotate",
+            Self::Extrude => "Extrude",
+            Self::Inset => "Inset",
         }
     }
 
@@ -52,6 +63,8 @@ impl Tool {
             Self::Move => "E",
             Self::Scale => "T",
             Self::Rotate => "R",
+            Self::Extrude => "D",
+            Self::Inset => "I",
         }
     }
 
@@ -68,6 +81,8 @@ impl Tool {
             Self::Move => "Move: drag an axis handle to move along it · Alt+drag to navigate",
             Self::Scale => "Scale: drag an axis handle to scale along it · Alt+drag to navigate",
             Self::Rotate => "Rotate: drag a ring to rotate around its axis · Alt+drag to navigate",
+            Self::Extrude => "Extrude works on the polygons or border edges of a polygon object",
+            Self::Inset => "Inset works on the polygons of a polygon object (Polygons mode)",
         }
     }
 
@@ -76,10 +91,25 @@ impl Tool {
         matches!(self, Self::Move | Self::Scale | Self::Rotate)
     }
 
-    /// The Select menu's tools (their options show in the Attribute Manager).
+    /// The Select menu's tools.
     #[must_use]
     pub const fn is_selection_tool(self) -> bool {
-        !self.has_gizmo()
+        matches!(
+            self,
+            Self::LiveSelection | Self::RectangleSelection | Self::LoopSelection | Self::RingSelection
+        )
+    }
+
+    /// The Mesh menu's modelling tools: drag in the viewport, or Apply.
+    #[must_use]
+    pub const fn is_mesh_tool(self) -> bool {
+        matches!(self, Self::Extrude | Self::Inset)
+    }
+
+    /// The tool's options are worth showing in the Attribute Manager as it is picked.
+    #[must_use]
+    pub const fn shows_options(self) -> bool {
+        self.is_selection_tool() || self.is_mesh_tool()
     }
 }
 
@@ -105,6 +135,42 @@ pub struct TransformSettings {
     /// Move tool, component modes: with nothing selected, dragging a component
     /// moves just that component and leaves the selection alone.
     pub tweak: bool,
+}
+
+/// Options of the modelling tools (Attribute Manager, Tool mode). Editor state.
+/// Angles in radians.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModelingSettings {
+    /// Extrude; its offset, subdivision and n-gon option also apply to edges.
+    pub extrude: ExtrudeOptions,
+    /// Extrude in Edges mode: tilt of the new polygons around their edge.
+    pub edge_rotation: f32,
+    pub inset: InsetOptions,
+}
+
+impl Default for ModelingSettings {
+    fn default() -> Self {
+        // The manual gives no defaults: these are ours (docs/reference/modeling-tools.md).
+        let max_angle = 89f32.to_radians();
+        Self {
+            extrude: ExtrudeOptions {
+                offset: 10.0,
+                subdivision: 0,
+                create_ngons: false,
+                create_caps: false,
+                preserve_groups: true,
+                max_angle,
+            },
+            edge_rotation: 0.0,
+            inset: InsetOptions {
+                offset: 10.0,
+                subdivision: 1,
+                create_ngons: false,
+                preserve_groups: true,
+                max_angle,
+            },
+        }
+    }
 }
 
 impl Default for SelectionSettings {
@@ -270,6 +336,7 @@ pub struct EditorState {
     pub mode: EditMode,
     pub selection_settings: SelectionSettings,
     pub transform_settings: TransformSettings,
+    pub modeling_settings: ModelingSettings,
     /// X / Y / Z axis buttons. `true` = the axis is enabled (C4D semantics).
     pub axes: [bool; 3],
     /// World (`true`) or object (`false`) coordinate system for the gizmo.
@@ -296,6 +363,7 @@ impl Default for EditorState {
             mode: EditMode::Model,
             selection_settings: SelectionSettings::default(),
             transform_settings: TransformSettings::default(),
+            modeling_settings: ModelingSettings::default(),
             axes: [true; 3],
             world_coordinates: false,
             snapping: false,

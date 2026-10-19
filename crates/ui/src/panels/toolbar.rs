@@ -24,7 +24,7 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
         history_button(ui, editor, HistoryStep::Redo);
         group_gap(ui);
 
-        for tool in Tool::ALL {
+        for tool in Tool::TOOLBAR {
             let style = IconStyle {
                 selected: editor.tool == tool,
                 ..IconStyle::default()
@@ -167,6 +167,8 @@ const fn tool_icon(tool: Tool) -> Icon {
         Tool::Move => Icon::Move,
         Tool::Scale => Icon::Scale,
         Tool::Rotate => Icon::Rotate,
+        // Not on the toolbar (Mesh menu, D / I); a plain arrow if ever shown.
+        Tool::Extrude | Tool::Inset => Icon::Move,
     }
 }
 
@@ -179,6 +181,8 @@ const fn tool_tooltip(tool: Tool) -> &'static str {
         Tool::Move => "Move (E)",
         Tool::Scale => "Scale (T)",
         Tool::Rotate => "Rotate (R)",
+        Tool::Extrude => "Extrude (D)",
+        Tool::Inset => "Inset (I)",
     }
 }
 

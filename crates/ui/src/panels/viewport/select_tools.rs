@@ -52,6 +52,8 @@ pub(super) enum Gesture {
         edit: PointEdit,
         last: Pos2,
     },
+    /// A modelling tool's drag (Extrude, Inset).
+    MeshTool(super::mesh_tools::MeshDrag),
     /// Esc cancelled the gesture: ignore the pointer until it is released.
     Cancelled,
 }

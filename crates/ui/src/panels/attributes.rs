@@ -68,7 +68,7 @@ impl AttributesPanel {
         // Like C4D: picking a selection tool shows its options, selecting objects shows them.
         if self.seen_tool != Some(editor.tool) {
             if self.seen_tool.is_some() {
-                self.view = if editor.tool.is_selection_tool() {
+                self.view = if editor.tool.shows_options() {
                     View::Tool
                 } else {
                     View::Objects
@@ -110,7 +110,7 @@ impl AttributesPanel {
             .show(ui, |ui| {
                 egui::Frame::new().inner_margin(Margin::symmetric(8, 6)).show(ui, |ui| {
                     match (self.view, editor.selection.active()) {
-                        (View::Tool, _) => tool_ui(ui, editor),
+                        (View::Tool, _) => tool_ui(ui, doc, editor),
                         (View::Objects, Some(id)) => {
                             self.node_ui(ui, doc, id, editor.selection.len(), &mut editor.commands);
                         }
@@ -414,7 +414,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
 }
 
 /// The active tool's options (editor state: no undo, not saved).
-fn tool_ui(ui: &mut Ui, editor: &mut EditorState) {
+fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
     let tool = editor.tool;
     ui.label(
         RichText::new(format!("{} [Tool]", tool.label()))
@@ -460,7 +460,71 @@ fn tool_ui(ui: &mut Ui, editor: &mut EditorState) {
                 ui.label(RichText::new("This tool has no options yet.").color(p::TEXT_DIM));
                 ui.end_row();
             }
+            Tool::Extrude => {
+                let m = &mut editor.modeling_settings;
+                offset_row(ui, "Offset", &mut m.extrude.offset);
+                count_row(ui, "Subdivision", &mut m.extrude.subdivision, 0);
+                check_row(ui, "Create N-gons", &mut m.extrude.create_ngons);
+                check_row(ui, "Create Caps", &mut m.extrude.create_caps);
+                check_row(ui, "Preserve Groups", &mut m.extrude.preserve_groups);
+                angle_row(ui, "Maximum Angle", &mut m.extrude.max_angle, 0.0..=180.0);
+                angle_row(ui, "Rotation (Edges)", &mut m.edge_rotation, -180.0..=180.0);
+            }
+            Tool::Inset => {
+                let m = &mut editor.modeling_settings;
+                offset_row(ui, "Offset", &mut m.inset.offset);
+                count_row(ui, "Subdivision", &mut m.inset.subdivision, 1);
+                check_row(ui, "Create N-gons", &mut m.inset.create_ngons);
+                check_row(ui, "Preserve Groups", &mut m.inset.preserve_groups);
+                angle_row(ui, "Maximum Angle", &mut m.inset.max_angle, 0.0..=180.0);
+            }
         });
+    if tool.is_mesh_tool() {
+        ui.add_space(6.0);
+        let target = crate::commands::component_target(doc, editor)
+            .is_some_and(|(_, component)| crate::modeling::works_in(tool, component));
+        if ui
+            .add_enabled(target, Button::new("Apply"))
+            .on_hover_text("Run the tool once with these options on the selection (or on everything)")
+            .on_disabled_hover_text(tool.hint())
+            .clicked()
+        {
+            editor.commands.push(EditorCommand::ApplyMeshTool);
+        }
+        ui.label(RichText::new("Or drag left/right in the viewport: every drag is a new operation").color(p::TEXT_DIM));
+    }
+}
+
+/// A length that may be negative (a tool's offset).
+fn offset_row(ui: &mut Ui, label: &str, value: &mut f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        DragValue::new(value).speed(0.5).suffix(" cm").max_decimals(2),
+    );
+    ui.end_row();
+}
+
+fn count_row(ui: &mut Ui, label: &str, value: &mut u32, min: u32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    ui.add_sized([FIELD_WIDTH, 19.0], DragValue::new(value).speed(0.05).range(min..=64));
+    ui.end_row();
+}
+
+/// An angle stored in radians, edited in degrees.
+fn angle_row(ui: &mut Ui, label: &str, radians: &mut f32, degrees: std::ops::RangeInclusive<f32>) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let mut value = radians.to_degrees();
+    if ui
+        .add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut value).speed(0.5).range(degrees).suffix("°"),
+        )
+        .changed()
+    {
+        *radians = value.to_radians();
+    }
+    ui.end_row();
 }
 
 fn check_row(ui: &mut Ui, label: &str, value: &mut bool) {

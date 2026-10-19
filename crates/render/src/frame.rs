@@ -118,6 +118,10 @@ impl FrameData {
         for node in scene.nodes() {
             let Some(draw) = node.drawable else { continue };
             let model = node.world * Mat4::from_scale(draw.scale);
+            // Unit marker meshes fit in the unit sphere.
+            if draw.marker && model.inverse().transform_point3(self.eye).length() <= 1.0 {
+                continue;
+            }
             let batches = &mut self.batches;
             let slot = *self.batch_index.entry(draw.key).or_insert_with(|| {
                 // A key's mesh never changes (an edited mesh has a new id), so the
@@ -325,6 +329,22 @@ mod tests {
         }
         frame.extract(&eval, |_| false);
         assert_eq!(frame.batches.len(), 1, "only the current mesh is kept");
+    }
+
+    #[test]
+    fn a_camera_marker_around_the_eye_is_not_drawn() {
+        let camera = OrbitCamera::default();
+        let mut doc = Document::new("cameras");
+        let kind = ObjectKindTag::Camera.default_kind();
+        doc.scene
+            .insert(Node::new("At the view", kind.clone()).with_position(camera.eye()));
+        doc.scene.insert(Node::new("Elsewhere", kind).with_position(Vec3::ZERO));
+        let mut frame = FrameData::new();
+        frame.set_camera(&camera, 1.5);
+        frame.extract(&evaluated(&doc), |_| false);
+        assert_eq!(frame.instance_count(), 1, "only the camera away from the eye is drawn");
+        let drawn = Mat4::from_cols_array_2d(&frame.batches().next().unwrap().2[0].model);
+        assert!(drawn.transform_point3(Vec3::ZERO).abs_diff_eq(Vec3::ZERO, 1e-4));
     }
 
     #[test]
