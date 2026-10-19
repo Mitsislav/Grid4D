@@ -346,11 +346,14 @@ impl ViewportRenderer {
             });
             offset = end;
         }
-        if self.frame.is_multiple_of(EVICTION_INTERVAL) {
-            let frame_now = self.frame;
-            self.meshes
-                .retain(|_, mesh| mesh.last_used + MESH_TTL_FRAMES > frame_now);
-        }
+        // Polygon meshes get a new key on every edit (each frame of a component
+        // drag): free them as soon as they are not drawn. Primitives linger a while.
+        let frame_now = self.frame;
+        let periodic = self.frame.is_multiple_of(EVICTION_INTERVAL);
+        self.meshes.retain(|key, mesh| match key {
+            MeshKey::Polygon(_) => mesh.last_used == frame_now,
+            _ => !periodic || mesh.last_used + MESH_TTL_FRAMES > frame_now,
+        });
         self.draw_grid = frame.show_grid;
         self.overlay.sync(device, queue, &frame.components);
     }

@@ -200,7 +200,7 @@ impl ViewportPanel {
         }
         match &self.gesture {
             Gesture::Frame { start, end } => overlay::marquee(&painter, Rect::from_two_pos(*start, *end)),
-            Gesture::None | Gesture::Stroke(_) | Gesture::Cancelled => {}
+            Gesture::None | Gesture::Stroke(_) | Gesture::Tweak { .. } | Gesture::Cancelled => {}
         }
         if target.is_some()
             && editor.tool == Tool::LiveSelection
@@ -496,11 +496,11 @@ const fn component_hint(component: Component, tool: Tool, active: bool) -> &'sta
     }
     match component {
         Component::Point => {
-            "Points: click to select · Shift adds · Ctrl removes · Shift/Ctrl+click a mode converts the selection"
+            "Points: drag the gizmo to transform the selection · click selects · Shift adds · Ctrl removes"
         }
-        Component::Edge => "Edges: click to select · Shift adds · Ctrl removes · double-click selects a loop",
+        Component::Edge => "Edges: drag the gizmo to transform the selection · click selects · double-click: loop",
         Component::Polygon => {
-            "Polygons: click to select · Shift adds · Ctrl removes · double-click selects the connected part"
+            "Polygons: drag the gizmo to transform the selection · click selects · double-click: connected part"
         }
     }
 }
@@ -531,7 +531,7 @@ mod tests {
     use egui::{Event, Modifiers, RawInput, Vec2, vec2};
 
     use super::*;
-    use crate::{EditMode, EditorCommand, Tool, commands};
+    use crate::{EditMode, EditorCommand, SelectMode, Tool, commands};
 
     /// Runs the viewport headless (no GPU) in a real egui context.
     struct Harness {
@@ -598,6 +598,52 @@ mod tests {
             self.editor.tool = tool;
             self.frame(vec![]);
             id
+        }
+
+        fn mesh(&self, id: NodeId) -> grid4d_scene::MeshHandle {
+            let grid4d_scene::ObjectKind::Polygon { mesh, .. } = &self.doc.scene.get(id).unwrap().data.kind else {
+                panic!("not a polygon object");
+            };
+            mesh.clone()
+        }
+
+        fn components(&self, id: NodeId) -> grid4d_scene::Components {
+            let grid4d_scene::ObjectKind::Polygon { components, .. } = &self.doc.scene.get(id).unwrap().data.kind
+            else {
+                panic!("not a polygon object");
+            };
+            components.clone()
+        }
+
+        fn select(&mut self, id: NodeId, component: Component, hits: Vec<u32>) {
+            self.editor.commands.push(EditorCommand::SelectComponents {
+                node: id,
+                component,
+                hits,
+                mode: SelectMode::Replace,
+            });
+            self.frame(vec![]);
+        }
+
+        /// Drags gizmo handle `axis` by `steps` × 15 points along it.
+        fn drag_handle(&mut self, axis: usize, steps: u8) {
+            let geo = GizmoGeometry::new(
+                &self.doc.scene,
+                &self.editor,
+                &self.viewport.camera,
+                self.viewport.view_rect,
+            )
+            .expect("a gizmo");
+            let (start, dir) = geo.handle_for_test(axis).unwrap();
+            self.frame(vec![Event::PointerMoved(start)]);
+            self.frame(vec![Self::button(start, true)]);
+            let mut pointer = start;
+            for _ in 0..steps {
+                pointer += dir * 15.0;
+                self.frame(vec![Event::PointerMoved(pointer)]);
+            }
+            self.frame(vec![Self::button(pointer, false)]);
+            self.frame(vec![]);
         }
 
         /// Press at `from`, drag in steps to `to`, release.
@@ -815,6 +861,100 @@ mod tests {
         assert_eq!(components.selected().points.iter().collect::<Vec<_>>(), [nearest]);
         assert_eq!(h.editor.history.undo_label(), Some("Select Points"));
         assert_eq!(h.editor.selection.as_slice(), &[cube], "objects stay selected");
+    }
+
+    #[test]
+    fn the_gizmo_moves_the_selected_points_as_one_undo_step() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Points, Tool::Move);
+        h.select(cube, Component::Point, vec![0]);
+        let (before, components) = (h.mesh(cube), h.components(cube));
+        let steps = h.editor.history.undo_len();
+
+        h.drag_handle(0, 4);
+        let after = h.mesh(cube);
+        assert_ne!(after.id(), before.id(), "the moved mesh is a new mesh");
+        assert!(h.components(cube).same(&components), "…with the very same selection");
+        let moved = after.mesh().points()[0] - before.mesh().points()[0];
+        assert!(
+            moved.x > 1.0 && moved.y.abs() < 1e-3 && moved.z.abs() < 1e-3,
+            "along X: {moved:?}"
+        );
+        assert_eq!(
+            after.mesh().points()[1..],
+            before.mesh().points()[1..],
+            "only the selected point"
+        );
+        assert_eq!(h.editor.history.undo_len(), steps + 1, "the whole drag is one step");
+        assert_eq!(h.editor.history.undo_label(), Some("Move Points"));
+
+        h.editor.commands.push(EditorCommand::Undo);
+        h.frame(vec![]);
+        assert_eq!(h.mesh(cube).id(), before.id(), "undo brings the original mesh back");
+    }
+
+    #[test]
+    fn scaling_a_polygon_spreads_its_points_around_its_centre() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Polygons, Tool::Scale);
+        let before = h.mesh(cube);
+        let top = (0..before.mesh().face_count())
+            .find(|&f| before.mesh().face_normal(f).abs_diff_eq(Vec3::Y, 1e-5))
+            .unwrap();
+        h.select(cube, Component::Polygon, vec![u32::try_from(top).unwrap()]);
+        h.drag_handle(0, 3);
+        let after = h.mesh(cube);
+        let (old_centre, new_centre) = (before.mesh().face_center(top), after.mesh().face_center(top));
+        assert!(new_centre.abs_diff_eq(old_centre, 1e-3), "the pivot stays put");
+        let width = |m: &grid4d_scene::MeshHandle| {
+            let xs = m.mesh().face(top).iter().map(|&p| m.mesh().points()[p as usize].x);
+            xs.clone().fold(f32::NEG_INFINITY, f32::max) - xs.fold(f32::INFINITY, f32::min)
+        };
+        assert!(
+            width(&after) > width(&before) * 1.2,
+            "{} -> {}",
+            width(&before),
+            width(&after)
+        );
+        assert_eq!(h.editor.history.undo_label(), Some("Scale Polygons"));
+    }
+
+    #[test]
+    fn tweak_moves_the_point_under_the_cursor_without_selecting_it() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Points, Tool::Move);
+        h.editor.transform_settings.tweak = true;
+        let before = h.mesh(cube);
+        let world = h.doc.scene.world_matrix(cube);
+        let eye = h.viewport.camera.eye();
+        let (nearest, position) = before
+            .mesh()
+            .points()
+            .iter()
+            .map(|&p| world.transform_point3(p))
+            .enumerate()
+            .min_by(|a, b| a.1.distance(eye).total_cmp(&b.1.distance(eye)))
+            .unwrap();
+        let rect = h.viewport.view_rect;
+        let view_proj = h.viewport.camera.view_projection(rect.aspect_ratio());
+        let at = project(&view_proj, rect, position).unwrap();
+        h.drag(at, at + vec2(40.0, 0.0));
+        let after = h.mesh(cube);
+        assert!(after.mesh().points()[nearest].distance(before.mesh().points()[nearest]) > 1.0);
+        assert_eq!(
+            after
+                .mesh()
+                .points()
+                .iter()
+                .filter(|p| !before.mesh().points().contains(p))
+                .count(),
+            1
+        );
+        assert!(
+            h.selected(cube, Component::Point).is_empty(),
+            "the selection is left alone"
+        );
+        assert_eq!(h.editor.history.undo_label(), Some("Move Points"));
     }
 
     #[test]

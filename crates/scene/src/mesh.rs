@@ -31,8 +31,9 @@ struct Shared {
     bounds: Option<Aabb>,
     /// Built on the first ray cast (picking), then shared by every clone.
     bvh: OnceLock<Bvh>,
-    /// Built when first needed (component display, picking, conversions).
-    topology: OnceLock<Topology>,
+    /// Built when first needed (component display, picking, conversions);
+    /// shared with handles that only moved points ([`MeshHandle::with_points`]).
+    topology: OnceLock<Arc<Topology>>,
 }
 
 impl MeshHandle {
@@ -85,7 +86,24 @@ impl MeshHandle {
     /// The mesh's adjacency, built on first use and shared by every clone.
     #[must_use]
     pub fn topology(&self) -> &Topology {
-        self.0.topology.get_or_init(|| Topology::build(&self.0.mesh))
+        self.0.topology.get_or_init(|| Arc::new(Topology::build(&self.0.mesh)))
+    }
+
+    /// The same faces with the points moved to `points` (one per point; extra
+    /// entries are ignored, missing ones keep their old position): a new handle
+    /// with a new [`MeshId`] and bounds, sharing the topology, which moving
+    /// points cannot change. What transforming components produces.
+    #[must_use]
+    pub fn with_points(&self, points: &[Vec3]) -> Self {
+        let mut mesh = self.0.mesh.clone();
+        for (point, &new) in mesh.points_mut().iter_mut().zip(points) {
+            *point = new;
+        }
+        let moved = Self::new(mesh);
+        if let Some(topology) = self.0.topology.get() {
+            let _ = moved.0.topology.set(Arc::clone(topology));
+        }
+        moved
     }
 }
 
@@ -233,6 +251,22 @@ mod tests {
             .raycast_where(Vec3::new(0.0, 0.0, 5.0), -Vec3::Z, |f| f != front.face)
             .unwrap();
         assert!((back.t - 6.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn moved_points_keep_the_topology_but_not_the_bvh() {
+        let cube = MeshHandle::new(primitives::cube(Vec3::splat(2.0), [1, 1, 1]));
+        let _ = cube.raycast(Vec3::new(0.0, 0.0, 5.0), -Vec3::Z); // build the BVH…
+        let _ = cube.topology(); // …and the topology
+        let mut points = cube.mesh().points().to_vec();
+        points[0] += Vec3::new(-10.0, 0.0, 0.0);
+        let moved = cube.with_points(&points);
+        assert_ne!(moved.id(), cube.id());
+        assert!(std::ptr::eq(moved.topology(), cube.topology()), "faces did not change");
+        assert!(moved.0.bvh.get().is_none(), "positions did: the BVH is rebuilt");
+        let lowest = points.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+        assert_eq!(moved.bounds().unwrap().min.x, lowest, "bounds follow the points");
+        assert_eq!(moved.mesh().face(0), cube.mesh().face(0));
     }
 
     #[test]

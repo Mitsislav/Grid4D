@@ -99,6 +99,14 @@ pub struct SelectionSettings {
     pub grow_edges_only: bool,
 }
 
+/// Options of the transform tools (Attribute Manager, Tool mode). Editor state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TransformSettings {
+    /// Move tool, component modes: with nothing selected, dragging a component
+    /// moves just that component and leaves the selection alone.
+    pub tweak: bool,
+}
+
 impl Default for SelectionSettings {
     fn default() -> Self {
         Self {
@@ -261,6 +269,7 @@ pub struct EditorState {
     pub tool: Tool,
     pub mode: EditMode,
     pub selection_settings: SelectionSettings,
+    pub transform_settings: TransformSettings,
     /// X / Y / Z axis buttons. `true` = the axis is enabled (C4D semantics).
     pub axes: [bool; 3],
     /// World (`true`) or object (`false`) coordinate system for the gizmo.
@@ -286,6 +295,7 @@ impl Default for EditorState {
             tool: Tool::Move,
             mode: EditMode::Model,
             selection_settings: SelectionSettings::default(),
+            transform_settings: TransformSettings::default(),
             axes: [true; 3],
             world_coordinates: false,
             snapping: false,

@@ -330,6 +330,34 @@ pub fn connected(mesh: &PolyMesh, topology: &Topology, set: &BitSet, component: 
     stored(reached, component, topology)
 }
 
+/// The points that transforming the `component` selection `set` moves: the
+/// points themselves, both ends of each edge (by corner), or every corner
+/// of each polygon.
+#[must_use]
+pub fn points_of(mesh: &PolyMesh, set: &BitSet, component: Component) -> BitSet {
+    let corners = mesh.corner_points();
+    match component {
+        Component::Point => set.clone(),
+        Component::Edge => {
+            let mut points = BitSet::new();
+            for f in 0..mesh.face_count() {
+                let range = mesh.corner_range(f);
+                for c in range.clone().filter(|&c| set.contains(c)) {
+                    let next = if c + 1 == range.end { range.start } else { c + 1 };
+                    points.insert(us(corners[c]));
+                    points.insert(us(corners[next]));
+                }
+            }
+            points
+        }
+        Component::Polygon => set
+            .iter()
+            .filter(|&f| f < mesh.face_count())
+            .flat_map(|f| mesh.face(f).iter().map(|&p| us(p)))
+            .collect(),
+    }
+}
+
 /// Invert: every component not in `set` and not in `hidden` (both stored
 /// sets of `component`; edges are inverted as edges, not corner by corner).
 #[must_use]
@@ -537,6 +565,22 @@ mod tests {
         let edges = edges_from_corners(&inverted, &topology);
         assert_eq!(edges.len(), 11);
         assert!(!edges.contains(0));
+    }
+
+    #[test]
+    fn transforming_a_selection_moves_its_points() {
+        let (mesh, topology) = cube();
+        let one_face: BitSet = [2].into_iter().collect();
+        let mut corners: Vec<usize> = mesh.face(2).iter().map(|&p| us(p)).collect();
+        corners.sort_unstable();
+        assert_eq!(sorted(&points_of(&mesh, &one_face, Component::Polygon)), corners);
+        let edge = corners_from_edges(&[0].into_iter().collect(), &topology);
+        let [a, b] = topology.edges()[0];
+        let mut ends = vec![us(a), us(b)];
+        ends.sort_unstable();
+        assert_eq!(sorted(&points_of(&mesh, &edge, Component::Edge)), ends);
+        let points: BitSet = [1, 6].into_iter().collect();
+        assert_eq!(points_of(&mesh, &points, Component::Point), points);
     }
 
     #[test]

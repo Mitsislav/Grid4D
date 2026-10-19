@@ -13,7 +13,11 @@ use grid4d_render::{
 };
 use grid4d_scene::{Document, NodeData, NodeId, ObjectKind, SceneEdit};
 
-use super::{ViewportPanel, local, project};
+use super::{
+    ViewportPanel,
+    gizmo::{PointEdit, centre_of, move_label},
+    local, project,
+};
 use crate::{EditMode, EditorCommand, EditorState, SelectMode, Tool, theme::metrics};
 
 /// A Live Selection stroke being painted.
@@ -39,6 +43,14 @@ pub(super) enum Gesture {
     Frame {
         start: Pos2,
         end: Pos2,
+    },
+    /// Tweak: one component dragged in the view plane, the selection untouched.
+    Tweak {
+        node: NodeId,
+        component: Component,
+        before: NodeData,
+        edit: PointEdit,
+        last: Pos2,
     },
     /// Esc cancelled the gesture: ignore the pointer until it is released.
     Cancelled,
@@ -70,6 +82,12 @@ impl ViewportPanel {
                 Gesture::Stroke(stroke) => {
                     if let Some(node) = doc.scene.get_mut(stroke.node) {
                         node.data = stroke.before;
+                    }
+                    self.gesture = Gesture::Cancelled;
+                }
+                Gesture::Tweak { node, before, .. } => {
+                    if let Some(node) = doc.scene.get_mut(node) {
+                        node.data = before;
                     }
                     self.gesture = Gesture::Cancelled;
                 }
@@ -123,6 +141,15 @@ impl ViewportPanel {
                     });
                 }
                 true
+            }
+            (Tool::Move, Some((node, component)))
+                if matches!(self.gesture, Gesture::Tweak { .. })
+                    || (editor.transform_settings.tweak
+                        && response.drag_started_by(PointerButton::Primary)
+                        && !modifiers.alt
+                        && nothing_selected(doc, node, component)) =>
+            {
+                self.tweak(rect, doc, editor, node, component, origin, pointer, down)
             }
             (Tool::Move | Tool::Scale | Tool::Rotate, Some((node, component)))
                 if response.double_clicked_by(PointerButton::Primary) && !modifiers.alt =>
@@ -224,6 +251,85 @@ impl ViewportPanel {
                     data: stroke.before,
                 },
                 label: "Live Selection",
+            });
+        }
+        true
+    }
+
+    /// Tweak: starts on the component under the press, moves it in the view plane
+    /// at its own depth, and records one undo step on release.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one call site; the pieces of one frame's input"
+    )]
+    fn tweak(
+        &mut self,
+        rect: Rect,
+        doc: &mut Document,
+        editor: &mut EditorState,
+        node: NodeId,
+        component: Component,
+        origin: Option<Pos2>,
+        pointer: Option<Pos2>,
+        down: bool,
+    ) -> bool {
+        if !matches!(self.gesture, Gesture::Tweak { .. }) {
+            let Some(press) = origin else { return false };
+            let view = self.screen_view(rect);
+            let radius = metrics::COMPONENT_PICK_RADIUS;
+            let Some(hit) = pick_component(&self.evaluated, node, component, &view, local(press, rect), radius) else {
+                return false; // not on a component: an ordinary drag
+            };
+            let Some(before) = doc.scene.get(node).map(|n| n.data.clone()) else {
+                return false;
+            };
+            let ObjectKind::Polygon { mesh, .. } = &before.kind else {
+                return false;
+            };
+            let one: BitSet = match hit {
+                ComponentHit::Edge(e) => mesh.topology().edge_corners(idx(e)).iter().map(|&c| idx(c)).collect(),
+                ComponentHit::Point(i) | ComponentHit::Polygon(i) => [idx(i)].into_iter().collect(),
+            };
+            let points = selection::points_of(mesh.mesh(), &one, component);
+            let world = doc.scene.world_matrix(node);
+            let Some(centre) = centre_of(mesh, &points) else {
+                return false;
+            };
+            let edit = PointEdit::new(mesh, &points, world, world.transform_point3(centre));
+            self.gesture = Gesture::Tweak {
+                node,
+                component,
+                before,
+                edit,
+                last: press,
+            };
+        }
+        let camera = &self.camera;
+        let Gesture::Tweak { node, edit, last, .. } = &mut self.gesture else {
+            return false;
+        };
+        if let Some(pointer) = pointer
+            && pointer != *last
+        {
+            let depth = (edit.pivot - camera.eye()).dot(camera.forward()).max(camera.near);
+            let per_point = camera.world_units_per_pixel(depth, rect.height());
+            let d = pointer - *last;
+            // Screen y points down.
+            edit.moved += (camera.right() * d.x - camera.up() * d.y) * per_point;
+            edit.apply(glam::Mat4::from_translation(edit.moved), &mut doc.scene, *node);
+            *last = pointer;
+        }
+        if !down
+            && let Gesture::Tweak {
+                node,
+                component,
+                before,
+                ..
+            } = std::mem::take(&mut self.gesture)
+        {
+            editor.commands.push(EditorCommand::CommitLive {
+                inverse: SceneEdit::SetData { id: node, data: before },
+                label: move_label(component),
             });
         }
         true
@@ -412,6 +518,14 @@ impl ViewportPanel {
     pub(super) fn gesture_is_idle(&self) -> bool {
         matches!(self.gesture, Gesture::None)
     }
+}
+
+/// Nothing of kind `component` is selected on polygon object `node`.
+fn nothing_selected(doc: &Document, node: NodeId, component: Component) -> bool {
+    doc.scene.get(node).is_some_and(|n| match &n.data.kind {
+        ObjectKind::Polygon { components, .. } => components.selected().get(component).is_empty(),
+        _ => false,
+    })
 }
 
 fn idx(index: u32) -> usize {

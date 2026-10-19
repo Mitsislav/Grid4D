@@ -1,4 +1,5 @@
-//! Move / Scale / Rotate manipulator for the active object.
+//! Move / Scale / Rotate manipulator for the active object — or, in a component
+//! mode, for the selected points, edges or polygons of the active polygon object.
 //!
 //! All gizmo geometry is computed on the CPU in screen space and drawn with the
 //! egui painter as an overlay, so it is always on top and resolution-independent.
@@ -6,22 +7,36 @@
 use std::f32::consts::{PI, TAU};
 
 use egui::{Color32, CornerRadius, PointerButton, Pos2, Rect, Response, Shape, Stroke, Ui, Vec2};
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec3};
+use grid4d_geom::{BitSet, Component, selection};
 use grid4d_render::OrbitCamera;
-use grid4d_scene::{NodeData, NodeId, Scene, SceneEdit};
+use grid4d_scene::{MeshHandle, NodeData, NodeId, ObjectKind, Scene, SceneEdit};
 
 use super::project;
-use crate::{CommandQueue, EditMode, EditorCommand, EditorState, Tool, theme::palette as p};
+use crate::{CommandQueue, EditorCommand, EditorState, Tool, theme::palette as p};
 
 /// On-screen length of the axis handles, in points.
 const HANDLE_PX: f32 = 90.0;
 const RING_SEGMENTS: usize = 64;
 const PICK_TOLERANCE: f32 = 8.0;
 
+/// What the gizmo transforms.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Target {
+    /// The active object's transform.
+    Object,
+    /// The selected components of the active polygon object (`world`: its
+    /// world matrix); the gizmo sits at the centre of their points.
+    Components { component: Component, world: Mat4 },
+}
+
 /// Screen-space description of the gizmo for the current frame.
 pub(super) struct GizmoGeometry {
     node: NodeId,
     tool: Tool,
+    target: Target,
+    /// World position of the gizmo's centre (the pivot).
+    origin: Vec3,
     origin_px: Pos2,
     /// World-space unit axes the handles follow.
     axes: [Vec3; 3],
@@ -36,17 +51,29 @@ pub(super) struct GizmoGeometry {
 }
 
 impl GizmoGeometry {
-    /// Builds the gizmo for the active object, if the active tool has one.
+    /// Builds the gizmo for the active object, if the active tool has one. In a
+    /// component mode it works on the selected components (centred on them) and
+    /// is absent when nothing is selected.
     pub(super) fn new(scene: &Scene, editor: &EditorState, camera: &OrbitCamera, rect: Rect) -> Option<Self> {
-        // In component modes the gizmo will move components (step 4.3), never the object.
-        if !editor.tool.has_gizmo() || editor.mode != EditMode::Model {
+        if !editor.tool.has_gizmo() {
             return None;
         }
         let id = editor.selection.active()?;
-        scene.get(id)?;
+        let node = scene.get(id)?;
 
         let world = scene.world_matrix(id);
-        let (_, rotation, origin) = world.to_scale_rotation_translation();
+        let (_, rotation, translation) = world.to_scale_rotation_translation();
+        let (origin, target) = match editor.mode.component() {
+            None => (translation, Target::Object),
+            Some(component) => {
+                let ObjectKind::Polygon { mesh, components } = &node.data.kind else {
+                    return None;
+                };
+                let points = selection::points_of(mesh.mesh(), components.selected().get(component), component);
+                let centre = centre_of(mesh, &points)?;
+                (world.transform_point3(centre), Target::Components { component, world })
+            }
+        };
         let use_world_axes = editor.world_coordinates && editor.tool != Tool::Scale;
         let axes = if use_world_axes {
             [Vec3::X, Vec3::Y, Vec3::Z]
@@ -80,6 +107,8 @@ impl GizmoGeometry {
         Some(Self {
             node: id,
             tool: editor.tool,
+            target,
+            origin,
             origin_px,
             axes,
             length,
@@ -169,6 +198,116 @@ struct Drag {
     /// The node's data when the drag started: the whole drag is one undo step.
     before: NodeData,
     label: &'static str,
+    /// For a component transform: the points it moves.
+    points: Option<PointEdit>,
+}
+
+/// A transform of some of a polygon object's points, accumulated over a drag and
+/// applied to the points as they were when it started — so nothing drifts, and
+/// each frame writes a new mesh (new `MeshId`) whose selection is untouched.
+#[derive(Debug, Clone)]
+pub(super) struct PointEdit {
+    original: MeshHandle,
+    points: Vec<u32>,
+    /// The object's world matrix (unchanged by the edit).
+    world: Mat4,
+    /// World position the edit scales and rotates around.
+    pub(super) pivot: Vec3,
+    /// So far: world translation, scale factor, rotation angle.
+    pub(super) moved: Vec3,
+    factor: f32,
+    angle: f32,
+}
+
+impl PointEdit {
+    /// An edit of `points` of `mesh` (object world matrix `world`) around `pivot`.
+    pub(super) fn new(mesh: &MeshHandle, points: &BitSet, world: Mat4, pivot: Vec3) -> Self {
+        Self {
+            original: mesh.clone(),
+            points: points.iter().filter_map(|p| u32::try_from(p).ok()).collect(),
+            world,
+            pivot,
+            moved: Vec3::ZERO,
+            factor: 1.0,
+            angle: 0.0,
+        }
+    }
+
+    /// The world-space transform so far, for `tool` along world axis `axis`.
+    fn delta(&self, tool: Tool, axis: Vec3) -> Mat4 {
+        let around = |m: Mat4| Mat4::from_translation(self.pivot) * m * Mat4::from_translation(-self.pivot);
+        match tool {
+            Tool::Scale => {
+                // Scale by `factor` along `axis` only: I + (factor − 1) · axis axisᵀ.
+                let k = self.factor - 1.0;
+                let m = Mat3::from_cols(
+                    Vec3::X + axis * (k * axis.x),
+                    Vec3::Y + axis * (k * axis.y),
+                    Vec3::Z + axis * (k * axis.z),
+                );
+                around(Mat4::from_mat3(m))
+            }
+            Tool::Rotate => around(Mat4::from_quat(Quat::from_axis_angle(axis, self.angle))),
+            Tool::Move | Tool::LiveSelection | Tool::RectangleSelection | Tool::LoopSelection | Tool::RingSelection => {
+                Mat4::from_translation(self.moved)
+            }
+        }
+    }
+
+    /// Writes the original mesh with world transform `delta` applied to the
+    /// edited points (in object space) to `node`.
+    pub(super) fn apply(&self, delta: Mat4, scene: &mut Scene, node: NodeId) {
+        if self.world.determinant().abs() <= f32::EPSILON {
+            return;
+        }
+        let local = self.world.inverse() * delta * self.world;
+        let mut points = self.original.mesh().points().to_vec();
+        for &p in &self.points {
+            if let Some(point) = usize::try_from(p).ok().and_then(|p| points.get_mut(p)) {
+                *point = local.transform_point3(*point);
+            }
+        }
+        let moved = self.original.with_points(&points);
+        if let Some(node) = scene.get_mut(node)
+            && let ObjectKind::Polygon { mesh, .. } = &mut node.data.kind
+        {
+            *mesh = moved;
+        }
+    }
+}
+
+/// Centre of the bounding box of `points` of `mesh` (object space); `None` if empty.
+pub(super) fn centre_of(mesh: &MeshHandle, points: &BitSet) -> Option<Vec3> {
+    let positions = mesh.mesh().points();
+    let mut found = points.iter().filter_map(|p| positions.get(p).copied());
+    let first = found.next()?;
+    let (min, max) = found.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p)));
+    Some((min + max) * 0.5)
+}
+
+/// Undo label of a gizmo drag.
+const fn drag_label(tool: Tool, target: Target) -> &'static str {
+    let Target::Components { component, .. } = target else {
+        return tool.label();
+    };
+    match (tool, component) {
+        (Tool::Scale, Component::Point) => "Scale Points",
+        (Tool::Scale, Component::Edge) => "Scale Edges",
+        (Tool::Scale, Component::Polygon) => "Scale Polygons",
+        (Tool::Rotate, Component::Point) => "Rotate Points",
+        (Tool::Rotate, Component::Edge) => "Rotate Edges",
+        (Tool::Rotate, Component::Polygon) => "Rotate Polygons",
+        (_, component) => move_label(component),
+    }
+}
+
+/// Undo label of moving components (the gizmo, or Tweak).
+pub(super) const fn move_label(component: Component) -> &'static str {
+    match component {
+        Component::Point => "Move Points",
+        Component::Edge => "Move Edges",
+        Component::Polygon => "Move Polygons",
+    }
 }
 
 /// Interaction state that survives between frames.
@@ -211,7 +350,11 @@ impl GizmoState {
                 && geo.node == drag.node
             {
                 moved_object = pointer != drag.last_pointer;
-                apply_drag(geo, drag, pointer, scene);
+                if drag.points.is_some() {
+                    apply_component_drag(geo, drag, pointer, scene);
+                } else {
+                    apply_drag(geo, drag, pointer, scene);
+                }
                 drag.last_pointer = pointer;
             } else if let Some(done) = self.drag.take() {
                 // Recorded only if the drag actually changed something.
@@ -241,12 +384,20 @@ impl GizmoState {
                 && let Some(axis) = geo.hit(press)
                 && let Some(node) = scene.get(geo.node)
             {
+                let points = match (geo.target, &node.data.kind) {
+                    (Target::Components { component, world }, ObjectKind::Polygon { mesh, components }) => {
+                        let points = selection::points_of(mesh.mesh(), components.selected().get(component), component);
+                        Some(PointEdit::new(mesh, &points, world, geo.origin))
+                    }
+                    _ => None,
+                };
                 self.drag = Some(Drag {
                     node: geo.node,
                     axis,
                     last_pointer: response.interact_pointer_pos().unwrap_or(press),
                     before: node.data.clone(),
-                    label: geo.tool.label(),
+                    label: drag_label(geo.tool, geo.target),
+                    points,
                 });
                 return GizmoInteraction {
                     owns_pointer: true,
@@ -261,6 +412,57 @@ impl GizmoState {
     }
 }
 
+/// How far the pointer moved along a Move/Scale handle, as a share of the handle's
+/// on-screen length; `None` if the handle points at the camera.
+fn along_handle(geo: &GizmoGeometry, axis: usize, from: Pos2, to: Pos2) -> Option<f32> {
+    let end = geo.ends_px[axis]?;
+    let screen_axis = end - geo.origin_px;
+    let len_px = screen_axis.length();
+    (len_px >= 1.0).then(|| (to - from).dot(screen_axis / len_px) / len_px)
+}
+
+/// The rotation (radians, about `axis`) of dragging around the gizmo from `from` to `to`.
+fn ring_angle(geo: &GizmoGeometry, axis: usize, from: Pos2, to: Pos2) -> Option<f32> {
+    let (before, after) = (from - geo.origin_px, to - geo.origin_px);
+    if before.length() < 2.0 || after.length() < 2.0 {
+        return None;
+    }
+    let mut delta = after.y.atan2(after.x) - before.y.atan2(before.x);
+    if delta > PI {
+        delta -= TAU;
+    } else if delta < -PI {
+        delta += TAU;
+    }
+    // Screen y points down: clockwise on screen is a negative rotation about an
+    // axis that points at the viewer.
+    Some(if geo.toward_camera[axis] { -delta } else { delta })
+}
+
+/// One frame of a component drag: accumulate, then rewrite the points.
+fn apply_component_drag(geo: &GizmoGeometry, drag: &mut Drag, pointer: Pos2, scene: &mut Scene) {
+    let axis = drag.axis;
+    let Some(edit) = &mut drag.points else { return };
+    match geo.tool {
+        Tool::Move => {
+            if let Some(share) = along_handle(geo, axis, drag.last_pointer, pointer) {
+                edit.moved += geo.axes[axis] * (share * geo.length);
+            }
+        }
+        Tool::Scale => {
+            if let Some(share) = along_handle(geo, axis, drag.last_pointer, pointer) {
+                edit.factor = (edit.factor * (1.0 + share).max(0.01)).max(0.001);
+            }
+        }
+        Tool::Rotate => {
+            if let Some(angle) = ring_angle(geo, axis, drag.last_pointer, pointer) {
+                edit.angle += angle;
+            }
+        }
+        Tool::LiveSelection | Tool::RectangleSelection | Tool::LoopSelection | Tool::RingSelection => return,
+    }
+    edit.apply(edit.delta(geo.tool, geo.axes[axis]), scene, drag.node);
+}
+
 fn apply_drag(geo: &GizmoGeometry, drag: &Drag, pointer: Pos2, scene: &mut Scene) {
     let Some(node) = scene.get_mut(drag.node) else { return };
     let axis = drag.axis;
@@ -268,36 +470,21 @@ fn apply_drag(geo: &GizmoGeometry, drag: &Drag, pointer: Pos2, scene: &mut Scene
 
     match geo.tool {
         Tool::Move | Tool::Scale => {
-            let Some(end) = geo.ends_px[axis] else { return };
-            let screen_axis = end - geo.origin_px;
-            let len_px = screen_axis.length();
-            if len_px < 1.0 {
+            let Some(share) = along_handle(geo, axis, drag.last_pointer, pointer) else {
                 return;
-            }
-            let delta_px = (pointer - drag.last_pointer).dot(screen_axis / len_px);
+            };
             if geo.tool == Tool::Move {
-                let world_delta = geo.axes[axis] * (delta_px / len_px * geo.length);
+                let world_delta = geo.axes[axis] * (share * geo.length);
                 t.position += geo.parent_world.inverse().transform_vector3(world_delta);
             } else {
-                let factor = (1.0 + delta_px / len_px).max(0.01);
+                let factor = (1.0 + share).max(0.01);
                 t.scale[axis] = (t.scale[axis] * factor).max(0.001);
             }
         }
         Tool::Rotate => {
-            let before = drag.last_pointer - geo.origin_px;
-            let after = pointer - geo.origin_px;
-            if before.length() < 2.0 || after.length() < 2.0 {
+            let Some(angle) = ring_angle(geo, axis, drag.last_pointer, pointer) else {
                 return;
-            }
-            let mut delta = after.y.atan2(after.x) - before.y.atan2(before.x);
-            if delta > PI {
-                delta -= TAU;
-            } else if delta < -PI {
-                delta += TAU;
-            }
-            // Screen y points down: clockwise on screen is a negative rotation
-            // about an axis that points at the viewer.
-            let angle = if geo.toward_camera[axis] { -delta } else { delta };
+            };
             let world_delta = Quat::from_axis_angle(geo.axes[axis], angle);
             let (_, parent_rotation, _) = geo.parent_world.to_scale_rotation_translation();
             let local = parent_rotation.inverse() * world_delta * parent_rotation * t.rotation_quat();

@@ -148,7 +148,10 @@ impl FrameData {
                 ],
             });
         }
-        if frame.is_multiple_of(BATCH_TTL_FRAMES) {
+        // A polygon object's mesh changes id on every edit (each frame of a
+        // drag): its old batches go at once, so they never pile up.
+        let gone = |b: &Batch| matches!(b.key, MeshKey::Polygon(_)) && b.last_used != frame;
+        if frame.is_multiple_of(BATCH_TTL_FRAMES) || self.batches.iter().any(gone) {
             self.drop_stale_batches();
         }
     }
@@ -166,10 +169,14 @@ impl FrameData {
         self.components.update(scene, target, hover);
     }
 
-    /// Forgets shapes that have not been drawn for a while (edited away, deleted).
+    /// Forgets shapes that have not been drawn for a while (edited away, deleted)
+    /// and polygon meshes not drawn this frame.
     fn drop_stale_batches(&mut self) {
         let frame = self.frame;
-        self.batches.retain(|b| b.last_used + BATCH_TTL_FRAMES > frame);
+        self.batches.retain(|b| match b.key {
+            MeshKey::Polygon(_) => b.last_used == frame,
+            _ => b.last_used + BATCH_TTL_FRAMES > frame,
+        });
         self.batch_index.clear();
         for (slot, batch) in self.batches.iter().enumerate() {
             self.batch_index.insert(batch.key, slot);
@@ -300,6 +307,24 @@ mod tests {
                 .batches()
                 .any(|(k, _, _)| k == MeshKey::Cylinder { rotation: 7, height: 1 })
         );
+    }
+
+    #[test]
+    fn edited_polygon_meshes_do_not_pile_up() {
+        let mesh = MeshHandle::new(grid4d_eval::editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap());
+        let mut doc = Document::new("drag");
+        let id = doc.scene.insert(Node::new("Mesh", ObjectKind::polygon(mesh.clone())));
+        let mut eval = evaluated(&doc);
+        let mut frame = FrameData::new();
+        let mut points = mesh.mesh().points().to_vec();
+        for i in 0..50u8 {
+            points[0].x = f32::from(i);
+            doc.scene.get_mut(id).unwrap().data.kind = ObjectKind::polygon(mesh.with_points(&points));
+            eval.update(&doc.scene);
+            frame.extract(&eval, |_| false);
+        }
+        frame.extract(&eval, |_| false);
+        assert_eq!(frame.batches.len(), 1, "only the current mesh is kept");
     }
 
     #[test]

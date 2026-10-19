@@ -28,7 +28,9 @@ are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN
   ones stay hidden), the component under the cursor highlighted; click selects, Shift
   adds, Ctrl removes, empty space deselects (each an undo step, saved with the file);
   Shift/Ctrl+click on another mode converts the selection; Select All / Deselect All
-  work on components.
+  work on components. The Move / Scale / Rotate gizmo transforms the selected points,
+  edges or polygons around the selection's centre (one undo step per drag); with the
+  Move tool's *Tweak Mode* on and nothing selected, drag any component directly.
 - **Selection tools**: Live Selection (paint, middle-drag sizes the brush), Rectangle
   Selection (also selects objects in Model mode), Loop and Ring Selection with a
   preview under the cursor; Select ▸ Invert, Select Connected, Grow / Shrink, Hide

@@ -447,7 +447,16 @@ fn tool_ui(ui: &mut Ui, editor: &mut EditorState) {
             }
             Tool::LoopSelection => walk_rows(ui, &mut s.loop_options),
             Tool::RingSelection => walk_rows(ui, &mut s.ring_options),
-            Tool::Move | Tool::Scale | Tool::Rotate => {
+            Tool::Move => {
+                check_row(ui, "Tweak Mode", &mut editor.transform_settings.tweak);
+                ui.label("");
+                ui.label(
+                    RichText::new("With nothing selected, drag a point, edge or polygon to move just it")
+                        .color(p::TEXT_DIM),
+                );
+                ui.end_row();
+            }
+            Tool::Scale | Tool::Rotate => {
                 ui.label(RichText::new("This tool has no options yet.").color(p::TEXT_DIM));
                 ui.end_row();
             }
