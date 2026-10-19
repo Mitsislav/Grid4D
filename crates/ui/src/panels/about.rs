@@ -1,6 +1,6 @@
 //! "About & shortcuts" modal.
 
-use egui::{Grid, Id, Modal, RichText};
+use egui::{Grid, Id, Modal, RichText, ScrollArea};
 
 use crate::{EditorState, theme::palette as p};
 
@@ -18,8 +18,8 @@ const SHORTCUTS: [(&str, &str); 23] = [
     ("K~L / K~K", "Loop/Path Cut / Line Cut tool"),
     ("M~M / M~N / U~Z", "Connect / Dissolve / Melt"),
     ("Click / Shift / Ctrl", "Select / add / toggle"),
-    ("Delete", "Delete selection (objects or components)"),
-    ("Ctrl+⌫ / Alt+⌫", "Dissolve / Melt"),
+    ("Delete / Backspace", "Delete selection (objects or components)"),
+    ("Ctrl+Backspace / Alt+Backspace", "Dissolve / Melt"),
     ("Ctrl+A / Ctrl+Shift+A", "Select all / deselect all"),
     ("Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z)", "Undo / redo"),
     ("Ctrl+N / Ctrl+O", "New / open document"),
@@ -48,17 +48,21 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
         ui.add_space(10.0);
         ui.label(RichText::new("Keyboard & mouse").strong());
         ui.add_space(4.0);
-        Grid::new("grid4d.shortcuts")
-            .num_columns(2)
-            .spacing([24.0, 4.0])
-            .striped(true)
-            .show(ui, |ui| {
-                for (keys, action) in SHORTCUTS {
-                    ui.label(RichText::new(keys).monospace().color(p::TEXT_STRONG));
-                    ui.label(action);
-                    ui.end_row();
-                }
-            });
+        // The list scrolls, so the dialog (and its Close button) fits small windows.
+        let room = (ctx.content_rect().height() - 260.0).max(120.0);
+        ScrollArea::vertical().max_height(room).show(ui, |ui| {
+            Grid::new("grid4d.shortcuts")
+                .num_columns(2)
+                .spacing([24.0, 4.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    for (keys, action) in SHORTCUTS {
+                        ui.label(RichText::new(keys).monospace().color(p::TEXT_STRONG));
+                        ui.label(action);
+                        ui.end_row();
+                    }
+                });
+        });
         ui.add_space(10.0);
         ui.label(
             RichText::new(

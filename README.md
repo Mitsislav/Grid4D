@@ -7,10 +7,14 @@ workflow and layout inspired by Cinema 4D.
 
 ![Grid4D workspace](docs/screenshot.png)
 
-**Status: v0.1 — editor shell, with undo/redo and files.** The workspace, scene
-graph, GPU viewport, selection and transform tools work, every edit can be undone,
-and documents are saved as `.g4d` files; modelling, keyframes, glTF and rendering
-are on the roadmap (see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)).
+**Status: v0.4 in progress — polygon modelling.** The workspace, scene graph, GPU
+viewport, undo/redo and `.g4d` files work, and polygon objects can be modelled with
+component selection, Extrude, Inset, cuts and more; Bevel, Subdivision Surface,
+keyframes, glTF and rendering are on the roadmap (see
+[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)).
+
+**How to use it:** the [user manual](docs/manual.md). **What changed in each step:**
+the [progress log](docs/progress.md).
 
 ## What works today
 
