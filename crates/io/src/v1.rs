@@ -97,6 +97,7 @@ impl ObjectDto {
             visible_in_render: self.visible_in_render,
             enabled: self.enabled,
             tags: Vec::new(),
+            tracks: Vec::new(),
         }
     }
 

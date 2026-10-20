@@ -313,7 +313,25 @@ and drop `.obj` files like glTF files, and pick the `.obj` type in
 - The two fields on the right set the frame range; the drop-down sets the frame
   rate. The loop button (also Animate ▸ Loop Playback) makes playback start over at
   the end.
-- Keyframes are *planned*: playback moves the time, nothing is animated yet.
+### 10.1 Animation
+
+Objects in a document can be **animated**: their position, rotation and scale can
+change over time. While you play or step through the frames, the viewport shows
+every animated object where it is at the current frame, and its children move with
+it.
+
+![An animated document at frames 0, 8, 15 and 30: a ball bouncing (and squashing at the bottom) and a turning bar carrying a sphere](images/manual/animation_frames.png)
+
+- Each animated value has **keys**: a value at a frame. Between keys the value
+  changes smoothly (*Spline*, the default), in a straight line (*Linear*) or
+  holds and then jumps (*Step*). Smooth curves never shoot past a highest or
+  lowest key. Before the first key and after the last one, the value stays put.
+- The Coordinates fields show the object's own values. Animation changes what you
+  see, not those values.
+- Animation is saved with the document.
+- *Planned next:* recording keys (F9), automatic keying, key markers on the
+  timeline and the F-Curve editor. Until then, animation comes from documents that
+  already contain it.
 
 ## 11. Polygon modelling
 
@@ -759,7 +777,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   Cloner are planned.
 - **Tags**: Material tags (with materials), Protection limits, Phong edge breaks,
   copying tags between objects.
-- **Animation**: keyframes, F-curves, the Coordinate and Material managers.
+- **Animation**: recording and editing keys (F9, autokeying, the timeline and the
+  F-Curve editor), animating object parameters such as a cube's size; the
+  Coordinate and Material managers.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.
 - **Interchange and rendering**: materials and textures, animation in glTF, import

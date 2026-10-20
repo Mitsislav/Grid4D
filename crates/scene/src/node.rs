@@ -347,6 +347,8 @@ pub struct NodeData {
     /// Tags (Phong, Protection, Target …), at most one of each kind, in the order
     /// the Object Manager shows them.
     pub tags: Vec<crate::Tag>,
+    /// Animated parameters, at most one track per parameter.
+    pub tracks: Vec<crate::Track>,
 }
 
 impl NodeData {
@@ -364,6 +366,7 @@ impl NodeData {
             visible_in_render: true,
             enabled: true,
             tags: Vec::new(),
+            tracks: Vec::new(),
         }
     }
 

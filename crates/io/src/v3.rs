@@ -23,8 +23,8 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
 };
 use grid4d_scene::{
-    ComponentState, Components, Document, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, Tag, TimeSettings,
-    Transform,
+    Axis, ComponentState, Components, Curve, Document, Interpolation, Key, MeshHandle, MeshId, NodeData, NodeId,
+    ObjectKind, Param, Tag, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -85,6 +85,156 @@ struct ObjectDto {
     /// Added in the course of version 3; absent when the object has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     tags: Vec<TagDto>,
+    /// Added in the course of version 3; absent when the object is not animated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tracks: Vec<TrackDto>,
+}
+
+/// An animated parameter and its keys.
+#[derive(Debug, Serialize, Deserialize)]
+struct TrackDto {
+    param: ParamDto,
+    keys: Vec<KeyDto>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ParamDto {
+    PositionX,
+    PositionY,
+    PositionZ,
+    /// Radians, like `rotation_hpb`.
+    RotationH,
+    RotationP,
+    RotationB,
+    ScaleX,
+    ScaleY,
+    ScaleZ,
+}
+
+impl From<Param> for ParamDto {
+    fn from(param: Param) -> Self {
+        match param {
+            Param::Position(Axis::X) => Self::PositionX,
+            Param::Position(Axis::Y) => Self::PositionY,
+            Param::Position(Axis::Z) => Self::PositionZ,
+            Param::Rotation(Axis::X) => Self::RotationH,
+            Param::Rotation(Axis::Y) => Self::RotationP,
+            Param::Rotation(Axis::Z) => Self::RotationB,
+            Param::Scale(Axis::X) => Self::ScaleX,
+            Param::Scale(Axis::Y) => Self::ScaleY,
+            Param::Scale(Axis::Z) => Self::ScaleZ,
+        }
+    }
+}
+
+impl From<ParamDto> for Param {
+    fn from(param: ParamDto) -> Self {
+        match param {
+            ParamDto::PositionX => Self::Position(Axis::X),
+            ParamDto::PositionY => Self::Position(Axis::Y),
+            ParamDto::PositionZ => Self::Position(Axis::Z),
+            ParamDto::RotationH => Self::Rotation(Axis::X),
+            ParamDto::RotationP => Self::Rotation(Axis::Y),
+            ParamDto::RotationB => Self::Rotation(Axis::Z),
+            ParamDto::ScaleX => Self::Scale(Axis::X),
+            ParamDto::ScaleY => Self::Scale(Axis::Y),
+            ParamDto::ScaleZ => Self::Scale(Axis::Z),
+        }
+    }
+}
+
+/// A key; Spline interpolation and Auto tangents (the defaults) are left out.
+#[derive(Debug, Serialize, Deserialize)]
+struct KeyDto {
+    frame: f64,
+    value: f32,
+    #[serde(default, skip_serializing_if = "InterpolationDto::is_spline")]
+    interpolation: InterpolationDto,
+    /// Manual tangents as (frames, value change); absent for Auto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tangents: Option<TangentsDto>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum InterpolationDto {
+    #[default]
+    Spline,
+    Linear,
+    Step,
+}
+
+impl InterpolationDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_spline(&self) -> bool {
+        *self == Self::Spline
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TangentsDto {
+    left: (f64, f32),
+    right: (f64, f32),
+}
+
+impl TrackDto {
+    fn new(track: &Track) -> Self {
+        Self {
+            param: track.param.into(),
+            keys: track
+                .curve
+                .keys()
+                .iter()
+                .map(|key| KeyDto {
+                    frame: key.frame,
+                    value: key.value,
+                    interpolation: match key.interpolation {
+                        Interpolation::Spline => InterpolationDto::Spline,
+                        Interpolation::Linear => InterpolationDto::Linear,
+                        Interpolation::Step => InterpolationDto::Step,
+                    },
+                    tangents: match key.tangents {
+                        Tangents::Auto => None,
+                        Tangents::Manual { left, right } => Some(TangentsDto { left, right }),
+                    },
+                })
+                .collect(),
+        }
+    }
+
+    fn into_track(self) -> Track {
+        Track {
+            param: self.param.into(),
+            curve: Curve::from_keys(self.keys.into_iter().map(|key| Key {
+                frame: key.frame,
+                value: key.value,
+                interpolation: match key.interpolation {
+                    InterpolationDto::Spline => Interpolation::Spline,
+                    InterpolationDto::Linear => Interpolation::Linear,
+                    InterpolationDto::Step => Interpolation::Step,
+                },
+                tangents: key.tangents.map_or(Tangents::Auto, |t| Tangents::Manual {
+                    left: (t.left.0.max(0.0), t.left.1),
+                    right: (t.right.0.max(0.0), t.right.1),
+                }),
+            })),
+        }
+    }
+
+    /// `true` if every frame, value and tangent is a finite number.
+    fn is_finite(&self) -> bool {
+        self.keys.iter().all(|k| {
+            k.frame.is_finite()
+                && k.value.is_finite()
+                && k.tangents.as_ref().is_none_or(|t| {
+                    t.left.0.is_finite() && t.left.1.is_finite() && t.right.0.is_finite() && t.right.1.is_finite()
+                })
+        })
+    }
 }
 
 /// A tag; objects it refers to are given by their index in `objects`.
@@ -501,6 +651,7 @@ impl ObjectDto {
             visible_in_render: data.visible_in_render,
             enabled: data.enabled,
             tags: data.tags.iter().map(|tag| TagDto::new(tag, index_of)).collect(),
+            tracks: data.tracks.iter().map(TrackDto::new).collect(),
         }
     }
 
@@ -521,11 +672,24 @@ impl ObjectDto {
             visible_in_render: self.visible_in_render,
             enabled: self.enabled,
             tags: Vec::new(),
+            // One track per parameter: a later one replaces an earlier one.
+            tracks: self.tracks.into_iter().fold(Vec::new(), |mut tracks: Vec<Track>, dto| {
+                let track = dto.into_track();
+                tracks.retain(|t| t.param != track.param);
+                tracks.push(track);
+                tracks
+            }),
         })
         .map(|data| (data, self.tags))
     }
 
     fn check_finite(&self) -> Result<(), IoError> {
+        if !self.tracks.iter().all(TrackDto::is_finite) {
+            return Err(IoError::Invalid(format!(
+                "object \"{}\" has an animation key that is not a finite number",
+                self.name
+            )));
+        }
         check_finite(
             &self.name,
             &[
@@ -1041,6 +1205,56 @@ mod tests {
         };
         assert_eq!((target.is_some(), up), (true, None));
         let _ = detached;
+    }
+
+    #[test]
+    fn tracks_round_trip_exactly_and_non_finite_keys_are_refused() {
+        let mut doc = Document::with_demo_scene();
+        let cube = doc.scene.iter().find(|(_, n)| n.data.name == "Cube").unwrap().0;
+        let tracks = vec![
+            Track {
+                param: Param::Position(Axis::Y),
+                curve: Curve::from_keys([
+                    Key::new(0.0, 100.0),
+                    Key {
+                        interpolation: Interpolation::Linear,
+                        ..Key::new(12.5, 300.0)
+                    },
+                    Key {
+                        interpolation: Interpolation::Step,
+                        tangents: Tangents::Manual {
+                            left: (2.0, -10.0),
+                            right: (4.0, 25.0),
+                        },
+                        ..Key::new(30.0, 100.0)
+                    },
+                ]),
+            },
+            Track {
+                param: Param::Rotation(Axis::Z),
+                curve: Curve::from_keys([Key::new(0.0, 0.0), Key::new(90.0, 1.5)]),
+            },
+        ];
+        doc.scene.get_mut(cube).unwrap().data.tracks = tracks.clone();
+        let json = String::from_utf8(entries(&to_bytes(&doc).unwrap())[0].1.clone()).unwrap();
+        assert!(json.contains("\"position_y\"") && json.contains("\"rotation_b\""));
+        assert!(!json.contains("\"spline\""), "defaults are left out");
+
+        let back = round_trip(&doc);
+        let loaded = back.scene.iter().find(|(_, n)| n.data.name == "Cube").unwrap().1;
+        assert_eq!(loaded.data.tracks, tracks);
+        assert!(
+            back.scene
+                .iter()
+                .filter(|(_, n)| n.data.name != "Cube")
+                .all(|(_, n)| n.data.tracks.is_empty())
+        );
+
+        doc.scene.get_mut(cube).unwrap().data.tracks[0]
+            .curve
+            .set_key(Key::new(40.0, f32::NAN));
+        let err = to_bytes(&doc).unwrap_err();
+        assert!(err.to_string().contains("animation key"), "{err}");
     }
 
     fn tags_of(doc: &Document, name: &str) -> Vec<Tag> {

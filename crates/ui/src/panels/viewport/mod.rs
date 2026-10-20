@@ -177,6 +177,7 @@ impl ViewportPanel {
             interaction.owns_pointer
         };
         if !navigating && !gizmo_owns_pointer {
+            self.evaluated.set_frame(f64::from(doc.time.frame()));
             self.evaluated.update(&doc.scene);
             if !self.mesh_tools(ui, &response, rect, doc, editor)
                 && !self.cut_tools(ui, &response, rect, editor)
@@ -192,6 +193,8 @@ impl ViewportPanel {
         let painter = ui.painter_at(rect);
         overlay::background(&painter, rect);
         // A gizmo drag above may have moved an object; free if nothing changed.
+        // Animation is shown at the current (whole) frame.
+        self.evaluated.set_frame(f64::from(doc.time.frame()));
         self.evaluated.update(&doc.scene);
         // Component modes: the active polygon object, and what a click would select.
         let target = self.component_target(editor);

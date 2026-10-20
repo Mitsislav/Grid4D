@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use glam::Mat4;
 use grid4d_geom::{BitSet, subdivision::SubdivisionOptions};
 use grid4d_scene::{
-    Aabb, Components, LIGHT_MARKER_RADIUS, MeshHandle, MeshId, NodeId, ObjectKind, Scene, TagKind, Tags, WalkItem,
+    Aabb, Components, LIGHT_MARKER_RADIUS, MeshHandle, MeshId, NodeId, ObjectKind, Scene, TagKind, Tags, Tracks,
+    WalkItem,
 };
 
 use crate::{
@@ -46,8 +47,10 @@ pub struct EvaluatedNode {
 /// A generator draws its result instead of its cage: the cage's nodes stay listed
 /// (component modes edit them, framing sees them) but are neither drawn nor picked.
 ///
-/// A Target tag turns its object's forward axis (−Z) towards the target here; the
-/// object's children follow. The document's own rotations are left as they are.
+/// Animation is applied here, at the frame given to [`EvaluatedScene::set_frame`]:
+/// animated objects (and their children) are placed where their curves say. Then
+/// a Target tag turns its object's forward axis (−Z) towards the target; the
+/// object's children follow. The document's own transforms are left as they are.
 ///
 /// Keep one per document view and call [`EvaluatedScene::update`] each frame
 /// before drawing or picking.
@@ -72,6 +75,13 @@ pub struct EvaluatedScene {
     /// turned objects whose subtree is being visited.
     aim_index: HashMap<NodeId, usize>,
     aim_stack: Vec<(u32, Mat4)>,
+    /// The frame animation is evaluated at.
+    frame: f64,
+    /// Whether the last update found animated objects (only then does a new frame
+    /// need a new evaluation).
+    animated: bool,
+    /// Scratch space for animation: the world matrices of the current ancestors.
+    world_stack: Vec<(u32, Mat4)>,
     /// [`Scene::revision`] of the scene `nodes` were built from.
     revision: Option<u64>,
 }
@@ -80,6 +90,23 @@ impl EvaluatedScene {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Sets the frame animation is evaluated at; the next [`update`](Self::update)
+    /// re-evaluates if it changed and something is animated.
+    pub fn set_frame(&mut self, frame: f64) {
+        if self.frame != frame {
+            self.frame = frame;
+            if self.animated {
+                self.revision = None;
+            }
+        }
+    }
+
+    /// The frame animation is evaluated at.
+    #[must_use]
+    pub const fn frame(&self) -> f64 {
+        self.frame
     }
 
     /// Brings the evaluation up to date with `scene`. Returns `true` if it was
@@ -176,6 +203,13 @@ impl EvaluatedScene {
             });
             true
         });
+        self.animated = self
+            .nodes
+            .iter()
+            .any(|n| scene.get(n.id).is_some_and(|node| !node.data.tracks.is_empty()));
+        if self.animated {
+            animate(scene, &mut self.nodes, self.frame, &mut self.world_stack);
+        }
         if self
             .nodes
             .iter()
@@ -211,6 +245,29 @@ impl EvaluatedScene {
         let (mesh, components) = self.polygons.get(&id)?;
         let node = self.nodes.iter().find(|n| n.id == id)?;
         Some((node, mesh, components))
+    }
+}
+
+/// Recomputes the world matrices in pre-order with every object's animated
+/// transform at `frame`, so animated objects and everything below them move.
+/// (Every listed node's parent is listed before it: a hidden parent hides its
+/// subtree.)
+fn animate(scene: &Scene, nodes: &mut [EvaluatedNode], frame: f64, stack: &mut Vec<(u32, Mat4)>) {
+    stack.clear();
+    for node in nodes {
+        while stack.last().is_some_and(|&(d, _)| d >= node.depth) {
+            stack.pop();
+        }
+        let Some(data) = scene.get(node.id).map(|n| &n.data) else {
+            continue;
+        };
+        let local = if data.tracks.is_empty() {
+            data.transform.matrix()
+        } else {
+            data.tracks.animate(&data.transform, frame).matrix()
+        };
+        node.world = stack.last().map_or(local, |&(_, parent)| parent * local);
+        stack.push((node.depth, node.world));
     }
 }
 
@@ -383,6 +440,50 @@ mod tests {
 
     fn id_of(doc: &Document, name: &str) -> NodeId {
         doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0
+    }
+
+    #[test]
+    fn animated_objects_and_their_children_move_with_the_frame() {
+        use grid4d_scene::{Axis, Curve, Interpolation, Key, Param, Track};
+        let mut doc = Document::with_demo_scene();
+        let (group, cylinder) = (id_of(&doc, "Group"), id_of(&doc, "Cylinder"));
+        let linear = |keys: &[(f64, f32)]| {
+            Curve::from_keys(keys.iter().map(|&(f, v)| Key {
+                interpolation: Interpolation::Linear,
+                ..Key::new(f, v)
+            }))
+        };
+        doc.scene.get_mut(group).unwrap().data.tracks = vec![Track {
+            param: Param::Position(Axis::Y),
+            curve: linear(&[(0.0, 0.0), (10.0, 300.0)]),
+        }];
+        let world = |eval: &EvaluatedScene, id| eval.nodes().iter().find(|n| n.id == id).unwrap().world;
+        let mut eval = EvaluatedScene::new();
+        eval.set_frame(5.0);
+        eval.update(&doc.scene);
+        assert!(
+            (world(&eval, group).w_axis.y - 150.0).abs() < 1e-3,
+            "halfway up at frame 5"
+        );
+        let child = world(&eval, cylinder).w_axis.y;
+        assert!((child - (150.0 + 100.0)).abs() < 1e-3, "the child follows: {child}");
+        assert_eq!(
+            doc.scene.get(group).unwrap().data.transform.position.y,
+            0.0,
+            "the document is untouched"
+        );
+
+        eval.set_frame(10.0);
+        assert!(eval.update(&doc.scene), "a new frame re-evaluates an animated scene");
+        assert!((world(&eval, group).w_axis.y - 300.0).abs() < 1e-3);
+        eval.set_frame(10.0);
+        assert!(!eval.update(&doc.scene), "the same frame does not");
+
+        // Without animation a new frame changes nothing and costs nothing.
+        doc.scene.get_mut(group).unwrap().data.tracks.clear();
+        eval.update(&doc.scene);
+        eval.set_frame(42.0);
+        assert!(!eval.update(&doc.scene));
     }
 
     #[test]

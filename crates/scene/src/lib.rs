@@ -16,6 +16,7 @@
 //! * Rotations are stored as HPB Euler angles in radians (see [`Transform`]).
 //! * Colours are linear RGB.
 
+mod anim;
 mod bounds;
 mod document;
 mod edit;
@@ -29,6 +30,7 @@ mod transform;
 #[cfg(test)]
 mod test_util;
 
+pub use anim::{Axis, Curve, Interpolation, Key, Param, Tangents, Track, Tracks};
 pub use bounds::Aabb;
 pub use document::Document;
 pub use edit::SceneEdit;

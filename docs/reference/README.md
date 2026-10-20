@@ -63,6 +63,7 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 5.1–5.2 | [`interchange-gltf.md`](interchange-gltf.md) — glTF 2.0 import and export, File ▸ Merge / Export, drag and drop | implemented 2026-10-20 |
 | 5.3 | [`interchange-obj.md`](interchange-obj.md) — Wavefront OBJ import and export | implemented 2026-10-20 |
 | 6.1 | [`tag-basics.md`](tag-basics.md) — tags: Phong, Protection, Target | implemented 2026-10-20 |
+| 6.2 | [`animation-keys.md`](animation-keys.md) — tracks, curves, keys, evaluation | implemented 2026-10-20 |
 | later | `modeling-sds-weights.md` — point/edge weights (creases) | todo |
 | 6 | `animation-keyframes.md` — keys, tracks, F-curve interpolation, timeline | todo |
 | 6 | `manager-coordinate.md`, `manager-material.md` | todo |

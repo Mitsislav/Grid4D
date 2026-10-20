@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 6 — Tags, animation, materials, managers (v0.6) |
-| Last step done | 6.1 — Tags: Phong, Protection, Target (2026-10-20) |
-| Next step | 6.2 — Tracks, curves and keys + evaluation |
-| Tests | 378, all passing; clippy and rustfmt clean |
+| Last step done | 6.2 — Tracks, curves and keys + evaluation (2026-10-20) |
+| Next step | 6.3 — Recording keys (F9), autokeying, key indicators, keys on the timeline |
+| Tests | 386, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -328,7 +328,8 @@ Maxon's public manual, in our own words (clean-room).
 
 | Step | Built | Tests |
 |------|-------|-------|
-| 6.1 | Tags on objects (saved, undoable): Phong (smoothing angle, in the viewport and in exports), Protection (no gizmo, read-only Coordinates for protected channels), Target (turns the object's −Z towards another object, children follow); icons in the Object Manager, the tag view in the Attribute Manager, Tags menu, Delete removes a selected tag | 378 |
+| 6.1 (`becd43a`) | Tags on objects (saved, undoable): Phong (smoothing angle, in the viewport and in exports), Protection (no gizmo, read-only Coordinates for protected channels), Target (turns the object's −Z towards another object, children follow); icons in the Object Manager, the tag view in the Attribute Manager, Tags menu, Delete removes a selected tag | 378 |
+| 6.2 | Animation data: tracks of keys per object (position, rotation, scale), Spline / Linear / Step with clamped auto or manual tangents, evaluated at the current frame (children follow, the document untouched), saved in `.g4d` | 386 |
 
 *Problems and solutions:*
 - **Where tags live.** Tags sit in `NodeData`, the unit of attribute edits. Adding,
@@ -359,6 +360,25 @@ Maxon's public manual, in our own words (clean-room).
   - a tag added from the Tags menu is selected, and Delete removes only the tag;
   - a sphere tagged Phong 0° is flat-shaded;
   - a protected box has no Move gizmo and grey Coordinates.
+
+*Step 6.2 — problems and solutions:*
+- **Tracks belong to their object.** The plan sketched one list of tracks naming
+  their nodes. Storing them in the object's data instead keeps the animation with
+  its object through deletes, undo, merges and saving, with no extra bookkeeping.
+- **Playback must not touch the document.** The evaluation computes animated world
+  matrices in pre-order, so children follow, and leaves the object's own values
+  alone. It re-evaluates on a frame change only if the last evaluation found
+  animation; a static scene costs nothing during playback.
+- **Spline segments as functions of time.** A Bézier segment is a curve in
+  (frame, value). Its parameter is found by bisection on the frame, and the
+  handles are kept within their segment so the frame always increases.
+  - Auto tangents use the slope through the neighbouring keys, with handles a third
+    of the way to each neighbour, so the curve is smooth through every key.
+  - Clamping flattens peaks, dips and equal neighbours, so a bouncing ball never
+    goes through the floor. Tests check both.
+- **Checked in the app:** a document with a bouncing, squashing ball and a turning
+  bar carrying a sphere, stepped with G to frames 8, 15 and 30. Every object was
+  where its curves put it, and the child turned with its parent.
 
 ---
 
