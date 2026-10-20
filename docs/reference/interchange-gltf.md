@@ -83,9 +83,9 @@ None yet (an import dialog with Scale and toggles is *later*). Fixed choices:
     the viewport shows) and the UVs when the mesh has them. Vertices that agree in
     position, normal and UV are shared.
   - **Primitives** → meshes of their current shape (what Make Editable would give).
-  - **Generators** → their result at the viewport level; the cage is not written. A
-    switched-off generator is written as an empty node with its children as they
-    are.
+  - **Generators** → their result at the viewport level, in the cage's display
+    colour (as the viewport draws it); the cage is not written. A switched-off
+    generator is written as an empty node with its children as they are.
   - Display colours → materials (base colour, not metallic), one per colour.
   - Cameras → perspective cameras (vertical field of view); lights →
     `KHR_lights_punctual` point lights (colour, intensity); Nulls and empty polygon

@@ -195,16 +195,16 @@ tool's options. Its **Mode** menu switches between *Objects* and *Tool* by hand.
 | Command | Shortcut | Notes |
 |---------|----------|-------|
 | File ▸ New | Ctrl+N | An empty document. |
-| File ▸ Open… | Ctrl+O | Opens `.g4d` documents (and older `.oc4d` ones), and glTF models (`.gltf`, `.glb`) as new documents. |
+| File ▸ Open… | Ctrl+O | Opens `.g4d` documents (and older `.oc4d` ones), and models (`.gltf`, `.glb`, `.obj`) as new documents. |
 | File ▸ Open Recent | | The last ten files. |
-| File ▸ Merge… | Ctrl+Shift+O | Adds the objects of a `.g4d`, `.gltf` or `.glb` file to the current document. |
-| File ▸ Export… | | Writes the scene as a glTF model (`.glb`, or `.gltf` + `.bin`) for other applications. |
+| File ▸ Merge… | Ctrl+Shift+O | Adds the objects of a `.g4d`, `.gltf`, `.glb` or `.obj` file to the current document. |
+| File ▸ Export… | | Writes the scene as a model for other applications: glTF (`.glb`, or `.gltf` + `.bin`) or OBJ (`.obj` + `.mtl`). |
 | File ▸ Save | Ctrl+S | Asks for a name the first time. |
 | File ▸ Save As… | Ctrl+Shift+S | |
 | File ▸ Quit | | |
 
-- **Drag a `.g4d` file onto the window** to open it; **drag a `.gltf` or `.glb`
-  file** onto it to merge the model into the current document.
+- **Drag a `.g4d` file onto the window** to open it; **drag a model** (`.gltf`,
+  `.glb` or `.obj`) onto it to merge it into the current document.
 - The window title shows the document name and an asterisk (`*`) while there are
   unsaved changes. Undoing back to the saved state clears it again.
 - Before anything would discard unsaved changes (New, Open, Quit, closing the
@@ -274,6 +274,27 @@ Exporting does not change the document: there is nothing to undo, and the title'
 Opening an exported file brings back the hierarchy, names, positions, cameras and
 lights. Every mesh comes back as a triangulated polygon object, since glTF stores
 only triangles.
+
+### 9.3 OBJ files
+
+OBJ (Wavefront) is the oldest common mesh format; nearly every 3D application
+reads and writes it. It stores **meshes only**, with no hierarchy, cameras or
+lights. Unlike glTF, it keeps polygons with any number of corners. Open, merge
+and drop `.obj` files like glTF files, and pick the `.obj` type in
+**File ▸ Export…**.
+
+- **Importing:** every object or group in the file becomes a polygon object, placed
+  at the origin. Quads and n-gons stay as they are. Texture coordinates are kept,
+  and the colours of the `.mtl` file named in the OBJ become display colours.
+  OBJ has no units: 1 unit is read as 1 cm.
+- **Exporting:** every mesh (primitives and Subdivision Surfaces included, as for
+  glTF) becomes one OBJ object, with its points where they are in the scene (OBJ
+  has no positions or hierarchy of its own). Polygons keep all their corners.
+  Normals follow the viewport's smoothing. Colours go to a `.mtl` file of the
+  same name next to the `.obj`; keep the two together. Cameras, lights and Nulls
+  are left out.
+
+![Top: the document; bottom: its OBJ export opened again. One polygon object per mesh, in the same places, quads intact](images/manual/obj_export.png)
 
 ## 10. Timeline and playback
 
@@ -679,8 +700,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Animation**: keyframes, F-curves, the Coordinate and Material managers.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.
-- **Interchange and rendering**: OBJ import and export, glTF materials, textures and
-  animation, an export dialog (scale, visible or selected objects only), the
+- **Interchange and rendering**: materials and textures, animation in glTF, import
+  and export dialogs (scale, axis flips, visible or selected objects only), the
   offline renderer (the Render menu is disabled).
 - The Takes, Layers and Filter panels are placeholders.
 

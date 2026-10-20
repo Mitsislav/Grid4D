@@ -46,6 +46,7 @@ mod common;
 mod gltf_export;
 mod gltf_import;
 mod import;
+mod obj;
 mod v1;
 mod v2;
 mod v3;
@@ -62,7 +63,8 @@ use crate::common::Archive;
 pub use crate::{
     gltf_export::{export_gltf, glb_bytes, gltf_document},
     gltf_import::import_gltf,
-    import::{IMPORT_EXTENSIONS, ObjectEntry, Objects, import, is_importable},
+    import::{EXPORT_EXTENSIONS, IMPORT_EXTENSIONS, ObjectEntry, Objects, export, import, is_importable},
+    obj::{export_obj, import_obj, obj_text},
 };
 
 /// File extension, without the dot.

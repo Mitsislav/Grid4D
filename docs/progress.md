@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 5 — Interchange: glTF, OBJ (v0.5) |
-| Last step done | 5.2 — glTF 2.0 export (2026-10-20) |
-| Next step | 5.3 — OBJ import and export |
-| Tests | 362, all passing; clippy and rustfmt clean |
+| Last step done | 5.3 — OBJ import and export (2026-10-20); phase 5's steps done (5.4 belongs to phase 6) |
+| Next step | Phase 6 — tags, animation, materials and managers (6A: tags) |
+| Tests | 368, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -259,7 +259,8 @@ Maxon's public manual, in our own words (clean-room).
 | Step | Built | Tests |
 |------|-------|-------|
 | 5.1 (`02b7d94`) | glTF 2.0 import (`.gltf` + `.bin`, embedded buffers, `.glb`): hierarchy, transforms, meshes (welded, with UVs), base colours, cameras, lights; Open makes a new document, File ▸ Merge (Ctrl+Shift+O) and drag and drop add to the current one (one undo step); Merge also takes `.g4d` files | 354 |
-| 5.2 | glTF 2.0 export (File ▸ Export…, `.glb` or `.gltf` + `.bin`): hierarchy, transforms, triangulated meshes with the viewport's normals and UVs, primitives and Subdivision Surfaces baked, colours as materials, cameras, lights; checked in the app by exporting, validating, reopening and merging | 362 |
+| 5.2 (`e54fbdb`) | glTF 2.0 export (File ▸ Export…, `.glb` or `.gltf` + `.bin`): hierarchy, transforms, triangulated meshes with the viewport's normals and UVs, primitives and Subdivision Surfaces baked, colours as materials, cameras, lights; checked in the app by exporting, validating, reopening and merging | 362 |
+| 5.3 | Wavefront OBJ import and export: polygons keep their corners both ways, per-corner UVs (V flipped), colours through `.mtl`, objects split by `o`/`g`; Open, Merge, drop and Export accept `.obj`; exported generators take their cage's colour | 368 |
 
 *Problems and solutions:*
 - **The `gltf` crate's default features decode textures** (they pull in an image
@@ -300,6 +301,28 @@ Maxon's public manual, in our own words (clean-room).
   bit by bit, so `0.0` and `-0.0` counted as different points. A sphere's pole,
   written with zeros of both signs, was only partly merged and kept degenerate
   triangles. Zeros are now normalised before comparing (a test covers it).
+
+*Step 5.3 — problems and solutions:*
+- **OBJ has no transforms or hierarchy.** Objects are written with their points in
+  world space (from the object list's parents). An object mirrored by a negative
+  scale has its polygons written in reverse order, so they still face outwards.
+- **The `tobj` reader invents texture coordinates.** For faces without `vt`, in a
+  file that has some elsewhere, it repeats one stand-in value. A constant UV map
+  carries nothing, so it is dropped on import.
+- **The reader numbers points in the order faces use them**, not as in the file.
+  The round-trip tests therefore compare point sets, not indices.
+- **Testing in the app found an inconsistency in both exporters.** A Subdivision
+  Surface was written in its own display colour, while the viewport draws its
+  result in the cage's. Exports now use the cage's colour.
+- **Checks in the app:**
+  - the demo with a Subdivision Surface, exported to OBJ through File ▸ Export,
+    passed an independent Python check (references in range, unit normals, every
+    material defined);
+  - it kept its polygons: 96 quads, and two 36-sided caps on the cylinder;
+  - opened again, the smoothed object came back with 98 points and 96 polygons;
+  - merged into the original, every object lay on its original;
+  - the imported table scene (hierarchy, rotations), exported to OBJ, matched
+    world-space positions computed straight from the glTF to 3·10⁻⁶ cm.
 
 ---
 

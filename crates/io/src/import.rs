@@ -7,10 +7,12 @@ use std::{collections::HashMap, fs, path::Path};
 
 use grid4d_scene::{Document, Node, NodeData, NodeId};
 
-use crate::{IoError, OPEN_EXTENSIONS, gltf_import, load};
+use crate::{IoError, OPEN_EXTENSIONS, gltf_export, gltf_import, load, obj};
 
 /// Extensions of the formats [`import`] reads besides Grid4D documents.
-pub const IMPORT_EXTENSIONS: [&str; 2] = ["gltf", "glb"];
+pub const IMPORT_EXTENSIONS: [&str; 3] = ["gltf", "glb", "obj"];
+/// Extensions of the formats [`export`] writes.
+pub const EXPORT_EXTENSIONS: [&str; 3] = ["glb", "gltf", "obj"];
 
 /// Objects read from a file, or to write to one.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -80,7 +82,8 @@ fn has_extension(path: &Path, extensions: &[&str]) -> bool {
         .is_some_and(|ext| extensions.iter().any(|known| ext.eq_ignore_ascii_case(known)))
 }
 
-/// The objects of a glTF (`.gltf`, `.glb`) file or a Grid4D document.
+/// The objects of a glTF (`.gltf`, `.glb`) or Wavefront OBJ file, or of a Grid4D
+/// document.
 ///
 /// # Errors
 ///
@@ -92,12 +95,35 @@ pub fn import(path: &Path) -> Result<Objects, IoError> {
     }
     if !is_importable(path) {
         return Err(IoError::Invalid(format!(
-            "unsupported file type (Grid4D reads .{}, .gltf and .glb)",
+            "unsupported file type (Grid4D reads .{}, .gltf, .glb and .obj)",
             crate::EXTENSION
         )));
     }
     let bytes = fs::read(path).map_err(IoError::Io)?;
+    if has_extension(path, &["obj"]) {
+        let name = path
+            .file_stem()
+            .map_or_else(|| "Object".into(), |s| s.to_string_lossy());
+        return obj::import_obj(&bytes, path.parent(), &name);
+    }
     gltf_import::import_gltf(&bytes, path.parent())
+}
+
+/// Writes `objects` to `path` in the format its extension names: `.glb`, `.gltf`
+/// (+ `.bin`) or `.obj` (+ `.mtl`).
+///
+/// # Errors
+///
+/// [`IoError::Invalid`] for an unknown extension or non-finite numbers,
+/// [`IoError::Io`] if a file cannot be written.
+pub fn export(objects: &Objects, path: &Path) -> Result<(), IoError> {
+    if has_extension(path, &["obj"]) {
+        obj::export_obj(objects, path)
+    } else if has_extension(path, &["glb", "gltf"]) {
+        gltf_export::export_gltf(objects, path)
+    } else {
+        Err(IoError::Invalid("export as .glb, .gltf or .obj".to_owned()))
+    }
 }
 
 #[cfg(test)]
@@ -134,8 +160,9 @@ mod tests {
     fn importable_paths_and_unsupported_ones() {
         assert!(is_importable(Path::new("model.GLB")));
         assert!(is_importable(Path::new("dir/model.gltf")));
-        assert!(!is_importable(Path::new("model.obj")));
-        let err = import(Path::new("model.obj")).unwrap_err();
+        assert!(is_importable(Path::new("model.OBJ")));
+        assert!(!is_importable(Path::new("model.fbx")));
+        let err = import(Path::new("model.fbx")).unwrap_err();
         assert!(err.to_string().contains("unsupported"), "{err}");
     }
 }

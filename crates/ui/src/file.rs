@@ -17,7 +17,7 @@ use grid4d_scene::{Document, MeshHandle, NodeId, ObjectKind, SceneEdit};
 use crate::{EditorCommand, EditorState, History, ViewportPanel, recent::RecentFiles};
 
 /// Every extension File ▸ Open and File ▸ Merge accept.
-const ANY_EXTENSIONS: [&str; 4] = ["g4d", "oc4d", "gltf", "glb"];
+const ANY_EXTENSIONS: [&str; 5] = ["g4d", "oc4d", "gltf", "glb", "obj"];
 
 /// Native open/save dialogs, behind a trait so tests never open a window.
 pub trait FileDialogs: std::fmt::Debug {
@@ -68,15 +68,21 @@ impl FileDialogs for NativeDialogs {
             .set_title("Export")
             .add_filter("glTF Binary (.glb)", &["glb"])
             .add_filter("glTF (.gltf + .bin)", &["gltf"])
+            .add_filter("Wavefront OBJ (.obj + .mtl)", &["obj"])
             .set_file_name(suggested)
             .save_file()
             .map(with_export_extension)
     }
 }
 
-/// A typed export name without `.glb` or `.gltf` gets `.glb`.
+/// A typed export name without `.glb`, `.gltf` or `.obj` gets `.glb`.
 fn with_export_extension(path: PathBuf) -> PathBuf {
-    if grid4d_io::is_importable(&path) {
+    let known = path.extension().is_some_and(|ext| {
+        grid4d_io::EXPORT_EXTENSIONS
+            .iter()
+            .any(|known| ext.eq_ignore_ascii_case(known))
+    });
+    if known {
         return path;
     }
     let mut name = path.into_os_string();
@@ -84,12 +90,13 @@ fn with_export_extension(path: PathBuf) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Grid4D documents and glTF files, together and each on its own.
+/// Grid4D documents and models (glTF, OBJ), together and each on its own.
 fn with_filters(dialog: rfd::FileDialog) -> rfd::FileDialog {
     dialog
-        .add_filter("Grid4D Document or glTF", &ANY_EXTENSIONS)
+        .add_filter("Grid4D Document or Model", &ANY_EXTENSIONS)
         .add_filter("Grid4D Document", &grid4d_io::OPEN_EXTENSIONS)
-        .add_filter("glTF 2.0", &grid4d_io::IMPORT_EXTENSIONS)
+        .add_filter("glTF 2.0", &["gltf", "glb"])
+        .add_filter("Wavefront OBJ", &["obj"])
 }
 
 fn with_directory(dialog: rfd::FileDialog, directory: Option<&Path>) -> rfd::FileDialog {
@@ -385,14 +392,15 @@ pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, v
 }
 
 /// File ▸ Export: asks where, then writes the document as glTF (`.glb`, or
-/// `.gltf` + `.bin`). The document does not change; a failure shows an alert.
+/// `.gltf` + `.bin`) or OBJ (`.obj` + `.mtl`), by the chosen extension. The
+/// document does not change; a failure shows an alert.
 pub(crate) fn export(doc: &Document, editor: &mut EditorState) {
     let suggested = format!("{}.glb", file_stem_for(&editor.file.display_name(doc)));
     let directory = editor.file.directory().map(Path::to_path_buf);
     let Some(path) = editor.file.dialogs.pick_export(directory.as_deref(), &suggested) else {
         return;
     };
-    if let Err(err) = grid4d_io::export_gltf(&exportable(doc), &path) {
+    if let Err(err) = grid4d_io::export(&exportable(doc), &path) {
         editor.file.alert = Some(Alert {
             title: "Could Not Export",
             message: format!("{}\n\n{err}", path.display()),
@@ -417,6 +425,10 @@ pub fn exportable(doc: &Document) -> Objects {
                 Some(mesh) => {
                     data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
                     cage = node.children().first().copied();
+                    // The viewport shows the result in the cage's colour.
+                    if let Some(cage) = cage.and_then(|c| doc.scene.get(c)) {
+                        data.display_color = cage.data.display_color;
+                    }
                 }
                 None => data.kind = ObjectKind::Null,
             }
@@ -539,7 +551,7 @@ fn choose_dropped(paths: &[&Path]) -> Option<Result<DropAction, Alert>> {
         Some(path) => Ok(DropAction::Merge(path.to_path_buf())),
         None => {
             let mut message = format!(
-                "None of the dropped files is a Grid4D document (.{}) or a glTF file (.gltf, .glb):\n",
+                "None of the dropped files is a Grid4D document (.{}) or a model (.gltf, .glb, .obj):\n",
                 grid4d_io::EXTENSION
             );
             for path in paths {
@@ -1095,6 +1107,18 @@ mod tests {
             panic!("the generator is written as its result")
         };
         assert_eq!(mesh.mesh(), &smoothed);
+        let cage_colour = f
+            .doc
+            .scene
+            .get(f.doc.scene.children(sds)[0])
+            .unwrap()
+            .data
+            .display_color;
+        assert_eq!(
+            entry("Subdivision Surface").unwrap().data.display_color,
+            cage_colour,
+            "in the colour the viewport shows it in"
+        );
         for name in ["Sphere", "Cylinder", "Box"] {
             assert_eq!(
                 entry(name).unwrap().data.kind.tag(),
@@ -1163,6 +1187,32 @@ mod tests {
         assert_eq!(f.editor.file.alert.as_ref().unwrap().title, "Could Not Export");
     }
 
+    #[test]
+    fn obj_export_writes_the_meshes_and_opens_again() {
+        let mut f = Fixture::new("export_obj", None, Some("scene.obj"));
+        f.run(&[EditorCommand::Export]);
+        assert!(f.dir.join("scene.obj").is_file() && f.dir.join("scene.mtl").is_file());
+        assert!(f.editor.file.alert.is_none());
+
+        // OBJ holds meshes only: every primitive, baked; no Nulls, cameras or lights.
+        let meshes: Vec<String> = exportable(&f.doc)
+            .nodes
+            .into_iter()
+            .filter(|n| matches!(&n.data.kind, ObjectKind::Polygon { mesh, .. } if mesh.mesh().face_count() > 0))
+            .map(|n| n.data.name)
+            .collect();
+        f.run(&[EditorCommand::OpenFile(f.dir.join("scene.obj"))]);
+        assert!(f.editor.file.alert.is_none(), "{:?}", f.editor.file.alert);
+        assert_eq!(names(&f.doc), meshes);
+        assert_eq!(f.doc.name, "scene");
+        assert!(
+            f.doc
+                .scene
+                .iter()
+                .all(|(_, n)| n.data.kind.tag() == ObjectKindTag::Polygon && n.parent().is_none())
+        );
+    }
+
     // ── Drag and drop ───────────────────────────────────────────────────────
 
     #[test]
@@ -1178,11 +1228,15 @@ mod tests {
         let picked = choose_dropped(&[Path::new("notes.txt"), Path::new("model.GLTF")]);
         assert_eq!(picked, Some(Ok(DropAction::Merge(PathBuf::from("model.GLTF")))));
 
-        let Some(Err(alert)) = choose_dropped(&[Path::new("a/notes.txt"), Path::new("model.obj")]) else {
+        assert_eq!(
+            choose_dropped(&[Path::new("notes.txt"), Path::new("model.obj")]),
+            Some(Ok(DropAction::Merge(PathBuf::from("model.obj"))))
+        );
+        let Some(Err(alert)) = choose_dropped(&[Path::new("a/notes.txt"), Path::new("model.fbx")]) else {
             panic!("nothing usable was dropped");
         };
         assert_eq!(alert.title, "Cannot Open Dropped Files");
-        assert!(alert.message.contains("notes.txt") && alert.message.contains("model.obj"));
+        assert!(alert.message.contains("notes.txt") && alert.message.contains("model.fbx"));
     }
 
     /// A file dropped onto the window, as the windowing integration reports it.

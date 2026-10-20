@@ -33,7 +33,7 @@ pub fn show(ctx: &egui::Context) {
 fn hover_label<'a>(paths: impl Iterator<Item = Option<&'a std::path::Path>>) -> Option<String> {
     let mut any = false;
     let mut any_path = false;
-    // A document wins over a glTF file anywhere in the same drop.
+    // A document wins over a model anywhere in the same drop.
     let mut merge: Option<String> = None;
     for path in paths {
         any = true;
@@ -51,9 +51,9 @@ fn hover_label<'a>(paths: impl Iterator<Item = Option<&'a std::path::Path>>) -> 
         (false, _, _) => None,
         (true, true, Some(merge)) => Some(merge),
         (true, true, None) => {
-            Some("Only Grid4D documents (.g4d) and glTF files (.gltf, .glb) can be dropped".to_owned())
+            Some("Only Grid4D documents (.g4d) and models (.gltf, .glb, .obj) can be dropped".to_owned())
         }
-        (true, false, _) => Some("Drop a .g4d document to open it, or a glTF file to merge it".to_owned()),
+        (true, false, _) => Some("Drop a .g4d document to open it, or a model to merge it".to_owned()),
     }
 }
 
@@ -72,11 +72,11 @@ mod tests {
         );
         assert_eq!(
             hover_label([Some(Path::new("notes.txt"))].into_iter()).as_deref(),
-            Some("Only Grid4D documents (.g4d) and glTF files (.gltf, .glb) can be dropped")
+            Some("Only Grid4D documents (.g4d) and models (.gltf, .glb, .obj) can be dropped")
         );
         assert_eq!(
             hover_label([None].into_iter()).as_deref(),
-            Some("Drop a .g4d document to open it, or a glTF file to merge it")
+            Some("Drop a .g4d document to open it, or a model to merge it")
         );
         assert_eq!(
             hover_label([Some(Path::new("duck.glb")), Some(Path::new("shot.g4d"))].into_iter()).as_deref(),
