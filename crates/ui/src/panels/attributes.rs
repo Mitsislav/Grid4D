@@ -11,7 +11,8 @@ use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdi
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_scene::{
-    Axis, Document, KeyState, NodeData, NodeId, ObjectKind, Param, Scene, SceneEdit, Tag, TagKind, TimeSettings,
+    Axis, Document, KeyState, Material, MaterialId, NodeData, NodeId, ObjectKind, Param, Scene, SceneEdit, Tag,
+    TagKind, TimeSettings,
 };
 
 use crate::{
@@ -62,6 +63,7 @@ pub struct AttributesPanel {
     seen_active: Option<NodeId>,
     tab: Tab,
     node_edit: LiveEdit<NodeId, NodeData>,
+    material_edit: LiveEdit<MaterialId, Material>,
     name_edit: LiveEdit<(), String>,
     time_edit: LiveEdit<(), TimeSettings>,
 }
@@ -78,10 +80,12 @@ impl AttributesPanel {
                 };
             }
             self.seen_tool = Some(editor.tool);
+            editor.materials.shown = false;
         }
         if self.seen_active != editor.selection.active() {
             self.view = View::Objects;
             self.seen_active = editor.selection.active();
+            editor.materials.shown = false;
         }
 
         manager_area_tabs(ui, editor);
@@ -112,6 +116,13 @@ impl AttributesPanel {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 egui::Frame::new().inner_margin(Margin::symmetric(8, 6)).show(ui, |ui| {
+                    // A material picked in the Material Manager comes first.
+                    if editor.materials.shown
+                        && let Some(id) = editor.materials.selected.filter(|&m| doc.scene.materials().contains(m))
+                    {
+                        self.material_ui(ui, doc, id, &mut editor.commands);
+                        return;
+                    }
                     match (self.view, editor.selection.active()) {
                         (View::Tool, _) => tool_ui(ui, doc, editor),
                         (View::Objects, Some(id)) => {
@@ -126,6 +137,75 @@ impl AttributesPanel {
                     }
                 });
             });
+    }
+
+    /// A material's settings, edited live; one undo step per interaction.
+    fn material_ui(&mut self, ui: &mut Ui, doc: &mut Document, id: MaterialId, commands: &mut CommandQueue) {
+        let Some(mut material) = doc.scene.materials().get(id).cloned() else {
+            return;
+        };
+        self.material_edit.begin(id, &material);
+        ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());
+            icons::paint_material_ball(ui.painter(), rect, material.color);
+            ui.label(
+                RichText::new(format!("Material [{}]", material.name))
+                    .strong()
+                    .color(p::TEXT_STRONG),
+            );
+        });
+        section_heading(ui, "Material");
+        Grid::new("grid4d.attr.material")
+            .num_columns(2)
+            .spacing([6.0, 4.0])
+            .show(ui, |ui| {
+                attr_label(ui, "Name", LABEL_WIDTH);
+                ui.add(TextEdit::singleline(&mut material.name).desired_width(f32::INFINITY));
+                ui.end_row();
+                attr_label(ui, "Color", LABEL_WIDTH);
+                ui.color_edit_button_rgb(&mut material.color);
+                ui.end_row();
+                for (label, value) in [
+                    ("Roughness", &mut material.roughness),
+                    ("Metallic", &mut material.metallic),
+                ] {
+                    attr_label(ui, label, LABEL_WIDTH);
+                    let mut percent = *value * 100.0;
+                    if ui
+                        .add_sized(
+                            [FIELD_WIDTH, 19.0],
+                            DragValue::new(&mut percent).speed(0.5).range(0.0..=100.0).suffix(" %"),
+                        )
+                        .changed()
+                    {
+                        *value = percent / 100.0;
+                    }
+                    ui.end_row();
+                }
+                attr_label(ui, "Luminance", LABEL_WIDTH);
+                ui.color_edit_button_rgb(&mut material.emission);
+                ui.end_row();
+            });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("The viewport shows the colour; roughness, metallic and luminance shade it from Phase 7")
+                .color(p::TEXT_DIM),
+        );
+        if doc.scene.materials().get(id).is_some_and(|m| *m != material)
+            && let Some(m) = doc.scene.materials_mut().get_mut(id)
+        {
+            m.clone_from(&material);
+        }
+        if let Some((id, before)) = self.material_edit.end(id, &material, interaction_ongoing(ui)) {
+            let mut table = doc.scene.materials().clone();
+            if let Some(m) = table.get_mut(id) {
+                *m = before;
+            }
+            commands.push(EditorCommand::CommitLive {
+                inverse: SceneEdit::SetMaterials(table),
+                label: "Edit Material",
+            });
+        }
     }
 
     /// The active object's attributes, or those of its selected tag.
@@ -809,14 +889,37 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
                 object_row(ui, "Up Vector", up, scene, owner);
                 check_row(ui, "Pitch", pitch);
             }
+            Tag::Material { material } => material_row(ui, material, scene),
         });
     let hint = match tag {
         Tag::Phong { .. } => "Edges sharper than the angle stay hard; with Angle Limit off everything is smooth",
         Tag::Protection { .. } => "Protected channels cannot be changed with the gizmo or the Coordinates fields",
         Tag::Target { .. } => "The object turns its forward axis (−Z) towards the target; Pitch off keeps it level",
+        Tag::Material { .. } => {
+            "The object and its children without a Material tag of their own show this material; drag a material onto an object to assign it"
+        }
     };
     ui.add_space(4.0);
     ui.label(RichText::new(hint).color(p::TEXT_DIM));
+}
+
+/// A Material tag's link: a list of the document's materials, `None` first.
+fn material_row(ui: &mut Ui, value: &mut Option<MaterialId>, scene: &Scene) {
+    attr_label(ui, "Material", LABEL_WIDTH);
+    let materials = scene.materials();
+    let name = value
+        .and_then(|id| materials.get(id))
+        .map_or("None", |m| m.name.as_str());
+    egui::ComboBox::from_id_salt("grid4d.attr.tag.material")
+        .selected_text(name)
+        .width(FIELD_WIDTH + 40.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(value, None, "None");
+            for (id, material) in materials.iter() {
+                ui.selectable_value(value, Some(id), &material.name);
+            }
+        });
+    ui.end_row();
 }
 
 /// A link to another object: a list of the document's objects, `None` first.

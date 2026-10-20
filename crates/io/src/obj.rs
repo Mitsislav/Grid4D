@@ -8,10 +8,11 @@ use std::{collections::HashMap, fmt::Write as _, fs, path::Path};
 
 use glam::{Mat3, Mat4, Vec2, Vec3};
 use grid4d_geom::{PolyMesh, Smoothing, TriMesh, Triangulator};
-use grid4d_scene::{MeshHandle, NodeData, ObjectKind, Tags};
+use grid4d_scene::{Material, MaterialId, Materials, MeshHandle, NodeData, ObjectKind, Tag, Tags};
 
 use crate::{
     IoError,
+    import::Look,
     import::{ObjectEntry, Objects},
     write_atomic,
 };
@@ -44,7 +45,26 @@ pub fn import_obj(bytes: &[u8], base: Option<&Path>, fallback: &str) -> Result<O
     let mut reader = bytes;
     let (models, materials) = tobj::load_obj_buf(&mut reader, &options, |path| load_mtl(path, base))
         .map_err(|err| invalid(format!("not a valid OBJ file: {err}")))?;
-    let materials = materials.unwrap_or_default();
+    let mtl = materials.unwrap_or_default();
+    // Every material of the .mtl, in its order; objects get a Material tag for theirs.
+    let mut materials = Materials::default();
+    let material_ids: Vec<MaterialId> = mtl
+        .iter()
+        .map(|m| {
+            let name = match m.name.trim() {
+                "" => materials.unique_name("Mat"),
+                name => name.to_owned(),
+            };
+            let mut material = Material::new(name);
+            if let Some(colour) = m.diffuse.filter(|c| finite(c)) {
+                material.color = colour.map(|c| c.max(0.0));
+            }
+            if let Some(emission) = m.emissive.filter(|c| finite(c)) {
+                material.emission = emission.map(|c| c.max(0.0));
+            }
+            materials.insert(material)
+        })
+        .collect();
 
     let mut nodes = Vec::new();
     for model in models {
@@ -59,15 +79,24 @@ pub fn import_obj(bytes: &[u8], base: Option<&Path>, fallback: &str) -> Result<O
         if let Some(colour) = model
             .mesh
             .material_id
-            .and_then(|id| materials.get(id))
+            .and_then(|id| mtl.get(id))
             .and_then(|m| m.diffuse)
             .filter(|c| finite(c))
         {
             data.display_color = colour;
         }
+        if let Some(&material) = model.mesh.material_id.and_then(|id| material_ids.get(id)) {
+            data.tags.push(Tag::Material {
+                material: Some(material),
+            });
+        }
         nodes.push(ObjectEntry { parent: None, data });
     }
-    Ok(Objects { nodes })
+    Ok(Objects {
+        nodes,
+        materials,
+        sources: Vec::new(),
+    })
 }
 
 /// The `.mtl` named by `mtllib`, read only from a path relative to the OBJ.
@@ -182,14 +211,15 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
     let worlds = world_matrices(objects);
     let mut obj = format!("# Grid4D {}\n", env!("CARGO_PKG_VERSION"));
     let mut mtl = String::new();
-    let mut material_of: HashMap<[u32; 3], String> = HashMap::new();
+    let mut material_of: HashMap<Look, String> = HashMap::new();
+    let effective = objects.effective_materials();
     let mut triangulator = Triangulator::new();
     let mut tri = TriMesh::default();
     // Running 1-based offsets of the v / vt / vn lists.
     let (mut v_base, mut vt_base, mut vn_base) = (1usize, 1usize, 1usize);
     let mut body = String::new();
 
-    for (entry, world) in objects.nodes.iter().zip(&worlds) {
+    for ((entry, world), material) in objects.nodes.iter().zip(&worlds).zip(effective) {
         let data = &entry.data;
         // Only polygon objects have something to write (OBJ holds no cameras or lights).
         let mesh = match &data.kind {
@@ -218,15 +248,46 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
 
         let _ = writeln!(body, "o {}", one_line(&data.name));
         if mtl_name.is_some() {
-            let key = data.display_color.map(f32::to_bits);
-            let next = material_of.len() + 1;
-            let material = material_of.entry(key).or_insert_with(|| {
-                let name = format!("color_{next}");
-                let [r, g, b] = data.display_color;
-                let _ = writeln!(mtl, "newmtl {name}\nKd {r} {g} {b}\nKa 0 0 0\nKs 0 0 0\nillum 1\n");
-                name
-            });
-            let _ = writeln!(body, "usemtl {material}");
+            // Its material (own or inherited) under its name, else its display colour.
+            let material = material.and_then(|id| objects.materials.get(id).map(|m| (id, m)));
+            let key = match material {
+                Some((id, _)) => Look::Material(id),
+                None => Look::Colour(data.display_color.map(f32::to_bits)),
+            };
+            if !material_of.contains_key(&key) {
+                let next = material_of.len() + 1;
+                let (name, colour, emission) = match material {
+                    Some((_, m)) => {
+                        let name: String = m
+                            .name
+                            .chars()
+                            .map(|c| if c.is_whitespace() || c.is_control() { '_' } else { c })
+                            .collect();
+                        // Two materials with the same name stay apart.
+                        let name = if name.is_empty() || material_of.values().any(|n| *n == name) {
+                            format!("{name}_{next}")
+                        } else {
+                            name
+                        };
+                        (name, m.color, m.emission)
+                    }
+                    None => (format!("color_{next}"), data.display_color, [0.0; 3]),
+                };
+                if !finite(&colour) || !finite(&emission) {
+                    return Err(invalid(format!("\"{}\" has a non-finite colour", data.name)));
+                }
+                let [r, g, b] = colour;
+                let _ = write!(mtl, "newmtl {name}\nKd {r} {g} {b}\nKa 0 0 0\nKs 0 0 0\n");
+                if emission != [0.0; 3] {
+                    let [r, g, b] = emission;
+                    let _ = writeln!(mtl, "Ke {r} {g} {b}");
+                }
+                let _ = writeln!(mtl, "illum 1\n");
+                material_of.insert(key, name);
+            }
+            if let Some(name) = material_of.get(&key) {
+                let _ = writeln!(body, "usemtl {name}");
+            }
         }
         for &p in mesh.points() {
             let p = world.transform_point3(p);
@@ -434,6 +495,32 @@ l 5 6
 
     /// Root (moved, turned) > Box (a cube); Pentagon (an n-gon with UVs, mirrored);
     /// Cam and Lamp (not written).
+    #[test]
+    fn materials_are_written_under_their_names_and_read_back() {
+        use grid4d_scene::{Material, Tag};
+        let mut objects = scene();
+        let mut lamp = Material::new("Warm Lamp");
+        lamp.color = [0.9, 0.8, 0.1];
+        lamp.emission = [1.0, 0.5, 0.0];
+        let lamp = objects.materials.insert(lamp);
+        objects.nodes[0].data.tags.push(Tag::Material { material: Some(lamp) });
+        let (obj, mtl) = obj_text(&objects, Some("scene.mtl")).unwrap();
+        assert!(mtl.contains("newmtl Warm_Lamp\nKd 0.9 0.8 0.1"), "{mtl}");
+        assert!(mtl.contains("Ke 1 0.5 0"), "{mtl}");
+        assert!(obj.contains("usemtl Warm_Lamp"));
+
+        let dir = temp_dir("material_names");
+        fs::write(dir.join("scene.mtl"), &mtl).unwrap();
+        let back = import_obj(obj.as_bytes(), Some(&dir), "scene").unwrap();
+        let (id, material) = back.materials.iter().find(|(_, m)| m.name == "Warm_Lamp").unwrap();
+        assert_eq!(material.color, [0.9, 0.8, 0.1]);
+        assert_eq!(material.emission, [1.0, 0.5, 0.0]);
+        assert!(
+            back.nodes.iter().any(|n| n.data.tags.material() == Some(id)),
+            "objects get Material tags"
+        );
+    }
+
     fn scene() -> Objects {
         let mut pentagon = PolyMesh::from_faces(
             (0..5)
@@ -477,7 +564,10 @@ l 5 6
         };
         nodes[1].data.display_color = [0.2, 0.6, 0.9];
         nodes[2].data.transform.scale = Vec3::new(-1.0, 1.0, 1.0);
-        Objects { nodes }
+        Objects {
+            nodes,
+            ..Objects::default()
+        }
     }
 
     #[test]

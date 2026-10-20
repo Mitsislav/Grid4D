@@ -10,10 +10,14 @@ use std::{collections::HashMap, path::Path};
 
 use glam::{Quat, Vec3};
 use grid4d_geom::{Smoothing, TriMesh, Triangulator};
-use grid4d_scene::{MeshHandle, MeshId, ObjectKind, Tags};
+use grid4d_scene::{Materials, MeshHandle, MeshId, ObjectKind, Tags};
 use serde_json::{Map, Value, json};
 
-use crate::{IoError, import::Objects, write_atomic};
+use crate::{
+    IoError,
+    import::{Look, Objects},
+    write_atomic,
+};
 
 /// Grid4D centimetres → glTF metres.
 const TO_METRES: f32 = 0.01;
@@ -103,6 +107,7 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
     let mut roots = Vec::new();
     let mut cameras = Vec::new();
     let mut lights = Vec::new();
+    let effective = objects.effective_materials();
 
     for (index, entry) in objects.nodes.iter().enumerate() {
         match entry.parent.filter(|&p| p < index) {
@@ -130,7 +135,12 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
         match &data.kind {
             ObjectKind::Polygon { mesh, .. } => {
                 let angle = data.tags.smoothing_angle();
-                if let Some(index) = writer.mesh(mesh, data.display_color, angle, &data.name)? {
+                // Its material (own or inherited), else its display colour.
+                let look = match effective.get(index).copied().flatten() {
+                    Some(material) => Look::Material(material),
+                    None => Look::Colour(data.display_color.map(f32::to_bits)),
+                };
+                if let Some(index) = writer.mesh(mesh, look, angle, &data.name, &objects.materials)? {
                     node.insert("mesh".into(), json!(index));
                 }
             }
@@ -223,11 +233,11 @@ struct Writer {
     accessors: Vec<Value>,
     meshes: Vec<Value>,
     materials: Vec<Value>,
-    /// One material per display colour (by bits).
-    material_of: HashMap<[u32; 3], usize>,
-    /// One glTF mesh per (mesh, colour, Phong angle): objects sharing all three
+    /// One glTF material per document material or display colour.
+    material_of: HashMap<Look, usize>,
+    /// One glTF mesh per (mesh, look, Phong angle): objects sharing all three
     /// share the mesh.
-    mesh_of: HashMap<(MeshId, [u32; 3], u32), Option<usize>>,
+    mesh_of: HashMap<(MeshId, Look, u32), Option<usize>>,
     triangulator: Triangulator,
     tri: TriMesh,
 }
@@ -250,40 +260,69 @@ impl Writer {
         self.accessors.len() - 1
     }
 
-    fn material(&mut self, colour: [f32; 3]) -> Result<usize, IoError> {
-        if !finite(&colour) {
-            return Err(invalid("a display colour is not finite"));
-        }
-        let key = colour.map(f32::to_bits);
-        if let Some(&index) = self.material_of.get(&key) {
+    /// The glTF material for `look` (written on first use).
+    fn material(&mut self, look: Look, materials: &Materials) -> Result<usize, IoError> {
+        if let Some(&index) = self.material_of.get(&look) {
             return Ok(index);
         }
-        self.materials.push(json!({
-            "pbrMetallicRoughness": {
-                "baseColorFactor": [colour[0], colour[1], colour[2], 1.0],
-                "metallicFactor": 0.0,
-                "roughnessFactor": 0.8
+        let value = match look {
+            Look::Material(id) => {
+                let material = materials
+                    .get(id)
+                    .ok_or_else(|| invalid("a Material tag refers to a missing material"))?;
+                if !finite(&material.numbers()) {
+                    return Err(invalid(format!("material \"{}\" is not finite", material.name)));
+                }
+                let [r, g, b] = material.color;
+                let mut value = json!({
+                    "name": material.name,
+                    "pbrMetallicRoughness": {
+                        "baseColorFactor": [r, g, b, 1.0],
+                        "metallicFactor": material.metallic,
+                        "roughnessFactor": material.roughness
+                    }
+                });
+                if material.emission != [0.0; 3] {
+                    // glTF's core emissive factor stops at 1.
+                    value["emissiveFactor"] = json!(material.emission.map(|c| c.clamp(0.0, 1.0)));
+                }
+                value
             }
-        }));
+            Look::Colour(bits) => {
+                let colour = bits.map(f32::from_bits);
+                if !finite(&colour) {
+                    return Err(invalid("a display colour is not finite"));
+                }
+                json!({
+                    "pbrMetallicRoughness": {
+                        "baseColorFactor": [colour[0], colour[1], colour[2], 1.0],
+                        "metallicFactor": 0.0,
+                        "roughnessFactor": 0.8
+                    }
+                })
+            }
+        };
+        self.materials.push(value);
         let index = self.materials.len() - 1;
-        self.material_of.insert(key, index);
+        self.material_of.insert(look, index);
         Ok(index)
     }
 
-    /// The glTF mesh of `handle` in `colour`, smoothed up to `angle` (radians;
-    /// written on first use); `None` for a mesh without polygons.
+    /// The glTF mesh of `handle` looking like `look`, smoothed up to `angle`
+    /// (radians; written on first use); `None` for a mesh without polygons.
     fn mesh(
         &mut self,
         handle: &MeshHandle,
-        colour: [f32; 3],
+        look: Look,
         angle: f32,
         name: &str,
+        materials: &Materials,
     ) -> Result<Option<usize>, IoError> {
-        let key = (handle.id(), colour.map(f32::to_bits), angle.to_bits());
+        let key = (handle.id(), look, angle.to_bits());
         if let Some(&index) = self.mesh_of.get(&key) {
             return Ok(index);
         }
-        let index = self.write_mesh(handle, colour, angle, name)?;
+        let index = self.write_mesh(handle, look, angle, name, materials)?;
         self.mesh_of.insert(key, index);
         Ok(index)
     }
@@ -291,9 +330,10 @@ impl Writer {
     fn write_mesh(
         &mut self,
         handle: &MeshHandle,
-        colour: [f32; 3],
+        look: Look,
         angle: f32,
         name: &str,
+        materials: &Materials,
     ) -> Result<Option<usize>, IoError> {
         let mesh = handle.mesh();
         if mesh.face_count() == 0 {
@@ -378,7 +418,7 @@ impl Writer {
         let index_accessor = self.accessor(json!({
             "bufferView": view, "componentType": component, "count": indices.len(), "type": "SCALAR"
         }));
-        let material = self.material(colour)?;
+        let material = self.material(look, materials)?;
         self.meshes.push(json!({
             "name": name,
             "primitives": [ {
@@ -422,6 +462,32 @@ mod tests {
     /// Root (Null, moved, turned, scaled) > Box (a cube) + Pillar (a 7-sided
     /// cylinder: n-gon caps) + Twin (the cube's mesh again); Cam; Lamp; Empty (a
     /// polygon object without polygons).
+    #[test]
+    fn materials_round_trip_through_gltf() {
+        use grid4d_scene::{Material, Tag};
+        let mut objects = scene();
+        let mut gold = Material::new("Gold");
+        gold.color = [1.0, 0.7, 0.2];
+        gold.metallic = 1.0;
+        gold.roughness = 0.3;
+        gold.emission = [0.1, 0.0, 0.0];
+        let gold = objects.materials.insert(gold);
+        // On the first object; its children inherit it.
+        objects.nodes[0].data.tags.push(Tag::Material { material: Some(gold) });
+        let bytes = glb_bytes(&objects).unwrap();
+        let back = import_gltf(&bytes, None).unwrap();
+        let materials: Vec<&Material> = back.materials.iter().map(|(_, m)| m).collect();
+        let found = materials
+            .iter()
+            .find(|m| m.name == "Gold")
+            .expect("the material comes back");
+        assert_eq!((found.metallic, found.roughness), (1.0, 0.3));
+        assert_eq!(found.color, [1.0, 0.7, 0.2]);
+        assert_eq!(found.emission, [0.1, 0.0, 0.0]);
+        let tagged = back.nodes.iter().filter(|n| n.data.tags.material().is_some()).count();
+        assert!(tagged >= 1, "meshes come back with Material tags");
+    }
+
     fn scene() -> Objects {
         let cube = MeshHandle::new(primitives::cube(Vec3::splat(200.0), [1, 1, 1]));
         let cylinder = MeshHandle::new(primitives::cylinder(50.0, 120.0, 7, 1));
@@ -450,7 +516,10 @@ mod tests {
         nodes[3].data.display_color = [0.9, 0.1, 0.2];
         nodes[2].data.transform.position = Vec3::new(300.0, 0.0, 0.0);
         nodes[4].data.transform.position = Vec3::new(0.0, 150.0, 800.0);
-        Objects { nodes }
+        Objects {
+            nodes,
+            ..Objects::default()
+        }
     }
 
     fn mesh(objects: &Objects, name: &str) -> MeshHandle {
@@ -638,7 +707,14 @@ mod tests {
         let vertices = |tags: Vec<grid4d_scene::Tag>| {
             let mut node = entry(None, "Ball", ObjectKind::polygon(sphere.clone()));
             node.data.tags = tags;
-            let (json, _) = gltf_document(&Objects { nodes: vec![node] }, None).unwrap();
+            let (json, _) = gltf_document(
+                &Objects {
+                    nodes: vec![node],
+                    ..Objects::default()
+                },
+                None,
+            )
+            .unwrap();
             let doc: Value = serde_json::from_slice(&json).unwrap();
             let position = doc["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
                 .as_u64()

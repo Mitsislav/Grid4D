@@ -16,6 +16,7 @@ pub mod attributes;
 pub mod coordinates;
 pub mod drop_overlay;
 pub mod fcurve;
+pub mod materials;
 pub mod menu_bar;
 pub mod mode_palette;
 pub mod optimize;
@@ -29,6 +30,7 @@ pub mod viewport;
 pub use attributes::AttributesPanel;
 pub use coordinates::CoordinatesPanel;
 pub use fcurve::FCurvePanel;
+pub use materials::MaterialsPanel;
 pub use outliner::OutlinerPanel;
 pub use timeline::TimelinePanel;
 pub use viewport::ViewportPanel;
@@ -87,6 +89,7 @@ mod tests {
         let mut timeline = TimelinePanel::default();
         let mut fcurve = FCurvePanel::default();
         let mut coordinates = CoordinatesPanel::default();
+        let mut materials = MaterialsPanel;
         let mut viewport = ViewportPanel::new(None);
 
         let mut frame = |doc: &mut Document, editor: &mut EditorState| {
@@ -99,6 +102,7 @@ mod tests {
                 timeline.show(ui, doc, editor);
                 fcurve.show(ui, doc, editor);
                 coordinates.show(ui, doc, editor);
+                materials.show(ui, doc, editor);
                 viewport.show(ui, doc, editor);
             })
             .drop_without_applying_deltas();

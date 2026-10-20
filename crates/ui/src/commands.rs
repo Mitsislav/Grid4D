@@ -220,6 +220,17 @@ pub enum EditorCommand {
     MoveKeys {
         by: i32,
     },
+    /// A new material with the defaults, selected and shown in the Attribute
+    /// Manager. One undo step.
+    NewMaterial,
+    /// Removes the material; Material tags that used it stay, empty. One undo step.
+    DeleteMaterial(grid4d_scene::MaterialId),
+    /// Links `material` to each of `nodes`: their Material tag gets it, or a new
+    /// Material tag is added. One undo step.
+    AssignMaterial {
+        material: grid4d_scene::MaterialId,
+        nodes: Vec<NodeId>,
+    },
     /// Changes or deletes the keys selected in the F-Curve editor. One undo step.
     EditCurveKeys {
         op: crate::keys::CurveOp,
@@ -787,6 +798,63 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 *frame += by;
             }
         }
+        EditorCommand::NewMaterial => {
+            let mut materials = doc.scene.materials().clone();
+            let name = materials.unique_name("Mat");
+            let id = materials.insert(grid4d_scene::Material::new(name));
+            commit(
+                doc,
+                editor,
+                "New Material",
+                vec![SceneEdit::SetMaterials(materials)],
+                |_, _| {},
+            );
+            editor.materials.selected = Some(id);
+            editor.materials.shown = true;
+        }
+        EditorCommand::DeleteMaterial(id) => {
+            let mut materials = doc.scene.materials().clone();
+            if materials.remove(id).is_some() {
+                commit(
+                    doc,
+                    editor,
+                    "Delete Material",
+                    vec![SceneEdit::SetMaterials(materials)],
+                    |_, _| {},
+                );
+            }
+            if editor.materials.selected == Some(id) {
+                editor.materials.selected = None;
+                editor.materials.shown = false;
+            }
+        }
+        EditorCommand::AssignMaterial { material, nodes } => {
+            let edits: Vec<SceneEdit> = nodes
+                .iter()
+                .filter_map(|&id| {
+                    let before = &doc.scene.get(id)?.data;
+                    let mut data = before.clone();
+                    match data
+                        .tags
+                        .iter_mut()
+                        .find(|t| t.kind() == grid4d_scene::TagKind::Material)
+                    {
+                        Some(tag) => {
+                            *tag = grid4d_scene::Tag::Material {
+                                material: Some(material),
+                            };
+                        }
+                        None => data.tags.push(grid4d_scene::Tag::Material {
+                            material: Some(material),
+                        }),
+                    }
+                    (data != *before).then_some(SceneEdit::SetData { id, data })
+                })
+                .collect();
+            if doc.scene.materials().contains(material) {
+                commit(doc, editor, "Assign Material", edits, |_, _| {});
+            }
+        }
         EditorCommand::EditCurveKeys { op } => {
             let edits = crate::keys::curve_edits(doc, &editor.curves.keys, op);
             commit(doc, editor, op.label(), edits, |_, _| {});
@@ -1141,6 +1209,7 @@ fn is_current_state(doc: &Document, edit: &SceneEdit) -> bool {
         SceneEdit::SetData { id, data } => doc.scene.get(*id).is_none_or(|node| node.data == *data),
         SceneEdit::SetTime(settings) => doc.time.settings() == *settings,
         SceneEdit::SetName(name) => doc.name == *name,
+        SceneEdit::SetMaterials(materials) => doc.scene.materials() == materials,
         // Structural changes are never made live; record them as given.
         SceneEdit::Insert { .. } | SceneEdit::Detach { .. } | SceneEdit::Attach { .. } | SceneEdit::Move { .. } => {
             false
@@ -1291,6 +1360,60 @@ mod tests {
         let tracks = &doc.scene.get(cube).unwrap().data.tracks;
         assert_eq!(tracks.len(), 3);
         assert!(tracks.iter().all(|t| matches!(t.param, Param::Rotation(_))));
+    }
+
+    #[test]
+    fn materials_are_made_assigned_and_deleted_one_step_each() {
+        use grid4d_scene::{Tag, Tags};
+        let mut doc = Document::with_demo_scene();
+        let (mut editor, mut vp) = (EditorState::default(), viewport());
+        let (cube, sphere) = (id_of(&doc, "Cube"), id_of(&doc, "Sphere"));
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::NewMaterial, EditorCommand::NewMaterial],
+        );
+        let ids = doc.scene.materials().ids().to_vec();
+        assert_eq!(ids.len(), 2);
+        let names: Vec<&str> = doc.scene.materials().iter().map(|(_, m)| m.name.as_str()).collect();
+        assert_eq!(names, ["Mat", "Mat.1"]);
+        assert_eq!(editor.materials.selected, Some(ids[1]), "the new one is selected");
+        assert!(editor.materials.shown, "and shown in the Attribute Manager");
+
+        // Assigning adds a tag, or changes the one there.
+        let assign = |material| EditorCommand::AssignMaterial {
+            material,
+            nodes: vec![cube, sphere],
+        };
+        run(&mut doc, &mut editor, &mut vp, &[assign(ids[0])]);
+        run(&mut doc, &mut editor, &mut vp, &[assign(ids[1])]);
+        for id in [cube, sphere] {
+            let tags = &doc.scene.get(id).unwrap().data.tags;
+            assert_eq!(tags.len(), 1, "one Material tag");
+            assert_eq!(tags.material(), Some(ids[1]));
+        }
+        assert_eq!(editor.history.undo_label(), Some("Assign Material"));
+
+        // Deleting leaves the tag empty-handed; undo brings the link back.
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteMaterial(ids[1])]);
+        assert!(!doc.scene.materials().contains(ids[1]));
+        assert_eq!(editor.materials.selected, None);
+        assert_eq!(doc.scene.effective_material(cube), None);
+        assert!(matches!(
+            doc.scene.get(cube).unwrap().data.tags[..],
+            [Tag::Material { .. }]
+        ));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.effective_material(cube), Some(ids[1]));
+
+        let steps = editor.history.undo_len();
+        assert_eq!(steps, 4, "two new materials and two assignments");
+        for _ in 0..steps {
+            run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        }
+        assert!(doc.scene.materials().is_empty());
+        assert!(doc.scene.get(cube).unwrap().data.tags.is_empty());
     }
 
     #[test]

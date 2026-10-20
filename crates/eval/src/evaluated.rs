@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use glam::Mat4;
 use grid4d_geom::{BitSet, subdivision::SubdivisionOptions};
 use grid4d_scene::{
-    Aabb, Components, LIGHT_MARKER_RADIUS, MeshHandle, MeshId, NodeId, ObjectKind, Scene, TagKind, Tags, WalkItem,
+    Aabb, Components, LIGHT_MARKER_RADIUS, MaterialId, MeshHandle, MeshId, NodeId, ObjectKind, Scene, TagKind, Tags,
+    WalkItem,
 };
 
 use crate::{
@@ -81,6 +82,9 @@ pub struct EvaluatedScene {
     animated: bool,
     /// Scratch space for animation: the world matrices of the current ancestors.
     world_stack: Vec<(u32, Mat4)>,
+    /// Scratch space for materials: the material each current ancestor shows
+    /// (its own Material tag's, else inherited).
+    material_stack: Vec<(u32, Option<MaterialId>)>,
     /// [`Scene::revision`] of the scene `nodes` were built from.
     revision: Option<u64>,
 }
@@ -123,6 +127,9 @@ impl EvaluatedScene {
         let revision = scene.revision();
         let (nodes, meshes, polygons, shown) = (&mut self.nodes, &mut self.meshes, &mut self.polygons, &mut self.shown);
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
+        let material_stack = &mut self.material_stack;
+        material_stack.clear();
+        let materials = scene.materials();
         // The next cage root to consume, and the depth of the cage being consumed.
         let mut next_cage: Option<NodeId> = None;
         let mut cage_depth: Option<u32> = None;
@@ -140,8 +147,18 @@ impl EvaluatedScene {
                 cage_depth = Some(depth);
                 next_cage = None;
             }
+            // Its Material tag's material, else the nearest ancestor's.
+            while material_stack.last().is_some_and(|&(d, _)| d >= depth) {
+                material_stack.pop();
+            }
+            let inherited = material_stack.last().and_then(|&(_, m)| m);
+            let material = data.tags.material().filter(|&m| materials.contains(m)).or(inherited);
+            material_stack.push((depth, material));
+            let material_colour = material.and_then(|m| materials.get(m)).map(|m| m.color);
             let mut drawable = drawable(&data.kind, data.display_color).map(|d| Drawable {
                 shading: Shading::from_angle(data.tags.smoothing_angle()),
+                // Markers (cameras, lights) keep their own colour.
+                color: material_colour.filter(|_| !d.marker).unwrap_or(d.color),
                 ..d
             });
             let mut pick = pick_shape(&data.kind);
@@ -175,11 +192,19 @@ impl EvaluatedScene {
                         } else {
                             cage_tags.map_or(&data.tags, |cage| &cage.data.tags)
                         };
+                        // Its material (own or inherited), else the cage's, else the cage's colour.
+                        let cage_material = cage_tags
+                            .and_then(|cage| cage.data.tags.material())
+                            .filter(|&m| materials.contains(m));
+                        let colour = material
+                            .or(cage_material)
+                            .and_then(|m| materials.get(m))
+                            .map_or(result.colour, |m| m.color);
                         drawable = Some(Drawable {
                             key: MeshKey::Polygon(mesh.id()),
                             shading: Shading::from_angle(tags.smoothing_angle()),
                             scale: glam::Vec3::ONE,
-                            color: result.colour,
+                            color: colour,
                             unlit: false,
                             marker: false,
                         });
@@ -436,6 +461,51 @@ mod tests {
 
     fn id_of(doc: &Document, name: &str) -> NodeId {
         doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0
+    }
+
+    #[test]
+    fn materials_colour_objects_and_their_children() {
+        use grid4d_scene::{Material, Tag};
+        let mut doc = Document::with_demo_scene();
+        let (group, cylinder, light) = (id_of(&doc, "Group"), id_of(&doc, "Cylinder"), id_of(&doc, "Light"));
+        let mut red = Material::new("Red");
+        red.color = [1.0, 0.0, 0.0];
+        let red = doc.scene.materials_mut().insert(red);
+        for id in [group, light] {
+            doc.scene
+                .get_mut(id)
+                .unwrap()
+                .data
+                .tags
+                .push(Tag::Material { material: Some(red) });
+        }
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let colour = |eval: &EvaluatedScene, id| {
+            eval.nodes()
+                .iter()
+                .find(|n| n.id == id)
+                .and_then(|n| n.drawable)
+                .map(|d| d.color)
+        };
+        assert_eq!(
+            colour(&eval, cylinder),
+            Some([1.0, 0.0, 0.0]),
+            "inherited from the group"
+        );
+        assert_ne!(colour(&eval, light), Some([1.0, 0.0, 0.0]), "markers keep their colour");
+        let cube = id_of(&doc, "Cube");
+        let cube_colour = doc.scene.get(cube).unwrap().data.display_color;
+        assert_eq!(
+            colour(&eval, cube),
+            Some(cube_colour),
+            "no material: the display colour"
+        );
+
+        // Editing the material re-evaluates.
+        doc.scene.materials_mut().get_mut(red).unwrap().color = [0.0, 1.0, 0.0];
+        assert!(eval.update(&doc.scene));
+        assert_eq!(colour(&eval, cylinder), Some([0.0, 1.0, 0.0]));
     }
 
     #[test]

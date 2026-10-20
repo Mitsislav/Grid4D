@@ -489,32 +489,57 @@ pub enum ManagerTab {
     Coordinates,
 }
 
-/// What the bottom panel shows (its tabs; Tab switches over it).
+/// What the bottom panel shows (its tabs; Tab switches between the Timeline and
+/// the F-Curve editor over it).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BottomPanel {
     #[default]
     Timeline,
     FCurve,
+    /// The Material Manager.
+    Materials,
 }
 
 impl BottomPanel {
-    pub const ALL: [Self; 2] = [Self::Timeline, Self::FCurve];
+    pub const ALL: [Self; 3] = [Self::Timeline, Self::FCurve, Self::Materials];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Timeline => "Timeline",
             Self::FCurve => "F-Curve",
+            Self::Materials => "Materials",
         }
     }
 
+    /// What Tab switches to.
     #[must_use]
     pub const fn other(self) -> Self {
         match self {
             Self::Timeline => Self::FCurve,
-            Self::FCurve => Self::Timeline,
+            Self::FCurve | Self::Materials => Self::Timeline,
         }
     }
+}
+
+/// A material being dragged from the Material Manager (onto an object in the
+/// Object Manager or the viewport). Editor state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MaterialDrag {
+    pub material: grid4d_scene::MaterialId,
+}
+
+/// The Material Manager's state that other panels act on. Editor state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MaterialSelection {
+    /// The selected material.
+    pub selected: Option<grid4d_scene::MaterialId>,
+    /// The Attribute Manager shows the selected material (rather than an object).
+    pub shown: bool,
+    /// The last click was in the Material Manager: Delete removes the material.
+    pub focused: bool,
+    /// A material on its way to an object.
+    pub drag: Option<MaterialDrag>,
 }
 
 /// Component mode (left palette). Points, Edges and Polygons work on the active
@@ -691,6 +716,8 @@ pub struct EditorState {
     pub bottom: BottomPanel,
     /// The lower right manager's tab.
     pub managers: ManagerTab,
+    /// The Material Manager's selection, focus and drag.
+    pub materials: MaterialSelection,
     /// The pointer is over the bottom panel (last frame): Tab switches its tab.
     pub bottom_hovered: bool,
     /// The frame temporary values were last checked against (see
@@ -745,6 +772,7 @@ impl Default for EditorState {
             curves: CurveSelection::default(),
             bottom: BottomPanel::default(),
             managers: ManagerTab::default(),
+            materials: MaterialSelection::default(),
             bottom_hovered: false,
             seen_frame: None,
             commands: CommandQueue::default(),

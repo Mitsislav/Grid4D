@@ -63,7 +63,10 @@ use crate::common::Archive;
 pub use crate::{
     gltf_export::{export_gltf, glb_bytes, gltf_document},
     gltf_import::import_gltf,
-    import::{EXPORT_EXTENSIONS, IMPORT_EXTENSIONS, ObjectEntry, Objects, export, import, is_importable},
+    import::{
+        EXPORT_EXTENSIONS, IMPORT_EXTENSIONS, ObjectEntry, Objects, export, import, is_importable, remap_materials,
+        remap_objects,
+    },
     obj::{export_obj, import_obj, obj_text},
 };
 

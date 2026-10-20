@@ -43,6 +43,10 @@ enum RowAction {
     DeleteTag(NodeId, TagKind),
     /// Context menu: add a tag to the (just selected) object.
     AddTag(TagKind),
+    /// A material dropped on the object.
+    AssignMaterial(NodeId, grid4d_scene::MaterialId),
+    /// A double-click on a Material tag: show its material.
+    ShowMaterial(grid4d_scene::MaterialId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,6 +210,21 @@ impl OutlinerPanel {
             painter.rect_filled(rect, CornerRadius::ZERO, p::BG_HOVER.gamma_multiply(0.55));
         }
 
+        // A material from the Material Manager: dropped on this row assigns it.
+        if let Some(drag) = editor.materials.drag
+            && ui.rect_contains_pointer(rect)
+        {
+            painter.rect_stroke(
+                rect.shrink(1.0),
+                CornerRadius::same(2),
+                Stroke::new(1.5, p::HIGHLIGHT),
+                StrokeKind::Inside,
+            );
+            if ui.input(|i| i.pointer.any_released()) {
+                self.actions.push(RowAction::AssignMaterial(id, drag.material));
+            }
+        }
+
         // Drop target highlight while dragging another row.
         if let Some(dragged) = self.dragging
             && dragged != id
@@ -271,9 +290,29 @@ impl OutlinerPanel {
                 );
             }
             let color = if hit.hovered() { p::TEXT_STRONG } else { p::TAG };
-            icons::paint(&painter, icon_rect.shrink(1.0), Icon::Tag(kind), color);
-            let hit = hit.on_hover_text(format!("{} Tag", kind.label()));
-            if hit.clicked() {
+            // A Material tag shows its material's colour.
+            let material = match tag {
+                grid4d_scene::Tag::Material { material } => {
+                    material.and_then(|m| scene.materials().get(m).map(|mat| (m, mat)))
+                }
+                grid4d_scene::Tag::Phong { .. }
+                | grid4d_scene::Tag::Protection { .. }
+                | grid4d_scene::Tag::Target { .. } => None,
+            };
+            match material {
+                Some((_, mat)) => icons::paint_material_ball(&painter, icon_rect.shrink(2.0), mat.color),
+                None => icons::paint(&painter, icon_rect.shrink(1.0), Icon::Tag(kind), color),
+            }
+            let tip = match material {
+                Some((_, mat)) => format!("Material Tag: {} · double-click shows the material", mat.name),
+                None => format!("{} Tag", kind.label()),
+            };
+            let hit = hit.on_hover_text(tip);
+            if hit.double_clicked()
+                && let Some((m, _)) = material
+            {
+                self.actions.push(RowAction::ShowMaterial(m));
+            } else if hit.clicked() {
                 self.actions.push(RowAction::SelectTag(id, kind));
             }
             let actions = &mut self.actions;
@@ -464,6 +503,15 @@ impl OutlinerPanel {
                 }
                 RowAction::DeleteTag(node, kind) => editor.commands.push(EditorCommand::DeleteTag { node, kind }),
                 RowAction::AddTag(kind) => editor.commands.push(EditorCommand::AddTag(kind)),
+                RowAction::AssignMaterial(node, material) => editor.commands.push(EditorCommand::AssignMaterial {
+                    material,
+                    nodes: vec![node],
+                }),
+                RowAction::ShowMaterial(material) => {
+                    editor.materials.selected = Some(material);
+                    editor.materials.shown = true;
+                    editor.managers = crate::ManagerTab::Attributes;
+                }
                 RowAction::ToggleFold(id) => {
                     if !self.collapsed.remove(&id) {
                         self.collapsed.insert(id);
@@ -638,6 +686,59 @@ mod tests {
         frame(vec![], &mut doc, &mut editor, &mut panel);
         assert_eq!(panel.renaming, Some(sphere));
         assert_eq!(panel.rename_buffer, "Sphere");
+    }
+
+    #[test]
+    fn a_material_dropped_on_a_row_is_assigned_to_its_object() {
+        use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
+
+        let mut doc = Document::with_demo_scene();
+        let material = doc.scene.materials_mut().insert(grid4d_scene::Material::new("Mat"));
+        let mut editor = EditorState::default();
+        let mut panel = super::OutlinerPanel::default();
+        let mut viewport = ViewportPanel::new(None);
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut frame = |events: Vec<Event>, doc: &mut Document, editor: &mut EditorState| {
+            time += 1.0 / 60.0;
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 500.0))),
+                time: Some(time),
+                events,
+                ..RawInput::default()
+            };
+            ctx.run_ui(input, |ui| {
+                egui::CentralPanel::no_frame().show(ui, |ui| panel.show(ui, doc, editor));
+            })
+            .drop_without_applying_deltas();
+            commands::apply_pending(doc, editor, &mut viewport);
+        };
+        frame(vec![], &mut doc, &mut editor);
+        let release = |pos| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        };
+        // Drop down the list until an object gets the material.
+        let mut got = None;
+        for i in 0..60u8 {
+            let at = pos2(120.0, 60.0 + 4.0 * f32::from(i));
+            editor.materials.drag = Some(crate::MaterialDrag { material });
+            frame(vec![Event::PointerMoved(at)], &mut doc, &mut editor);
+            frame(vec![release(at)], &mut doc, &mut editor);
+            got = doc
+                .scene
+                .iter()
+                .find(|(_, n)| grid4d_scene::Tags::material(n.data.tags.as_slice()) == Some(material))
+                .map(|(id, _)| id);
+            if got.is_some() {
+                break;
+            }
+        }
+        let id = got.expect("a row takes the material");
+        assert_eq!(doc.scene.get(id).unwrap().data.name, "Cube", "the first row");
+        assert_eq!(editor.history.undo_len(), 1);
     }
 
     #[test]

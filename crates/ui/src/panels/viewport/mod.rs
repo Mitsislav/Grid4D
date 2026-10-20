@@ -198,6 +198,7 @@ impl ViewportPanel {
         // Animation is shown at the current (whole) frame.
         self.evaluated.set_frame(f64::from(doc.time.frame()));
         self.evaluated.update(&doc.scene);
+        self.drop_material(ui, rect, editor);
         // Component modes: the active polygon object, and what a click would select.
         let target = self.component_target(editor);
         self.update_hover(target, &response, rect, editor, navigating);
@@ -467,6 +468,26 @@ impl ViewportPanel {
             Some(id) => editor.commands.push(EditorCommand::Select { id, mode }),
             None if mode == SelectMode::Replace => editor.commands.push(EditorCommand::DeselectAll),
             None => {}
+        }
+    }
+
+    /// A material dragged from the Material Manager and released over an object
+    /// is assigned to it.
+    fn drop_material(&self, ui: &Ui, rect: Rect, editor: &mut EditorState) {
+        let Some(drag) = editor.materials.drag else { return };
+        let Some(pointer) = ui.ctx().pointer_latest_pos().filter(|p| rect.contains(*p)) else {
+            return;
+        };
+        editor.status_hint = Some("Release over an object to give it this material");
+        if !ui.input(|i| i.pointer.any_released()) {
+            return;
+        }
+        let ray = self.camera.ray_from_ndc(to_ndc(pointer, rect), rect.aspect_ratio());
+        if let Some(id) = pick(&self.evaluated, ray) {
+            editor.commands.push(EditorCommand::AssignMaterial {
+                material: drag.material,
+                nodes: vec![id],
+            });
         }
     }
 
@@ -1518,6 +1539,25 @@ mod tests {
             parent.map(|n| n.data.kind.tag()),
             Some(ObjectKindTag::SubdivisionSurface)
         );
+    }
+
+    #[test]
+    fn a_material_dropped_on_an_object_is_assigned_to_it() {
+        let mut h = Harness::new();
+        let cube = h.doc.scene.roots()[0];
+        let material = h.doc.scene.materials_mut().insert(grid4d_scene::Material::new("Mat"));
+        h.frame(vec![]);
+        let world = h.doc.scene.world_matrix(cube);
+        let rect = h.viewport.view_rect;
+        let view_proj = h.viewport.camera.view_projection(rect.aspect_ratio());
+        let centre = project(&view_proj, rect, world.transform_point3(Vec3::ZERO)).unwrap();
+        // As the Material Manager leaves it: a drag in progress, released over the cube.
+        h.editor.materials.drag = Some(crate::MaterialDrag { material });
+        h.frame(vec![Event::PointerMoved(centre)]);
+        h.frame(vec![Harness::button(centre, false)]);
+        let tags = &h.doc.scene.get(cube).unwrap().data.tags;
+        assert_eq!(grid4d_scene::Tags::material(tags.as_slice()), Some(material));
+        assert_eq!(h.editor.history.undo_label(), Some("Assign Material"));
     }
 
     #[test]

@@ -24,6 +24,8 @@
 //! | `H` / `S` (over the F-Curve graph) | Frame all / selected keys |
 //! | `Ctrl+F9`      | Autokeying on / off        |
 //! | `Shift+F5` / `Shift+F7` | Attribute / Coordinate Manager |
+//! | `Shift+F2`     | Material Manager (bottom tab) |
+//! | `Ctrl+N` (over the Material Manager) | New material |
 //!
 //! Two-key chords (press the first key, then the second) are listed in
 //! [`Chord::complete`]: `U~L` Loop Selection, `K~L` Loop/Path Cut, `M~M` Connect, …
@@ -220,17 +222,22 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
             }
             if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
                 // After a click in the timeline's key strip or the F-Curve graph,
-                // Delete removes keys.
-                let command = match editor.bottom {
-                    BottomPanel::FCurve if editor.curves.focused && !editor.curves.keys.is_empty() => {
+                // Delete removes keys; in the Material Manager, the material.
+                let command = match (editor.bottom, editor.materials.selected) {
+                    (BottomPanel::FCurve, _) if editor.curves.focused && !editor.curves.keys.is_empty() => {
                         EditorCommand::EditCurveKeys {
                             op: crate::keys::CurveOp::Delete,
                         }
                     }
-                    BottomPanel::Timeline if editor.keys.focused && !editor.keys.frames.is_empty() => {
+                    (BottomPanel::Timeline, _) if editor.keys.focused && !editor.keys.frames.is_empty() => {
                         EditorCommand::DeleteKeys
                     }
-                    BottomPanel::FCurve | BottomPanel::Timeline => EditorCommand::DeleteSelected,
+                    (BottomPanel::Materials, Some(material)) if editor.materials.focused => {
+                        EditorCommand::DeleteMaterial(material)
+                    }
+                    (BottomPanel::FCurve | BottomPanel::Timeline | BottomPanel::Materials, _) => {
+                        EditorCommand::DeleteSelected
+                    }
                 };
                 editor.commands.push(command);
             }
@@ -257,6 +264,9 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         }
         if i.modifiers.shift_only() && i.key_pressed(Key::S) {
             editor.snap.enabled = !editor.snap.enabled;
+        }
+        if i.modifiers.shift_only() && i.key_pressed(Key::F2) {
+            editor.bottom = BottomPanel::Materials;
         }
         if i.modifiers.shift_only() && i.key_pressed(Key::F5) {
             editor.managers = ManagerTab::Attributes;
@@ -295,7 +305,14 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         // starting from the document it began with.
         if i.modifiers.command && !i.pointer.any_down() {
             if i.key_pressed(Key::N) {
-                editor.commands.push(EditorCommand::NewDocument);
+                // Over the Material Manager, Ctrl+N makes a material.
+                editor
+                    .commands
+                    .push(if editor.bottom == BottomPanel::Materials && editor.bottom_hovered {
+                        EditorCommand::NewMaterial
+                    } else {
+                        EditorCommand::NewDocument
+                    });
             } else if i.key_pressed(Key::O) {
                 editor.commands.push(if i.modifiers.shift {
                     EditorCommand::Merge

@@ -5,7 +5,7 @@
 
 use std::{collections::HashMap, fs, path::Path};
 
-use grid4d_scene::{Document, Node, NodeData, NodeId};
+use grid4d_scene::{Document, MaterialId, Materials, Node, NodeData, NodeId, Tag};
 
 use crate::{IoError, OPEN_EXTENSIONS, gltf_export, gltf_import, load, obj};
 
@@ -19,6 +19,13 @@ pub const EXPORT_EXTENSIONS: [&str; 3] = ["glb", "gltf", "obj"];
 pub struct Objects {
     /// In Object Manager pre-order: every parent comes before its children.
     pub nodes: Vec<ObjectEntry>,
+    /// The materials the nodes' Material tags refer to (their ids are this
+    /// table's, not a document's).
+    pub materials: Materials,
+    /// For objects taken from a document: each node's id there (parallel to
+    /// `nodes`), so object references in tags can be carried over. Empty
+    /// otherwise.
+    pub sources: Vec<NodeId>,
 }
 
 /// One object of an [`Objects`] list.
@@ -31,10 +38,11 @@ pub struct ObjectEntry {
 }
 
 impl Objects {
-    /// Every object of `doc`, in Object Manager order.
+    /// Every object of `doc`, in Object Manager order, with its materials.
     #[must_use]
     pub fn from_document(doc: &Document) -> Self {
         let mut nodes = Vec::new();
+        let mut sources = Vec::new();
         let mut index_of: HashMap<NodeId, usize> = HashMap::new();
         let mut stack: Vec<NodeId> = doc.scene.roots().iter().rev().copied().collect();
         while let Some(id) = stack.pop() {
@@ -45,15 +53,22 @@ impl Objects {
                 parent,
                 data: node.data.clone(),
             });
+            sources.push(id);
             stack.extend(node.children().iter().rev());
         }
-        Self { nodes }
+        Self {
+            nodes,
+            materials: doc.scene.materials().clone(),
+            sources,
+        }
     }
 
-    /// A new document named `name` holding these objects.
+    /// A new document named `name` holding these objects and materials.
     #[must_use]
     pub fn into_document(self, name: &str) -> Document {
         let mut doc = Document::new(name);
+        // A new document: the table moves over with its ids, so tags stay valid.
+        *doc.scene.materials_mut() = self.materials;
         let mut ids: Vec<NodeId> = Vec::with_capacity(self.nodes.len());
         for node in self.nodes {
             let parent = node.parent.and_then(|p| ids.get(p).copied());
@@ -67,7 +82,55 @@ impl Objects {
             };
             ids.push(id);
         }
+        let objects: HashMap<NodeId, NodeId> = self.sources.iter().copied().zip(ids.iter().copied()).collect();
+        for &id in &ids {
+            if let Some(node) = doc.scene.get_mut(id) {
+                remap_objects(&mut node.data, |old| objects.get(&old).copied());
+            }
+        }
         doc
+    }
+
+    /// Each node's effective material (its own Material tag's, else its nearest
+    /// ancestor's), for exporters.
+    #[must_use]
+    pub fn effective_materials(&self) -> Vec<Option<MaterialId>> {
+        let mut effective: Vec<Option<MaterialId>> = Vec::with_capacity(self.nodes.len());
+        for node in &self.nodes {
+            let own = grid4d_scene::Tags::material(node.data.tags.as_slice()).filter(|&m| self.materials.contains(m));
+            let inherited = node.parent.and_then(|p| effective.get(p).copied().flatten());
+            effective.push(own.or(inherited));
+        }
+        effective
+    }
+}
+
+/// What an exported mesh looks like: a material, or a plain display colour (as
+/// bits, so it can be a key).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Look {
+    Material(MaterialId),
+    Colour([u32; 3]),
+}
+
+/// Rewrites the object references in `data`'s tags through `map` (a reference
+/// `map` does not know is dropped).
+pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>) {
+    for tag in &mut data.tags {
+        if let Tag::Target { target, up, .. } = tag {
+            *target = target.and_then(&map);
+            *up = up.and_then(&map);
+        }
+    }
+}
+
+/// Rewrites the material references in `data`'s tags through `map` (a reference
+/// `map` does not know is dropped).
+pub fn remap_materials(data: &mut NodeData, map: impl Fn(MaterialId) -> Option<MaterialId>) {
+    for tag in &mut data.tags {
+        if let Tag::Material { material } = tag {
+            *material = material.and_then(&map);
+        }
     }
 }
 
@@ -154,6 +217,40 @@ mod tests {
         let back = imported.clone().into_document("Copy");
         assert_eq!(Objects::from_document(&back), imported);
         assert_eq!(back.name, "Copy");
+    }
+
+    #[test]
+    fn materials_are_inherited_and_carried_into_new_documents() {
+        use grid4d_scene::{Material, Tag};
+        let mut doc = Document::with_demo_scene();
+        let red = doc.scene.materials_mut().insert(Material::new("Red"));
+        let id = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+        let (group, cube, boxed) = (id(&doc, "Group"), id(&doc, "Cube"), id(&doc, "Box"));
+        doc.scene.get_mut(group).unwrap().data.tags = vec![Tag::Material { material: Some(red) }];
+        // The Cube aims at the Box: an object reference.
+        doc.scene.get_mut(cube).unwrap().data.tags = vec![Tag::Target {
+            target: Some(boxed),
+            up: None,
+            pitch: true,
+        }];
+        let objects = Objects::from_document(&doc);
+        let effective = objects.effective_materials();
+        for (node, material) in objects.nodes.iter().zip(&effective) {
+            let expected = matches!(node.data.name.as_str(), "Group" | "Cylinder" | "Box").then_some(red);
+            assert_eq!(*material, expected, "{}", node.data.name);
+        }
+
+        let copy = objects.into_document("Copy");
+        let copy_group = id(&copy, "Group");
+        assert_eq!(copy.scene.effective_material(id(&copy, "Box")), Some(red));
+        assert_eq!(copy.scene.materials().get(red).unwrap().name, "Red");
+        assert_eq!(copy.scene.get(copy_group).unwrap().data.tags.len(), 1);
+        let aim = grid4d_scene::Tags::aim(copy.scene.get(id(&copy, "Cube")).unwrap().data.tags.as_slice());
+        assert_eq!(
+            aim.map(|a| a.target),
+            Some(id(&copy, "Box")),
+            "the reference follows its object"
+        );
     }
 
     #[test]

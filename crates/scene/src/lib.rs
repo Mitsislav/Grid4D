@@ -20,6 +20,7 @@ mod anim;
 mod bounds;
 mod document;
 mod edit;
+mod material;
 mod mesh;
 mod node;
 mod scene;
@@ -36,6 +37,7 @@ pub use anim::{
 pub use bounds::Aabb;
 pub use document::Document;
 pub use edit::SceneEdit;
+pub use material::{Material, MaterialId, Materials};
 pub use mesh::{ComponentState, Components, MeshHandle, MeshId};
 pub use node::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, Node, NodeData, NodeId, ObjectKind, ObjectKindTag};
 pub use scene::{Detached, Scene, SceneError, WalkItem};

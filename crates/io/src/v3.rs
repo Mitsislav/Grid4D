@@ -23,8 +23,8 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
 };
 use grid4d_scene::{
-    Axis, ComponentState, Components, Curve, Document, Interpolation, Key, MeshHandle, MeshId, NodeData, NodeId,
-    ObjectKind, Param, Tag, Tangents, TimeSettings, Track, Transform,
+    Axis, ComponentState, Components, Curve, Document, Interpolation, Key, Material, MaterialId, MeshHandle, MeshId,
+    NodeData, NodeId, ObjectKind, Param, Tag, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -56,6 +56,61 @@ struct DocumentDto {
     name: String,
     time: TimeDto,
     objects: Vec<ObjectDto>,
+    /// Added in the course of version 3 (step 6.6); absent when there are none.
+    /// Material tags refer to them by index.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    materials: Vec<MaterialDto>,
+}
+
+/// A material; colours are linear RGB.
+#[derive(Debug, Serialize, Deserialize)]
+struct MaterialDto {
+    name: String,
+    color: [f32; 3],
+    roughness: f32,
+    metallic: f32,
+    emission: [f32; 3],
+}
+
+impl MaterialDto {
+    fn new(material: &Material) -> Self {
+        Self {
+            name: material.name.clone(),
+            color: material.color,
+            roughness: material.roughness,
+            metallic: material.metallic,
+            emission: material.emission,
+        }
+    }
+
+    fn into_material(self) -> Result<Material, IoError> {
+        let material = Material {
+            name: self.name,
+            color: self.color.map(|c| c.max(0.0)),
+            roughness: self.roughness.clamp(0.0, 1.0),
+            metallic: self.metallic.clamp(0.0, 1.0),
+            emission: self.emission.map(|c| c.max(0.0)),
+        };
+        check_material_finite(&material)?;
+        Ok(material)
+    }
+}
+
+fn check_material_finite(material: &Material) -> Result<(), IoError> {
+    if material.numbers().iter().all(|v| v.is_finite()) {
+        Ok(())
+    } else {
+        Err(IoError::Invalid(format!(
+            "material \"{}\" has a value that is not a finite number",
+            material.name
+        )))
+    }
+}
+
+/// Indices that tags write instead of ids.
+struct Refs {
+    objects: HashMap<NodeId, usize>,
+    materials: HashMap<MaterialId, usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -258,11 +313,16 @@ enum TagDto {
         up: Option<usize>,
         pitch: bool,
     },
+    /// Added with materials (step 6.6): the material's index in `materials`.
+    Material {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        material: Option<usize>,
+    },
 }
 
 impl TagDto {
-    fn new(tag: &Tag, index_of: &HashMap<NodeId, usize>) -> Self {
-        let index = |id: Option<NodeId>| id.and_then(|id| index_of.get(&id).copied());
+    fn new(tag: &Tag, refs: &Refs) -> Self {
+        let index = |id: Option<NodeId>| id.and_then(|id| refs.objects.get(&id).copied());
         match *tag {
             Tag::Phong { angle_limit, angle } => Self::Phong { angle_limit, angle },
             Tag::Protection {
@@ -279,12 +339,16 @@ impl TagDto {
                 up: index(up),
                 pitch,
             },
+            Tag::Material { material } => Self::Material {
+                material: material.and_then(|m| refs.materials.get(&m).copied()),
+            },
         }
     }
 
-    /// The tag, with object references resolved through `ids` (an index that names
-    /// no object drops the reference).
-    fn into_tag(self, ids: &[NodeId]) -> Tag {
+    /// The tag, with object references resolved through `ids` and material
+    /// references through `materials` (an index that names nothing drops the
+    /// reference).
+    fn into_tag(self, ids: &[NodeId], materials: &[MaterialId]) -> Tag {
         let id = |index: Option<usize>| index.and_then(|i| ids.get(i).copied());
         match self {
             Self::Phong { angle_limit, angle } => Tag::Phong {
@@ -305,13 +369,16 @@ impl TagDto {
                 up: id(up),
                 pitch,
             },
+            Self::Material { material } => Tag::Material {
+                material: material.and_then(|i| materials.get(i).copied()),
+            },
         }
     }
 
     fn parameters(&self) -> Vec<f32> {
         match self {
             Self::Phong { angle, .. } => vec![*angle],
-            Self::Protection { .. } | Self::Target { .. } => Vec::new(),
+            Self::Protection { .. } | Self::Target { .. } | Self::Material { .. } => Vec::new(),
         }
     }
 }
@@ -528,13 +595,26 @@ pub(crate) fn write(doc: &Document) -> Result<Vec<u8>, IoError> {
         order.push(id);
         true
     });
-    let index_of: HashMap<NodeId, usize> = order.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+    let refs = Refs {
+        objects: order.iter().enumerate().map(|(i, &id)| (id, i)).collect(),
+        materials: doc
+            .scene
+            .materials()
+            .ids()
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| (id, i))
+            .collect(),
+    };
     let mut objects = Vec::with_capacity(order.len());
     let mut table = MeshTable::default();
     for &id in &order {
         let Some(node) = doc.scene.get(id) else { continue };
-        let parent = node.parent().and_then(|p| index_of.get(&p).copied());
-        objects.push(ObjectDto::new(&node.data, parent, &mut table, &index_of));
+        let parent = node.parent().and_then(|p| refs.objects.get(&p).copied());
+        objects.push(ObjectDto::new(&node.data, parent, &mut table, &refs));
+    }
+    for (_, material) in doc.scene.materials().iter() {
+        check_material_finite(material)?;
     }
     for object in &objects {
         object.check_finite()?;
@@ -555,6 +635,7 @@ pub(crate) fn write(doc: &Document) -> Result<Vec<u8>, IoError> {
                 looping: settings.looping,
             },
             objects,
+            materials: doc.scene.materials().iter().map(|(_, m)| MaterialDto::new(m)).collect(),
         },
         meshes: table.meshes.iter().map(|(mesh, _)| MeshDto::of(mesh.mesh())).collect(),
     };
@@ -605,7 +686,16 @@ impl File {
             })
             .collect::<Result<Vec<_>, IoError>>()?;
 
-        let DocumentDto { name, time, objects } = self.document;
+        let DocumentDto {
+            name,
+            time,
+            objects,
+            materials,
+        } = self.document;
+        let materials = materials
+            .into_iter()
+            .map(MaterialDto::into_material)
+            .collect::<Result<Vec<_>, IoError>>()?;
         let mut tags: Vec<Vec<TagDto>> = Vec::with_capacity(objects.len());
         let objects = objects
             .into_iter()
@@ -624,12 +714,19 @@ impl File {
             looping: time.looping,
         };
         let (mut doc, ids) = assemble_with_ids(name, time, objects)?;
+        let material_ids: Vec<MaterialId> = materials
+            .into_iter()
+            .map(|material| doc.scene.materials_mut().insert(material))
+            .collect();
         // Tags last: they may refer to any object.
         for (&id, object_tags) in ids.iter().zip(tags) {
             if !object_tags.is_empty()
                 && let Some(node) = doc.scene.get_mut(id)
             {
-                node.data.tags = object_tags.into_iter().map(|tag| tag.into_tag(&ids)).collect();
+                node.data.tags = object_tags
+                    .into_iter()
+                    .map(|tag| tag.into_tag(&ids, &material_ids))
+                    .collect();
             }
         }
         Ok(doc)
@@ -637,7 +734,7 @@ impl File {
 }
 
 impl ObjectDto {
-    fn new(data: &NodeData, parent: Option<usize>, meshes: &mut MeshTable, index_of: &HashMap<NodeId, usize>) -> Self {
+    fn new(data: &NodeData, parent: Option<usize>, meshes: &mut MeshTable, refs: &Refs) -> Self {
         let t = &data.transform;
         Self {
             name: data.name.clone(),
@@ -650,7 +747,7 @@ impl ObjectDto {
             visible_in_editor: data.visible_in_editor,
             visible_in_render: data.visible_in_render,
             enabled: data.enabled,
-            tags: data.tags.iter().map(|tag| TagDto::new(tag, index_of)).collect(),
+            tags: data.tags.iter().map(|tag| TagDto::new(tag, refs)).collect(),
             tracks: data.tracks.iter().map(TrackDto::new).collect(),
         }
     }
@@ -1256,6 +1353,49 @@ mod tests {
             .set_key(Key::new(40.0, f32::NAN));
         let err = to_bytes(&doc).unwrap_err();
         assert!(err.to_string().contains("animation key"), "{err}");
+    }
+
+    #[test]
+    fn materials_and_material_tags_round_trip() {
+        let mut doc = Document::with_demo_scene();
+        let mut red = Material::new("Red");
+        red.color = [0.9, 0.1, 0.1];
+        red.roughness = 0.25;
+        red.metallic = 1.0;
+        red.emission = [0.5, 0.0, 0.0];
+        let red_id = doc.scene.materials_mut().insert(red.clone());
+        let plain = Material::new("Mat");
+        doc.scene.materials_mut().insert(plain.clone());
+        let gone = doc.scene.materials_mut().insert(Material::new("Gone"));
+        doc.scene.materials_mut().remove(gone);
+        let id = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+        let tag = |material| Tag::Material { material };
+        doc.scene.get_mut(id(&doc, "Cube")).unwrap().data.tags = vec![tag(Some(red_id))];
+        doc.scene.get_mut(id(&doc, "Sphere")).unwrap().data.tags = vec![tag(Some(gone))];
+        doc.scene.get_mut(id(&doc, "Box")).unwrap().data.tags = vec![tag(None)];
+
+        let loaded = round_trip(&doc);
+        let materials: Vec<Material> = loaded.scene.materials().iter().map(|(_, m)| m.clone()).collect();
+        assert_eq!(materials, [red, plain], "in Material Manager order, exactly");
+        let [Tag::Material { material: Some(m) }] = tags_of(&loaded, "Cube")[..] else {
+            panic!("the Cube keeps its Material tag");
+        };
+        assert_eq!(loaded.scene.materials().get(m).unwrap().name, "Red");
+        assert_eq!(
+            tags_of(&loaded, "Sphere"),
+            [tag(None)],
+            "a link to a deleted material is dropped"
+        );
+        assert_eq!(tags_of(&loaded, "Box"), [tag(None)]);
+        assert!(document_json(&doc).contains("\"materials\""));
+        assert!(
+            !document_json(&Document::with_demo_scene()).contains("\"materials\""),
+            "omitted when there are none"
+        );
+
+        doc.scene.materials_mut().get_mut(red_id).unwrap().roughness = f32::NAN;
+        let err = to_bytes(&doc).unwrap_err();
+        assert!(err.to_string().contains("\"Red\""), "{err}");
     }
 
     fn tags_of(doc: &Document, name: &str) -> Vec<Tag> {

@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 6 — Tags, animation, materials, managers (v0.6) |
-| Last step done | 6.5 — The Coordinate Manager (2026-10-20) |
-| Next step | 6.6 — Materials |
-| Tests | 421, all passing; clippy and rustfmt clean |
+| Last step done | 6.6 — Materials (2026-10-21) |
+| Next step | Phase 7 — Viewport: cameras, lights, 4-view, shading (7.1 scene cameras) |
+| Tests | 434, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -332,7 +332,8 @@ Maxon's public manual, in our own words (clean-room).
 | 6.2 (`2e1086a`) | Animation data: tracks of keys per object (position, rotation, scale), Spline / Linear / Step with clamped auto or manual tangents, evaluated at the current frame (children follow, the document untouched), saved in `.g4d` | 386 |
 | 6.3 (`09acb58`) | Recording keys: Record Active Objects (F9), Autokeying (Ctrl+F9, red view frame), key buttons in the Coord. tab, temporary (unrecorded) changes, the timeline's key strip (select, move, delete, Ctrl+click records), previous / next key (Ctrl+F / Ctrl+G); the gizmo and the Coordinates work at the current frame | 403 |
 | 6.4 (`4724314`) | The F-Curve editor, a tab beside the Timeline (Tab switches): track list, curves with keys, selecting (click, Ctrl, box, curve), moving keys (Shift constrains), tangent handles (Shift breaks), Ctrl+click adds a key, interpolation and tangent presets, zoom, pan, H / S framing, the selected key's frame and value | 415 |
-| 6.5 | The Coordinate Manager, a tab beside the Attribute Manager (Shift+F7 / Shift+F5): position, scale / size / size+ and rotation of the active object in object or world space, or of the selected points, edges or polygons (centre, size, relative rotation); Apply | 421 |
+| 6.5 (`dfdc469`) | The Coordinate Manager, a tab beside the Attribute Manager (Shift+F7 / Shift+F5): position, scale / size / size+ and rotation of the active object in object or world space, or of the selected points, edges or polygons (centre, size, relative rotation); Apply | 421 |
+| 6.6 | Materials: the Material Manager (a bottom tab, Shift+F2), materials with colour, roughness, metallic and luminance, Material tags (drag a material onto an object, Apply), inheritance by children, the viewport in the material's colour, saved in `.g4d` and carried by glTF and OBJ; Merge keeps materials and object references | 434 |
 
 *Problems and solutions:*
 - **Where tags live.** Tags sit in `NodeData`, the unit of attribute edits. Adding,
@@ -470,6 +471,38 @@ Maxon's public manual, in our own words (clean-room).
   its own) and its 80 cm size. Typing through posted key messages doubles
   characters (the same happens in the Attribute Manager), so typed values are
   checked by the tests instead.
+
+*Step 6.6 — problems and solutions:*
+- **Where materials live.** Materials belong to the document, but evaluation only
+  sees the scene, and skips frames by the scene's revision. The table sits in the
+  scene, so editing a material re-colours the viewport through the usual revision
+  check, with nothing new to watch.
+- **Undo without new machinery.** The whole table is replaced by one edit (it is
+  small), ids included, so tags keep pointing at the same materials across undo
+  and redo. A deleted material's id is never reused, so a tag left pointing at it
+  simply shows nothing until undo brings the material back.
+- **Inheritance on the hot path.** Children without a Material tag show their
+  parent's. The evaluation already walks the scene in order, so it keeps a stack of
+  the materials of the current ancestors, reused every frame (no allocation).
+  Exporters, which get flat object lists, compute the same from the parents.
+- **Merging a document mixed up references.** A merged object's tags kept the ids
+  of the other document; a Target tag could point at an unrelated object of this
+  one (a bug since 6.1, found while adding materials). Object lists now carry their
+  source ids and materials: merging adds the materials (with unique names) and
+  points the tags at the new materials and objects, all in one undo step.
+- **Drag and drop between panels.** A material is dragged from the bottom panel to
+  the Object Manager (drawn before it) or the viewport (drawn after it). The drag is
+  shared editor state; every panel can drop it on the frame of the release, and it
+  ends the frame after.
+- **Two details from testing:** a swatch could not start a drag in the frame it
+  first appeared (nothing can be hit before it has been laid out once), and the
+  large preview in the Attribute Manager pushed the settings out of a small window;
+  it is smaller now.
+- **On-screen testing:** a material was made from the Create menu, coloured with
+  the colour picker, and dragged with the real cursor onto the Sphere's row and the
+  Group's row: the Sphere and the Group's Cylinder and Box turned yellow and the tags
+  showed the colour. Posted double-clicks do not reach the app (the second click is
+  lost), so the double-click and Ctrl+N are covered by headless tests.
 
 ---
 

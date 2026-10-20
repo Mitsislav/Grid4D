@@ -4,8 +4,8 @@
 use egui::{CentralPanel, Margin, Panel};
 use grid4d_scene::Document;
 use grid4d_ui::{
-    AttributesPanel, BottomPanel, CoordinatesPanel, EditorCommand, EditorState, FCurvePanel, ManagerTab, OutlinerPanel,
-    RecentFiles, TimelinePanel, ViewportPanel, commands, file,
+    AttributesPanel, BottomPanel, CoordinatesPanel, EditorCommand, EditorState, FCurvePanel, ManagerTab,
+    MaterialsPanel, OutlinerPanel, RecentFiles, TimelinePanel, ViewportPanel, commands, file,
     panels::{about, alert, drop_overlay, menu_bar, mode_palette, optimize, status_bar, toolbar, unsaved_changes},
     recent, shortcuts,
     theme::{self, metrics},
@@ -14,6 +14,7 @@ use grid4d_ui::{
 
 const MIN_MANAGERS_WIDTH: f32 = 280.0;
 const MIN_FCURVE_HEIGHT: f32 = 160.0;
+const MIN_MATERIALS_HEIGHT: f32 = 110.0;
 
 pub struct Grid4DApp {
     doc: Document,
@@ -24,6 +25,7 @@ pub struct Grid4DApp {
     coordinates: CoordinatesPanel,
     timeline: TimelinePanel,
     fcurve: FCurvePanel,
+    materials: MaterialsPanel,
     /// Time of the previous playback tick (egui clock, seconds).
     last_tick: Option<f64>,
     window_fit: WindowFit,
@@ -72,6 +74,7 @@ impl Grid4DApp {
             coordinates: CoordinatesPanel::default(),
             timeline: TimelinePanel::default(),
             fcurve: FCurvePanel::default(),
+            materials: MaterialsPanel,
             last_tick: None,
             window_fit: WindowFit::default(),
         }
@@ -173,6 +176,15 @@ impl eframe::App for Grid4DApp {
                     .default_size(grid4d_ui::panels::fcurve::DEFAULT_HEIGHT)
                     .size_range(MIN_FCURVE_HEIGHT..=max_height)
                     .show(ui, |ui| self.fcurve.show(ui, &mut self.doc, &mut self.editor));
+            }
+            BottomPanel::Materials => {
+                let max_height = (ui.available_height() * 0.5).max(MIN_MATERIALS_HEIGHT);
+                Panel::bottom("grid4d.materials")
+                    .frame(theme::panel_frame())
+                    .resizable(true)
+                    .default_size(grid4d_ui::panels::materials::DEFAULT_HEIGHT)
+                    .size_range(MIN_MATERIALS_HEIGHT..=max_height)
+                    .show(ui, |ui| self.materials.show(ui, &mut self.doc, &mut self.editor));
             }
         }
 

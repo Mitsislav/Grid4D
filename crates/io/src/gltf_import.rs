@@ -7,7 +7,7 @@ use std::{collections::HashMap, fs, path::Path};
 use glam::{Quat, Vec2, Vec3};
 use gltf::{buffer::Source, camera::Projection, mesh::Mode};
 use grid4d_geom::PolyMesh;
-use grid4d_scene::{MeshHandle, NodeData, ObjectKind, Transform};
+use grid4d_scene::{Material, MaterialId, Materials, MeshHandle, NodeData, ObjectKind, Tag, Transform};
 
 use crate::{
     IoError,
@@ -17,9 +17,9 @@ use crate::{
 /// glTF metres → Grid4D centimetres.
 const UNIT: f32 = 100.0;
 
-/// A glTF mesh, read once: its geometry and its first material's base colour;
-/// `None` if it has no triangles.
-type ReadMesh = Option<(MeshHandle, Option<[f32; 3]>)>;
+/// A glTF mesh, read once: its geometry, its first material's base colour and
+/// that material's index; `None` if it has no triangles.
+type ReadMesh = Option<(MeshHandle, Option<[f32; 3]>, Option<usize>)>;
 
 fn invalid(message: impl Into<String>) -> IoError {
     IoError::Invalid(message.into())
@@ -35,6 +35,15 @@ fn invalid(message: impl Into<String>) -> IoError {
 pub fn import_gltf(bytes: &[u8], base: Option<&Path>) -> Result<Objects, IoError> {
     let gltf = gltf::Gltf::from_slice(bytes).map_err(|err| invalid(format!("not a valid glTF file: {err}")))?;
     let buffers = load_buffers(&gltf, base)?;
+    // Every material of the file, in its order; meshes refer to them by index.
+    let mut materials = Materials::default();
+    let material_ids: Vec<MaterialId> = gltf
+        .materials()
+        .map(|m| {
+            let material = read_material(&m, &materials);
+            materials.insert(material)
+        })
+        .collect();
     let mut meshes: Vec<Option<ReadMesh>> = vec![None; gltf.meshes().count()];
     let mut visited = vec![false; gltf.nodes().count()];
     let mut nodes = Vec::new();
@@ -64,7 +73,7 @@ pub fn import_gltf(bytes: &[u8], base: Option<&Path>) -> Result<Objects, IoError
             _ => continue,
         }
         let index = nodes.len();
-        let mut data = node_data(&node, &buffers, &mut meshes)?;
+        let mut data = node_data(&node, &buffers, &mut meshes, &material_ids)?;
         data.transform = transform(&node)?;
         // A mesh node that is also a camera or light: the other one as a child.
         let extra = data
@@ -86,7 +95,36 @@ pub fn import_gltf(bytes: &[u8], base: Option<&Path>) -> Result<Objects, IoError
         stack.extend(node.children().map(|child| (child, Some(index))));
         stack[first..].reverse();
     }
-    Ok(Objects { nodes })
+    Ok(Objects {
+        nodes,
+        materials,
+        sources: Vec::new(),
+    })
+}
+
+/// A glTF material as a Grid4D one (non-finite factors fall back to the defaults).
+fn read_material(material: &gltf::Material<'_>, taken: &Materials) -> Material {
+    let name = material
+        .name()
+        .filter(|n| !n.trim().is_empty())
+        .map_or_else(|| taken.unique_name("Mat"), str::to_owned);
+    let mut out = Material::new(name);
+    let pbr = material.pbr_metallic_roughness();
+    let [r, g, b, _] = pbr.base_color_factor();
+    if [r, g, b].iter().all(|c| c.is_finite()) {
+        out.color = [r, g, b].map(|c| c.max(0.0));
+    }
+    if pbr.metallic_factor().is_finite() {
+        out.metallic = pbr.metallic_factor().clamp(0.0, 1.0);
+    }
+    if pbr.roughness_factor().is_finite() {
+        out.roughness = pbr.roughness_factor().clamp(0.0, 1.0);
+    }
+    let emissive = material.emissive_factor();
+    if emissive.iter().all(|c| c.is_finite()) {
+        out.emission = emissive.map(|c| c.max(0.0));
+    }
+    out
 }
 
 /// Each buffer's bytes: the `.glb` binary chunk, a `data:` URI or a file next to the glTF.
@@ -183,8 +221,14 @@ fn decode_base64(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// What a node is: its mesh, else its camera or light, else a Null.
-fn node_data(node: &gltf::Node<'_>, buffers: &[Vec<u8>], meshes: &mut [Option<ReadMesh>]) -> Result<NodeData, IoError> {
+/// What a node is: its mesh (with a Material tag for its material), else its
+/// camera or light, else a Null.
+fn node_data(
+    node: &gltf::Node<'_>,
+    buffers: &[Vec<u8>],
+    meshes: &mut [Option<ReadMesh>],
+    materials: &[MaterialId],
+) -> Result<NodeData, IoError> {
     let named = |kind: ObjectKind, fallback: Option<&str>| {
         let name = node
             .name()
@@ -200,10 +244,15 @@ fn node_data(node: &gltf::Node<'_>, buffers: &[Vec<u8>], meshes: &mut [Option<Re
         if slot.is_none() {
             *slot = Some(read_mesh(&mesh, buffers)?);
         }
-        if let Some(Some((handle, colour))) = slot {
+        if let Some(Some((handle, colour, material))) = slot {
             let mut data = named(ObjectKind::polygon(handle.clone()), mesh.name());
             if let Some(colour) = colour {
                 data.display_color = *colour;
+            }
+            if let Some(&material) = material.and_then(|i| materials.get(i)) {
+                data.tags.push(Tag::Material {
+                    material: Some(material),
+                });
             }
             return Ok(data);
         }
@@ -267,6 +316,7 @@ fn read_mesh(mesh: &gltf::Mesh<'_>, buffers: &[Vec<u8>]) -> Result<ReadMesh, IoE
     let mut uvs: Vec<Vec2> = Vec::new();
     let mut any_uvs = false;
     let mut colour = None;
+    let mut material = None;
 
     for primitive in mesh.primitives() {
         let mode = primitive.mode();
@@ -297,7 +347,10 @@ fn read_mesh(mesh: &gltf::Mesh<'_>, buffers: &[Vec<u8>]) -> Result<ReadMesh, IoE
             None => (0..u32::try_from(local.len()).map_err(|_| invalid("a mesh has too many points"))?).collect(),
         };
         let triangles = triangles(mode, &indices);
-        if colour.is_none() && primitive.material().index().is_some() {
+        if material.is_none()
+            && let Some(index) = primitive.material().index()
+        {
+            material = Some(index);
             let [r, g, b, _] = primitive.material().pbr_metallic_roughness().base_color_factor();
             if [r, g, b].iter().all(|c| c.is_finite()) {
                 colour = Some([r, g, b]);
@@ -344,7 +397,7 @@ fn read_mesh(mesh: &gltf::Mesh<'_>, buffers: &[Vec<u8>]) -> Result<ReadMesh, IoE
             .set_uvs(Some(uvs))
             .map_err(|err| invalid(format!("mesh {}: {err}", mesh.index())))?;
     }
-    Ok(Some((MeshHandle::new(mesh_out), colour)))
+    Ok(Some((MeshHandle::new(mesh_out), colour, material)))
 }
 
 /// The triangles of a primitive (corner indices into its vertices).

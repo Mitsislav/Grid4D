@@ -12,7 +12,7 @@ use std::{
 
 use egui::ViewportCommand;
 use grid4d_io::{ObjectEntry, Objects};
-use grid4d_scene::{Document, MeshHandle, NodeId, ObjectKind, SceneEdit};
+use grid4d_scene::{Document, MeshHandle, NodeData, NodeId, ObjectKind, SceneEdit, Tags};
 
 use crate::{EditorCommand, EditorState, History, ViewportPanel, recent::RecentFiles};
 
@@ -353,13 +353,42 @@ pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, v
     let selection_before = editor.selection.clone();
     let mut ids: Vec<NodeId> = Vec::with_capacity(imported.nodes.len());
     let mut roots: Vec<NodeId> = Vec::new();
-    let mut inverses = Vec::with_capacity(imported.nodes.len());
-    for node in imported.nodes {
+    let mut inverses = Vec::with_capacity(imported.nodes.len() + 2);
+    // The file's materials join the document's (with unique names); its Material
+    // tags are pointed at them.
+    let mut material_of: HashMap<grid4d_scene::MaterialId, grid4d_scene::MaterialId> = HashMap::new();
+    if !imported.materials.is_empty() {
+        let mut materials = doc.scene.materials().clone();
+        for (old, material) in imported.materials.iter() {
+            let mut material = material.clone();
+            material.name = materials.unique_name(&material.name);
+            material_of.insert(old, materials.insert(material));
+        }
+        match doc.apply(SceneEdit::SetMaterials(materials)) {
+            Ok(inverse) => inverses.push(inverse),
+            Err(err) => return failed(editor, err.to_string()),
+        }
+    }
+    // Object references (Target tags) are resolved once every object has its id.
+    let mut later: Vec<(usize, NodeData)> = Vec::new();
+    for (index, node) in imported.nodes.into_iter().enumerate() {
         let parent = node.parent.and_then(|p| ids.get(p).copied());
+        let mut data = node.data;
+        grid4d_io::remap_materials(&mut data, |m| material_of.get(&m).copied());
+        let refers = data.tags.iter().any(|t| {
+            matches!(
+                t,
+                grid4d_scene::Tag::Target { target: Some(_), .. } | grid4d_scene::Tag::Target { up: Some(_), .. }
+            )
+        });
+        if refers {
+            later.push((index, data.clone()));
+            grid4d_io::remap_objects(&mut data, |_| None);
+        }
         let insert = SceneEdit::Insert {
             parent,
             index: usize::MAX,
-            data: node.data,
+            data,
         };
         match doc.apply(insert) {
             Ok(inverse) => {
@@ -380,9 +409,20 @@ pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, v
         }
     }
     if roots.is_empty() {
+        for inverse in inverses.into_iter().rev() {
+            let _ = doc.apply(inverse);
+        }
         return failed(editor, "The file contains no objects.".to_owned());
     }
-    inverses.reverse(); // children are detached before their parents
+    let node_of: HashMap<NodeId, NodeId> = imported.sources.iter().copied().zip(ids.iter().copied()).collect();
+    for (index, mut data) in later {
+        let Some(&id) = ids.get(index) else { continue };
+        grid4d_io::remap_objects(&mut data, |old| node_of.get(&old).copied());
+        if let Ok(inverse) = doc.apply(SceneEdit::SetData { id, data }) {
+            inverses.push(inverse);
+        }
+    }
+    inverses.reverse(); // newest first: references, then children before parents, then materials
     editor.selection.set_all(roots);
     let selection_after = editor.selection.clone();
     editor
@@ -435,12 +475,25 @@ pub fn exportable(doc: &Document) -> Objects {
         } else if let Some(mesh) = grid4d_eval::editable_mesh(&data.kind) {
             data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
         }
+        // A generator without a material shows its cage's.
+        if let Some(cage) = cage.and_then(|c| doc.scene.get(c))
+            && data.tags.material().is_none()
+            && let Some(material) = cage.data.tags.material()
+        {
+            data.tags.push(grid4d_scene::Tag::Material {
+                material: Some(material),
+            });
+        }
         let parent = node.parent().and_then(|p| index_of.get(&p).copied());
         index_of.insert(id, nodes.len());
         nodes.push(ObjectEntry { parent, data });
         stack.extend(node.children().iter().rev().filter(|&&child| Some(child) != cage));
     }
-    Objects { nodes }
+    Objects {
+        nodes,
+        materials: doc.scene.materials().clone(),
+        sources: Vec::new(),
+    }
 }
 
 /// Saves to the current file, or asks where (always with `ask_path`, i.e. Save As).
@@ -1049,6 +1102,61 @@ mod tests {
         // A dropped glTF file merges straight away.
         f.run(&[EditorCommand::MergeFile(path)]);
         assert_eq!(names(&f.doc).len(), after.len() + 2);
+    }
+
+    #[test]
+    fn merging_a_document_brings_its_materials_and_keeps_its_references() {
+        use grid4d_scene::{Material, Tag, Tags};
+        let mut f = Fixture::new("merge_materials", None, None);
+        // The open document already has a material called "Red".
+        let mine = f.doc.scene.materials_mut().insert(Material::new("Red"));
+        let mut other = Document::with_demo_scene();
+        let mut red = Material::new("Red");
+        red.color = [1.0, 0.0, 0.0];
+        let red = other.scene.materials_mut().insert(red);
+        let find = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+        let (cube, boxed) = (find(&other, "Cube"), find(&other, "Box"));
+        other.scene.get_mut(cube).unwrap().data.tags = vec![
+            Tag::Material { material: Some(red) },
+            Tag::Target {
+                target: Some(boxed),
+                up: None,
+                pitch: true,
+            },
+        ];
+        let path = f.dir.join("other.g4d");
+        grid4d_io::save(&other, &path).unwrap();
+        let before = f.doc.scene.len();
+        f.run(&[EditorCommand::MergeFile(path)]);
+
+        let materials = f.doc.scene.materials();
+        assert_eq!(materials.len(), 2);
+        let (merged, material) = materials.iter().find(|&(id, _)| id != mine).unwrap();
+        assert_eq!(material.name, "Red.1", "a unique name");
+        assert_eq!(material.color, [1.0, 0.0, 0.0]);
+        // The merged objects are the selected roots; the merged Cube is one of them.
+        let new_cube = *f
+            .editor
+            .selection
+            .as_slice()
+            .iter()
+            .find(|&&id| f.doc.scene.get(id).unwrap().data.name == "Cube")
+            .unwrap();
+        let data = &f.doc.scene.get(new_cube).unwrap().data;
+        assert_eq!(
+            data.tags.material(),
+            Some(merged),
+            "its tag points at the merged material"
+        );
+        let target = data.tags.aim().map(|a| a.target).unwrap();
+        assert_eq!(f.doc.scene.get(target).unwrap().data.name, "Box");
+        assert_eq!(f.editor.history.undo_len(), 1, "one step");
+
+        f.run(&[EditorCommand::Undo]);
+        assert_eq!(f.doc.scene.materials().len(), 1, "undo takes the material back too");
+        assert_eq!(f.doc.scene.len(), before);
+        f.run(&[EditorCommand::Redo]);
+        assert_eq!(f.doc.scene.materials().len(), 2);
     }
 
     #[test]

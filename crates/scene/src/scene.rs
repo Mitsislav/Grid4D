@@ -88,6 +88,9 @@ pub struct Scene {
     detached_roots: Vec<NodeId>,
     /// Number of nodes, across all detached subtrees, hidden from public queries.
     detached_count: usize,
+    /// The document's materials (here, so evaluation sees changes through the
+    /// revision).
+    materials: crate::Materials,
     revision: u64,
 }
 
@@ -98,6 +101,7 @@ impl Default for Scene {
             roots: Vec::new(),
             detached_roots: Vec::new(),
             detached_count: 0,
+            materials: crate::Materials::default(),
             revision: next_revision(),
         }
     }
@@ -113,6 +117,35 @@ impl Scene {
     #[must_use]
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// The document's materials.
+    #[must_use]
+    pub fn materials(&self) -> &crate::Materials {
+        &self.materials
+    }
+
+    /// Write access to the materials (marks the scene as changed).
+    pub fn materials_mut(&mut self) -> &mut crate::Materials {
+        self.touch();
+        &mut self.materials
+    }
+
+    /// The material an object shows: its own Material tag's, else the nearest
+    /// ancestor's (links to missing materials count as none).
+    #[must_use]
+    pub fn effective_material(&self, id: NodeId) -> Option<crate::MaterialId> {
+        let mut current = Some(id);
+        while let Some(c) = current {
+            let node = self.get(c)?;
+            if let Some(material) =
+                crate::Tags::material(node.data.tags.as_slice()).filter(|&m| self.materials.contains(m))
+            {
+                return Some(material);
+            }
+            current = node.parent;
+        }
+        None
     }
 
     /// Marks the scene as changed.
@@ -805,6 +838,39 @@ mod tests {
         assert_eq!(s.get(parent).unwrap().data.unkeyed, None);
         let curve = s.get(parent).unwrap().data.tracks[0].curve.value_at(3.0).unwrap();
         assert_eq!(at(&s, 3.0).x, curve, "the curve again");
+    }
+
+    #[test]
+    fn materials_are_inherited_and_changes_bump_the_revision() {
+        use crate::{Material, Tag};
+        let mut s = Scene::new();
+        let revision = s.revision();
+        let red = s.materials_mut().insert(Material::new("Red"));
+        assert_ne!(s.revision(), revision, "a material change is a scene change");
+        let group = s.insert(null("group"));
+        let child = s.insert_child(group, null("child")).unwrap();
+        let grandchild = s.insert_child(child, null("grandchild")).unwrap();
+        assert_eq!(s.effective_material(grandchild), None);
+        s.get_mut(group)
+            .unwrap()
+            .data
+            .tags
+            .push(Tag::Material { material: Some(red) });
+        assert_eq!(s.effective_material(grandchild), Some(red), "inherited");
+        let blue = s.materials_mut().insert(Material::new("Blue"));
+        s.get_mut(child)
+            .unwrap()
+            .data
+            .tags
+            .push(Tag::Material { material: Some(blue) });
+        assert_eq!(s.effective_material(grandchild), Some(blue), "the nearest wins");
+        assert_eq!(s.effective_material(group), Some(red));
+        s.materials_mut().remove(blue);
+        assert_eq!(
+            s.effective_material(grandchild),
+            Some(red),
+            "a missing material counts as none"
+        );
     }
 
     #[test]

@@ -537,7 +537,7 @@ impl Canvas<'_> {
 }
 
 /// Tag icons: a smooth curve over a faceted one (Phong), a padlock (Protection),
-/// a sight (Target).
+/// a sight (Target), a lit ball (Material; painted in the material's colour).
 fn paint_tag(c: &Canvas<'_>, kind: TagKind, soft: Color32) {
     match kind {
         TagKind::Phong => {
@@ -574,7 +574,40 @@ fn paint_tag(c: &Canvas<'_>, kind: TagKind, soft: Color32) {
                 c.line(a, b);
             }
         }
+        TagKind::Material => {
+            c.disc((0.5, 0.5), 0.42);
+            c.disc_with((0.38, 0.36), 0.12, Color32::from_white_alpha(150));
+        }
     }
+}
+
+/// A material preview: a ball in `colour` (linear RGB), lit from the upper left,
+/// in `rect`.
+pub fn paint_material_ball(painter: &Painter, rect: Rect, colour: [f32; 3]) {
+    let radius = rect.width().min(rect.height()) * 0.5;
+    let centre = rect.center();
+    // Rings from the rim inwards, brighter towards the light.
+    let rings = 14;
+    for k in 0..rings {
+        let t = k as f32 / rings as f32;
+        let shade = 0.35 + 0.75 * t;
+        let lit = colour.map(|c| (c * shade).min(1.0));
+        let offset = vec2(-0.22, -0.25) * radius * t;
+        painter.circle_filled(centre + offset, radius * (1.0 - t * 0.85), linear(lit));
+    }
+    painter.circle_filled(
+        centre + vec2(-0.35, -0.38) * radius,
+        radius * 0.13,
+        Color32::from_white_alpha(120),
+    );
+    painter.circle_stroke(centre, radius, Stroke::new(1.0, Color32::from_black_alpha(140)));
+}
+
+/// Linear RGB as an egui colour (which is sRGB).
+#[must_use]
+pub fn linear(colour: [f32; 3]) -> Color32 {
+    let [r, g, b] = colour.map(|c| c.clamp(0.0, 1.0));
+    Color32::from(egui::Rgba::from_rgb(r, g, b))
 }
 
 /// Paints an icon into a `size × size` square centred on `center`.

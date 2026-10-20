@@ -24,8 +24,9 @@ screenshots come from the application itself.
 12. [Generators: Subdivision Surface](#12-generators-subdivision-surface)
 13. [Snapping](#13-snapping)
 14. [Tags](#14-tags)
-15. [Keyboard shortcuts](#15-keyboard-shortcuts)
-16. [Limitations and what is planned](#16-limitations-and-what-is-planned)
+15. [Materials](#15-materials)
+16. [Keyboard shortcuts](#16-keyboard-shortcuts)
+17. [Limitations and what is planned](#17-limitations-and-what-is-planned)
 
 ---
 
@@ -271,12 +272,12 @@ What comes in:
 |------|--------|
 | Node hierarchy, names, position / rotation / scale | The same hierarchy of objects. Metres become centimetres (× 100). |
 | Meshes | Polygon objects, ready for modelling. Points that the file repeats at seams are merged, so the mesh is connected. Texture coordinates are kept. |
-| Material base colour | The object's display colour. |
+| Materials | Materials in the Material Manager (name, colour, roughness, metallic, emission), linked to the meshes by Material tags; the base colour also becomes the display colour. |
 | Cameras | Camera objects (field of view). |
 | Lights (`KHR_lights_punctual`) | Light objects (colour, intensity). |
 | Empty nodes | Nulls. |
 
-Not yet: materials and textures, animation, skinning, morph targets and compressed
+Not yet: textures, animation, skinning, morph targets and compressed
 meshes (Draco). Shading comes from Grid4D's own smoothing, not from the file's
 normals. Points the file has at *almost* the same place (not exactly) stay separate;
 run **Optimize** (U~O) on such an object to merge them.
@@ -299,7 +300,9 @@ What goes out:
   A **Subdivision Surface** is written as its smooth result at the viewport level,
   without its cage. A switched-off one is written as an empty object with its
   children as they are.
-- Display colours as simple materials, cameras, and lights.
+- Materials (name, colour, roughness, metallic, emission; one a mesh inherits from a
+  parent included); objects without one get a simple material in their display
+  colour. Cameras and lights.
 
 Exporting does not change the document: there is nothing to undo, and the title's
 `*` stays as it was.
@@ -320,14 +323,15 @@ and drop `.obj` files like glTF files, and pick the `.obj` type in
 
 - **Importing:** every object or group in the file becomes a polygon object, placed
   at the origin. Quads and n-gons stay as they are. Texture coordinates are kept,
-  and the colours of the `.mtl` file named in the OBJ become display colours.
+  and the materials of the `.mtl` file named in the OBJ become materials (colour,
+  emission) linked by Material tags, their colours also the display colours.
   OBJ has no units: 1 unit is read as 1 cm.
 - **Exporting:** every mesh (primitives and Subdivision Surfaces included, as for
   glTF) becomes one OBJ object, with its points where they are in the scene (OBJ
   has no positions or hierarchy of its own). Polygons keep all their corners.
-  Normals follow the viewport's smoothing. Colours go to a `.mtl` file of the
-  same name next to the `.obj`; keep the two together. Cameras, lights and Nulls
-  are left out.
+  Normals follow the viewport's smoothing. Materials (under their names, with colour
+  and emission), or display colours, go to a `.mtl` file of the same name next to
+  the `.obj`; keep the two together. Cameras, lights and Nulls are left out.
 
 ![Top: the document; bottom: its OBJ export opened again. One polygon object per mesh, in the same places, quads intact](images/manual/obj_export.png)
 
@@ -861,7 +865,62 @@ Turns the object to face another object.
 
 ![The Target tag's settings](images/manual/tags_target.png)
 
-## 15. Keyboard shortcuts
+### 14.4 Material
+
+Links a material to the object; see [§15](#15-materials).
+
+## 15. Materials
+
+A **material** gives objects their surface. Materials live in the **Material
+Manager**, the **Materials** tab at the bottom (beside Timeline and F-Curve;
+**Shift+F2**, or Window ▸ Material Manager). An object shows a material through a
+**Material tag**.
+
+![A yellow material on the Sphere and on the Group, whose Cylinder and Box inherit it; the material in the Material Manager and the Attribute Manager](images/manual/materials.png)
+
+**Making materials**
+
+- **Create ▸ New Material** in the Material Manager, **Ctrl+N** with the pointer
+  over it, a **double-click on its empty space**, or the main menu's
+  **Create ▸ Material**. New materials are called Mat, Mat.1, …
+- **Click** a material to select it: the Attribute Manager shows its settings.
+  Selecting an object shows the object again.
+
+**Settings** (Attribute Manager)
+
+| Setting | Meaning |
+|---------|---------|
+| Name | shown under the preview |
+| Color | the surface colour; the viewport shows it |
+| Roughness | 0 % mirror-like … 100 % matte |
+| Metallic | 0 % plastic, stone, wood … 100 % metal |
+| Luminance | light the surface gives off |
+
+The viewport shows only the colour for now; roughness, metallic and luminance will
+shade it with the lit viewport (planned), and they are saved and exported already.
+
+**Giving an object a material**
+
+- **Drag** the material from the Material Manager onto the object's row in the
+  Object Manager, or onto the object in the viewport.
+- Or select the objects and choose **Material ▸ Apply** in the Material Manager
+  (or right-click the material ▸ *Apply to Selected Objects*).
+- The object gets a **Material tag** (its icon shows the material's colour); if it
+  has one already, the tag gets the new material. In the Attribute Manager the tag
+  has a **Material** list to pick another one. **Double-click** the tag icon to see
+  its material.
+- **Children inherit**: an object without its own Material tag shows the material
+  of its nearest parent that has one. A Subdivision Surface shows its own material,
+  else its cage's.
+
+**Deleting**: click a material, then press **Delete** (or Edit ▸ Delete, or
+right-click ▸ *Delete*). Material tags that used it stay, without a material, and
+their objects show their display colour again; undo brings everything back.
+
+Every change is one undo step. Materials are saved with the document, travel with
+glTF and OBJ files ([§9](#9-files)), and come along when you merge a document.
+
+## 16. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -899,6 +958,8 @@ Esc cancels a chord.
 | F9 | Record Active Objects |
 | Ctrl+F9 | Autokeying on / off |
 | Shift+F5 / Shift+F7 | Attribute Manager / Coordinate Manager |
+| Shift+F2 | Material Manager |
+| Ctrl+N (pointer over the Material Manager) | New material |
 | Tab (pointer over the timeline) | Timeline / F-Curve tab |
 | H / S (pointer over the F-Curve graph) | Frame all curves / the selected keys |
 
@@ -906,7 +967,7 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 16. Limitations and what is planned
+## 17. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
@@ -918,17 +979,18 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Generators**: only the Subdivision Surface, with one type (Catmull-Clark) and
   without edge weights (creases) or UV options. Extrude, Lathe, Loft, Sweep and
   Cloner are planned.
-- **Tags**: Material tags (with materials), Protection limits, Phong edge breaks,
-  copying tags between objects.
+- **Tags**: Protection limits, Phong edge breaks, copying tags between objects.
+- **Materials**: one Material tag per object (no layering), projection settings,
+  textures, rendered previews; the viewport shows only the colour.
 - **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's
   angle or length while dragging it (Ctrl / Alt), normalised curves, copying and
   pasting keys, animating object parameters such as a cube's size, Frame
-  Scene/Selected following the animation; the Material Manager.
+  Scene/Selected following the animation.
 - **Coordinate Manager**: frozen coordinates (Object Abs), changing primitives'
   size parameters rather than their scale, editing several objects at once.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.
-- **Interchange and rendering**: materials and textures, animation in glTF, import
+- **Interchange and rendering**: textures, animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only), the
   offline renderer (the Render menu is disabled).
 - The Takes, Layers and Filter panels are placeholders.

@@ -5,7 +5,7 @@
 //! The UI translates its `EditorCommand`s into edits and keeps the inverses in
 //! its history; this crate only guarantees that every inverse is exact.
 
-use crate::{Detached, Document, Node, NodeData, NodeId, SceneError, TimeSettings, Transform};
+use crate::{Detached, Document, Materials, Node, NodeData, NodeId, SceneError, TimeSettings, Transform};
 
 /// One reversible change to a [`Document`].
 ///
@@ -48,6 +48,9 @@ pub enum SceneEdit {
     SetTime(TimeSettings),
     /// Renames the document.
     SetName(String),
+    /// Replaces the document's materials (the whole table, ids included: tags
+    /// keep pointing at the same materials across undo and redo).
+    SetMaterials(Materials),
 }
 
 impl SceneEdit {
@@ -59,7 +62,7 @@ impl SceneEdit {
         match *self {
             Self::Detach { root } | Self::Attach { root, .. } => Some(root),
             Self::Move { id, .. } | Self::SetData { id, .. } => Some(id),
-            Self::Insert { .. } | Self::SetTime(_) | Self::SetName(_) => None,
+            Self::Insert { .. } | Self::SetTime(_) | Self::SetName(_) | Self::SetMaterials(_) => None,
         }
     }
 }
@@ -115,6 +118,10 @@ impl Document {
                 Ok(SceneEdit::SetTime(old))
             }
             SceneEdit::SetName(name) => Ok(SceneEdit::SetName(std::mem::replace(&mut self.name, name))),
+            SceneEdit::SetMaterials(materials) => Ok(SceneEdit::SetMaterials(std::mem::replace(
+                self.scene.materials_mut(),
+                materials,
+            ))),
         }
     }
 
@@ -156,6 +163,7 @@ mod tests {
     struct Snapshot {
         name: String,
         time: TimeSettings,
+        materials: Materials,
         nodes: Vec<(NodeId, Option<NodeId>, u32, NodeData)>,
     }
 
@@ -169,6 +177,7 @@ mod tests {
         Snapshot {
             name: doc.name.clone(),
             time: doc.time.settings(),
+            materials: doc.scene.materials().clone(),
             nodes,
         }
     }
@@ -436,7 +445,7 @@ mod tests {
         let parent = if rng.chance(4) { None } else { rng.pick(&attached) };
         let index = rng.below(5);
         let target = rng.pick(&attached);
-        match (rng.below(9), target) {
+        match (rng.below(10), target) {
             (2, Some(root)) => SceneEdit::Detach { root },
             (3, _) => match rng.pick(doc.scene.detached_roots()) {
                 Some(root) => SceneEdit::Attach { root, parent, index },
@@ -462,6 +471,20 @@ mod tests {
                 })
             }
             (7, _) => SceneEdit::SetName(format!("doc {}", rng.below(100))),
+            (8, _) => {
+                // Add a material or remove one (the table is replaced whole).
+                let mut materials = doc.scene.materials().clone();
+                match rng.pick(materials.ids()) {
+                    Some(id) if rng.chance(2) => {
+                        materials.remove(id);
+                    }
+                    _ => {
+                        let name = materials.unique_name("Mat");
+                        materials.insert(crate::Material::new(name));
+                    }
+                }
+                SceneEdit::SetMaterials(materials)
+            }
             _ => SceneEdit::Insert {
                 parent,
                 index,

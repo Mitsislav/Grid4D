@@ -93,7 +93,15 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             create(ui, editor, ObjectKindTag::Camera);
             create(ui, editor, ObjectKindTag::Light);
             ui.separator();
-            planned(ui, "Material", "");
+            if ui
+                .button("Material")
+                .on_hover_text("A new material in the Material Manager")
+                .clicked()
+            {
+                editor.commands.push(EditorCommand::NewMaterial);
+                editor.bottom = crate::BottomPanel::Materials;
+                ui.close();
+            }
         });
 
         ui.menu_button("Modes", |ui| {
@@ -341,6 +349,13 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             command(ui, editor, "Frame Selected Objects", "O", EditorCommand::FrameSelected);
             command(ui, editor, "Reset View", "", EditorCommand::ResetView);
             ui.separator();
+            let materials = Button::new("Material Manager")
+                .shortcut_text("Shift+F2")
+                .selected(editor.bottom == crate::BottomPanel::Materials);
+            if ui.add(materials).clicked() {
+                editor.bottom = crate::BottomPanel::Materials;
+                ui.close();
+            }
             for (tab, label, shortcut) in [
                 (crate::ManagerTab::Attributes, "Attribute Manager", "Shift+F5"),
                 (crate::ManagerTab::Coordinates, "Coordinate Manager", "Shift+F7"),

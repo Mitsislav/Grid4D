@@ -4,7 +4,7 @@
 //!
 //! [`NodeData::tags`]: crate::NodeData::tags
 
-use crate::NodeId;
+use crate::{MaterialId, NodeId};
 
 /// Grid4D's smoothing for objects without a Phong tag: 80° (radians).
 pub const DEFAULT_PHONG_ANGLE: f32 = 80.0 * std::f32::consts::PI / 180.0;
@@ -28,6 +28,8 @@ pub enum Tag {
         up: Option<NodeId>,
         pitch: bool,
     },
+    /// Links a material to the object (and its children without their own).
+    Material { material: Option<MaterialId> },
 }
 
 /// The kinds of tag, for menus and icons.
@@ -36,10 +38,11 @@ pub enum TagKind {
     Phong,
     Protection,
     Target,
+    Material,
 }
 
 impl TagKind {
-    pub const ALL: [Self; 3] = [Self::Phong, Self::Protection, Self::Target];
+    pub const ALL: [Self; 4] = [Self::Phong, Self::Protection, Self::Target, Self::Material];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
@@ -47,6 +50,7 @@ impl TagKind {
             Self::Phong => "Phong",
             Self::Protection => "Protection",
             Self::Target => "Target",
+            Self::Material => "Material",
         }
     }
 
@@ -68,6 +72,7 @@ impl TagKind {
                 up: None,
                 pitch: true,
             },
+            Self::Material => Tag::Material { material: None },
         }
     }
 }
@@ -79,6 +84,7 @@ impl Tag {
             Self::Phong { .. } => TagKind::Phong,
             Self::Protection { .. } => TagKind::Protection,
             Self::Target { .. } => TagKind::Target,
+            Self::Material { .. } => TagKind::Material,
         }
     }
 }
@@ -109,6 +115,8 @@ pub trait Tags {
     fn aim(&self) -> Option<Aim>;
     /// The index of its tag of `kind`, if it has one.
     fn tag_index(&self, kind: TagKind) -> Option<usize>;
+    /// The material its Material tag links, if any.
+    fn material(&self) -> Option<MaterialId>;
 }
 
 impl Tags for [Tag] {
@@ -120,7 +128,7 @@ impl Tags for [Tag] {
                 } else {
                     std::f32::consts::PI
                 }),
-                Tag::Protection { .. } | Tag::Target { .. } => None,
+                Tag::Protection { .. } | Tag::Target { .. } | Tag::Material { .. } => None,
             })
             .unwrap_or(DEFAULT_PHONG_ANGLE)
     }
@@ -136,19 +144,26 @@ impl Tags for [Tag] {
                 scale: p.scale || scale,
                 rotation: p.rotation || rotation,
             },
-            Tag::Phong { .. } | Tag::Target { .. } => p,
+            Tag::Phong { .. } | Tag::Target { .. } | Tag::Material { .. } => p,
         })
     }
 
     fn aim(&self) -> Option<Aim> {
         self.iter().find_map(|tag| match *tag {
             Tag::Target { target, up, pitch } => target.map(|target| Aim { target, up, pitch }),
-            Tag::Phong { .. } | Tag::Protection { .. } => None,
+            Tag::Phong { .. } | Tag::Protection { .. } | Tag::Material { .. } => None,
         })
     }
 
     fn tag_index(&self, kind: TagKind) -> Option<usize> {
         self.iter().position(|tag| tag.kind() == kind)
+    }
+
+    fn material(&self) -> Option<MaterialId> {
+        self.iter().find_map(|tag| match *tag {
+            Tag::Material { material } => material,
+            Tag::Phong { .. } | Tag::Protection { .. } | Tag::Target { .. } => None,
+        })
     }
 }
 
@@ -176,5 +191,11 @@ mod tests {
         assert_eq!(tags.aim(), None, "a Target tag without a target does nothing");
         assert_eq!(tags.tag_index(TagKind::Target), Some(2));
         assert_eq!(TagKind::ALL.map(|k| k.default_tag().kind()), TagKind::ALL);
+        assert_eq!(tags.material(), None);
+        let mut materials = crate::Materials::default();
+        let m = materials.insert(crate::Material::new("Mat"));
+        let with = [Tag::Material { material: Some(m) }];
+        assert_eq!(with.material(), Some(m));
+        assert_eq!(TagKind::Material.default_tag(), Tag::Material { material: None });
     }
 }
