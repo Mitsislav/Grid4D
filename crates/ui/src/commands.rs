@@ -10,7 +10,7 @@ use grid4d_geom::{
     BitSet, Component, MeshError, PolyMesh, Topology, ops,
     selection::{self, corners_from_edges, edges_from_corners},
 };
-use grid4d_render::OrbitCamera;
+use grid4d_render::{DisplayStyle, OrbitCamera, ShadingMode};
 use grid4d_scene::{
     ComponentState, Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, SceneEdit,
     Transform,
@@ -244,6 +244,10 @@ pub enum EditorCommand {
     /// Shows view `Some(i)` alone and makes it active (F1–F4), or all four views
     /// (`None`, F5).
     ShowView(Option<usize>),
+    /// The active view's shading mode (Display menu, N~A … N~G).
+    SetShading(ShadingMode),
+    /// The active view's display style: Wireframe (N~H) or Box (N~K).
+    SetDisplayStyle(DisplayStyle),
     FrameScene,
     FrameSelected,
     ResetView,
@@ -876,6 +880,8 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 .record(doc, label, inverses, selection.clone(), selection);
         }
         EditorCommand::ShowView(view) => viewport.show_views(view),
+        EditorCommand::SetShading(shading) => viewport.set_shading(shading),
+        EditorCommand::SetDisplayStyle(style) => viewport.set_display_style(style),
         EditorCommand::FrameScene => viewport.frame_scene(&doc.scene),
         EditorCommand::FrameSelected => viewport.frame_selection(&doc.scene, &editor.selection),
         EditorCommand::ResetView => viewport.reset_view(),

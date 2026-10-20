@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 7 — Viewport: cameras, lights, 4-view, shading (v0.7) |
-| Last step done | 7.2 — Four views with orthographic projections (2026-10-21) |
-| Next step | 7.3 — Display modes (Gouraud, Lines, Quick, Wireframe, Box), per view |
-| Tests | 448, all passing; clippy and rustfmt clean |
+| Last step done | 7.3 — Display modes per view (2026-10-21) |
+| Next step | 7.4 — Lights in the viewport, shading from materials |
+| Tests | 452, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -512,7 +512,8 @@ write animation yet (planned).
 | Step | Built | Tests |
 |------|-------|-------|
 | 7.1 (`ed7102e`) | Scene cameras: look through a camera (Cameras ▸ Use Camera, a double-click on its icon) or any object, with its position, bank and field of view; navigation moves it (one undo step per gesture, Autokeying, Protection); wire pyramids for the other cameras; new cameras clone the view | 441 |
-| 7.2 | Four views (Perspective, Top, Right, Front) with orthographic projections: Panel menu arrangements, F1–F4 / F5, middle click shows a view alone; every view has its own camera, projection (Cameras menu) and Options; the active view takes input and a click elsewhere activates and acts; the grid lies in the view's plane | 448 |
+| 7.2 (`ebbf93b`) | Four views (Perspective, Top, Right, Front) with orthographic projections: Panel menu arrangements, F1–F4 / F5, middle click shows a view alone; every view has its own camera, projection (Cameras menu) and Options; the active view takes input and a click elsewhere activates and acts; the grid lies in the view's plane | 448 |
+| 7.3 | Display modes per view (Display menu, N~ chords): Gouraud, Quick and Constant Shading, each also with lines, Hidden Line and Lines; Wireframe (polygon edges) or Box (each object as its bounding box); selected objects' lines in orange | 452 |
 
 *Problems and solutions:*
 - **The view camera had no bank.** The turntable camera kept world Y up, so a banked
@@ -570,6 +571,33 @@ write animation yet (planned).
   second one brought the four back; the Panel and Cameras menus and the
   side-by-side arrangement worked. Posted Alt does not reach the app, so
   Alt-panning in orthographic views is covered by a headless test.
+- **Lines without a new per-frame cost.** A wireframe built from the scene every
+  frame would grow with the scene's edge count. Instead each mesh key gets a line
+  list (its polygons' edges, from the topology) next to its triangles, built the
+  first time a frame draws lines, and the line pass draws it instanced with the
+  same per-object data as the surfaces. Edges come from the polygons, not the
+  triangles, so n-gons show their outline.
+- **Box mode** builds a second mesh per key, its bounding box, shaded or as
+  twelve edges. A flat object (a plane) gets a hair of thickness so every side
+  has a normal.
+- **Hidden Line** draws the surfaces into the depth buffer only, then the lines:
+  what is behind a surface is hidden, and the background (and the grid's
+  depth test) show through.
+- **Lines against their own surfaces.** Edges lie exactly on their polygons, so
+  they would flicker against them; the line shader pulls them a tiny share of
+  their distance towards the viewer (a fixed distance in parallel views, like the
+  component overlay).
+- **One cache, several views.** Views can now draw the same polygon mesh in
+  different ways (as is, as a box). Polygon meshes used to be freed as soon as one
+  render did not draw them, which would rebuild them every frame with mixed
+  styles; they now stay for a few renders.
+- **On-screen testing:** N~B, N~C, N~E, N~F, N~G, N~K and N~A were pressed in
+  turn in the perspective view: lines over shaded surfaces (the selected cube's in
+  orange), the flatter Quick Shading, flat Constant Shading, Hidden Line with the
+  back edges and the grid hidden behind the surfaces, all lines in Lines, wire
+  boxes, then shaded boxes. With four views, the Top view showed Lines, Front
+  Hidden Line and Right Gouraud Shading (Lines) next to the shaded perspective
+  view; the Display menu marked each view's own mode.
 
 ---
 

@@ -6,7 +6,7 @@ use grid4d_eval::{EvaluatedScene, MeshKey, Shading};
 use grid4d_geom::Component;
 use grid4d_scene::{MeshHandle, NodeId};
 
-use crate::{ComponentHit, ComponentStyle, OrbitCamera, components::ComponentOverlay};
+use crate::{ComponentHit, ComponentStyle, DisplayMode, OrbitCamera, components::ComponentOverlay};
 
 /// Per-instance GPU data. Layout must match `InstanceIn` in `shaders/mesh.wgsl`.
 #[repr(C)]
@@ -99,6 +99,8 @@ pub struct FrameData {
     /// The camera is a parallel (orthographic) one: no grid fade, overlays pulled
     /// a fixed amount towards the viewer.
     pub parallel: bool,
+    /// How objects are drawn: the view's shading and display style.
+    pub display: DisplayMode,
     /// Colours and sizes of the component overlay.
     pub component_style: ComponentStyle,
     /// Points, edges and polygons of the active object in a component mode.
@@ -127,6 +129,7 @@ impl FrameData {
             show_grid: true,
             grid_plane: GridPlane::XZ,
             parallel: false,
+            display: DisplayMode::default(),
             component_style: ComponentStyle::default(),
             components: ComponentOverlay::default(),
             batches: Vec::with_capacity(16),

@@ -7,8 +7,9 @@ use grid4d_eval::{MeshKey, Shading};
 use grid4d_scene::MeshHandle;
 
 use crate::{
-    FrameData, InstanceRaw, Vertex, ViewportTarget,
+    DisplayStyle, FrameData, InstanceRaw, Vertex, ViewportTarget,
     components::{ComponentOverlay, EdgeInstance, FaceVertex, PointInstance},
+    display::{Fill, bounding_box, edge_lines},
     mesh::{TessellationScratch, tessellate},
     shaders,
 };
@@ -31,7 +32,8 @@ struct CameraUniform {
     eye: [f32; 4],
     light_dir: [f32; 4],
     grid: [f32; 4],
-    /// xy: target size in pixels.
+    /// xy: target size in pixels, z: the fill (0 lit, 1 quick, 2 constant), w: 1
+    /// for lines in the object's colour.
     viewport: [f32; 4],
     wire: [f32; 4],
     selected: [f32; 4],
@@ -132,19 +134,55 @@ impl OverlayBuffers {
     }
 }
 
+/// Vertices and indices on the GPU: a surface's triangles, or a line list.
 #[derive(Debug)]
-struct GpuMesh {
+struct GpuGeometry {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
-    index_count: u32,
+    count: u32,
+}
+
+/// A part of a cached mesh, built the first time a frame draws it.
+#[derive(Debug, Default)]
+enum Part {
+    #[default]
+    NotBuilt,
+    /// Built: nothing to draw (no triangles, or no edges).
+    Empty,
+    Ready(GpuGeometry),
+}
+
+impl Part {
+    fn get(&self) -> Option<&GpuGeometry> {
+        match self {
+            Self::Ready(geometry) => Some(geometry),
+            Self::NotBuilt | Self::Empty => None,
+        }
+    }
+}
+
+/// The GPU side of one [`DrawKey`]: its surface and its lines.
+#[derive(Debug, Default)]
+struct GpuMesh {
+    faces: Part,
+    lines: Part,
     /// Last frame this mesh was drawn, for eviction.
     last_used: u64,
+}
+
+/// What a cached mesh is made of: a key's geometry with a Phong angle, as is or
+/// as its bounding box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct DrawKey {
+    mesh: MeshKey,
+    shading: Shading,
+    boxed: bool,
 }
 
 /// One instanced draw: a cached mesh and its instances in the instance buffer.
 #[derive(Clone, Debug)]
 struct Draw {
-    key: (MeshKey, Shading),
+    key: DrawKey,
     instances: Range<u32>,
 }
 
@@ -152,10 +190,15 @@ const INSTANCE_STRIDE: u64 = size_of::<InstanceRaw>() as u64;
 const INITIAL_INSTANCE_CAPACITY: usize = 256;
 /// GPU meshes not drawn for this many frames are freed.
 const MESH_TTL_FRAMES: u64 = 600;
+/// Polygon meshes (a new key on every edit) go much sooner: after this many
+/// frames (each view's render is one) without being drawn.
+const POLYGON_TTL_FRAMES: u64 = 8;
 /// How often (in frames) the cache looks for meshes to free.
 const EVICTION_INTERVAL: u64 = 120;
 
 const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+/// Line vertices: a position.
+const LINE_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x3];
 /// `PointInstance` and `FaceVertex`: position, flags.
 const POSITION_FLAGS_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32];
 /// `EdgeInstance`: a, flags, b.
@@ -177,6 +220,9 @@ const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array!
 #[derive(Debug)]
 pub struct ViewportRenderer {
     mesh_pipeline: wgpu::RenderPipeline,
+    /// The surfaces of Hidden Line: depth only.
+    depth_pipeline: wgpu::RenderPipeline,
+    line_pipeline: wgpu::RenderPipeline,
     grid_pipeline: wgpu::RenderPipeline,
     point_pipeline: wgpu::RenderPipeline,
     edge_pipeline: wgpu::RenderPipeline,
@@ -184,11 +230,12 @@ pub struct ViewportRenderer {
     overlay: OverlayBuffers,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    meshes: HashMap<(MeshKey, Shading), GpuMesh>,
+    meshes: HashMap<DrawKey, GpuMesh>,
     /// Reused while generating meshes for new keys.
     tessellation: TessellationScratch,
     vertex_scratch: Vec<Vertex>,
     index_scratch: Vec<u32>,
+    line_scratch: Vec<[f32; 3]>,
     instance_buffer: wgpu::Buffer,
     instance_capacity: usize,
     /// This frame's draws; cleared (capacity kept) every frame.
@@ -196,6 +243,9 @@ pub struct ViewportRenderer {
     frame: u64,
     encode_srgb: bool,
     draw_grid: bool,
+    /// This frame's display mode: how surfaces are filled, whether lines are drawn.
+    fill: Fill,
+    draw_lines: bool,
 }
 
 impl ViewportRenderer {
@@ -271,8 +321,41 @@ impl ViewportRenderer {
             &POSITION_FLAGS_ATTRIBUTES,
         );
 
+        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("grid4d.mesh.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(shaders::MESH.into()),
+        });
+        let object = |pass: &ObjectPass| create_object_pipeline(device, &layout, target, &mesh_shader, pass);
+        let surfaces = ObjectPass {
+            label: "grid4d.mesh.pipeline",
+            vertex: "vs_main",
+            fragment: "fs_main",
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            stride: size_of::<Vertex>() as u64,
+            attributes: &VERTEX_ATTRIBUTES,
+            writes: wgpu::ColorWrites::ALL,
+            depth_write: true,
+            depth_compare: wgpu::CompareFunction::Less,
+        };
+
         Self {
-            mesh_pipeline: create_mesh_pipeline(device, &layout, target),
+            mesh_pipeline: object(&surfaces),
+            depth_pipeline: object(&ObjectPass {
+                label: "grid4d.depth.pipeline",
+                writes: wgpu::ColorWrites::empty(),
+                ..surfaces
+            }),
+            line_pipeline: object(&ObjectPass {
+                label: "grid4d.line.pipeline",
+                vertex: "vs_line",
+                fragment: "fs_line",
+                topology: wgpu::PrimitiveTopology::LineList,
+                stride: size_of::<[f32; 3]>() as u64,
+                attributes: &LINE_ATTRIBUTES,
+                writes: wgpu::ColorWrites::ALL,
+                depth_write: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+            }),
             grid_pipeline: create_grid_pipeline(device, &layout, target),
             point_pipeline,
             edge_pipeline,
@@ -284,12 +367,15 @@ impl ViewportRenderer {
             tessellation: TessellationScratch::default(),
             vertex_scratch: Vec::new(),
             index_scratch: Vec::new(),
+            line_scratch: Vec::new(),
             instance_buffer: create_instance_buffer(device, INITIAL_INSTANCE_CAPACITY),
             instance_capacity: INITIAL_INSTANCE_CAPACITY,
             draws: Vec::with_capacity(16),
             frame: 0,
             encode_srgb: !target.color_format.is_srgb(),
             draw_grid: true,
+            fill: Fill::Lit,
+            draw_lines: false,
         }
     }
 
@@ -302,6 +388,9 @@ impl ViewportRenderer {
     /// them; the overlay is uploaded only when it changed.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FrameData, viewport: [u32; 2]) {
         self.frame += 1;
+        let display = frame.display;
+        self.fill = display.shading.fill();
+        self.draw_lines = display.shading.lines();
         let style = &frame.component_style;
         let px = |n: u32| f32::from(u16::try_from(n).unwrap_or(u16::MAX));
         let uniform = CameraUniform {
@@ -318,7 +407,12 @@ impl ViewportRenderer {
                 frame.grid_extent,
                 frame.grid_extent,
             ],
-            viewport: [px(viewport[0]), px(viewport[1]), 0.0, 0.0],
+            viewport: [
+                px(viewport[0]),
+                px(viewport[1]),
+                self.fill.code(),
+                f32::from(u8::from(display.shading.coloured_lines())),
+            ],
             wire: style.wire,
             selected: style.selected,
             hover: style.hover,
@@ -340,8 +434,15 @@ impl ViewportRenderer {
 
         self.draws.clear();
         let mut offset = 0usize;
-        for (key, shading, mesh, instances) in frame.draw_batches() {
-            if !self.ensure_mesh(device, (key, shading), mesh) {
+        let boxed = display.style == DisplayStyle::Box;
+        let (faces, lines) = (self.fill != Fill::None, self.draw_lines);
+        for (mesh_key, shading, mesh, instances) in frame.draw_batches() {
+            let key = DrawKey {
+                mesh: mesh_key,
+                shading,
+                boxed,
+            };
+            if !self.ensure_mesh(device, key, mesh, faces, lines) {
                 continue; // nothing to draw for this shape
             }
             queue.write_buffer(
@@ -351,66 +452,78 @@ impl ViewportRenderer {
             );
             let end = offset + instances.len();
             self.draws.push(Draw {
-                key: (key, shading),
+                key,
                 instances: to_u32(offset)..to_u32(end),
             });
             offset = end;
         }
         // Polygon meshes get a new key on every edit (each frame of a component
-        // drag): free them as soon as they are not drawn. Primitives linger a while.
+        // drag): free them soon after they are no longer drawn (views with
+        // different display styles draw different meshes of the same key).
+        // Primitives linger a while.
         let frame_now = self.frame;
         let periodic = self.frame.is_multiple_of(EVICTION_INTERVAL);
-        self.meshes.retain(|(key, _), mesh| match key {
-            MeshKey::Polygon(_) => mesh.last_used == frame_now,
+        self.meshes.retain(|key, mesh| match key.mesh {
+            MeshKey::Polygon(_) => mesh.last_used + POLYGON_TTL_FRAMES > frame_now,
             _ => !periodic || mesh.last_used + MESH_TTL_FRAMES > frame_now,
         });
         self.draw_grid = frame.show_grid;
         self.overlay.sync(device, queue, &frame.components);
     }
 
-    /// Makes sure the mesh for `key` is on the GPU (`polygon` holds the geometry of
-    /// a [`MeshKey::Polygon`]); `false` if it has no triangles.
-    fn ensure_mesh(&mut self, device: &wgpu::Device, key: (MeshKey, Shading), polygon: Option<&MeshHandle>) -> bool {
-        if let Some(mesh) = self.meshes.get_mut(&key) {
-            mesh.last_used = self.frame;
-            return true;
-        }
-        let (mesh_key, shading) = key;
-        let generated;
-        let source = match (polygon, mesh_key.build()) {
-            (Some(handle), _) => handle.mesh(),
-            (None, Some(mesh)) => {
-                generated = mesh;
-                &generated
+    /// Makes sure the parts of `key`'s mesh this frame draws — its surface
+    /// (`faces`), its lines (`lines`) — are on the GPU; `polygon` holds the
+    /// geometry of a [`MeshKey::Polygon`]. `false` if there is nothing to draw.
+    fn ensure_mesh(
+        &mut self,
+        device: &wgpu::Device,
+        key: DrawKey,
+        polygon: Option<&MeshHandle>,
+        faces: bool,
+        lines: bool,
+    ) -> bool {
+        let mesh = self.meshes.entry(key).or_default();
+        mesh.last_used = self.frame;
+        let build_faces = faces && matches!(mesh.faces, Part::NotBuilt);
+        let build_lines = lines && matches!(mesh.lines, Part::NotBuilt);
+        if build_faces || build_lines {
+            let generated;
+            let source = match (polygon, key.mesh.build()) {
+                (Some(handle), _) => handle.mesh(),
+                (None, Some(mesh)) => {
+                    generated = mesh;
+                    &generated
+                }
+                (None, None) => return false, // a polygon key without its mesh
+            };
+            let cuboid = if key.boxed { bounding_box(source) } else { None };
+            let geometry = if key.boxed { cuboid.as_ref() } else { Some(source) };
+            if build_faces {
+                mesh.faces = match geometry {
+                    Some(geometry) => {
+                        tessellate(
+                            geometry,
+                            key.shading.smoothing(),
+                            &mut self.tessellation,
+                            &mut self.vertex_scratch,
+                            &mut self.index_scratch,
+                        );
+                        upload(device, "grid4d.mesh", &self.vertex_scratch, &self.index_scratch)
+                    }
+                    None => Part::Empty,
+                };
             }
-            (None, None) => return false, // a polygon key without its mesh
-        };
-        tessellate(
-            source,
-            shading.smoothing(),
-            &mut self.tessellation,
-            &mut self.vertex_scratch,
-            &mut self.index_scratch,
-        );
-        if self.index_scratch.is_empty() {
-            return false;
+            if build_lines {
+                mesh.lines = match geometry {
+                    Some(geometry) => {
+                        edge_lines(geometry, &mut self.line_scratch, &mut self.index_scratch);
+                        upload(device, "grid4d.lines", &self.line_scratch, &self.index_scratch)
+                    }
+                    None => Part::Empty,
+                };
+            }
         }
-        let mesh = GpuMesh {
-            vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("grid4d.mesh.vertices"),
-                contents: bytemuck::cast_slice(&self.vertex_scratch),
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
-            indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("grid4d.mesh.indices"),
-                contents: bytemuck::cast_slice(&self.index_scratch),
-                usage: wgpu::BufferUsages::INDEX,
-            }),
-            index_count: to_u32(self.index_scratch.len()),
-            last_used: self.frame,
-        };
-        self.meshes.insert(key, mesh);
-        true
+        (faces && mesh.faces.get().is_some()) || (lines && mesh.lines.get().is_some())
     }
 
     /// Draws `frame` into `target` and submits the work: [`prepare`](Self::prepare),
@@ -438,21 +551,28 @@ impl ViewportRenderer {
     pub fn paint(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_bind_group(0, &self.camera_bind_group, &[]);
 
-        pass.set_pipeline(&self.mesh_pipeline);
-        pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        for draw in &self.draws {
-            let Some(mesh) = self.meshes.get(&draw.key) else {
-                continue;
-            };
-            pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-            pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.index_count, 0, draw.instances.clone());
+        let surfaces = match self.fill {
+            Fill::Lit | Fill::Quick | Fill::Constant => Some(&self.mesh_pipeline),
+            Fill::DepthOnly => Some(&self.depth_pipeline),
+            Fill::None => None,
+        };
+        if let Some(pipeline) = surfaces {
+            pass.set_pipeline(pipeline);
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            self.draw_parts(pass, |mesh| mesh.faces.get());
         }
 
         // The grid after the meshes: depth-tested against them, alpha-blended.
         if self.draw_grid {
             pass.set_pipeline(&self.grid_pipeline);
             pass.draw(0..6, 0..1);
+        }
+
+        // Lines over the surfaces (pulled slightly towards the viewer in the shader).
+        if self.draw_lines {
+            pass.set_pipeline(&self.line_pipeline);
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            self.draw_parts(pass, |mesh| mesh.lines.get());
         }
 
         // Component overlay on top: tinted polygons, edges, points, then the
@@ -479,6 +599,41 @@ impl ViewportRenderer {
             }
         }
     }
+}
+
+impl ViewportRenderer {
+    /// One instanced draw per batch, of the part of its mesh that `part` picks.
+    fn draw_parts(&self, pass: &mut wgpu::RenderPass<'_>, part: impl Fn(&GpuMesh) -> Option<&GpuGeometry>) {
+        for draw in &self.draws {
+            let Some(geometry) = self.meshes.get(&draw.key).and_then(&part) else {
+                continue;
+            };
+            pass.set_vertex_buffer(0, geometry.vertices.slice(..));
+            pass.set_index_buffer(geometry.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..geometry.count, 0, draw.instances.clone());
+        }
+    }
+}
+
+/// Uploads vertices and indices (`label`: what they are); [`Part::Empty`] without
+/// indices.
+fn upload<T: Pod>(device: &wgpu::Device, label: &'static str, vertices: &[T], indices: &[u32]) -> Part {
+    if indices.is_empty() {
+        return Part::Empty;
+    }
+    Part::Ready(GpuGeometry {
+        vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        }),
+        indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        }),
+        count: to_u32(indices.len()),
+    })
 }
 
 fn to_u32(n: usize) -> u32 {
@@ -511,27 +666,40 @@ fn multisample(target: &GpuTargetConfig) -> wgpu::MultisampleState {
     }
 }
 
-fn create_mesh_pipeline(
+/// What differs between the pipelines that draw objects (`mesh.wgsl`): their
+/// per-vertex data comes with the instances (`InstanceRaw`).
+#[derive(Clone, Copy)]
+struct ObjectPass {
+    label: &'static str,
+    vertex: &'static str,
+    fragment: &'static str,
+    topology: wgpu::PrimitiveTopology,
+    stride: u64,
+    attributes: &'static [wgpu::VertexAttribute],
+    writes: wgpu::ColorWrites,
+    depth_write: bool,
+    depth_compare: wgpu::CompareFunction,
+}
+
+fn create_object_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
     target: &GpuTargetConfig,
+    shader: &wgpu::ShaderModule,
+    pass: &ObjectPass,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("grid4d.mesh.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(shaders::MESH.into()),
-    });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("grid4d.mesh.pipeline"),
+        label: Some(pass.label),
         layout: Some(layout),
         vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_main"),
+            module: shader,
+            entry_point: Some(pass.vertex),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers: &[
                 Some(wgpu::VertexBufferLayout {
-                    array_stride: size_of::<Vertex>() as u64,
+                    array_stride: pass.stride,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &VERTEX_ATTRIBUTES,
+                    attributes: pass.attributes,
                 }),
                 Some(wgpu::VertexBufferLayout {
                     array_stride: INSTANCE_STRIDE,
@@ -541,7 +709,7 @@ fn create_mesh_pipeline(
             ],
         },
         primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
+            topology: pass.topology,
             front_face: wgpu::FrontFace::Ccw,
             // Planes are double-sided; closed meshes could use Back culling later.
             cull_mode: None,
@@ -549,20 +717,20 @@ fn create_mesh_pipeline(
         },
         depth_stencil: target.depth_format.map(|format| wgpu::DepthStencilState {
             format,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Less),
+            depth_write_enabled: Some(pass.depth_write),
+            depth_compare: Some(pass.depth_compare),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
         multisample: multisample(target),
         fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_main"),
+            module: shader,
+            entry_point: Some(pass.fragment),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: target.color_format,
                 blend: Some(wgpu::BlendState::REPLACE),
-                write_mask: wgpu::ColorWrites::ALL,
+                write_mask: pass.writes,
             })],
         }),
         multiview_mask: None,

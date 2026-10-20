@@ -18,6 +18,7 @@
 
 mod camera;
 mod components;
+mod display;
 mod frame;
 mod gpu;
 mod mesh;
@@ -30,6 +31,7 @@ pub use components::{
     Brush, BrushCoverage, ComponentHit, ComponentStyle, RegionRules, ScreenView, components_in_rect, nearest_face_edge,
     paint_brush, pick_component,
 };
+pub use display::{DisplayMode, DisplayStyle, ShadingMode};
 pub use frame::{FrameData, GridPlane, InstanceRaw};
 pub use gpu::{GpuTargetConfig, ViewportRenderer};
 pub use mesh::{TessellationScratch, Vertex, tessellate};

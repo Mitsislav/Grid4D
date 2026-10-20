@@ -15,8 +15,8 @@ use glam::{Mat4, Vec2 as GVec2, Vec3};
 use grid4d_eval::EvaluatedScene;
 use grid4d_geom::Component;
 use grid4d_render::{
-    ComponentHit, ComponentStyle, FrameData, OrbitCamera, Projection, ScreenView, SnapCache, SnapHit, pick,
-    pick_component,
+    ComponentHit, ComponentStyle, DisplayMode, DisplayStyle, FrameData, OrbitCamera, Projection, ScreenView,
+    ShadingMode, SnapCache, SnapHit, pick, pick_component,
 };
 use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, Tags, Transform, WalkItem};
 
@@ -127,11 +127,30 @@ impl Arrangement {
     }
 }
 
+/// The Display menu's shading modes, with their shortcuts from Maxon's list.
+const SHADING_MENU: [(ShadingMode, &str, &str); 8] = [
+    (ShadingMode::Gouraud, "Gouraud Shading", "N~A"),
+    (ShadingMode::GouraudLines, "Gouraud Shading (Lines)", "N~B"),
+    (ShadingMode::Quick, "Quick Shading", "N~C"),
+    (ShadingMode::QuickLines, "Quick Shading (Lines)", "N~D"),
+    (ShadingMode::Constant, "Constant Shading", "N~E"),
+    (ShadingMode::ConstantLines, "Constant Shading (Lines)", ""),
+    (ShadingMode::HiddenLine, "Hidden Line", "N~F"),
+    (ShadingMode::Lines, "Lines", "N~G"),
+];
+
+/// The Display menu's styles: what is drawn of each object.
+const STYLE_MENU: [(DisplayStyle, &str, &str); 2] = [
+    (DisplayStyle::Wireframe, "Wireframe", "N~H"),
+    (DisplayStyle::Box, "Box", "N~K"),
+];
+
 /// One view's own settings (the active view's live in the panel's fields).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ViewState {
     camera: OrbitCamera,
     kind: ViewKind,
+    display: DisplayMode,
     show_grid: bool,
     show_axis_triad: bool,
     show_hud: bool,
@@ -148,6 +167,8 @@ pub struct ViewportPanel {
     camera: OrbitCamera,
     /// The active view's projection.
     kind: ViewKind,
+    /// The active view's display mode (Display menu).
+    display: DisplayMode,
     /// Every view's settings; the active view's entry is stale (its live state is
     /// in the panel's own fields).
     views: [ViewState; 4],
@@ -203,6 +224,7 @@ impl ViewportPanel {
         let view = |kind: ViewKind| ViewState {
             camera: kind.aim(OrbitCamera::default()),
             kind,
+            display: DisplayMode::default(),
             show_grid: true,
             show_axis_triad: true,
             show_hud: true,
@@ -211,6 +233,7 @@ impl ViewportPanel {
         Self {
             camera: OrbitCamera::default(),
             kind: ViewKind::Perspective,
+            display: DisplayMode::default(),
             views: DEFAULT_VIEWS.map(view),
             active: 0,
             arrangement: Arrangement::Single,
@@ -294,6 +317,22 @@ impl ViewportPanel {
         (self.arrangement, self.solo)
     }
 
+    /// The active view's display mode.
+    #[must_use]
+    pub fn display(&self) -> DisplayMode {
+        self.display
+    }
+
+    /// Sets the active view's shading mode (N~A … N~G).
+    pub fn set_shading(&mut self, shading: ShadingMode) {
+        self.display.shading = shading;
+    }
+
+    /// Sets the active view's display style (N~H, N~K).
+    pub fn set_display_style(&mut self, style: DisplayStyle) {
+        self.display.style = style;
+    }
+
     /// Shows view `index` alone (F1–F4) and makes it active; `None`: all four views
     /// (F5).
     pub fn show_views(&mut self, index: Option<usize>) {
@@ -315,6 +354,7 @@ impl ViewportPanel {
         ViewState {
             camera: self.camera,
             kind: self.kind,
+            display: self.display,
             show_grid: self.show_grid,
             show_axis_triad: self.show_axis_triad,
             show_hud: self.show_hud,
@@ -325,6 +365,7 @@ impl ViewportPanel {
     fn load(&mut self, view: ViewState) {
         self.camera = view.camera;
         self.kind = view.kind;
+        self.display = view.display;
         self.show_grid = view.show_grid;
         self.show_axis_triad = view.show_axis_triad;
         self.show_hud = view.show_hud;
@@ -590,6 +631,7 @@ impl ViewportPanel {
         if let Some(gpu) = &mut self.gpu {
             self.frame.set_camera(&self.camera, rect.aspect_ratio());
             self.frame.show_grid = self.show_grid;
+            self.frame.display = self.display;
             self.frame.extract(&self.evaluated, |id| editor.selection.contains(id));
             self.frame.component_style = component_style(ui.ctx().pixels_per_point());
             // What a click would select shows where the pointer is.
@@ -837,8 +879,29 @@ impl ViewportPanel {
                             }
                         });
                         ui.menu_button("Display", |ui| {
-                            ui.add(egui::Button::new("Gouraud Shading").selected(true));
-                            for planned in ["Gouraud Shading (Lines)", "Quick Shading", "Wireframe", "Box"] {
+                            // This view's own mode (the shortcuts act on the active view).
+                            for (shading, label, keys) in SHADING_MENU {
+                                let current = self.display.shading == shading;
+                                if ui
+                                    .add(egui::Button::new(label).shortcut_text(keys).selected(current))
+                                    .clicked()
+                                {
+                                    self.display.shading = shading;
+                                    ui.close();
+                                }
+                            }
+                            ui.separator();
+                            for (style, label, keys) in STYLE_MENU {
+                                let current = self.display.style == style;
+                                if ui
+                                    .add(egui::Button::new(label).shortcut_text(keys).selected(current))
+                                    .clicked()
+                                {
+                                    self.display.style = style;
+                                    ui.close();
+                                }
+                            }
+                            for planned in ["Isoparms — planned", "Skeleton — planned"] {
                                 ui.add_enabled(false, egui::Button::new(planned));
                             }
                         });
@@ -2359,6 +2422,43 @@ mod tests {
             "still looking along −X"
         );
         assert_ne!(after.target, before.target, "panned");
+    }
+
+    #[test]
+    fn each_view_keeps_its_display_mode_and_the_commands_change_the_active_one() {
+        let mut h = Harness::new();
+        assert_eq!(h.viewport.display(), DisplayMode::default());
+        h.editor.commands.push(EditorCommand::ShowView(None));
+        h.editor.commands.push(EditorCommand::SetShading(ShadingMode::Lines));
+        h.editor
+            .commands
+            .push(EditorCommand::SetDisplayStyle(DisplayStyle::Box));
+        h.frame(vec![]);
+        h.frame(vec![]);
+        let lines_box = DisplayMode {
+            shading: ShadingMode::Lines,
+            style: DisplayStyle::Box,
+        };
+        assert_eq!(h.viewport.display(), lines_box, "View 1 changed");
+
+        // View 4 (Front) is untouched; its own change stays its own.
+        h.editor.commands.push(EditorCommand::ShowView(Some(3)));
+        h.editor
+            .commands
+            .push(EditorCommand::SetShading(ShadingMode::HiddenLine));
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert_eq!(
+            h.viewport.display(),
+            DisplayMode {
+                shading: ShadingMode::HiddenLine,
+                style: DisplayStyle::Wireframe,
+            }
+        );
+        h.editor.commands.push(EditorCommand::ShowView(Some(0)));
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert_eq!(h.viewport.display(), lines_box, "View 1 kept its mode");
     }
 
     #[test]

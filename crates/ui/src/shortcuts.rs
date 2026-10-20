@@ -29,9 +29,11 @@
 //! | `Ctrl+N` (over the Material Manager) | New material |
 //!
 //! Two-key chords (press the first key, then the second) are listed in
-//! [`Chord::complete`]: `U~L` Loop Selection, `K~L` Loop/Path Cut, `M~M` Connect, …
+//! [`Chord::complete`]: `U~L` Loop Selection, `K~L` Loop/Path Cut, `M~M` Connect,
+//! `N~A` Gouraud Shading, …
 
 use egui::{Event, Key};
+use grid4d_render::{DisplayStyle, ShadingMode};
 use grid4d_scene::Document;
 
 use crate::{BottomPanel, EditorCommand, EditorState, FrameCurves, ManagerTab, Tool};
@@ -45,6 +47,8 @@ pub enum Chord {
     K,
     /// Modelling commands.
     M,
+    /// The active view's display mode.
+    N,
 }
 
 /// What a completed chord does.
@@ -62,6 +66,7 @@ impl Chord {
             Key::U => Some(Self::U),
             Key::K => Some(Self::K),
             Key::M => Some(Self::M),
+            Key::N => Some(Self::N),
             _ => None,
         }
     }
@@ -76,6 +81,9 @@ impl Chord {
             Self::K => "K…  L Loop/Path Cut · K Line Cut · Esc cancels",
             Self::M => {
                 "M…  M Connect · N Dissolve · T Extrude · W Inset · S Bevel · B Bridge · L Loop/Path Cut · K Line Cut · Esc cancels"
+            }
+            Self::N => {
+                "N…  A Gouraud · B Gouraud (Lines) · C Quick · D Quick (Lines) · E Constant · F Hidden Line · G Lines · H Wireframe · K Box · Esc cancels"
             }
         }
     }
@@ -100,6 +108,15 @@ impl Chord {
             (Self::M, Key::W) => Pick(Tool::Inset),
             (Self::M, Key::S) => Pick(Tool::Bevel),
             (Self::M, Key::B) => Pick(Tool::Bridge),
+            (Self::N, Key::A) => Command(EditorCommand::SetShading(ShadingMode::Gouraud)),
+            (Self::N, Key::B) => Command(EditorCommand::SetShading(ShadingMode::GouraudLines)),
+            (Self::N, Key::C) => Command(EditorCommand::SetShading(ShadingMode::Quick)),
+            (Self::N, Key::D) => Command(EditorCommand::SetShading(ShadingMode::QuickLines)),
+            (Self::N, Key::E) => Command(EditorCommand::SetShading(ShadingMode::Constant)),
+            (Self::N, Key::F) => Command(EditorCommand::SetShading(ShadingMode::HiddenLine)),
+            (Self::N, Key::G) => Command(EditorCommand::SetShading(ShadingMode::Lines)),
+            (Self::N, Key::H) => Command(EditorCommand::SetDisplayStyle(DisplayStyle::Wireframe)),
+            (Self::N, Key::K) => Command(EditorCommand::SetDisplayStyle(DisplayStyle::Box)),
             _ => return None,
         })
     }
@@ -529,6 +546,14 @@ mod tests {
             [EditorCommand::DissolveSelected]
         );
         assert_eq!(keys(&[(Key::U, none), (Key::Z, none)]).1, [EditorCommand::MeltSelected]);
+        assert_eq!(
+            keys(&[(Key::N, none), (Key::B, none)]).1,
+            [EditorCommand::SetShading(ShadingMode::GouraudLines)]
+        );
+        assert_eq!(
+            keys(&[(Key::N, none), (Key::K, none)]).1,
+            [EditorCommand::SetDisplayStyle(DisplayStyle::Box)]
+        );
         // An unbound second key does nothing, not even its own shortcut.
         let (editor, commands) = keys(&[(Key::U, none), (Key::E, none)]);
         assert_eq!((editor.tool, editor.chord, commands.len()), (Tool::Move, None, 0));

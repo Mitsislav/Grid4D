@@ -178,6 +178,49 @@ its projection — or the name of the camera it looks through — at the top lef
 When a view is too narrow for its menus and navigation icons, the icons are left
 out; the mouse navigation works as always.
 
+### 3.3 Display modes
+
+Each view's **Display** menu chooses how it draws objects: smooth shading to
+judge the form, lines to see how a mesh is built, boxes to keep a heavy scene
+quick. Every view has its own mode, so the perspective view can stay shaded
+while the top view shows lines.
+
+![The Display menu](images/manual/display_menu.png)
+
+The upper part chooses the **shading**:
+
+| Mode | Shortcut | What you see |
+|------|----------|--------------|
+| Gouraud Shading | N~A | Smooth, lit surfaces (the default). |
+| Gouraud Shading (Lines) | N~B | The same, with lines over the surfaces. |
+| Quick Shading | N~C | Lit by the default light only, without highlights. Scene lights do not light the viewport yet, so it differs little from Gouraud for now. |
+| Quick Shading (Lines) | N~D | The same, with lines. |
+| Constant Shading | N~E | Flat, in each object's colour, without light and shade. |
+| Constant Shading (Lines) | | The same, with lines. |
+| Hidden Line | N~F | Only lines, and only those not hidden behind a surface. |
+| Lines | N~G | Only lines, all of them — you see through the objects. |
+
+The lower part chooses **what is drawn** of each object:
+
+- **Wireframe** (N~H): the object itself; its lines are the edges of its
+  polygons (an n-gon shows its outline, not the triangles it is drawn with).
+- **Box** (N~K): each object as a box around it — its bounding box, turned with
+  the object. Shaded in a shaded mode, its twelve edges in Hidden Line or Lines.
+  Handy when a scene is heavy. Clicking still selects the object by its real
+  shape.
+
+![Gouraud Shading (Lines), Constant Shading, Hidden Line, and Lines with Box](images/manual/display_modes.png)
+
+Over shaded surfaces the lines are a dark shade of the object's colour; in
+Hidden Line and Lines they take the object's colour. **Selected objects' lines
+are orange.**
+
+The N~ shortcuts change the **active view** (press N, then the letter; the
+status bar lists the choices while it waits). The menu changes the view it
+belongs to.
+
+![Four views, each with its own mode: Gouraud Shading, Lines (Top), Gouraud Shading (Lines) (Right) and Hidden Line (Front)](images/manual/display_per_view.png)
+
 ## 4. Creating objects
 
 Click a button on the right side of the command palette, or use **Create ▸ Object**:
@@ -1023,6 +1066,9 @@ Esc cancels a chord.
 | H / O | Frame scene / frame selected objects |
 | F1–F4 / F5 | View 1–4 alone / all four views |
 | Middle click on a view | Show it alone / back among the others |
+| N~A / N~B / N~C / N~D | Gouraud Shading / Gouraud Shading (Lines) / Quick Shading / Quick Shading (Lines) |
+| N~E / N~F / N~G | Constant Shading / Hidden Line / Lines |
+| N~H / N~K | Wireframe / Box |
 | E / T / R | Move / Scale / Rotate tool |
 | 9 / 0 | Live / Rectangle Selection tool |
 | U~L / U~B | Loop / Ring Selection tool |
@@ -1081,8 +1127,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   Scene/Selected following the animation.
 - **Coordinate Manager**: frozen coordinates (Object Abs), changing primitives'
   size parameters rather than their scale, editing several objects at once.
-- **Viewport**: wireframe and other display modes; three-view and the other
-  four-view arrangements; the parallel and axonometric projections; the views and
+- **Viewport**: the Isoparms and Skeleton display styles, separate display
+  settings for selected objects, backface culling, X-Ray and textures; lines are
+  one pixel wide; three-view and the other four-view arrangements; the parallel and axonometric projections; the views and
   their arrangement are not saved with the document, and only View 1 can look
   through a camera; lights do not light the viewport yet; no render resolution
   (camera pyramids use the view's proportions) and no depth-of-field handles.

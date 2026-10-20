@@ -1,5 +1,6 @@
-// Grid4D — shaded mesh pass.
-// Instanced: one draw call per primitive mesh kind (cube, sphere, cylinder, plane).
+// Grid4D — objects: shaded surfaces (`vs_main` / `fs_main`) and lines along
+// their edges (`vs_line` / `fs_line`).
+// Instanced: one draw call per mesh key, the instances carry the placement.
 // Lighting is done in linear space; the result is sRGB-encoded here when the
 // surface format is not an *Srgb format (egui prefers a gamma framebuffer).
 
@@ -7,10 +8,13 @@ struct Camera {
     view_proj: mat4x4<f32>,
     // xyz: eye position, w: 1.0 if this shader must encode to sRGB itself.
     eye: vec4<f32>,
-    // xyz: direction towards the key light.
+    // xyz: direction towards the key light, w: grid plane + 8 for a parallel camera.
     light_dir: vec4<f32>,
     // x: minor spacing, y: major spacing, z: fade distance, w: half extent.
     grid: vec4<f32>,
+    // xy: target size in pixels, z: the fill (0 lit, 1 quick, 2 constant),
+    // w: 1 for lines in the object's colour.
+    viewport: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -83,13 +87,64 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let specular = pow(max(dot(n, half_vec), 0.0), 48.0) * 0.08;
 
     let base = in.color.rgb;
-    let lit = base * (0.08 + 0.22 * sky + 0.62 * key + 0.16 * facing) + vec3<f32>(specular);
+    var lit = base * (0.08 + 0.22 * sky + 0.62 * key + 0.16 * facing) + vec3<f32>(specular);
+    let fill = u32(camera.viewport.z + 0.5);
+    if (fill == 1u) {
+        // Quick Shading: the default light alone, no highlight.
+        lit = base * (0.22 + 0.78 * key);
+    } else if (fill == 2u) {
+        // Constant Shading: the colour itself.
+        lit = base;
+    }
     var rgb = mix(lit, base, in.params.y);
 
     // Selected objects get a subtle orange Fresnel rim (the UI adds bbox corner brackets).
     let rim = pow(1.0 - facing, 4.0);
     rgb = mix(rgb, SELECTION_RIM, clamp(rim * 0.8, 0.0, 1.0) * in.params.x);
 
+    if (camera.eye.w > 0.5) {
+        rgb = linear_to_srgb(rgb);
+    }
+    return vec4<f32>(rgb, 1.0);
+}
+
+struct LineOut {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) color: vec3<f32>,
+};
+
+// Lines are pulled towards the viewer by this share of their distance, so an
+// edge wins over its own polygons.
+const LINE_PULL: f32 = 0.002;
+
+@vertex
+fn vs_line(@location(0) position: vec3<f32>, instance: InstanceIn) -> LineOut {
+    let model = mat4x4<f32>(instance.model_0, instance.model_1, instance.model_2, instance.model_3);
+    let p = (model * vec4<f32>(position, 1.0)).xyz;
+    var q = p + (camera.eye.xyz - p) * LINE_PULL;
+    // A parallel camera's eye is far away: pull a fixed distance instead
+    // (light_dir.w: + 8 for a parallel camera).
+    if ((u32(camera.light_dir.w) & 8u) != 0u) {
+        q = p + normalize(camera.eye.xyz - p) * LINE_PULL * 1000.0;
+    }
+
+    var out: LineOut;
+    out.clip_position = camera.view_proj * vec4<f32>(q, 1.0);
+    // Over surfaces a dark shade of the object's colour; alone, the colour itself.
+    var color = instance.color.rgb * 0.22;
+    if (camera.viewport.w > 0.5) {
+        color = instance.color.rgb;
+    }
+    if (instance.params.x > 0.5) {
+        color = SELECTION_RIM;
+    }
+    out.color = color;
+    return out;
+}
+
+@fragment
+fn fs_line(in: LineOut) -> @location(0) vec4<f32> {
+    var rgb = in.color;
     if (camera.eye.w > 0.5) {
         rgb = linear_to_srgb(rgb);
     }
