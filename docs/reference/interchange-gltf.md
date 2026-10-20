@@ -1,4 +1,4 @@
-# glTF 2.0 import (and File ▸ Merge)
+# glTF 2.0 import and export (File ▸ Merge, File ▸ Export)
 
 > Sources (read 2026-10-20): Khronos [glTF 2.0 specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html)
 > (units, axes, node transforms, meshes and accessors, cameras, `.glb` container) and
@@ -11,7 +11,13 @@
 > [Keyboard Shortcuts](https://help.maxon.net/c4d/2025/en-us/Content/html/Shortcuts.html)
 > (*Merge Project* = Shift+Ctrl+O). Written in our own words.
 >
-> Covers implementation-plan step **5.1**. Export is step 5.2.
+> Export (read 2026-10-20): the manual's [glTF Export settings](https://help.maxon.net/c4d/s22/us/html/FGLTFEXPORTER-GLTFEXPORTER_GROUP.html)
+> (glTF text or GLB binary — GLB at least a third smaller —, a scale with a unit,
+> optional cameras, normals following the object's smoothing, the first UV set, and
+> *Flip Z* because the reference application is left-handed while glTF is
+> right-handed; Grid4D is right-handed, so nothing flips).
+>
+> Covers implementation-plan steps **5.1** (import) and **5.2** (export).
 
 ## Purpose
 
@@ -59,17 +65,48 @@ None yet (an import dialog with Scale and toggles is *later*). Fixed choices:
 - **Errors** leave the document untouched and show an alert: unreadable JSON or
   binary, a buffer shorter than declared, a missing external `.bin`, non-finite
   numbers, an external URI that is absolute or not a file.
+- **Welding** compares exact positions (with `-0.0` equal to `0.0`); points that are
+  only nearly equal stay separate (Optimize merges them).
 - **Safety:** external buffers are read only from paths relative to the glTF file;
   `data:` URIs are decoded (base64); cycles in a broken node graph are cut.
+
+## Export (5.2)
+
+- **File ▸ Export…** asks for a file name; the type picks the flavour:
+  **`.glb`** (one binary file, suggested) or **`.gltf`** (JSON plus a `.bin` file of
+  the same name next to it). The document itself does not change (no undo step, no
+  unsaved-changes mark); a failed export shows an alert.
+- **What is written:** every object of the document, in its hierarchy, with names
+  and TRS transforms (HPB → quaternion, translations ÷ 100: centimetres → metres).
+  - Polygon objects → meshes, triangulated (an n-gon with *n* corners gives
+    *n* − 2 triangles), with per-corner **normals from Grid4D's own smoothing** (what
+    the viewport shows) and the UVs when the mesh has them. Vertices that agree in
+    position, normal and UV are shared.
+  - **Primitives** → meshes of their current shape (what Make Editable would give).
+  - **Generators** → their result at the viewport level; the cage is not written. A
+    switched-off generator is written as an empty node with its children as they
+    are.
+  - Display colours → materials (base colour, not metallic), one per colour.
+  - Cameras → perspective cameras (vertical field of view); lights →
+    `KHR_lights_punctual` point lights (colour, intensity); Nulls and empty polygon
+    objects → nodes without content.
+- **Round trip:** importing an exported file gives back the hierarchy, names,
+  transforms, cameras and lights, and every mesh as a polygon object with the same
+  points (triangulated, welded).
+- **Not written (later):** animation, textures and other material channels, an
+  export dialog (scale, visible objects only, selection only).
 
 ## Grid4D mapping
 
 | Piece | Where |
 |-------|-------|
-| `Imported { nodes: Vec<ImportedNode { parent, data }> }` (pre-order), `import(path)`, `import_gltf(bytes, base)`, `Imported::from_document` / `into_document`, `IMPORT_EXTENSIONS` | `grid4d-io` (`import.rs`, `gltf_import.rs`; the `gltf` crate without its image/import features, base64 decoded by us) |
+| `Objects { nodes: Vec<ObjectEntry { parent, data }> }` (pre-order), `import(path)`, `import_gltf(bytes, base)`, `Objects::from_document` / `into_document`, `IMPORT_EXTENSIONS` | `grid4d-io` (`import.rs`, `gltf_import.rs`; the `gltf` crate without its image/import features, base64 decoded by us) |
 | Merge as one undo step | `ui/file.rs::merge`: the nodes inserted in order with `SceneEdit::Insert`, their inverses recorded as one history step "Merge" |
 | `EditorCommand::Merge` (dialog) / `MergeFile(path)` (drop), File ▸ Merge…, Shift+Ctrl+O | `commands.rs`, `menu_bar.rs`, `shortcuts.rs` |
 | Open accepting glTF | `file::open_path` (by extension) and the dialog's filters |
+| Export: `Objects` → `.glb` / `.gltf` + `.bin` (`export_gltf(objects, path)`, `gltf_document(objects, buffer_uri)`, `glb_bytes(objects)`) | `grid4d-io` (`gltf_export.rs`; JSON written with `serde_json`, meshes triangulated by `grid4d_geom::Triangulator`) |
+| Baking primitives and generators into polygon objects for export | `ui/file.rs::exportable` (uses `grid4d_eval::editable_mesh` / `generator_mesh`; `grid4d-io` stays independent of evaluation) |
+| File ▸ Export… | `EditorCommand::Export`, `FileDialogs::pick_export` |
 
 ## Acceptance criteria
 
@@ -84,6 +121,17 @@ None yet (an import dialog with Scale and toggles is *later*). Fixed choices:
 - [x] Merge adds the objects as one undo step (undo removes them all, redo brings
       the same ones back) and selects them; Open makes a new untitled document.
 - [x] A dropped glTF merges; a dropped `.g4d` still opens.
+
+Export:
+
+- [x] Export → import round-trips the demo scene: names, hierarchy, transforms,
+      cameras, lights; every primitive arrives as a polygon object with its points.
+- [x] `.glb` and `.gltf` + `.bin` give the same model on import.
+- [x] A Subdivision Surface is written as its smoothed result without its cage; a
+      switched-off one as an empty node with its children.
+- [x] N-gons become *n* − 2 triangles; normals follow the smoothing; UVs are kept.
+- [x] Non-finite numbers are refused; File ▸ Export changes nothing in the document
+      and a failed export shows an alert.
 
 The phase's acceptance also names the Khronos sample models (Box, Duck, …). They
 are not in the repository (downloading them needs a decision on test assets);

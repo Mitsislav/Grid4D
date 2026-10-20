@@ -11,7 +11,7 @@ use grid4d_scene::{MeshHandle, NodeData, ObjectKind, Transform};
 
 use crate::{
     IoError,
-    import::{Imported, ImportedNode},
+    import::{ObjectEntry, Objects},
 };
 
 /// glTF metres → Grid4D centimetres.
@@ -32,7 +32,7 @@ fn invalid(message: impl Into<String>) -> IoError {
 ///
 /// [`IoError::Invalid`] for broken or unsupported content, [`IoError::Io`] if an
 /// external buffer cannot be read.
-pub fn import_gltf(bytes: &[u8], base: Option<&Path>) -> Result<Imported, IoError> {
+pub fn import_gltf(bytes: &[u8], base: Option<&Path>) -> Result<Objects, IoError> {
     let gltf = gltf::Gltf::from_slice(bytes).map_err(|err| invalid(format!("not a valid glTF file: {err}")))?;
     let buffers = load_buffers(&gltf, base)?;
     let mut meshes: Vec<Option<ReadMesh>> = vec![None; gltf.meshes().count()];
@@ -73,10 +73,10 @@ pub fn import_gltf(bytes: &[u8], base: Option<&Path>) -> Result<Imported, IoErro
             .eq(&grid4d_scene::ObjectKindTag::Polygon)
             .then(|| camera_or_light(&node))
             .flatten();
-        nodes.push(ImportedNode { parent, data });
+        nodes.push(ObjectEntry { parent, data });
         if let Some(kind) = extra {
             let name = kind.tag().label();
-            nodes.push(ImportedNode {
+            nodes.push(ObjectEntry {
                 parent: Some(index),
                 data: NodeData::new(name, kind),
             });
@@ -86,7 +86,7 @@ pub fn import_gltf(bytes: &[u8], base: Option<&Path>) -> Result<Imported, IoErro
         stack.extend(node.children().map(|child| (child, Some(index))));
         stack[first..].reverse();
     }
-    Ok(Imported { nodes })
+    Ok(Objects { nodes })
 }
 
 /// Each buffer's bytes: the `.glb` binary chunk, a `data:` URI or a file next to the glTF.
@@ -282,7 +282,8 @@ fn read_mesh(mesh: &gltf::Mesh<'_>, buffers: &[Vec<u8>]) -> Result<ReadMesh, IoE
             if !p.iter().all(|v| v.is_finite()) {
                 return Err(invalid(format!("mesh {} has a non-finite position", mesh.index())));
             }
-            let key = p.map(f32::to_bits);
+            // `+ 0.0` turns -0.0 into 0.0: the same point, whatever the sign of a zero.
+            let key = p.map(|v| (v + 0.0).to_bits());
             let next = u32::try_from(points.len()).map_err(|_| invalid("a mesh has too many points"))?;
             let index = *welded.entry(key).or_insert_with(|| {
                 points.push(Vec3::from(p) * UNIT);
@@ -509,7 +510,7 @@ mod tests {
         out
     }
 
-    fn names(imported: &Imported) -> Vec<(&str, Option<usize>, ObjectKindTag)> {
+    fn names(imported: &Objects) -> Vec<(&str, Option<usize>, ObjectKindTag)> {
         imported
             .nodes
             .iter()
@@ -517,7 +518,7 @@ mod tests {
             .collect()
     }
 
-    fn mesh_of(imported: &Imported, name: &str) -> MeshHandle {
+    fn mesh_of(imported: &Objects, name: &str) -> MeshHandle {
         let node = imported.nodes.iter().find(|n| n.data.name == name).unwrap();
         let ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
             panic!("{name} is not a polygon object")
@@ -677,6 +678,44 @@ mod tests {
             Ok(imported) => assert_eq!(imported.nodes.len(), 2),
             Err(err) => assert!(!err.to_string().is_empty()),
         }
+    }
+
+    #[test]
+    fn zeros_of_either_sign_are_one_point() {
+        // A fan of three triangles around a point written once as 0 and once as -0.
+        let mut bin = Vec::new();
+        let points: [[f32; 3]; 6] = [
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [-0.0, 1.0, -0.0],
+            [0.0, 0.0, 1.0],
+            [-1.0, 0.0, 0.0],
+        ];
+        for p in points {
+            for c in p {
+                bin.extend(c.to_le_bytes());
+            }
+        }
+        let uri = format!("data:application/octet-stream;base64,{}", b64(&bin));
+        let json = serde_json::to_vec(&json!({
+            "asset": { "version": "2.0" },
+            "scene": 0, "scenes": [ { "nodes": [0] } ],
+            "nodes": [ { "name": "Fan", "mesh": 0 } ],
+            "meshes": [ { "primitives": [ { "attributes": { "POSITION": 0 } } ] } ],
+            "buffers": [ { "byteLength": bin.len(), "uri": uri } ],
+            "bufferViews": [ { "buffer": 0, "byteLength": bin.len() } ],
+            "accessors": [ { "bufferView": 0, "componentType": 5126, "count": 6, "type": "VEC3",
+                             "min": [-1.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0] } ]
+        }))
+        .unwrap();
+        let imported = import_gltf(&json, None).unwrap();
+        let mesh = mesh_of(&imported, "Fan");
+        assert_eq!(mesh.mesh().point_count(), 4, "the apex once");
+        assert!(
+            Topology::build(mesh.mesh()).boundary_edge_count() < 6,
+            "the triangles share an edge"
+        );
     }
 
     #[test]

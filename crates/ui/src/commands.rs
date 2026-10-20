@@ -71,6 +71,8 @@ pub enum EditorCommand {
     Merge,
     /// Adds the objects of this file (a dropped glTF file). One undo step.
     MergeFile(std::path::PathBuf),
+    /// Asks where, then writes the document as glTF (File ▸ Export).
+    Export,
     /// Saves to the current file, asking for a path if there is none yet.
     Save,
     /// Asks for a path and saves there.
@@ -256,6 +258,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             }
         }
         EditorCommand::MergeFile(path) => file::merge(&path, doc, editor, viewport),
+        EditorCommand::Export => file::export(doc, editor),
         EditorCommand::Save => {
             file::save(doc, editor, false);
         }

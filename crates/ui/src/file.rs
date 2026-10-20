@@ -6,11 +6,13 @@
 
 use std::{
     borrow::Cow,
+    collections::HashMap,
     path::{Path, PathBuf},
 };
 
 use egui::ViewportCommand;
-use grid4d_scene::{Document, NodeId, SceneEdit};
+use grid4d_io::{ObjectEntry, Objects};
+use grid4d_scene::{Document, MeshHandle, NodeId, ObjectKind, SceneEdit};
 
 use crate::{EditorCommand, EditorState, History, ViewportPanel, recent::RecentFiles};
 
@@ -27,6 +29,11 @@ pub trait FileDialogs: std::fmt::Debug {
     /// A file to merge into the document (File ▸ Merge), or `None` if cancelled.
     fn pick_merge(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
         self.pick_open(directory)
+    }
+    /// Where to export (File ▸ Export): a `.glb` or `.gltf` path, or `None` if
+    /// cancelled. `suggested` is a bare file name such as `Untitled 1.glb`.
+    fn pick_export(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
+        self.pick_save(directory, suggested)
     }
 }
 
@@ -55,6 +62,26 @@ impl FileDialogs for NativeDialogs {
             .save_file()
             .map(with_extension)
     }
+
+    fn pick_export(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
+        with_directory(rfd::FileDialog::new(), directory)
+            .set_title("Export")
+            .add_filter("glTF Binary (.glb)", &["glb"])
+            .add_filter("glTF (.gltf + .bin)", &["gltf"])
+            .set_file_name(suggested)
+            .save_file()
+            .map(with_export_extension)
+    }
+}
+
+/// A typed export name without `.glb` or `.gltf` gets `.glb`.
+fn with_export_extension(path: PathBuf) -> PathBuf {
+    if grid4d_io::is_importable(&path) {
+        return path;
+    }
+    let mut name = path.into_os_string();
+    name.push(".glb");
+    PathBuf::from(name)
 }
 
 /// Grid4D documents and glTF files, together and each on its own.
@@ -355,6 +382,53 @@ pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, v
         .history
         .record(doc, "Merge", inverses, selection_before, selection_after);
     viewport.frame_selection(&doc.scene, &editor.selection);
+}
+
+/// File ▸ Export: asks where, then writes the document as glTF (`.glb`, or
+/// `.gltf` + `.bin`). The document does not change; a failure shows an alert.
+pub(crate) fn export(doc: &Document, editor: &mut EditorState) {
+    let suggested = format!("{}.glb", file_stem_for(&editor.file.display_name(doc)));
+    let directory = editor.file.directory().map(Path::to_path_buf);
+    let Some(path) = editor.file.dialogs.pick_export(directory.as_deref(), &suggested) else {
+        return;
+    };
+    if let Err(err) = grid4d_io::export_gltf(&exportable(doc), &path) {
+        editor.file.alert = Some(Alert {
+            title: "Could Not Export",
+            message: format!("{}\n\n{err}", path.display()),
+        });
+    }
+}
+
+/// The document's objects as an export writes them: every primitive as a polygon
+/// object of its current shape, every switched-on generator as one holding its
+/// result (its cage left out), a switched-off generator as a Null over its children.
+#[must_use]
+pub fn exportable(doc: &Document) -> Objects {
+    let mut nodes = Vec::new();
+    let mut index_of: HashMap<NodeId, usize> = HashMap::new();
+    let mut stack: Vec<NodeId> = doc.scene.roots().iter().rev().copied().collect();
+    while let Some(id) = stack.pop() {
+        let Some(node) = doc.scene.get(id) else { continue };
+        let mut data = node.data.clone();
+        let mut cage = None;
+        if data.kind.is_generator() {
+            match grid4d_eval::generator_mesh(&doc.scene, id).filter(|_| data.enabled) {
+                Some(mesh) => {
+                    data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
+                    cage = node.children().first().copied();
+                }
+                None => data.kind = ObjectKind::Null,
+            }
+        } else if let Some(mesh) = grid4d_eval::editable_mesh(&data.kind) {
+            data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
+        }
+        let parent = node.parent().and_then(|p| index_of.get(&p).copied());
+        index_of.insert(id, nodes.len());
+        nodes.push(ObjectEntry { parent, data });
+        stack.extend(node.children().iter().rev().filter(|&&child| Some(child) != cage));
+    }
+    Objects { nodes }
 }
 
 /// Saves to the current file, or asks where (always with `ask_path`, i.e. Save As).
@@ -710,9 +784,7 @@ mod tests {
     fn open_asks_about_unsaved_changes_then_replaces_the_document() {
         let mut f = Fixture::new("open", Some("other.g4d"), None);
         let mut other = Document::new("Other");
-        other
-            .scene
-            .insert(grid4d_scene::Node::new("Lonely", grid4d_scene::ObjectKind::Null));
+        other.scene.insert(grid4d_scene::Node::new("Lonely", ObjectKind::Null));
         grid4d_io::save(&other, &f.dir.join("other.g4d")).unwrap();
         f.make_dirty();
         let before = f.doc.scene.len();
@@ -915,7 +987,7 @@ mod tests {
     }
 
     fn names(doc: &Document) -> Vec<String> {
-        grid4d_io::Imported::from_document(doc)
+        Objects::from_document(doc)
             .nodes
             .into_iter()
             .map(|n| n.data.name)
@@ -999,6 +1071,96 @@ mod tests {
         f.run(&[EditorCommand::Save]);
         assert_eq!(f.log.borrow().save_suggestions, ["model.g4d"]);
         assert_eq!(f.editor.file.path(), Some(f.dir.join("saved.g4d").as_path()));
+    }
+
+    // ── Export ──────────────────────────────────────────────────────────────
+
+    /// Wraps the demo's Cube in a Subdivision Surface (the Cube becomes its cage).
+    fn with_subdivision_surface(f: &mut Fixture) -> NodeId {
+        let cube = f.doc.scene.iter().find(|(_, n)| n.data.name == "Cube").unwrap().0;
+        f.editor.selection.set_single(cube);
+        f.run(&[EditorCommand::WrapInGenerator(ObjectKindTag::SubdivisionSurface)]);
+        f.editor.selection.active().unwrap()
+    }
+
+    #[test]
+    fn exportable_bakes_primitives_and_generators_and_leaves_cages_out() {
+        let mut f = Fixture::new("exportable", None, None);
+        let sds = with_subdivision_surface(&mut f);
+        let objects = exportable(&f.doc);
+        let entry = |name: &str| objects.nodes.iter().find(|n| n.data.name == name);
+        assert!(entry("Cube").is_none(), "the cage goes into the generator's mesh");
+        let smoothed = grid4d_eval::generator_mesh(&f.doc.scene, sds).unwrap();
+        let ObjectKind::Polygon { mesh, .. } = &entry("Subdivision Surface").unwrap().data.kind else {
+            panic!("the generator is written as its result")
+        };
+        assert_eq!(mesh.mesh(), &smoothed);
+        for name in ["Sphere", "Cylinder", "Box"] {
+            assert_eq!(
+                entry(name).unwrap().data.kind.tag(),
+                ObjectKindTag::Polygon,
+                "{name} baked"
+            );
+        }
+        assert_eq!(entry("Group").unwrap().data.kind, ObjectKind::Null);
+        assert_eq!(entry("Light").unwrap().data.kind.tag(), ObjectKindTag::Light);
+        assert_eq!(objects.nodes.len(), f.doc.scene.len() - 1);
+
+        // Switched off: an empty node over its cage, which is written as it is.
+        f.doc.scene.get_mut(sds).unwrap().data.enabled = false;
+        let objects = exportable(&f.doc);
+        let generator = objects
+            .nodes
+            .iter()
+            .position(|n| n.data.name == "Subdivision Surface")
+            .unwrap();
+        assert_eq!(objects.nodes[generator].data.kind, ObjectKind::Null);
+        let cube = objects.nodes.iter().find(|n| n.data.name == "Cube").unwrap();
+        assert_eq!(
+            (cube.parent, cube.data.kind.tag()),
+            (Some(generator), ObjectKindTag::Polygon)
+        );
+    }
+
+    #[test]
+    fn export_writes_glb_or_gltf_and_leaves_the_document_alone() {
+        let mut f = Fixture::new("export", None, Some("scene.glb"));
+        with_subdivision_surface(&mut f);
+        let (steps, dirty) = (f.editor.history.undo_len(), f.dirty());
+        f.run(&[EditorCommand::Export]);
+        assert_eq!(f.log.borrow().save_suggestions, ["Untitled 1.glb"]);
+        assert_eq!(
+            (f.editor.history.undo_len(), f.dirty()),
+            (steps, dirty),
+            "nothing recorded"
+        );
+        assert_eq!(f.editor.file.path(), None, "the document keeps its own file");
+        assert!(f.editor.file.alert.is_none());
+
+        let back = grid4d_io::import(&f.dir.join("scene.glb")).unwrap();
+        let expected: Vec<String> = exportable(&f.doc).nodes.into_iter().map(|n| n.data.name).collect();
+        let got: Vec<String> = back.nodes.iter().map(|n| n.data.name.clone()).collect();
+        assert_eq!(got, expected);
+
+        // The .gltf flavour writes its .bin next to it.
+        let mut f = Fixture::new("export_gltf", None, Some("scene.gltf"));
+        f.run(&[EditorCommand::Export]);
+        assert!(f.dir.join("scene.gltf").is_file() && f.dir.join("scene.bin").is_file());
+        assert_eq!(
+            grid4d_io::import(&f.dir.join("scene.gltf")).unwrap().nodes.len(),
+            f.doc.scene.len()
+        );
+
+        // Cancelled: nothing written, nothing said.
+        let mut f = Fixture::new("export_cancel", None, None);
+        f.run(&[EditorCommand::Export]);
+        assert!(f.editor.file.alert.is_none());
+        assert_eq!(std::fs::read_dir(&f.dir).unwrap().count(), 0);
+
+        // An unwritable place: an alert.
+        let mut f = Fixture::new("export_fail", None, Some("missing/folder/scene.glb"));
+        f.run(&[EditorCommand::Export]);
+        assert_eq!(f.editor.file.alert.as_ref().unwrap().title, "Could Not Export");
     }
 
     // ── Drag and drop ───────────────────────────────────────────────────────

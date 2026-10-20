@@ -7,7 +7,7 @@ workflow and layout inspired by Cinema 4D.
 
 ![Grid4D workspace](docs/screenshot.png)
 
-**Status: v0.5 in progress — interchange (glTF import done).** The workspace, scene graph, GPU
+**Status: v0.5 in progress — interchange (glTF import and export done).** The workspace, scene graph, GPU
 viewport, undo/redo and `.g4d` files work, and polygon objects can be modelled with
 component selection, Extrude, Inset, Bevel, Bridge, cuts and more, then smoothed with
 the Subdivision Surface generator; keyframes, glTF and rendering are on the roadmap (see
@@ -53,6 +53,9 @@ the [progress log](docs/progress.md).
 - **glTF 2.0 import**: open a `.gltf`/`.glb` model as a new document, or merge it
   (File ▸ Merge…, `Ctrl+Shift+O`, or drag and drop) into the current one as one undo
   step: hierarchy, transforms, meshes (welded, with UVs), colours, cameras, lights.
+- **glTF 2.0 export** (File ▸ Export…, `.glb` or `.gltf` + `.bin`): the whole scene
+  with primitives and Subdivision Surfaces baked, smoothing normals, UVs, colours,
+  cameras and lights.
 - **Snapping** (`Shift+S`): drag a Move arrow (or Tweak a component) and point the
   cursor at a vertex, edge, edge middle, polygon centre, surface, axis or grid
   crossing; the target is highlighted and the element lines up with it. 2D or 3D,

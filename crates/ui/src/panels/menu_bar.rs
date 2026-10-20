@@ -17,7 +17,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             command(ui, editor, "Save", "Ctrl+S", EditorCommand::Save);
             command(ui, editor, "Save As…", "Ctrl+Shift+S", EditorCommand::SaveAs);
             ui.separator();
-            planned(ui, "Export…", "");
+            command(ui, editor, "Export…", "", EditorCommand::Export);
             ui.separator();
             // Asks to save unsaved changes before the window closes.
             command(ui, editor, "Quit", "", EditorCommand::Quit);

@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 5 — Interchange: glTF, OBJ (v0.5) |
-| Last step done | 5.1 — glTF 2.0 import, File ▸ Merge (2026-10-20) |
-| Next step | 5.2 — glTF 2.0 export |
-| Tests | 354, all passing; clippy and rustfmt clean |
+| Last step done | 5.2 — glTF 2.0 export (2026-10-20) |
+| Next step | 5.3 — OBJ import and export |
+| Tests | 362, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -258,7 +258,8 @@ Maxon's public manual, in our own words (clean-room).
 
 | Step | Built | Tests |
 |------|-------|-------|
-| 5.1 | glTF 2.0 import (`.gltf` + `.bin`, embedded buffers, `.glb`): hierarchy, transforms, meshes (welded, with UVs), base colours, cameras, lights; Open makes a new document, File ▸ Merge (Ctrl+Shift+O) and drag and drop add to the current one (one undo step); Merge also takes `.g4d` files | 354 |
+| 5.1 (`02b7d94`) | glTF 2.0 import (`.gltf` + `.bin`, embedded buffers, `.glb`): hierarchy, transforms, meshes (welded, with UVs), base colours, cameras, lights; Open makes a new document, File ▸ Merge (Ctrl+Shift+O) and drag and drop add to the current one (one undo step); Merge also takes `.g4d` files | 354 |
+| 5.2 | glTF 2.0 export (File ▸ Export…, `.glb` or `.gltf` + `.bin`): hierarchy, transforms, triangulated meshes with the viewport's normals and UVs, primitives and Subdivision Surfaces baked, colours as materials, cameras, lights; checked in the app by exporting, validating, reopening and merging | 362 |
 
 *Problems and solutions:*
 - **The `gltf` crate's default features decode textures** (they pull in an image
@@ -266,7 +267,7 @@ Maxon's public manual, in our own words (clean-room).
   the `.glb` binary chunk, `data:` URIs (a small base64 decoder) and files next to
   the glTF, by relative path only, so a file cannot make Grid4D read anything else.
 - **Exporters split vertices** at every normal or UV seam, so a glTF cube has 24
-  vertices. Imported as they are, the faces would not be connected and modelling
+  vertices. Objects as they are, the faces would not be connected and modelling
   tools or the Subdivision Surface would tear them apart (the reference's manual
   suggests running Optimize afterwards). Identical positions are now merged on
   import; the UVs live per corner, so the seams survive.
@@ -279,6 +280,30 @@ Maxon's public manual, in our own words (clean-room).
   and absolute or remote URIs are errors, shown in an alert. Tests feed such files.
 - **Display scaling bit us again on screen.** An earlier panel resize had left the
   right panel 10 px narrower; it was dragged back to its original width.
+
+*Step 5.2 — problems and solutions:*
+- **Exporting needs baked geometry, but `grid4d-io` must not depend on evaluation.**
+  The UI first bakes the document into an object list (`file::exportable`):
+  primitives become their meshes and generators their results without the cage.
+  `grid4d-io` then only writes polygon objects, cameras, lights and empty nodes.
+  The importer's object list (renamed `Objects`) serves both directions.
+- **glTF forbids empty arrays and a scene needs nodes.** An empty document is
+  written without them, and the tests check that.
+- **Testing in the app.** The demo with a Subdivision Surface was exported through
+  File ▸ Export (both `.glb` and `.gltf` with a space in its name). Each file was
+  checked by a separate Python script: GLB layout, buffer bounds, min/max,
+  indices, unit normals, the hierarchy. The file was then opened again and merged
+  into the original: the smoothed object came back with exactly its 98 points and
+  192 triangles. The imported table scene, exported again, keeps every node's
+  transform to within 5·10⁻⁸.
+- **That round trip found a bug in the 5.1 importer.** Welding compared positions
+  bit by bit, so `0.0` and `-0.0` counted as different points. A sphere's pole,
+  written with zeros of both signs, was only partly merged and kept degenerate
+  triangles. Zeros are now normalised before comparing (a test covers it).
+
+---
+
+## How this file is kept
 
 ---
 

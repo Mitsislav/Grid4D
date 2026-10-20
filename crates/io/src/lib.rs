@@ -43,6 +43,7 @@
 //! current version.
 
 mod common;
+mod gltf_export;
 mod gltf_import;
 mod import;
 mod v1;
@@ -59,8 +60,9 @@ use serde::Deserialize;
 
 use crate::common::Archive;
 pub use crate::{
+    gltf_export::{export_gltf, glb_bytes, gltf_document},
     gltf_import::import_gltf,
-    import::{IMPORT_EXTENSIONS, Imported, ImportedNode, import, is_importable},
+    import::{IMPORT_EXTENSIONS, ObjectEntry, Objects, import, is_importable},
 };
 
 /// File extension, without the dot.
@@ -216,7 +218,11 @@ impl Header {
 /// Writes a temporary file next to `path` and renames it over the target, so a
 /// crash or a full disk never leaves a half-written document behind.
 pub fn save(doc: &Document, path: &Path) -> Result<(), IoError> {
-    let bytes = to_bytes(doc)?;
+    write_atomic(path, &to_bytes(doc)?)
+}
+
+/// Writes `bytes` to a temporary file next to `path` and renames it over `path`.
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), IoError> {
     let temp = temp_path(path);
     if let Err(err) = fs::write(&temp, bytes).and_then(|()| fs::rename(&temp, path)) {
         // Best effort: the temporary file may not even exist.

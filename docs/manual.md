@@ -198,6 +198,7 @@ tool's options. Its **Mode** menu switches between *Objects* and *Tool* by hand.
 | File ▸ Open… | Ctrl+O | Opens `.g4d` documents (and older `.oc4d` ones), and glTF models (`.gltf`, `.glb`) as new documents. |
 | File ▸ Open Recent | | The last ten files. |
 | File ▸ Merge… | Ctrl+Shift+O | Adds the objects of a `.g4d`, `.gltf` or `.glb` file to the current document. |
+| File ▸ Export… | | Writes the scene as a glTF model (`.glb`, or `.gltf` + `.bin`) for other applications. |
 | File ▸ Save | Ctrl+S | Asks for a name the first time. |
 | File ▸ Save As… | Ctrl+Shift+S | |
 | File ▸ Quit | | |
@@ -242,7 +243,37 @@ What comes in:
 
 Not yet: materials and textures, animation, skinning, morph targets and compressed
 meshes (Draco). Shading comes from Grid4D's own smoothing, not from the file's
-normals.
+normals. Points the file has at *almost* the same place (not exactly) stay separate;
+run **Optimize** (U~O) on such an object to merge them.
+
+### 9.2 Exporting glTF
+
+**File ▸ Export…** writes the whole scene as a glTF model that other applications
+(Blender, game engines, web viewers, …) can read. Pick the file type in the dialog:
+
+- **glTF Binary (`.glb`)**: one file with everything in it (the default).
+- **glTF (`.gltf` + `.bin`)**: a text file plus a `.bin` file of the same name next
+  to it. Keep the two together.
+
+What goes out:
+
+- Every object in its hierarchy, with names and positions (centimetres become
+  metres).
+- Polygon objects as meshes, split into triangles, with the smoothing you see in
+  the viewport and their UVs. **Primitives** are written in their current shape.
+  A **Subdivision Surface** is written as its smooth result at the viewport level,
+  without its cage. A switched-off one is written as an empty object with its
+  children as they are.
+- Display colours as simple materials, cameras, and lights.
+
+Exporting does not change the document: there is nothing to undo, and the title's
+`*` stays as it was.
+
+![Top: the document; bottom: the exported .glb opened again. The Subdivision Surface arrives as one polygon object with the same shape](images/manual/gltf_export.png)
+
+Opening an exported file brings back the hierarchy, names, positions, cameras and
+lights. Every mesh comes back as a triangulated polygon object, since glTF stores
+only triangles.
 
 ## 10. Timeline and playback
 
@@ -648,8 +679,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Animation**: keyframes, F-curves, the Coordinate and Material managers.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.
-- **Interchange and rendering**: glTF export, OBJ import and export, glTF materials
-  and animation, the offline renderer (the Render menu is disabled).
+- **Interchange and rendering**: OBJ import and export, glTF materials, textures and
+  animation, an export dialog (scale, visible or selected objects only), the
+  offline renderer (the Render menu is disabled).
 - The Takes, Layers and Filter panels are placeholders.
 
 See [`progress.md`](progress.md) for what changed in each step.
