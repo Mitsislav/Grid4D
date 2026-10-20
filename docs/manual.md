@@ -170,7 +170,8 @@ With an object selected it shows three tabs:
 
 - **Basic**: name, editor and render visibility, enabled.
 - **Coord.**: position (P), scale (S) and rotation (R, as H/P/B angles in degrees),
-  plus *Reset Transform*.
+  plus *Reset Transform*. The values are those at the current frame; the small
+  circle before each field is its key button ([§10.2](#102-recording-keys)).
 - **Object**: the object's own parameters (sizes, segments, field of view …).
 
 Drag a value left or right to change it, or click it and type a number. A change
@@ -307,12 +308,18 @@ and drop `.obj` files like glTF files, and pick the `.obj` type in
 | Play forwards / backwards | F8 / F6 |
 | Stop | F7 |
 | Previous / next frame | F / G |
+| Previous / next key of the selected objects | Ctrl+F / Ctrl+G |
 | Go to start / end | the outer transport buttons |
+| Record Active Objects | F9 (the red button) |
+| Autokeying on / off | Ctrl+F9 (the button with an A) |
 
-- Drag the blue marker on the ruler to scrub, or type a frame number.
+- Click or drag on the ruler to scrub, or type a frame number.
+- Under the ruler, the **key strip** shows the keys of the selected objects
+  ([§10.3](#103-keys-on-the-timeline)).
 - The two fields on the right set the frame range; the drop-down sets the frame
   rate. The loop button (also Animate ▸ Loop Playback) makes playback start over at
   the end.
+
 ### 10.1 Animation
 
 Objects in a document can be **animated**: their position, rotation and scale can
@@ -326,12 +333,72 @@ it.
   changes smoothly (*Spline*, the default), in a straight line (*Linear*) or
   holds and then jumps (*Step*). Smooth curves never shoot past a highest or
   lowest key. Before the first key and after the last one, the value stays put.
-- The Coordinates fields show the object's own values. Animation changes what you
-  see, not those values.
+- The Coordinates fields and the gizmo show and change the values **at the
+  current frame**.
 - Animation is saved with the document.
-- *Planned next:* recording keys (F9), automatic keying, key markers on the
-  timeline and the F-Curve editor. Until then, animation comes from documents that
-  already contain it.
+
+### 10.2 Recording keys
+
+1. Select the objects to animate and go to a frame.
+2. Place them: move, scale or rotate them with the gizmo or the Coordinates fields.
+3. Press **F9** (*Record Active Objects*: the red button under the timeline, or
+   Animate ▸ Record Active Objects). Every selected object gets keys for its
+   position, scale and rotation at this frame.
+4. Go to another frame, change them again, press F9 again, and so on.
+
+Animate ▸ Record chooses which of **Position**, **Scale** and **Rotation** F9
+records (all three by default).
+
+**Key buttons.** In the Attribute Manager's Coord. tab, the circle before each
+field tells you about that value:
+
+| Circle | Meaning |
+|--------|---------|
+| grey ring | not animated |
+| red ring | animated, no key at this frame |
+| red dot | a key at this frame |
+| yellow ring / dot | changed here but not recorded (no key / a key at this frame) |
+
+- **Click** a circle to set a key for just that value at the current frame. Click a
+  red dot to remove that key.
+- **Shift+Ctrl+click** removes all the value's keys; it keeps the value it shows.
+
+**Changes that are not recorded.** If you change an animated value without
+recording, the change is temporary: the circle turns yellow, and the object stays
+where you put it only at this frame. Press F9 (or click the circle) to keep it;
+going to another frame drops it.
+
+![The cube moved at frame 31 but not recorded: P . X shows a yellow ring](images/manual/animation_unkeyed.png)
+
+![After F9 at frame 31: keys at frames 0 and 31 on the timeline, red dots in the Coordinates](images/manual/animation_record.png)
+
+**Autokeying** (**Ctrl+F9**, the button with an A, or Animate ▸ Autokeying) records
+for you: while it is on, the viewport has a red frame, and every change to an
+**animated** value becomes a key at the current frame. Values that are not animated
+yet change without a key, so record them once with F9 first. Switch Autokeying off
+when you are done, so later edits do not overwrite your animation.
+
+![Autokeying on: the viewport is framed in red](images/manual/animation_autokey.png)
+
+Every recording, key click and Autokeying drag is one undo step.
+
+### 10.3 Keys on the timeline
+
+The strip under the frame ruler shows a mark at every frame where a selected object
+has keys.
+
+- **Click** a mark to select it (orange); **Shift+click** adds or removes marks.
+  **Drag across empty space** to select all the marks in that range. A click on
+  empty space clears the selection.
+- **Drag a mark** to move the selected keys by whole frames. Keys already at the
+  frames they land on are replaced.
+- **Delete** (or Backspace) right after clicking in the strip deletes the selected
+  keys; so do the strip's right-click menu and Animate ▸ Delete Keys. Once you click
+  elsewhere, Delete works on objects again.
+- **Ctrl+click** in the strip records keys at that frame without moving the time
+  (with the values shown at the current frame).
+- **Ctrl+F / Ctrl+G** (Animate ▸ Go to Previous / Next Key) jump to the previous or
+  next frame with a key.
 
 ## 11. Polygon modelling
 
@@ -751,13 +818,16 @@ Esc cancels a chord.
 | M~N or Ctrl+Backspace | Dissolve |
 | U~Z or Alt+Backspace | Melt |
 | U~O | Optimize… |
-| Delete / Backspace | Delete (objects in Model mode, components otherwise) |
+| Delete / Backspace | Delete (objects in Model mode, components otherwise; keys after a click in the timeline's key strip) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) | Undo / redo |
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New / open / save / save as |
 | Ctrl+Shift+O | Merge a file into the document |
 | F8 / F6 / F7 | Play / play backwards / stop |
 | F / G | Previous / next frame |
+| Ctrl+F / Ctrl+G | Previous / next key |
+| F9 | Record Active Objects |
+| Ctrl+F9 | Autokeying on / off |
 
 **Help ▸ Keyboard Shortcuts & About** shows this list inside the application.
 
@@ -777,9 +847,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   Cloner are planned.
 - **Tags**: Material tags (with materials), Protection limits, Phong edge breaks,
   copying tags between objects.
-- **Animation**: recording and editing keys (F9, autokeying, the timeline and the
-  F-Curve editor), animating object parameters such as a cube's size; the
-  Coordinate and Material managers.
+- **Animation**: the F-Curve editor (editing tangents and interpolation), copying
+  and pasting keys, animating object parameters such as a cube's size, Frame
+  Scene/Selected following the animation; the Coordinate and Material managers.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.
 - **Interchange and rendering**: materials and textures, animation in glTF, import

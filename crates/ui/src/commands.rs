@@ -207,6 +207,19 @@ pub enum EditorCommand {
         inverse: SceneEdit,
         label: &'static str,
     },
+    /// Record Active Objects (F9): keys at frame `at` for the enabled channels of
+    /// the selected objects, with the values shown at the current frame. One undo
+    /// step.
+    RecordKeys {
+        at: i32,
+    },
+    /// Removes the keys selected on the timeline from the selected objects. One
+    /// undo step.
+    DeleteKeys,
+    /// Moves the keys selected on the timeline by `by` frames. One undo step.
+    MoveKeys {
+        by: i32,
+    },
     FrameScene,
     FrameSelected,
     ResetView,
@@ -238,8 +251,15 @@ impl CommandQueue {
 /// Applies every queued command. Returns `true` if anything was applied, so the
 /// caller can request a repaint and show the result immediately.
 pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel) -> bool {
+    // A new frame: temporary values give way to the curves (not an undo step).
+    let frame = doc.time.frame();
+    let mut changed = false;
+    if editor.seen_frame != Some(frame) {
+        editor.seen_frame = Some(frame);
+        changed = doc.scene.discard_unkeyed(f64::from(frame));
+    }
     if editor.commands.is_empty() {
-        return false;
+        return changed;
     }
     let mut pending = std::mem::take(&mut editor.commands.pending);
     for command in pending.drain(..) {
@@ -725,9 +745,11 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         }
         EditorCommand::Undo => {
             editor.history.undo(doc, &mut editor.selection);
+            doc.scene.discard_unkeyed(f64::from(doc.time.frame()));
         }
         EditorCommand::Redo => {
             editor.history.redo(doc, &mut editor.selection);
+            doc.scene.discard_unkeyed(f64::from(doc.time.frame()));
         }
         EditorCommand::Edit { edit, label } => commit(doc, editor, label, vec![edit], |_, _| {}),
         EditorCommand::CommitLive { inverse, label } => {
@@ -736,6 +758,23 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 editor
                     .history
                     .record(doc, label, vec![inverse], selection.clone(), selection);
+            }
+        }
+        EditorCommand::RecordKeys { at } => {
+            let edits = crate::keys::record(doc, &editor.selection, &editor.animation, f64::from(at));
+            commit(doc, editor, "Record Keys", edits, |_, _| {});
+        }
+        EditorCommand::DeleteKeys => {
+            let edits = crate::keys::delete(doc, &editor.selection, &editor.keys.frames);
+            commit(doc, editor, "Delete Keys", edits, |_, _| {});
+            editor.keys.frames.clear();
+        }
+        EditorCommand::MoveKeys { by } => {
+            let by = f64::from(by);
+            let edits = crate::keys::shift(doc, &editor.selection, &editor.keys.frames, by);
+            commit(doc, editor, "Move Keys", edits, |_, _| {});
+            for frame in &mut editor.keys.frames {
+                *frame += by;
             }
         }
         EditorCommand::FrameScene => viewport.frame_scene(&doc.scene),
@@ -1116,6 +1155,8 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grid4d_scene::{Axis, Param};
+
     use crate::History;
 
     /// A headless viewport: without a wgpu render state it only keeps the camera.
@@ -1146,6 +1187,110 @@ mod tests {
         editor.commands.push(EditorCommand::DeselectAll);
         assert!(apply_pending(&mut doc, &mut editor, &mut vp));
         assert!(!apply_pending(&mut doc, &mut editor, &mut vp));
+    }
+
+    fn key_frames_of(doc: &Document, id: NodeId) -> Vec<f64> {
+        let mut frames = Vec::new();
+        let mut selection = Selection::default();
+        selection.set_single(id);
+        crate::keys::key_frames(&doc.scene, &selection, &mut frames);
+        frames
+    }
+
+    #[test]
+    fn recording_moving_and_deleting_keys_are_one_step_each() {
+        let mut doc = Document::with_demo_scene();
+        let (mut editor, mut vp) = (EditorState::default(), viewport());
+        let cube = id_of(&doc, "Cube");
+        let sphere = id_of(&doc, "Sphere");
+        editor.selection.set_all([cube, sphere]);
+        let before = doc.scene.get(cube).unwrap().data.clone();
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::RecordKeys { at: 0 }]);
+        doc.time.set_frame(20);
+        // Move the cube at frame 20 (temporary), then record it there.
+        let data = &mut doc.scene.get_mut(cube).unwrap().data;
+        let mut shown = data.transform_at(20.0);
+        shown.position.y = 300.0;
+        data.set_transform_at(&shown, 20.0, false);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::RecordKeys { at: 20 }]);
+        let data = &doc.scene.get(cube).unwrap().data;
+        assert_eq!(data.tracks.len(), 9);
+        assert_eq!(data.value_at(Param::Position(Axis::Y), 20.0), 300.0);
+        assert_eq!(data.value_at(Param::Position(Axis::Y), 0.0), 100.0);
+        assert_eq!(key_frames_of(&doc, sphere), [0.0, 20.0]);
+        assert_eq!(editor.history.undo_label(), Some("Record Keys"));
+
+        // Move the keys at 20 to 30, then delete those at 0.
+        editor.keys.frames = vec![20.0];
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MoveKeys { by: 10 }]);
+        assert_eq!(key_frames_of(&doc, cube), [0.0, 30.0]);
+        assert_eq!(editor.keys.frames, [30.0], "the selection moves with its keys");
+        editor.keys.frames = vec![0.0];
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteKeys]);
+        assert_eq!(key_frames_of(&doc, cube), [30.0]);
+        assert!(editor.keys.frames.is_empty());
+
+        // One step each: undoing the delete and the move brings back both keys,
+        // undoing both recordings the cube as it was.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Undo, EditorCommand::Undo],
+        );
+        assert_eq!(key_frames_of(&doc, cube), [0.0, 20.0]);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Undo, EditorCommand::Undo],
+        );
+        assert_eq!(doc.scene.get(cube).unwrap().data, before);
+    }
+
+    #[test]
+    fn record_follows_the_channel_toggles_and_needs_a_selection() {
+        let mut doc = Document::with_demo_scene();
+        let (mut editor, mut vp) = (EditorState::default(), viewport());
+        let cube = id_of(&doc, "Cube");
+        let revision = doc.scene.revision();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::RecordKeys { at: 0 }]);
+        assert_eq!(doc.scene.revision(), revision, "nothing selected, nothing recorded");
+        editor.selection.set_single(cube);
+        editor.animation.position = false;
+        editor.animation.scale = false;
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::RecordKeys { at: 5 }]);
+        let tracks = &doc.scene.get(cube).unwrap().data.tracks;
+        assert_eq!(tracks.len(), 3);
+        assert!(tracks.iter().all(|t| matches!(t.param, Param::Rotation(_))));
+    }
+
+    #[test]
+    fn temporary_values_are_dropped_when_the_frame_changes() {
+        let mut doc = Document::with_demo_scene();
+        let (mut editor, mut vp) = (EditorState::default(), viewport());
+        let cube = id_of(&doc, "Cube");
+        editor.selection.set_single(cube);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::RecordKeys { at: 0 }]);
+        let data = &mut doc.scene.get_mut(cube).unwrap().data;
+        let mut shown = data.transform_at(0.0);
+        shown.position.x = 55.0;
+        data.set_transform_at(&shown, 0.0, false);
+        assert!(!apply_pending(&mut doc, &mut editor, &mut vp), "same frame: kept");
+        assert!(doc.scene.get(cube).unwrap().data.unkeyed.is_some());
+        doc.time.set_frame(1);
+        assert!(apply_pending(&mut doc, &mut editor, &mut vp), "a new frame drops it");
+        assert_eq!(doc.scene.get(cube).unwrap().data.unkeyed, None);
+        doc.time.set_frame(0);
+        assert_eq!(
+            doc.scene
+                .get(cube)
+                .unwrap()
+                .data
+                .value_at(Param::Position(Axis::X), 0.0),
+            0.0
+        );
     }
 
     #[test]

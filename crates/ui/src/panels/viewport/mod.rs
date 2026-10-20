@@ -148,7 +148,8 @@ impl ViewportPanel {
         let navigating = self.navigate(ui, &response, rect, brush);
         // Built once per frame (after navigation moved the camera) and shared by
         // interaction and painting; rebuilt only if a drag just moved the object.
-        let mut gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect);
+        let keying = crate::keys::Keying::of(doc, editor);
+        let mut gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect, keying.frame);
         self.snap_hit = None;
         let gizmo_owns_pointer = if navigating {
             false
@@ -169,10 +170,11 @@ impl ViewportPanel {
                 &mut doc.scene,
                 &mut editor.commands,
                 &mut snapper,
+                keying,
             );
             self.snap_hit = snapper.hit;
             if interaction.moved_object {
-                gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect);
+                gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect, keying.frame);
             }
             interaction.owns_pointer
         };
@@ -225,6 +227,9 @@ impl ViewportPanel {
         }
 
         overlay::view_label(&painter, rect, "Perspective");
+        if editor.animation.autokey {
+            overlay::autokey_frame(&painter, rect);
+        }
         let view_proj = self.camera.view_projection(rect.aspect_ratio());
         overlay::selection_brackets(&painter, rect, &view_proj, &self.evaluated, &editor.selection);
         if let Some(geo) = &gizmo_geo {
@@ -727,6 +732,7 @@ mod tests {
                 &self.editor,
                 &self.viewport.camera,
                 self.viewport.view_rect,
+                f64::from(self.doc.time.frame()),
             )
             .expect("a gizmo");
             let (start, dir) = geo.handle_for_test(axis).unwrap();
@@ -781,7 +787,7 @@ mod tests {
                 ..EditorState::default()
             };
             editor.selection.set_single(cube);
-            GizmoGeometry::new(&h.doc.scene, &editor, &h.viewport.camera, h.viewport.view_rect).is_some()
+            GizmoGeometry::new(&h.doc.scene, &editor, &h.viewport.camera, h.viewport.view_rect, 0.0).is_some()
         };
         assert!(!gizmo(&h, Tool::Move), "position protected");
         assert!(gizmo(&h, Tool::Scale), "scale free");
@@ -793,7 +799,7 @@ mod tests {
         let mut h = Harness::new();
         h.frame(vec![]); // lay out once so the viewport knows its 3D rect
         let cube = h.editor.selection.active().unwrap();
-        let geo = GizmoGeometry::new(&h.doc.scene, &h.editor, &h.viewport.camera, h.viewport.view_rect).unwrap();
+        let geo = GizmoGeometry::new(&h.doc.scene, &h.editor, &h.viewport.camera, h.viewport.view_rect, 0.0).unwrap();
         let (start, dir): (Pos2, Vec2) = geo.handle_for_test(0).unwrap();
         let before = h.position(cube);
 
@@ -1011,6 +1017,51 @@ mod tests {
         assert_eq!(h.mesh(cube).id(), before.id(), "undo brings the original mesh back");
     }
 
+    /// The gizmo sits where the animation puts the object, and a drag writes a
+    /// temporary value, or a key with Autokeying.
+    #[test]
+    fn the_gizmo_follows_animation_and_keys_with_autokeying() {
+        use grid4d_scene::{Axis, Param};
+        let mut h = Harness::new();
+        let cube = h.doc.scene.roots()[0];
+        let px = Param::Position(Axis::X);
+        // Keys at 0 and 10 (x = 0 and 200); frame 10 shows x = 200.
+        let data = &mut h.doc.scene.get_mut(cube).unwrap().data;
+        data.record([px], 0.0, 0.0);
+        data.set_value_at(px, 200.0, 10.0, true);
+        h.doc.time.set_frame(10);
+        h.frame(vec![]);
+        let geo = GizmoGeometry::new(&h.doc.scene, &h.editor, &h.viewport.camera, h.viewport.view_rect, 10.0).unwrap();
+        assert!(
+            (geo.origin.x - 200.0).abs() < 1e-3,
+            "on the animated object: {}",
+            geo.origin
+        );
+
+        h.drag_handle(0, 4);
+        let data = &h.doc.scene.get(cube).unwrap().data;
+        let moved = data.value_at(px, 10.0);
+        assert!(moved > 201.0, "moved along X: {moved}");
+        assert_eq!(data.key_state(px, 10.0), grid4d_scene::KeyState::Changed { key: true });
+        assert_eq!(
+            data.tracks[0].curve.key_at(10.0).unwrap().value,
+            200.0,
+            "the key is unchanged"
+        );
+
+        h.editor.commands.push(EditorCommand::Undo);
+        h.editor.animation.autokey = true;
+        h.frame(vec![]);
+        h.drag_handle(0, 4);
+        let data = &h.doc.scene.get(cube).unwrap().data;
+        assert!(
+            data.tracks[0].curve.key_at(10.0).unwrap().value > 201.0,
+            "Autokeying wrote the key"
+        );
+        assert_eq!(data.unkeyed, None);
+        assert_eq!(data.tracks.len(), 1, "unchanged parameters get no keys");
+    }
+
     #[test]
     fn scaling_a_polygon_spreads_its_points_around_its_centre() {
         let mut h = Harness::new();
@@ -1087,7 +1138,7 @@ mod tests {
     /// Drags the active object's X handle in 3-point steps; the X position after each.
     fn drag_x_in_small_steps(h: &mut Harness, frames: usize) -> Vec<(f32, Option<grid4d_render::SnapKind>)> {
         h.frame(vec![]);
-        let geo = GizmoGeometry::new(&h.doc.scene, &h.editor, &h.viewport.camera, h.viewport.view_rect).unwrap();
+        let geo = GizmoGeometry::new(&h.doc.scene, &h.editor, &h.viewport.camera, h.viewport.view_rect, 0.0).unwrap();
         let (start, dir) = geo.handle_for_test(0).unwrap();
         let cube = h.editor.selection.active().unwrap();
         h.frame(vec![Event::PointerMoved(start)]);
@@ -1607,7 +1658,7 @@ mod tests {
     fn a_click_without_drag_records_nothing() {
         let mut h = Harness::new();
         h.frame(vec![]);
-        let geo = GizmoGeometry::new(&h.doc.scene, &h.editor, &h.viewport.camera, h.viewport.view_rect).unwrap();
+        let geo = GizmoGeometry::new(&h.doc.scene, &h.editor, &h.viewport.camera, h.viewport.view_rect, 0.0).unwrap();
         let (start, _) = geo.handle_for_test(1).unwrap();
         h.frame(vec![Event::PointerMoved(start)]);
         h.frame(vec![Harness::button(start, true)]);

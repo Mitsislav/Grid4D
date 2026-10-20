@@ -71,6 +71,16 @@ pub(super) fn view_label(painter: &Painter, rect: Rect, label: &str) {
     );
 }
 
+/// The red frame around the view while Autokeying is on.
+pub(super) fn autokey_frame(painter: &Painter, rect: Rect) {
+    painter.rect_stroke(
+        rect.shrink(1.5),
+        CornerRadius::ZERO,
+        Stroke::new(3.0, p::RECORD),
+        StrokeKind::Inside,
+    );
+}
+
 /// World-axis orientation indicator in the bottom-left corner.
 pub(super) fn axis_triad(painter: &Painter, rect: Rect, camera: &OrbitCamera) {
     let center = rect.left_bottom() + vec2(44.0, -44.0);

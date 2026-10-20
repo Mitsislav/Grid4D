@@ -380,6 +380,46 @@ impl Scene {
             .map_or(Mat4::IDENTITY, |p| self.world_matrix(p))
     }
 
+    /// World matrix of `id` with the transforms shown at `frame` (animation and
+    /// temporary values; see [`NodeData::transform_at`](crate::NodeData::transform_at)).
+    #[must_use]
+    pub fn world_matrix_at(&self, id: NodeId, frame: f64) -> Mat4 {
+        let mut m = Mat4::IDENTITY;
+        let mut current = Some(id);
+        while let Some(c) = current {
+            let Some(node) = self.get(c) else { break };
+            m = node.data.transform_at(frame).matrix() * m;
+            current = node.parent;
+        }
+        m
+    }
+
+    /// World matrix of the parent of `id` at `frame` (identity for roots).
+    #[must_use]
+    pub fn parent_world_matrix_at(&self, id: NodeId, frame: f64) -> Mat4 {
+        self.get(id)
+            .and_then(|n| n.parent)
+            .map_or(Mat4::IDENTITY, |p| self.world_matrix_at(p, frame))
+    }
+
+    /// Drops temporary values made at another frame than `frame` (the time
+    /// moved on, so the curves show again). Returns whether any were dropped;
+    /// touches nothing otherwise.
+    pub fn discard_unkeyed(&mut self, frame: f64) -> bool {
+        let stale = |node: &Node| !node.detached && node.data.unkeyed.is_some_and(|u| u.frame != frame);
+        if !self.nodes.values().any(stale) {
+            return false;
+        }
+        let revision = self.touch();
+        for node in self.nodes.values_mut() {
+            if stale(node) {
+                node.data.unkeyed = None;
+                node.revision = revision;
+            }
+        }
+        true
+    }
+
     /// Depth-first, pre-order traversal in Object Manager order, computing world
     /// matrices on the way down.
     ///
@@ -735,6 +775,36 @@ mod tests {
         assert!(s.is_empty());
         assert_eq!(s.nodes.len(), 0, "nothing left in the arena");
         assert_invariants(&s);
+    }
+
+    #[test]
+    fn world_matrices_at_a_frame_and_dropping_temporary_values() {
+        use crate::{Axis, Curve, Key, Param, Track};
+        let mut s = Scene::new();
+        let mut parent = null("parent");
+        parent.data.tracks.push(Track {
+            param: Param::Position(Axis::X),
+            curve: Curve::from_keys([Key::new(0.0, 0.0), Key::new(10.0, 100.0)]),
+        });
+        let parent = s.insert(parent);
+        let child = s.insert_child(parent, null("child").with_position(Vec3::Y)).unwrap();
+        let at = |s: &Scene, frame| s.world_matrix_at(child, frame).w_axis.truncate();
+        assert_eq!(at(&s, 10.0), Vec3::new(100.0, 1.0, 0.0), "the child follows the curve");
+        assert_eq!(s.parent_world_matrix_at(child, 10.0).w_axis.x, 100.0);
+        assert_eq!(s.world_matrix(child).w_axis.x, 0.0, "the document's own values");
+
+        let data = &mut s.get_mut(parent).unwrap().data;
+        let mut shown = data.transform_at(3.0);
+        shown.position.x = -50.0;
+        data.set_transform_at(&shown, 3.0, false);
+        assert_eq!(at(&s, 3.0).x, -50.0);
+        let revision = s.revision();
+        assert!(!s.discard_unkeyed(3.0), "still the frame it was made at");
+        assert_eq!(s.revision(), revision, "nothing touched");
+        assert!(s.discard_unkeyed(4.0));
+        assert_eq!(s.get(parent).unwrap().data.unkeyed, None);
+        let curve = s.get(parent).unwrap().data.tracks[0].curve.value_at(3.0).unwrap();
+        assert_eq!(at(&s, 3.0).x, curve, "the curve again");
     }
 
     #[test]

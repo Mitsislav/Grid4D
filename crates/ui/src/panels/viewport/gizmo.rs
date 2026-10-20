@@ -16,7 +16,7 @@ use super::{
     project,
     snapping::{Snapper, generators_above},
 };
-use crate::{CommandQueue, EditorCommand, EditorState, Tool, theme::palette as p};
+use crate::{CommandQueue, EditorCommand, EditorState, Tool, keys::Keying, theme::palette as p};
 
 /// On-screen length of the axis handles, in points.
 const HANDLE_PX: f32 = 90.0;
@@ -39,7 +39,7 @@ pub(super) struct GizmoGeometry {
     tool: Tool,
     target: Target,
     /// World position of the gizmo's centre (the pivot).
-    origin: Vec3,
+    pub(super) origin: Vec3,
     origin_px: Pos2,
     /// World-space unit axes the handles follow.
     axes: [Vec3; 3],
@@ -54,10 +54,17 @@ pub(super) struct GizmoGeometry {
 }
 
 impl GizmoGeometry {
-    /// Builds the gizmo for the active object, if the active tool has one. In a
-    /// component mode it works on the selected components (centred on them) and
-    /// is absent when nothing is selected.
-    pub(super) fn new(scene: &Scene, editor: &EditorState, camera: &OrbitCamera, rect: Rect) -> Option<Self> {
+    /// Builds the gizmo for the active object, if the active tool has one, where
+    /// it is shown at `frame` (animation). In a component mode it works on the
+    /// selected components (centred on them) and is absent when nothing is
+    /// selected.
+    pub(super) fn new(
+        scene: &Scene,
+        editor: &EditorState,
+        camera: &OrbitCamera,
+        rect: Rect,
+        frame: f64,
+    ) -> Option<Self> {
         if !editor.tool.has_gizmo() {
             return None;
         }
@@ -87,7 +94,7 @@ impl GizmoGeometry {
             }
         }
 
-        let world = scene.world_matrix(id);
+        let world = scene.world_matrix_at(id, frame);
         let (_, rotation, translation) = world.to_scale_rotation_translation();
         let (origin, target) = match editor.mode.component() {
             None => (translation, Target::Object),
@@ -142,7 +149,7 @@ impl GizmoGeometry {
             rings,
             toward_camera: axes.map(|a| a.dot(to_eye) > 0.0),
             enabled: editor.axes,
-            parent_world: scene.parent_world_matrix(id),
+            parent_world: scene.parent_world_matrix_at(id, frame),
         })
     }
 
@@ -388,8 +395,13 @@ impl GizmoState {
         self.drag.as_ref().map(|d| d.axis).or(self.hot)
     }
 
-    /// Handles hover and drag. The transform is written live while dragging;
-    /// when the drag ends, one undo step for it is pushed to `commands`.
+    /// Handles hover and drag. The transform is written live while dragging, as
+    /// `keying` says (keys or temporary values for animated parameters); when the
+    /// drag ends, one undo step for it is pushed to `commands`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one call site; the pieces of one frame's input"
+    )]
     pub(super) fn interact(
         &mut self,
         ui: &Ui,
@@ -398,6 +410,7 @@ impl GizmoState {
         scene: &mut Scene,
         commands: &mut CommandQueue,
         snapper: &mut Snapper<'_>,
+        keying: Keying,
     ) -> GizmoInteraction {
         let alt = ui.input(|i| i.modifiers.alt);
 
@@ -411,7 +424,7 @@ impl GizmoState {
                 if drag.points.is_some() {
                     apply_component_drag(geo, drag, pointer, scene, snapper);
                 } else {
-                    apply_drag(geo, drag, pointer, scene, snapper);
+                    apply_drag(geo, drag, pointer, scene, snapper, keying);
                 }
                 drag.last_pointer = pointer;
             } else if let Some(done) = self.drag.take() {
@@ -555,7 +568,16 @@ fn apply_component_drag(
     edit.apply(edit.delta(geo.tool, geo.axes[axis]), scene, node);
 }
 
-fn apply_drag(geo: &GizmoGeometry, drag: &mut Drag, pointer: Pos2, scene: &mut Scene, snapper: &mut Snapper<'_>) {
+/// One frame of an object drag: the transform shown at the current frame is
+/// changed and written back through `keying` (see `NodeData::set_transform_at`).
+fn apply_drag(
+    geo: &GizmoGeometry,
+    drag: &mut Drag,
+    pointer: Pos2,
+    scene: &mut Scene,
+    snapper: &mut Snapper<'_>,
+    keying: Keying,
+) {
     let axis = drag.axis;
     if geo.tool == Tool::Move {
         // From the position the drag started at: the unsnapped offset, snapped.
@@ -566,12 +588,15 @@ fn apply_drag(geo: &GizmoGeometry, drag: &mut Drag, pointer: Pos2, scene: &mut S
         let line = Some((drag.start, geo.axes[axis]));
         let to = snapper.snap(pointer, drag.start + drag.free, line, &drag.skip, None);
         let Some(node) = scene.get_mut(drag.node) else { return };
-        node.data.transform.position =
-            drag.before.transform.position + geo.parent_world.inverse().transform_vector3(to - drag.start);
+        let mut shown = node.data.transform_at(keying.frame);
+        shown.position = drag.before.transform_at(keying.frame).position
+            + geo.parent_world.inverse().transform_vector3(to - drag.start);
+        node.data.set_transform_at(&shown, keying.frame, keying.autokey);
         return;
     }
     let Some(node) = scene.get_mut(drag.node) else { return };
-    let t = &mut node.data.transform;
+    let mut shown = node.data.transform_at(keying.frame);
+    let t = &mut shown;
 
     match geo.tool {
         Tool::Scale => {
@@ -588,7 +613,13 @@ fn apply_drag(geo: &GizmoGeometry, drag: &mut Drag, pointer: Pos2, scene: &mut S
             let world_delta = Quat::from_axis_angle(geo.axes[axis], angle);
             let (_, parent_rotation, _) = geo.parent_world.to_scale_rotation_translation();
             let local = parent_rotation.inverse() * world_delta * parent_rotation * t.rotation_quat();
+            let previous = t.rotation;
             t.set_rotation_quat(local);
+            // Angles stay continuous (no jump from 180° to −180°), so keys interpolate
+            // the way the object turned.
+            for i in 0..3 {
+                t.rotation[i] = previous[i] + wrap_angle(t.rotation[i] - previous[i]);
+            }
         }
         Tool::Move
         | Tool::LiveSelection
@@ -601,8 +632,14 @@ fn apply_drag(geo: &GizmoGeometry, drag: &mut Drag, pointer: Pos2, scene: &mut S
         | Tool::LineCut
         | Tool::Bevel
         | Tool::Bridge
-        | Tool::Weld => {}
+        | Tool::Weld => return,
     }
+    node.data.set_transform_at(&shown, keying.frame, keying.autokey);
+}
+
+/// `angle` brought into `[-π, π]`.
+fn wrap_angle(angle: f32) -> f32 {
+    (angle + PI).rem_euclid(TAU) - PI
 }
 
 fn arrow_head(painter: &egui::Painter, tip: Pos2, dir: Vec2, size: f32, color: Color32) {

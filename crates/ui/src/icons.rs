@@ -46,6 +46,8 @@ pub enum Icon {
     StepForward,
     GoToEnd,
     Record,
+    /// Autokeying: a ring with an "A".
+    Autokey,
     Loop,
     // Viewport navigation
     NavZoom,
@@ -252,6 +254,11 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             c.rect_fill((0.76, 0.22), (0.86, 0.78), color);
         }
         Icon::Record => c.disc((0.5, 0.5), 0.28),
+        Icon::Autokey => {
+            c.circle((0.5, 0.5), 0.36);
+            c.polyline(&[(0.37, 0.68), (0.5, 0.3), (0.63, 0.68)], false);
+            c.line((0.42, 0.56), (0.58, 0.56));
+        }
         Icon::Loop => {
             let top = c.arc_points((0.5, 0.5), 0.32, PI + 0.35, TAU - 0.35);
             c.arrow_head_at(top, 0.2);

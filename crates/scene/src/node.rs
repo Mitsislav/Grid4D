@@ -349,6 +349,8 @@ pub struct NodeData {
     pub tags: Vec<crate::Tag>,
     /// Animated parameters, at most one track per parameter.
     pub tracks: Vec<crate::Track>,
+    /// Animated parameters changed without recording a key (never saved).
+    pub unkeyed: Option<crate::Unkeyed>,
 }
 
 impl NodeData {
@@ -367,6 +369,7 @@ impl NodeData {
             enabled: true,
             tags: Vec::new(),
             tracks: Vec::new(),
+            unkeyed: None,
         }
     }
 

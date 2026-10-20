@@ -2,8 +2,13 @@
 //! parameters each have a [`Track`] with a [`Curve`] of [`Key`]s. Tracks live in
 //! [`NodeData::tracks`](crate::NodeData::tracks), so editing them is an ordinary
 //! data edit (undo, save).
+//!
+//! What the user sees and edits are the values **at the current frame**
+//! ([`NodeData::transform_at`]); edits go back through
+//! [`NodeData::set_transform_at`], which writes keys (Autokeying) or temporary
+//! values (see `docs/reference/animation-recording.md`).
 
-use crate::Transform;
+use crate::{NodeData, Transform};
 
 /// An axis of a vector parameter (H, P, B for rotations).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -62,6 +67,16 @@ impl Param {
             Self::Scale(Axis::X) => "Scale . X",
             Self::Scale(Axis::Y) => "Scale . Y",
             Self::Scale(Axis::Z) => "Scale . Z",
+        }
+    }
+
+    /// Position in [`Param::TRANSFORM`].
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Position(axis) => axis.index(),
+            Self::Rotation(axis) => 3 + axis.index(),
+            Self::Scale(axis) => 6 + axis.index(),
         }
     }
 
@@ -188,6 +203,42 @@ impl Curve {
             }
             Err(_) => false,
         }
+    }
+
+    /// The key at `frame`, if there is one.
+    #[must_use]
+    pub fn key_at(&self, frame: f64) -> Option<&Key> {
+        let i = self.keys.binary_search_by(|k| k.frame.total_cmp(&frame)).ok()?;
+        self.keys.get(i)
+    }
+
+    /// Sets the value at `frame`: a key already there keeps its interpolation and
+    /// tangents, a new one gets the defaults.
+    pub fn record(&mut self, frame: f64, value: f32) {
+        match self.keys.binary_search_by(|k| k.frame.total_cmp(&frame)) {
+            Ok(i) => self.keys[i].value = value,
+            Err(i) => self.keys.insert(i, Key::new(frame, value)),
+        }
+    }
+
+    /// Moves the keys whose frame is `selected` by `by` frames; they replace keys
+    /// already at their new frames.
+    pub fn move_keys(&mut self, selected: impl Fn(f64) -> bool, by: f64) {
+        let (mut moved, kept): (Vec<Key>, Vec<Key>) = self.keys.drain(..).partition(|k| selected(k.frame));
+        self.keys = kept;
+        for key in &mut moved {
+            key.frame += by;
+        }
+        for key in moved {
+            self.set_key(key);
+        }
+    }
+
+    /// Removes the keys whose frame is `selected`; `true` if there were any.
+    pub fn remove_keys(&mut self, selected: impl Fn(f64) -> bool) -> bool {
+        let before = self.keys.len();
+        self.keys.retain(|k| !selected(k.frame));
+        self.keys.len() != before
     }
 
     /// The curve's value at `frame`; `None` without keys. Before the first and
@@ -323,6 +374,205 @@ impl Tracks for [Track] {
     }
 }
 
+/// A set of [`Param`]s.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ParamSet(u16);
+
+impl ParamSet {
+    #[must_use]
+    pub const fn contains(self, param: Param) -> bool {
+        self.0 & (1 << param.index()) != 0
+    }
+
+    pub fn insert(&mut self, param: Param) {
+        self.0 |= 1 << param.index();
+    }
+
+    pub fn remove(&mut self, param: Param) {
+        self.0 &= !(1 << param.index());
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// Animated parameters changed at one frame without being recorded: their new
+/// values are in the object's base transform and are shown only at `frame`.
+/// Kept with the object so that undo covers it; never saved.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Unkeyed {
+    pub frame: f64,
+    pub params: ParamSet,
+}
+
+/// What a parameter's key button shows at a frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyState {
+    /// No track.
+    Unanimated,
+    /// A track, no key at this frame.
+    Track,
+    /// A key at this frame.
+    Key,
+    /// A temporary value that differs from the curve; `key`: a key at this frame.
+    Changed { key: bool },
+}
+
+impl NodeData {
+    /// `param`'s value at `frame`: its curve's, unless it was changed at that
+    /// frame without recording (then the base transform's).
+    #[must_use]
+    pub fn value_at(&self, param: Param, frame: f64) -> f32 {
+        let base = param.get(&self.transform);
+        if self.is_unkeyed(param, frame) {
+            return base;
+        }
+        self.tracks
+            .track(param)
+            .and_then(|t| t.curve.value_at(frame))
+            .unwrap_or(base)
+    }
+
+    /// The transform shown at `frame` (what the viewport, the gizmo and the
+    /// Coordinates fields work with).
+    #[must_use]
+    pub fn transform_at(&self, frame: f64) -> Transform {
+        let mut transform = self.transform;
+        for track in &self.tracks {
+            if !self.is_unkeyed(track.param, frame)
+                && let Some(value) = track.curve.value_at(frame)
+            {
+                track.param.set(&mut transform, value);
+            }
+        }
+        transform
+    }
+
+    /// Writes `shown`, the transform as edited at `frame`, back: each parameter
+    /// whose shown value changed is set — an unanimated one in the base
+    /// transform; an animated one as a key at `frame` with `autokey`, else as a
+    /// temporary value.
+    pub fn set_transform_at(&mut self, shown: &Transform, frame: f64, autokey: bool) {
+        let current = self.transform_at(frame);
+        for param in Param::TRANSFORM {
+            let value = param.get(shown);
+            if value != param.get(&current) {
+                self.set_value_at(param, value, frame, autokey);
+            }
+        }
+    }
+
+    /// Sets one parameter as [`set_transform_at`](Self::set_transform_at) does.
+    pub fn set_value_at(&mut self, param: Param, value: f32, frame: f64, autokey: bool) {
+        let Some(track) = self.tracks.iter_mut().find(|t| t.param == param) else {
+            param.set(&mut self.transform, value);
+            return;
+        };
+        if autokey {
+            track.curve.record(frame, value);
+            self.forget_unkeyed(param);
+        } else {
+            param.set(&mut self.transform, value);
+            let mut params = self
+                .unkeyed
+                .filter(|u| u.frame == frame)
+                .map_or_else(ParamSet::default, |u| u.params);
+            params.insert(param);
+            self.unkeyed = Some(Unkeyed { frame, params });
+        }
+    }
+
+    /// The key button of `param` at `frame`.
+    #[must_use]
+    pub fn key_state(&self, param: Param, frame: f64) -> KeyState {
+        let Some(track) = self.tracks.track(param) else {
+            return KeyState::Unanimated;
+        };
+        let key = track.curve.key_at(frame).is_some();
+        if self.is_unkeyed(param, frame) && track.curve.value_at(frame) != Some(param.get(&self.transform)) {
+            KeyState::Changed { key }
+        } else if key {
+            KeyState::Key
+        } else {
+            KeyState::Track
+        }
+    }
+
+    /// Records the values of `params` shown at frame `from` as keys at frame `at`,
+    /// creating tracks as needed; those parameters are no longer temporary.
+    pub fn record(&mut self, params: impl IntoIterator<Item = Param>, from: f64, at: f64) {
+        for param in params {
+            let value = self.value_at(param, from);
+            match self.tracks.iter_mut().find(|t| t.param == param) {
+                Some(track) => track.curve.record(at, value),
+                None => self.tracks.push(Track {
+                    param,
+                    curve: Curve::from_keys([Key::new(at, value)]),
+                }),
+            }
+            self.forget_unkeyed(param);
+        }
+    }
+
+    /// A click on `param`'s key button at `frame`: removes the key there if the
+    /// button shows one, else records the shown value as a key.
+    pub fn toggle_key(&mut self, param: Param, frame: f64) {
+        if self.key_state(param, frame) == KeyState::Key {
+            self.remove_keys(|p, f| p == param && f == frame, frame);
+        } else {
+            self.record([param], frame, frame);
+        }
+    }
+
+    /// Removes `param`'s track; the parameter keeps the value shown at `frame`.
+    pub fn delete_track(&mut self, param: Param, frame: f64) {
+        self.remove_keys(|p, _| p == param, frame);
+    }
+
+    /// Removes the keys for which `selected(param, frame)` holds. A track left
+    /// without keys goes, and its parameter keeps the value shown at `current`.
+    /// Returns whether anything was removed.
+    pub fn remove_keys(&mut self, selected: impl Fn(Param, f64) -> bool, current: f64) -> bool {
+        let shown = self.transform_at(current);
+        let mut removed = false;
+        for track in &mut self.tracks {
+            let param = track.param;
+            removed |= track.curve.remove_keys(|f| selected(param, f));
+        }
+        for param in Param::TRANSFORM {
+            if self.tracks.track(param).is_some_and(|t| t.curve.is_empty()) {
+                param.set(&mut self.transform, param.get(&shown));
+                self.forget_unkeyed(param);
+            }
+        }
+        self.tracks.retain(|t| !t.curve.is_empty());
+        removed
+    }
+
+    /// Moves every key whose frame is `selected` by `by` frames, on every track.
+    pub fn move_keys(&mut self, selected: impl Fn(f64) -> bool + Copy, by: f64) {
+        for track in &mut self.tracks {
+            track.curve.move_keys(selected, by);
+        }
+    }
+
+    fn is_unkeyed(&self, param: Param, frame: f64) -> bool {
+        self.unkeyed
+            .is_some_and(|u| u.frame == frame && u.params.contains(param))
+    }
+
+    fn forget_unkeyed(&mut self, param: Param) {
+        if let Some(unkeyed) = &mut self.unkeyed {
+            unkeyed.params.remove(param);
+            if unkeyed.params.is_empty() {
+                self.unkeyed = None;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,6 +687,92 @@ mod tests {
             let mut t = base;
             p.set(&mut t, 0.5);
             assert_eq!(p.get(&t), 0.5, "{}", p.label());
+            assert_eq!(Param::TRANSFORM[p.index()], p);
         }
+    }
+
+    const PX: Param = Param::Position(Axis::X);
+    const PY: Param = Param::Position(Axis::Y);
+
+    /// An object whose position X goes 0 → 100 over frames 0–10 (linear).
+    fn animated() -> NodeData {
+        let mut data = NodeData::new("a", crate::ObjectKind::Null);
+        data.tracks.push(Track {
+            param: PX,
+            curve: curve(&[(0.0, 0.0), (10.0, 100.0)], Interpolation::Linear),
+        });
+        data
+    }
+
+    fn moved_x(data: &NodeData, frame: f64, x: f32) -> Transform {
+        let mut shown = data.transform_at(frame);
+        shown.position.x = x;
+        shown
+    }
+
+    #[test]
+    fn a_change_without_autokeying_is_temporary_at_its_frame() {
+        let mut data = animated();
+        assert_eq!(data.transform_at(5.0).position.x, 50.0, "the curve's value");
+        data.set_transform_at(&moved_x(&data, 5.0, 70.0), 5.0, false);
+        assert_eq!(data.value_at(PX, 5.0), 70.0, "shown at its frame");
+        assert!(close(data.value_at(PX, 6.0), 60.0), "the curve elsewhere");
+        assert_eq!(data.key_state(PX, 5.0), KeyState::Changed { key: false });
+        assert_eq!(data.key_state(PX, 6.0), KeyState::Track);
+        assert_eq!(data.key_state(PY, 5.0), KeyState::Unanimated);
+        assert_eq!(data.tracks[0].curve.keys().len(), 2, "no key written");
+        // Recording keeps it as a key.
+        data.record(Param::TRANSFORM, 5.0, 5.0);
+        assert_eq!(data.unkeyed, None);
+        assert_eq!(data.tracks.len(), 9, "every parameter recorded");
+        assert_eq!(data.value_at(PX, 5.0), 70.0);
+        assert_eq!(data.key_state(PX, 5.0), KeyState::Key);
+    }
+
+    #[test]
+    fn autokeying_writes_keys_for_animated_parameters_only() {
+        let mut data = animated();
+        let mut shown = moved_x(&data, 5.0, 80.0);
+        shown.position.y = 30.0;
+        data.set_transform_at(&shown, 5.0, true);
+        assert_eq!(data.tracks.len(), 1, "no track for the unanimated Y");
+        assert_eq!(data.transform.position.y, 30.0, "Y simply changes");
+        assert_eq!(data.tracks[0].curve.key_at(5.0).map(|k| k.value), Some(80.0));
+        assert_eq!(data.unkeyed, None);
+        // A key already there keeps its interpolation.
+        data.set_transform_at(&moved_x(&data, 0.0, -5.0), 0.0, true);
+        let first = data.tracks[0].curve.keys()[0];
+        assert_eq!((first.value, first.interpolation), (-5.0, Interpolation::Linear));
+    }
+
+    #[test]
+    fn key_buttons_set_and_remove_keys_and_tracks() {
+        let mut data = animated();
+        data.toggle_key(PX, 5.0);
+        assert_eq!(data.key_state(PX, 5.0), KeyState::Key);
+        assert_eq!(data.value_at(PX, 5.0), 50.0, "the shown value");
+        data.toggle_key(PX, 5.0);
+        assert_eq!(data.key_state(PX, 5.0), KeyState::Track, "a second click removes it");
+        // A key on an unanimated parameter starts its track.
+        data.toggle_key(PY, 3.0);
+        assert_eq!(data.key_state(PY, 3.0), KeyState::Key);
+        // Removing the last key removes the track; the value shown stays.
+        data.toggle_key(PY, 3.0);
+        assert!(data.tracks.track(PY).is_none());
+        data.delete_track(PX, 4.0);
+        assert!(data.tracks.is_empty());
+        assert_eq!(data.transform.position.x, 40.0, "kept as shown at frame 4");
+    }
+
+    #[test]
+    fn moving_and_removing_keys() {
+        let mut c = curve(&[(0.0, 1.0), (5.0, 2.0), (10.0, 3.0)], Interpolation::Linear);
+        c.move_keys(|f| f == 0.0 || f == 5.0, 5.0);
+        let keys: Vec<(f64, f32)> = c.keys().iter().map(|k| (k.frame, k.value)).collect();
+        assert_eq!(keys, [(5.0, 1.0), (10.0, 2.0)], "moved keys replace the key at 10");
+        let mut data = animated();
+        assert!(data.remove_keys(|_, f| f == 10.0, 10.0));
+        assert_eq!(data.tracks[0].curve.keys().len(), 1);
+        assert!(!data.remove_keys(|_, f| f == 99.0, 0.0), "nothing there");
     }
 }

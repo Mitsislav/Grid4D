@@ -273,7 +273,54 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     label: "Loop Playback",
                 });
             }
-            planned(ui, "Record Active Objects", "F9");
+            ui.separator();
+            let frame = time.frame();
+            if ui
+                .add_enabled(
+                    !editor.selection.is_empty(),
+                    Button::new("Record Active Objects").shortcut_text("F9"),
+                )
+                .clicked()
+            {
+                editor.commands.push(EditorCommand::RecordKeys { at: frame });
+                ui.close();
+            }
+            let autokey = Button::new("Autokeying")
+                .shortcut_text("Ctrl+F9")
+                .selected(editor.animation.autokey);
+            if ui.add(autokey).clicked() {
+                editor.animation.autokey = !editor.animation.autokey;
+                ui.close();
+            }
+            ui.menu_button("Record", |ui| {
+                let a = &mut editor.animation;
+                ui.checkbox(&mut a.position, "Position");
+                ui.checkbox(&mut a.scale, "Scale");
+                ui.checkbox(&mut a.rotation, "Rotation");
+            });
+            for (label, shortcut, forward) in [
+                ("Go to Previous Key", "Ctrl+F", false),
+                ("Go to Next Key", "Ctrl+G", true),
+            ] {
+                let target = crate::keys::adjacent_key(&doc.scene, &editor.selection, frame, forward);
+                if ui
+                    .add_enabled(target.is_some(), Button::new(label).shortcut_text(shortcut))
+                    .clicked()
+                    && let Some(target) = target
+                {
+                    doc.time.stop();
+                    doc.time.set_frame(target);
+                    ui.close();
+                }
+            }
+            if ui
+                .add_enabled(!editor.keys.frames.is_empty(), Button::new("Delete Keys"))
+                .on_disabled_hover_text("Select keys on the timeline first")
+                .clicked()
+            {
+                editor.commands.push(EditorCommand::DeleteKeys);
+                ui.close();
+            }
         });
 
         ui.menu_button("Simulate", |ui| {

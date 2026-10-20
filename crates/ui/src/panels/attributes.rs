@@ -10,12 +10,15 @@
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
-use grid4d_scene::{Document, NodeData, NodeId, ObjectKind, Scene, SceneEdit, Tag, TagKind, TimeSettings};
+use grid4d_scene::{
+    Axis, Document, KeyState, NodeData, NodeId, ObjectKind, Param, Scene, SceneEdit, Tag, TagKind, TimeSettings,
+};
 
 use crate::{
     CommandQueue, EditorCommand, EditorState, Tool,
     commands::tag_color,
     icons::{self, Icon},
+    keys::Keying,
     live_edit::{LiveEdit, interaction_ongoing},
     theme::palette as p,
     widgets::{attr_label, manager_tabs, section_heading},
@@ -112,8 +115,12 @@ impl AttributesPanel {
                     match (self.view, editor.selection.active()) {
                         (View::Tool, _) => tool_ui(ui, doc, editor),
                         (View::Objects, Some(id)) => {
-                            let tag = editor.selected_tag(doc).map(|(tag, index)| (tag.kind, index));
-                            self.node_ui(ui, doc, id, tag, editor.selection.len(), &mut editor.commands);
+                            let shown = Shown {
+                                tag: editor.selected_tag(doc).map(|(tag, index)| (tag.kind, index)),
+                                selection_len: editor.selection.len(),
+                                keying: Keying::of(doc, editor),
+                            };
+                            self.node_ui(ui, doc, id, shown, &mut editor.commands);
                         }
                         (View::Objects, None) => self.project_ui(ui, doc, &mut editor.commands),
                     }
@@ -121,17 +128,13 @@ impl AttributesPanel {
             });
     }
 
-    /// The active object's attributes, or those of its selected tag (`tag`: the
-    /// kind and its index in the object's tags).
-    fn node_ui(
-        &mut self,
-        ui: &mut Ui,
-        doc: &mut Document,
-        id: NodeId,
-        tag: Option<(TagKind, usize)>,
-        selection_len: usize,
-        commands: &mut CommandQueue,
-    ) {
+    /// The active object's attributes, or those of its selected tag.
+    fn node_ui(&mut self, ui: &mut Ui, doc: &mut Document, id: NodeId, shown: Shown, commands: &mut CommandQueue) {
+        let Shown {
+            tag,
+            selection_len,
+            keying,
+        } = shown;
         // Widgets edit a copy; the scene is only written (and its revision only
         // bumped) when a value actually changed, so idle frames stay idle.
         let Some(mut data) = doc.scene.get(id).map(|node| node.data.clone()) else {
@@ -187,12 +190,12 @@ impl AttributesPanel {
             }
         });
 
+        let mut label = self.tab.edit_label();
         match self.tab {
             Tab::Basic => basic_tab(ui, &mut data),
-            Tab::Coord => coord_tab(ui, &mut data),
+            Tab::Coord => label = coord_tab(ui, &mut data, keying).unwrap_or(label),
             Tab::Object => object_tab(ui, &mut data),
         }
-        let label = self.tab.edit_label();
         self.finish_node_edit(ui, doc, id, &data, label, commands);
     }
 
@@ -269,7 +272,10 @@ fn basic_tab(ui: &mut Ui, data: &mut NodeData) {
         });
 }
 
-fn coord_tab(ui: &mut Ui, data: &mut NodeData) {
+/// The Coordinates fields show and edit the values at the current frame
+/// (`keying`); the circle before each is its key button. Returns an undo label
+/// when a key button was used.
+fn coord_tab(ui: &mut Ui, data: &mut NodeData, keying: Keying) -> Option<&'static str> {
     section_heading(ui, "Coordinates");
     const ROWS: [[&str; 3]; 3] = [
         ["P . X", "S . X", "R . H"],
@@ -278,38 +284,52 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData) {
     ];
     // A Protection tag makes its channels read-only.
     let protection = grid4d_scene::Tags::protection(data.tags.as_slice());
-    let t = &mut data.transform;
+    let frame = keying.frame;
+    let before = data.transform_at(frame);
+    let mut shown = before;
+    let t = &mut shown;
+    let mut clicked: Option<(Param, KeyClick)> = None;
     Grid::new("grid4d.attr.coord")
         .num_columns(6)
         .spacing([4.0, 4.0])
         .show(ui, |ui| {
             for (axis, [pl, sl, rl]) in ROWS.into_iter().enumerate() {
-                small_label(ui, pl);
+                let axis_id = Axis::ALL[axis];
+                let mut label = |ui: &mut Ui, param: Param, text: &str| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        if let Some(click) = key_button(ui, data.key_state(param, frame)) {
+                            clicked = Some((param, click));
+                        }
+                        small_label(ui, text);
+                    });
+                };
+                label(ui, Param::Position(axis_id), pl);
                 ui.add_enabled_ui(!protection.position, |ui| {
                     ui.add_sized(
-                        [70.0, 19.0],
+                        [64.0, 19.0],
                         DragValue::new(&mut t.position[axis])
                             .speed(1.0)
                             .suffix(" cm")
                             .max_decimals(2),
                     )
                 });
-                small_label(ui, sl);
+                label(ui, Param::Scale(axis_id), sl);
                 ui.add_enabled_ui(!protection.scale, |ui| {
                     ui.add_sized(
-                        [52.0, 19.0],
+                        [48.0, 19.0],
                         DragValue::new(&mut t.scale[axis])
                             .speed(0.01)
                             .range(0.001..=10_000.0)
                             .max_decimals(3),
                     )
                 });
-                small_label(ui, rl);
+                label(ui, Param::Rotation(axis_id), rl);
                 let mut degrees = t.rotation[axis].to_degrees();
                 let rotated = ui
                     .add_enabled_ui(!protection.rotation, |ui| {
                         ui.add_sized(
-                            [60.0, 19.0],
+                            [56.0, 19.0],
                             DragValue::new(&mut degrees).speed(0.5).suffix("°").max_decimals(2),
                         )
                     })
@@ -330,6 +350,79 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData) {
     {
         *t = grid4d_scene::Transform::IDENTITY;
     }
+    if shown != before {
+        data.set_transform_at(&shown, frame, keying.autokey);
+    }
+    let (param, click) = clicked?;
+    Some(match click {
+        KeyClick::Toggle => {
+            data.toggle_key(param, frame);
+            "Set Key"
+        }
+        KeyClick::DeleteTrack => {
+            data.delete_track(param, frame);
+            "Delete Track"
+        }
+    })
+}
+
+/// What a click on a key button does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KeyClick {
+    /// Plain click: set a key, or remove the one shown.
+    Toggle,
+    /// Shift+Ctrl+click: remove the whole track.
+    DeleteTrack,
+}
+
+/// A parameter's key button: grey ring (not animated), red ring (animated),
+/// red disc (a key here), yellow (a temporary value).
+fn key_button(ui: &mut Ui, state: KeyState) -> Option<KeyClick> {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(11.0), Sense::click());
+    let (color, filled) = match state {
+        KeyState::Unanimated => (p::TEXT_FAINT, false),
+        KeyState::Track => (p::RECORD, false),
+        KeyState::Key => (p::RECORD, true),
+        KeyState::Changed { key } => (p::KEY_CHANGED, key),
+    };
+    let color = if response.hovered() {
+        color.gamma_multiply(1.4)
+    } else {
+        color
+    };
+    let (center, radius) = (rect.center(), 4.0);
+    if filled {
+        ui.painter().circle_filled(center, radius, color);
+    } else {
+        ui.painter()
+            .circle_stroke(center, radius - 0.6, egui::Stroke::new(1.3, color));
+    }
+    let tip = match state {
+        KeyState::Unanimated => "Click: set a key at the current frame",
+        KeyState::Track => "Animated · click: set a key here · Shift+Ctrl+click: delete the track",
+        KeyState::Key => "Key at this frame · click: remove it · Shift+Ctrl+click: delete the track",
+        KeyState::Changed { .. } => {
+            "Changed but not recorded: dropped when the frame changes · click: set a key · Shift+Ctrl+click: delete the track"
+        }
+    };
+    if !response.on_hover_text(tip).clicked() {
+        return None;
+    }
+    let m = ui.input(|i| i.modifiers);
+    Some(if m.shift && m.command {
+        KeyClick::DeleteTrack
+    } else {
+        KeyClick::Toggle
+    })
+}
+
+/// What the Attribute Manager shows for the active object.
+#[derive(Clone, Copy, Debug)]
+struct Shown {
+    /// The selected tag: its kind and index in the object's tags.
+    tag: Option<(TagKind, usize)>,
+    selection_len: usize,
+    keying: Keying,
 }
 
 fn object_tab(ui: &mut Ui, data: &mut NodeData) {

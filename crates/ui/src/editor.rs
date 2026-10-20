@@ -354,6 +354,76 @@ impl Default for SelectionSettings {
     }
 }
 
+/// Recording keys (timeline, Animate menu; see
+/// `docs/reference/animation-recording.md`). Editor state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[expect(clippy::struct_excessive_bools, reason = "independent toggles of the reference")]
+pub struct AnimationSettings {
+    /// Changes to animated parameters become keys at the current frame (Ctrl+F9).
+    pub autokey: bool,
+    /// The channels Record (F9) writes.
+    pub position: bool,
+    pub scale: bool,
+    pub rotation: bool,
+}
+
+impl Default for AnimationSettings {
+    fn default() -> Self {
+        Self {
+            autokey: false,
+            position: true,
+            scale: true,
+            rotation: true,
+        }
+    }
+}
+
+impl AnimationSettings {
+    /// Whether Record writes `param`.
+    #[must_use]
+    pub const fn records(&self, param: grid4d_scene::Param) -> bool {
+        match param {
+            grid4d_scene::Param::Position(_) => self.position,
+            grid4d_scene::Param::Scale(_) => self.scale,
+            grid4d_scene::Param::Rotation(_) => self.rotation,
+        }
+    }
+}
+
+/// Keys selected on the timeline: frames whose keys (of every selected object)
+/// are selected. Editor state.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct KeySelection {
+    /// Sorted, no duplicates.
+    pub frames: Vec<f64>,
+    /// The last click was in the timeline's key strip: Delete removes keys.
+    pub focused: bool,
+}
+
+impl KeySelection {
+    #[must_use]
+    pub fn contains(&self, frame: f64) -> bool {
+        self.frames.binary_search_by(|f| f.total_cmp(&frame)).is_ok()
+    }
+
+    /// Adds `frame`, or removes it if it is selected.
+    pub fn toggle(&mut self, frame: f64) {
+        match self.frames.binary_search_by(|f| f.total_cmp(&frame)) {
+            Ok(i) => {
+                self.frames.remove(i);
+            }
+            Err(i) => self.frames.insert(i, frame),
+        }
+    }
+
+    /// Adds `frame` (kept sorted).
+    pub fn insert(&mut self, frame: f64) {
+        if let Err(i) = self.frames.binary_search_by(|f| f.total_cmp(&frame)) {
+            self.frames.insert(i, frame);
+        }
+    }
+}
+
 /// Component mode (left palette). Points, Edges and Polygons work on the active
 /// object when it is a polygon object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -519,6 +589,12 @@ pub struct EditorState {
     pub snap: SnapSettings,
     /// The tag shown in the Attribute Manager (only while its object is active).
     pub tag_selection: Option<TagRef>,
+    pub animation: AnimationSettings,
+    /// Keys selected on the timeline.
+    pub keys: KeySelection,
+    /// The frame temporary values were last checked against (see
+    /// `commands::apply_pending`).
+    pub seen_frame: Option<i32>,
     pub commands: CommandQueue,
     /// Undo/redo steps; written only by `commands::apply`.
     pub history: History,
@@ -563,6 +639,9 @@ impl Default for EditorState {
             world_coordinates: false,
             snap: SnapSettings::default(),
             tag_selection: None,
+            animation: AnimationSettings::default(),
+            keys: KeySelection::default(),
+            seen_frame: None,
             commands: CommandQueue::default(),
             history: History::default(),
             file: DocumentFile::default(),

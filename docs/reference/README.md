@@ -64,7 +64,8 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 5.3 | [`interchange-obj.md`](interchange-obj.md) — Wavefront OBJ import and export | implemented 2026-10-20 |
 | 6.1 | [`tag-basics.md`](tag-basics.md) — tags: Phong, Protection, Target | implemented 2026-10-20 |
 | 6.2 | [`animation-keys.md`](animation-keys.md) — tracks, curves, keys, evaluation | implemented 2026-10-20 |
+| 6.3 | [`animation-recording.md`](animation-recording.md) — Record (F9), Autokeying, key buttons, keys on the timeline | implemented 2026-10-20 |
 | later | `modeling-sds-weights.md` — point/edge weights (creases) | todo |
-| 6 | `animation-keyframes.md` — keys, tracks, F-curve interpolation, timeline | todo |
+| 6.4 | `animation-fcurves.md` — the F-Curve editor | todo |
 | 6 | `manager-coordinate.md`, `manager-material.md` | todo |
 | 7 | `object-camera.md`, `object-light.md`, `viewport-layouts.md` | todo |

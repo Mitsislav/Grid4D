@@ -38,6 +38,10 @@ pub mod palette {
     /// Active object, hovered gizmo handles, keyframes.
     pub const HIGHLIGHT: Color32 = Color32::from_rgb(0xf5, 0x8f, 0x2a);
     pub const RECORD: Color32 = Color32::from_rgb(0xe0, 0x3e, 0x3e);
+    /// Key buttons: a temporary value that differs from its curve.
+    pub const KEY_CHANGED: Color32 = Color32::from_rgb(0xe8, 0xc5, 0x47);
+    /// Key marks on the timeline.
+    pub const KEY: Color32 = Color32::from_rgb(0xb4, 0xb8, 0xbf);
 
     pub const AXIS_X: Color32 = Color32::from_rgb(0xe8, 0x4f, 0x4f);
     pub const AXIS_Y: Color32 = Color32::from_rgb(0x7f, 0xc8, 0x45);

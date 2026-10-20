@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use glam::Mat4;
 use grid4d_geom::{BitSet, subdivision::SubdivisionOptions};
 use grid4d_scene::{
-    Aabb, Components, LIGHT_MARKER_RADIUS, MeshHandle, MeshId, NodeId, ObjectKind, Scene, TagKind, Tags, Tracks,
-    WalkItem,
+    Aabb, Components, LIGHT_MARKER_RADIUS, MeshHandle, MeshId, NodeId, ObjectKind, Scene, TagKind, Tags, WalkItem,
 };
 
 use crate::{
@@ -261,11 +260,8 @@ fn animate(scene: &Scene, nodes: &mut [EvaluatedNode], frame: f64, stack: &mut V
         let Some(data) = scene.get(node.id).map(|n| &n.data) else {
             continue;
         };
-        let local = if data.tracks.is_empty() {
-            data.transform.matrix()
-        } else {
-            data.tracks.animate(&data.transform, frame).matrix()
-        };
+        // Temporary values made at this frame included.
+        let local = data.transform_at(frame).matrix();
         node.world = stack.last().map_or(local, |&(_, parent)| parent * local);
         stack.push((node.depth, node.world));
     }

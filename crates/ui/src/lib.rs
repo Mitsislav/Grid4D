@@ -20,6 +20,7 @@ pub mod editor;
 pub mod file;
 pub mod history;
 pub mod icons;
+pub mod keys;
 mod live_edit;
 mod modeling;
 pub mod panels;
@@ -31,8 +32,8 @@ pub mod window;
 
 pub use commands::{CommandQueue, EditorCommand, SelectMode};
 pub use editor::{
-    EditMode, EditorState, ModelingSettings, Selection, SelectionSettings, SnapSettings, SnapType, TagRef, Tool,
-    TransformSettings,
+    AnimationSettings, EditMode, EditorState, KeySelection, ModelingSettings, Selection, SelectionSettings,
+    SnapSettings, SnapType, TagRef, Tool, TransformSettings,
 };
 pub use file::{DocumentFile, FileAction, FileDialogs, NativeDialogs, UnsavedChoice};
 pub use history::{History, UndoGroup};

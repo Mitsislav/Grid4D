@@ -59,6 +59,23 @@ mod tests {
         assert_idle_frames_leave_the_document_alone(doc, editor);
     }
 
+    /// The Attribute Manager and the gizmo show animated values between keys.
+    #[test]
+    fn idle_frames_between_keys_do_not_touch_the_document() {
+        let mut doc = Document::with_demo_scene();
+        let mut editor = EditorState::default();
+        let cube = doc.scene.roots()[0];
+        editor.selection.set_single(cube);
+        let data = &mut doc.scene.get_mut(cube).unwrap().data;
+        data.record(grid4d_scene::Param::TRANSFORM, 0.0, 0.0);
+        let mut shown = data.transform_at(10.0);
+        shown.position.x = 123.4;
+        shown.rotation.y = 0.7;
+        data.set_transform_at(&shown, 10.0, true);
+        doc.time.set_frame(7);
+        assert_idle_frames_leave_the_document_alone(doc, editor);
+    }
+
     fn assert_idle_frames_leave_the_document_alone(mut doc: Document, mut editor: EditorState) {
         let ctx = egui::Context::default();
         let mut outliner = OutlinerPanel::default();
@@ -73,7 +90,7 @@ mod tests {
                 mode_palette::show(ui, doc, editor);
                 outliner.show(ui, doc, editor);
                 attributes.show(ui, doc, editor);
-                timeline.show(ui, &mut doc.time, editor);
+                timeline.show(ui, doc, editor);
                 viewport.show(ui, doc, editor);
             })
             .drop_without_applying_deltas();

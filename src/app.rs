@@ -146,8 +146,8 @@ impl eframe::App for Grid4DApp {
         Panel::bottom("grid4d.timeline")
             .frame(theme::panel_frame())
             .resizable(false)
-            .exact_size(66.0)
-            .show(ui, |ui| self.timeline.show(ui, &mut self.doc.time, &mut self.editor));
+            .exact_size(grid4d_ui::panels::timeline::HEIGHT)
+            .show(ui, |ui| self.timeline.show(ui, &mut self.doc, &mut self.editor));
 
         CentralPanel::no_frame().show(ui, |ui| self.viewport.show(ui, &mut self.doc, &mut self.editor));
 

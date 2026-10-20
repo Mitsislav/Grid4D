@@ -679,6 +679,7 @@ impl ObjectDto {
                 tracks.push(track);
                 tracks
             }),
+            unkeyed: None,
         })
         .map(|data| (data, self.tags))
     }

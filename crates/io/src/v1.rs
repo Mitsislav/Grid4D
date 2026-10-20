@@ -98,6 +98,7 @@ impl ObjectDto {
             enabled: self.enabled,
             tags: Vec::new(),
             tracks: Vec::new(),
+            unkeyed: None,
         }
     }
 

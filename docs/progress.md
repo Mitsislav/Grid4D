@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 6 — Tags, animation, materials, managers (v0.6) |
-| Last step done | 6.2 — Tracks, curves and keys + evaluation (2026-10-20) |
-| Next step | 6.3 — Recording keys (F9), autokeying, key indicators, keys on the timeline |
-| Tests | 386, all passing; clippy and rustfmt clean |
+| Last step done | 6.3 — Recording keys (F9), Autokeying, key buttons, keys on the timeline (2026-10-20) |
+| Next step | 6.4 — The F-Curve editor |
+| Tests | 403, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -329,7 +329,8 @@ Maxon's public manual, in our own words (clean-room).
 | Step | Built | Tests |
 |------|-------|-------|
 | 6.1 (`becd43a`) | Tags on objects (saved, undoable): Phong (smoothing angle, in the viewport and in exports), Protection (no gizmo, read-only Coordinates for protected channels), Target (turns the object's −Z towards another object, children follow); icons in the Object Manager, the tag view in the Attribute Manager, Tags menu, Delete removes a selected tag | 378 |
-| 6.2 | Animation data: tracks of keys per object (position, rotation, scale), Spline / Linear / Step with clamped auto or manual tangents, evaluated at the current frame (children follow, the document untouched), saved in `.g4d` | 386 |
+| 6.2 (`2e1086a`) | Animation data: tracks of keys per object (position, rotation, scale), Spline / Linear / Step with clamped auto or manual tangents, evaluated at the current frame (children follow, the document untouched), saved in `.g4d` | 386 |
+| 6.3 | Recording keys: Record Active Objects (F9), Autokeying (Ctrl+F9, red view frame), key buttons in the Coord. tab, temporary (unrecorded) changes, the timeline's key strip (select, move, delete, Ctrl+click records), previous / next key (Ctrl+F / Ctrl+G); the gizmo and the Coordinates work at the current frame | 403 |
 
 *Problems and solutions:*
 - **Where tags live.** Tags sit in `NodeData`, the unit of attribute edits. Adding,
@@ -379,6 +380,44 @@ Maxon's public manual, in our own words (clean-room).
 - **Checked in the app:** a document with a bouncing, squashing ball and a turning
   bar carrying a sphere, stepped with G to frames 8, 15 and 30. Every object was
   where its curves put it, and the child turned with its parent.
+
+*Step 6.3 — problems and solutions:*
+- **Editing an animated object while playback never writes the document.** Before
+  6.3 the gizmo and the Coordinates fields worked on the object's own values, which
+  an animated parameter ignores, so a drag moved nothing. Now everything the user
+  sees and edits is the transform *at the current frame*, and one function writes
+  an edit back: a key with Autokeying, otherwise a **temporary value**.
+- **Where a temporary value lives.** The reference keeps a changed but unrecorded
+  value until the time moves. Grid4D keeps it in the object's base transform (unused
+  by an animated parameter) with the frame it belongs to, so the evaluation shows
+  it only at that frame and undo covers it. When the frame changes, the command
+  step drops it (not an undo step); it is never saved.
+- **The gizmo sat at the document's position**, not the animated one: it now uses
+  world matrices at the current frame.
+- **Rotation keys from the gizmo.** Converting the rotation back to H/P/B angles
+  jumps from 180° to −180°, and keys would then spin the object the long way round.
+  The gizmo keeps each angle within half a turn of its previous value.
+- **Undo labels for the key buttons.** The Attribute Manager records its edits per
+  tab; a key button click reports its own label ("Set Key", "Delete Track").
+- **Idle frames between keys.** A test now runs every panel on a document animated
+  between two keys and checks that nothing is written while nothing happens.
+- **A bigger `NodeData`** (the temporary value) made `EditorCommand` larger, and
+  clippy flagged the chord table that holds one. It is built per key press and
+  never stored, so the lint is acknowledged there.
+- **Deliberate differences from the reference**, written in the spec: a track whose
+  last key is deleted goes (the reference keeps it empty), and the key strip shows
+  the keys of all selected objects merged per frame.
+
+*Bugs found by testing the app on screen, and fixed:*
+- **The transport buttons ran into the range fields** at 1280 × 800 (125 %
+  scaling), now that there are nine of them. They shrink to fit narrow windows.
+- **A key at the current frame hid under the playhead.** The playhead is now drawn
+  under the key marks.
+- **On-screen testing:** the first posted click after the app starts is lost, so
+  runs now begin with a harmless click on the status bar. The scenario (F9 at frame
+  0, frame 31, a gizmo drag, F9, frame 16, select the key, Autokeying) showed every
+  state: the yellow ring, red dots, the in-between value, the selected mark and the
+  red frame.
 
 ---
 

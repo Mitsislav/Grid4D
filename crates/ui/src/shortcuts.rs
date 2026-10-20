@@ -18,6 +18,9 @@
 //! | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo            |
 //! | `F6` / `F7` / `F8` | Play backwards / stop / play forwards |
 //! | `F` / `G`      | Previous / next frame      |
+//! | `Ctrl+F` / `Ctrl+G` | Previous / next key   |
+//! | `F9`           | Record Active Objects      |
+//! | `Ctrl+F9`      | Autokeying on / off        |
 //!
 //! Two-key chords (press the first key, then the second) are listed in
 //! [`Chord::complete`]: `U~L` Loop Selection, `K~L` Loop/Path Cut, `M~M` Connect, …
@@ -39,6 +42,7 @@ pub enum Chord {
 }
 
 /// What a completed chord does.
+#[expect(clippy::large_enum_variant, reason = "one per key press, never stored")]
 enum Action {
     Tool(Tool),
     Command(EditorCommand),
@@ -171,7 +175,17 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                 editor.commands.push(EditorCommand::ToggleParentGenerator);
             }
             if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
-                editor.commands.push(EditorCommand::DeleteSelected);
+                // After a click in the timeline's key strip, Delete removes keys.
+                editor
+                    .commands
+                    .push(if editor.keys.focused && !editor.keys.frames.is_empty() {
+                        EditorCommand::DeleteKeys
+                    } else {
+                        EditorCommand::DeleteSelected
+                    });
+            }
+            if i.key_pressed(Key::F9) {
+                editor.commands.push(EditorCommand::RecordKeys { at: time.frame() });
             }
             if i.key_pressed(Key::F6) {
                 time.play_backward();
@@ -193,6 +207,19 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         }
         if i.modifiers.shift_only() && i.key_pressed(Key::S) {
             editor.snap.enabled = !editor.snap.enabled;
+        }
+        let ctrl_only = i.modifiers.command && !i.modifiers.shift && !i.modifiers.alt;
+        if ctrl_only && i.key_pressed(Key::F9) {
+            editor.animation.autokey = !editor.animation.autokey;
+        }
+        for (key, forward) in [(Key::F, false), (Key::G, true)] {
+            if ctrl_only
+                && i.key_pressed(key)
+                && let Some(frame) = crate::keys::adjacent_key(&doc.scene, &editor.selection, time.frame(), forward)
+            {
+                time.stop();
+                time.set_frame(frame);
+            }
         }
         let backspace = i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete);
         if backspace && i.modifiers.command && !i.modifiers.alt && !i.modifiers.shift {
@@ -449,6 +476,71 @@ mod tests {
         assert_eq!(keys(&[(Key::B, none)]).0.tool, Tool::Bridge);
         let (editor, commands) = keys(&[(Key::U, none), (Key::O, none)]);
         assert!(editor.show_optimize && commands.is_empty(), "U~O opens the dialog");
+    }
+
+    /// Presses `key` once with `modifiers` on the given document and editor.
+    fn press_on(doc: &mut Document, editor: &mut EditorState, key: Key, modifiers: Modifiers) {
+        let ctx = egui::Context::default();
+        let input = RawInput {
+            events: vec![
+                Event::ModifiersChanged(modifiers),
+                Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+            ],
+            ..RawInput::default()
+        };
+        ctx.run_ui(input, |ui| handle(ui.ctx(), doc, editor))
+            .drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn animation_keys_follow_maxons_list() {
+        assert_eq!(
+            press(Key::F9, Modifiers::NONE, false),
+            [EditorCommand::RecordKeys { at: 0 }]
+        );
+        let (mut doc, mut editor) = (Document::with_demo_scene(), EditorState::default());
+        press_on(&mut doc, &mut editor, Key::F9, Modifiers::COMMAND);
+        assert!(editor.animation.autokey, "Ctrl+F9 switches Autokeying on");
+        press_on(&mut doc, &mut editor, Key::F9, Modifiers::COMMAND);
+        assert!(!editor.animation.autokey);
+
+        // Ctrl+G / Ctrl+F jump between the selected object's keys.
+        let cube = doc.scene.roots()[0];
+        editor.selection.set_single(cube);
+        let data = &mut doc.scene.get_mut(cube).unwrap().data;
+        data.record([grid4d_scene::Param::Scale(grid4d_scene::Axis::X)], 0.0, 12.0);
+        data.record([grid4d_scene::Param::Scale(grid4d_scene::Axis::X)], 0.0, 40.0);
+        press_on(&mut doc, &mut editor, Key::G, Modifiers::COMMAND);
+        assert_eq!(doc.time.frame(), 12);
+        press_on(&mut doc, &mut editor, Key::G, Modifiers::COMMAND);
+        assert_eq!(doc.time.frame(), 40);
+        press_on(&mut doc, &mut editor, Key::G, Modifiers::COMMAND);
+        assert_eq!(doc.time.frame(), 40, "no key after the last");
+        press_on(&mut doc, &mut editor, Key::F, Modifiers::COMMAND);
+        assert_eq!(doc.time.frame(), 12);
+    }
+
+    #[test]
+    fn delete_removes_keys_after_a_click_in_the_key_strip() {
+        let (mut doc, mut editor) = (Document::default(), EditorState::default());
+        editor.keys.frames = vec![5.0];
+        press_on(&mut doc, &mut editor, Key::Delete, Modifiers::NONE);
+        assert_eq!(
+            editor.commands.pending(),
+            [EditorCommand::DeleteSelected],
+            "not focused"
+        );
+        let mut editor = EditorState::default();
+        editor.keys.frames = vec![5.0];
+        editor.keys.focused = true;
+        press_on(&mut doc, &mut editor, Key::Delete, Modifiers::NONE);
+        assert_eq!(editor.commands.pending(), [EditorCommand::DeleteKeys]);
     }
 
     #[test]

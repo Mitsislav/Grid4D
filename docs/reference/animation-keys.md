@@ -83,6 +83,6 @@ merges and saves without extra bookkeeping.
       not re-evaluated when the frame changes.
 - [x] Tracks survive save and reload exactly; non-finite data is refused.
 
-Known gaps until 6.3: the gizmo and the Coordinates fields work on the object's own
-values (an animated parameter shows its curve, not the dragged value); a
+Since 6.3 the gizmo and the Coordinates fields work on the values at the current
+frame ([`animation-recording.md`](animation-recording.md)). Still open: a
 Subdivision Surface's result does not follow an animated cage yet.
