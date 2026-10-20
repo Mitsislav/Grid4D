@@ -15,9 +15,31 @@ struct Camera {
     // xy: target size in pixels, z: the fill (0 lit, 1 quick, 2 constant),
     // w: 1 for lines in the object's colour.
     viewport: vec4<f32>,
+    // The component overlay's colours and sizes (overlay.wgsl).
+    wire: vec4<f32>,
+    selected: vec4<f32>,
+    hover: vec4<f32>,
+    sizes: vec4<f32>,
+    alphas: vec4<f32>,
+    // x: scene lights to use (0: the default light), y: ambient with scene lights.
+    lighting: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
+
+// Must match `LightRaw` in frame.rs.
+struct Light {
+    // xyz: world position, w: type (0 omni, 1 spot, 2 infinite).
+    position: vec4<f32>,
+    // xyz: the direction it shines in, w: cosine of half the outer angle.
+    direction: vec4<f32>,
+    // rgb: colour × intensity, w: cosine of half the inner angle.
+    color: vec4<f32>,
+    // x: falloff (0 none, 1 linear, 2 inverse square), y: radius.
+    falloff: vec4<f32>,
+};
+
+@group(0) @binding(1) var<storage, read> lights: array<Light>;
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
@@ -34,8 +56,10 @@ struct InstanceIn {
     @location(7) normal_1: vec4<f32>,
     @location(8) normal_2: vec4<f32>,
     @location(9) color: vec4<f32>,
-    // x: selected, y: unlit
+    // x: selected, y: unlit, z: roughness, w: metallic
     @location(10) params: vec4<f32>,
+    // rgb: light the surface gives off
+    @location(11) emission: vec4<f32>,
 };
 
 struct VertexOut {
@@ -44,6 +68,7 @@ struct VertexOut {
     @location(1) world_normal: vec3<f32>,
     @location(2) color: vec4<f32>,
     @location(3) params: vec4<f32>,
+    @location(4) emission: vec3<f32>,
 };
 
 @vertex
@@ -58,6 +83,7 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     out.world_normal = normal_matrix * vertex.normal;
     out.color = instance.color;
     out.params = instance.params;
+    out.emission = instance.emission.rgb;
     return out;
 }
 
@@ -69,6 +95,54 @@ fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
 }
 
 const SELECTION_RIM: vec3<f32> = vec3<f32>(1.0, 0.42, 0.06);
+// The default light's strength.
+const DEFAULT_LIGHT: f32 = 0.62;
+
+// What one light reflects towards the viewer: diffuse, and a highlight whose size
+// follows the roughness (Blinn-Phong with a normalised exponent, Schlick Fresnel).
+fn reflected(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>, diffuse: vec3<f32>, f0: vec3<f32>, shininess: f32) -> vec3<f32> {
+    let n_dot_l = dot(n, l);
+    if (n_dot_l <= 0.0) {
+        return vec3<f32>(0.0);
+    }
+    let h = normalize(l + v);
+    let fresnel = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
+    let highlight = fresnel * ((shininess + 8.0) / 8.0) * pow(max(dot(n, h), 0.0), shininess);
+    return (diffuse + highlight) * radiance * n_dot_l;
+}
+
+// The direction towards `light` from `p` (xyz) and how much of it arrives (w):
+// its cone and falloff.
+fn incoming(light: Light, p: vec3<f32>) -> vec4<f32> {
+    let kind = u32(light.position.w + 0.5);
+    if (kind == 2u) {
+        // Infinite: a direction only.
+        return vec4<f32>(-light.direction.xyz, 1.0);
+    }
+    let to_light = light.position.xyz - p;
+    let distance = max(length(to_light), 0.001);
+    let l = to_light / distance;
+    var amount = 1.0;
+    let falloff = u32(light.falloff.x + 0.5);
+    let radius = max(light.falloff.y, 0.01);
+    if (falloff == 1u) {
+        amount = clamp(1.0 - distance / radius, 0.0, 1.0);
+    } else if (falloff == 2u) {
+        let ratio = radius / distance;
+        amount = min(ratio * ratio, 10000.0);
+    }
+    if (kind == 1u) {
+        let cos_angle = dot(-l, light.direction.xyz);
+        let cos_outer = light.direction.w;
+        let cos_inner = light.color.w;
+        if (cos_inner > cos_outer + 0.0001) {
+            amount = amount * smoothstep(cos_outer, cos_inner, cos_angle);
+        } else if (cos_angle < cos_outer) {
+            amount = 0.0;
+        }
+    }
+    return vec4<f32>(l, amount);
+}
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
@@ -79,24 +153,43 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         n = -n;
     }
 
-    let light = normalize(camera.light_dir.xyz);
-    let key = max(dot(n, light), 0.0);
+    // The material: metals reflect their colour and have no diffuse part.
+    let base = in.color.rgb;
+    let roughness = clamp(in.params.z, 0.02, 1.0);
+    let metallic = clamp(in.params.w, 0.0, 1.0);
+    let diffuse = base * (1.0 - metallic);
+    let f0 = mix(vec3<f32>(0.04), base, metallic);
+    let shininess = clamp(2.0 / pow(roughness, 4.0) - 2.0, 1.0, 2048.0);
+
+    // Soft light from all around (stronger from above), and its reflection: a dim
+    // studio, brighter overhead, that mostly metals show (smoother ones more).
     let facing = max(dot(n, view_dir), 0.0);
     let sky = 0.5 + 0.5 * n.y;
-    let half_vec = normalize(light + view_dir);
-    let specular = pow(max(dot(n, half_vec), 0.0), 48.0) * 0.08;
+    let ambient = diffuse * (0.08 + 0.22 * sky + 0.16 * facing);
+    let mirrored = reflect(-view_dir, n);
+    let studio = f0 * (0.16 + 0.34 * (0.5 + 0.5 * mirrored.y)) * (1.0 - 0.5 * roughness);
 
-    let base = in.color.rgb;
-    var lit = base * (0.08 + 0.22 * sky + 0.62 * key + 0.16 * facing) + vec3<f32>(specular);
-    let fill = u32(camera.viewport.z + 0.5);
-    if (fill == 1u) {
-        // Quick Shading: the default light alone, no highlight.
-        lit = base * (0.22 + 0.78 * key);
-    } else if (fill == 2u) {
+    var lit = studio;
+    let count = u32(camera.lighting.x + 0.5);
+    if (count == 0u) {
+        // The default light, from over the viewer's shoulder.
+        let light = normalize(camera.light_dir.xyz);
+        lit = lit + ambient + reflected(n, view_dir, light, vec3<f32>(DEFAULT_LIGHT), diffuse, f0, shininess);
+    } else {
+        lit = lit + ambient * camera.lighting.y;
+        for (var i = 0u; i < count; i = i + 1u) {
+            let light = lights[i];
+            let arriving = incoming(light, in.world_position);
+            if (arriving.w > 0.0) {
+                lit = lit + reflected(n, view_dir, arriving.xyz, light.color.rgb * arriving.w, diffuse, f0, shininess);
+            }
+        }
+    }
+    if (u32(camera.viewport.z + 0.5) == 2u) {
         // Constant Shading: the colour itself.
         lit = base;
     }
-    var rgb = mix(lit, base, in.params.y);
+    var rgb = mix(lit, base, in.params.y) + in.emission;
 
     // Selected objects get a subtle orange Fresnel rim (the UI adds bbox corner brackets).
     let rim = pow(1.0 - facing, 4.0);

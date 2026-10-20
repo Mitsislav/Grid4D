@@ -55,8 +55,10 @@ None yet (an import dialog with Scale and toggles is *later*). Fixed choices:
   - the base colour factor of a primitive's material → the object's display colour;
   - perspective cameras → Camera objects (vertical field of view); orthographic ones
     become cameras with the default field of view;
-  - `KHR_lights_punctual` point, spot and directional lights → Light objects (colour,
-    intensity as given);
+  - `KHR_lights_punctual` point, spot and directional lights → Omni, Spot and
+    Infinite Light objects (colour, intensity as given; a spot's cone half-angles
+    doubled into opening angles, an inner cone as wide as the outer one is a hard
+    edge);
   - a node with a mesh *and* a camera or light keeps the mesh; the other becomes a
     child at the same place;
   - a node without content → a Null; empty names → the kind's label.
@@ -88,8 +90,9 @@ None yet (an import dialog with Scale and toggles is *later*). Fixed choices:
     generator is written as an empty node with its children as they are.
   - Display colours → materials (base colour, not metallic), one per colour.
   - Cameras → perspective cameras (vertical field of view); lights →
-    `KHR_lights_punctual` point lights (colour, intensity); Nulls and empty polygon
-    objects → nodes without content.
+    `KHR_lights_punctual` point, spot (cone half-angles; a hard cone's inner angle
+    just inside the outer one) and directional lights (colour, intensity); Nulls
+    and empty polygon objects → nodes without content.
 - **Round trip:** importing an exported file gives back the hierarchy, names,
   transforms, cameras and lights, and every mesh as a polygon object with the same
   points (triangulated, welded).

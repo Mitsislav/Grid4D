@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use crate::{Aabb, Components, MeshHandle, Transform};
+use crate::{Aabb, Components, LightDetails, LightType, MeshHandle, Transform};
 
 slotmap::new_key_type! {
     /// Stable, generational handle to a node in a [`Scene`](crate::Scene).
@@ -84,6 +84,9 @@ pub enum ObjectKind {
     Light {
         color: [f32; 3],
         intensity: f32,
+        light_type: LightType,
+        /// Cone (spots) and falloff.
+        details: LightDetails,
     },
     /// An editable mesh (C4D's "Polygon Object"), in object space, with its
     /// selected and hidden components (they live in the object, like C4D's, so
@@ -226,10 +229,7 @@ impl ObjectKindTag {
                 cap_segments: 8,
             },
             Self::Camera => ObjectKind::Camera { fov_y_deg: 40.0 },
-            Self::Light => ObjectKind::Light {
-                color: [1.0, 1.0, 1.0],
-                intensity: 1.0,
-            },
+            Self::Light => ObjectKind::light([1.0, 1.0, 1.0], 1.0),
             // Empty, like C4D's Create ▸ Polygon Object.
             Self::Polygon => ObjectKind::polygon(MeshHandle::new(grid4d_geom::PolyMesh::new())),
             // The manual states no defaults: 2 / 3 levels are the long-standing
@@ -245,6 +245,17 @@ impl ObjectKindTag {
 }
 
 impl ObjectKind {
+    /// An Omni light with the default details.
+    #[must_use]
+    pub fn light(color: [f32; 3], intensity: f32) -> Self {
+        Self::Light {
+            color,
+            intensity,
+            light_type: LightType::Omni,
+            details: LightDetails::default(),
+        }
+    }
+
     /// A polygon object with `mesh` and nothing selected or hidden.
     #[must_use]
     pub fn polygon(mesh: MeshHandle) -> Self {

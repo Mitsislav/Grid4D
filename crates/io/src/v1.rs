@@ -150,7 +150,7 @@ impl KindDto {
                 depth_segments: 20,
             },
             Self::Camera { fov_y_deg } => ObjectKind::Camera { fov_y_deg },
-            Self::Light { color, intensity } => ObjectKind::Light { color, intensity },
+            Self::Light { color, intensity } => ObjectKind::light(color, intensity),
         }
     }
 }

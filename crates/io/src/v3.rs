@@ -23,8 +23,8 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
 };
 use grid4d_scene::{
-    Axis, ComponentState, Components, Curve, Document, Interpolation, Key, Material, MaterialId, MeshHandle, MeshId,
-    NodeData, NodeId, ObjectKind, Param, Tag, Tangents, TimeSettings, Track, Transform,
+    Axis, ComponentState, Components, Curve, Document, Falloff, Interpolation, Key, LightDetails, LightType, Material,
+    MaterialId, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, Param, Tag, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -439,6 +439,12 @@ enum KindDto {
     Light {
         color: [f32; 3],
         intensity: f32,
+        /// Omni when absent (added in step 7.4).
+        #[serde(default, skip_serializing_if = "LightTypeDto::is_omni")]
+        light_type: LightTypeDto,
+        /// The defaults when absent (added in step 7.4).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<LightDetailsDto>,
     },
     /// `mesh` indexes the file's `meshes`; objects sharing a mesh share an index.
     /// `selected` / `hidden` flag components (optional, added in step 4.1).
@@ -456,6 +462,95 @@ enum KindDto {
         linear_pre: u32,
         boundary: BoundaryDto,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum LightTypeDto {
+    #[default]
+    Omni,
+    Spot,
+    Infinite,
+}
+
+impl LightTypeDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_omni(&self) -> bool {
+        *self == Self::Omni
+    }
+}
+
+impl From<LightType> for LightTypeDto {
+    fn from(light_type: LightType) -> Self {
+        match light_type {
+            LightType::Omni => Self::Omni,
+            LightType::Spot => Self::Spot,
+            LightType::Infinite => Self::Infinite,
+        }
+    }
+}
+
+impl From<LightTypeDto> for LightType {
+    fn from(light_type: LightTypeDto) -> Self {
+        match light_type {
+            LightTypeDto::Omni => Self::Omni,
+            LightTypeDto::Spot => Self::Spot,
+            LightTypeDto::Infinite => Self::Infinite,
+        }
+    }
+}
+
+/// A light's cone and falloff; written only when they differ from the defaults.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct LightDetailsDto {
+    use_inner: bool,
+    inner_angle_deg: f32,
+    outer_angle_deg: f32,
+    falloff: FalloffDto,
+    radius: f32,
+}
+
+impl LightDetailsDto {
+    fn new(details: LightDetails) -> Option<Self> {
+        (details != LightDetails::default()).then_some(Self {
+            use_inner: details.use_inner,
+            inner_angle_deg: details.inner_angle_deg,
+            outer_angle_deg: details.outer_angle_deg,
+            falloff: match details.falloff {
+                Falloff::None => FalloffDto::None,
+                Falloff::Linear => FalloffDto::Linear,
+                Falloff::InverseSquare => FalloffDto::InverseSquare,
+            },
+            radius: details.radius,
+        })
+    }
+
+    /// The details, angles and radius brought into range (never trust a file).
+    fn details(self) -> LightDetails {
+        let angle = |a: f32| a.clamp(0.0, LightDetails::MAX_ANGLE_DEG);
+        LightDetails {
+            use_inner: self.use_inner,
+            inner_angle_deg: angle(self.inner_angle_deg),
+            outer_angle_deg: angle(self.outer_angle_deg),
+            falloff: match self.falloff {
+                FalloffDto::None => Falloff::None,
+                FalloffDto::Linear => Falloff::Linear,
+                FalloffDto::InverseSquare => Falloff::InverseSquare,
+            },
+            radius: self.radius.max(LightDetails::MIN_RADIUS),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FalloffDto {
+    None,
+    Linear,
+    InverseSquare,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -885,7 +980,17 @@ impl KindDto {
                 cap_segments,
             },
             ObjectKind::Camera { fov_y_deg } => Self::Camera { fov_y_deg },
-            ObjectKind::Light { color, intensity } => Self::Light { color, intensity },
+            ObjectKind::Light {
+                color,
+                intensity,
+                light_type,
+                details,
+            } => Self::Light {
+                color,
+                intensity,
+                light_type: light_type.into(),
+                details: LightDetailsDto::new(details),
+            },
             ObjectKind::Polygon {
                 ref mesh,
                 ref components,
@@ -987,7 +1092,17 @@ impl KindDto {
                 cap_segments,
             },
             Self::Camera { fov_y_deg } => ObjectKind::Camera { fov_y_deg },
-            Self::Light { color, intensity } => ObjectKind::Light { color, intensity },
+            Self::Light {
+                color,
+                intensity,
+                light_type,
+                details,
+            } => ObjectKind::Light {
+                color,
+                intensity,
+                light_type: light_type.into(),
+                details: details.map_or_else(LightDetails::default, LightDetailsDto::details),
+            },
             Self::Polygon { mesh, selected, hidden } => {
                 let mesh = meshes.get(mesh).cloned().ok_or_else(|| {
                     IoError::Invalid(format!(
@@ -1044,7 +1159,18 @@ impl KindDto {
                 ..
             } => vec![inner_radius, outer_radius],
             Self::Camera { fov_y_deg } => vec![fov_y_deg],
-            Self::Light { color, intensity } => vec![color[0], color[1], color[2], intensity],
+            Self::Light {
+                color,
+                intensity,
+                details,
+                ..
+            } => {
+                let mut numbers = vec![color[0], color[1], color[2], intensity];
+                if let Some(details) = details {
+                    numbers.extend([details.inner_angle_deg, details.outer_angle_deg, details.radius]);
+                }
+                numbers
+            }
         }
     }
 }
@@ -1436,6 +1562,54 @@ mod tests {
         assert_eq!(
             (viewport_levels, render_levels, linear_pre),
             (MAX_LEVEL, MAX_LEVEL, MAX_LEVEL)
+        );
+    }
+
+    #[test]
+    fn light_types_and_details_round_trip_and_defaults_are_omitted() {
+        let mut doc = Document::new("lights");
+        let spot = ObjectKind::Light {
+            color: [1.0, 0.8, 0.6],
+            intensity: 3.0,
+            light_type: LightType::Spot,
+            details: LightDetails {
+                use_inner: false,
+                inner_angle_deg: 10.0,
+                outer_angle_deg: 70.0,
+                falloff: Falloff::InverseSquare,
+                radius: 250.0,
+            },
+        };
+        let sun = ObjectKind::Light {
+            color: [1.0; 3],
+            intensity: 1.0,
+            light_type: LightType::Infinite,
+            details: LightDetails::default(),
+        };
+        for (name, kind) in [("Spot", spot), ("Sun", sun), ("Bulb", ObjectKind::light([1.0; 3], 1.0))] {
+            doc.scene.insert(Node::new(name, kind));
+        }
+        assert_eq!(snapshot(&round_trip(&doc)), snapshot(&doc));
+
+        // An Omni light with the default details writes nothing new.
+        let dto = KindDto::new(&ObjectKind::light([1.0; 3], 1.0), "Bulb", &mut MeshTable::default());
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"type": "light", "color": [1.0, 1.0, 1.0], "intensity": 1.0})
+        );
+
+        // Angles and radii out of range are brought into it; non-finite ones refused.
+        let json = r#"{"type": "light", "color": [1, 1, 1], "intensity": 1, "light_type": "spot",
+            "details": {"use_inner": true, "inner_angle_deg": -5, "outer_angle_deg": 400,
+            "falloff": "linear", "radius": 0}}"#;
+        let dto: KindDto = serde_json::from_str(json).unwrap();
+        let ObjectKind::Light { details, .. } = dto.into_kind(&[], "test").unwrap() else {
+            panic!("not a light")
+        };
+        assert_eq!(
+            (details.inner_angle_deg, details.outer_angle_deg, details.radius),
+            (0.0, LightDetails::MAX_ANGLE_DEG, LightDetails::MIN_RADIUS)
         );
     }
 

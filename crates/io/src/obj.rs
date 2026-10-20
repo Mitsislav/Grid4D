@@ -548,14 +548,7 @@ l 5 6
             ),
             entry(None, "Pentagon", ObjectKind::polygon(MeshHandle::new(pentagon))),
             entry(None, "Cam", ObjectKind::Camera { fov_y_deg: 40.0 }),
-            entry(
-                None,
-                "Lamp",
-                ObjectKind::Light {
-                    color: [1.0; 3],
-                    intensity: 1.0,
-                },
-            ),
+            entry(None, "Lamp", ObjectKind::light([1.0; 3], 1.0)),
         ];
         nodes[0].data.transform = Transform {
             position: Vec3::new(200.0, 50.0, 0.0),

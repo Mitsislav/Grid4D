@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use grid4d_geom::{BitSet, subdivision::SubdivisionOptions};
 use grid4d_scene::{
-    Aabb, Components, LIGHT_MARKER_RADIUS, MaterialId, MeshHandle, MeshId, NodeId, ObjectKind, Scene, TagKind, Tags,
-    WalkItem,
+    Aabb, Components, LIGHT_MARKER_RADIUS, LightDetails, LightType, MaterialId, MeshHandle, MeshId, NodeId, ObjectKind,
+    Scene, TagKind, Tags, WalkItem,
 };
 
 use crate::{
-    Drawable, MeshKey, Shading, drawable,
+    Drawable, MeshKey, Shading, Surface, drawable,
     generator::{self, Input, viewport_options},
 };
 
@@ -39,6 +39,20 @@ pub struct EvaluatedNode {
     pub pick: PickShape,
 }
 
+/// A light object as viewers see it this frame (animation and Target tags applied).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EvaluatedLight {
+    pub id: NodeId,
+    pub light_type: LightType,
+    /// World position.
+    pub position: Vec3,
+    /// The direction it shines in (its −Z axis), unit length.
+    pub direction: Vec3,
+    /// Colour × intensity, linear RGB.
+    pub color: [f32; 3],
+    pub details: LightDetails,
+}
+
 /// The document as viewers see it: every node that is visible in the editor and
 /// enabled (a hidden or disabled node hides its whole subtree — except a disabled
 /// generator, whose children then show as they are), in Object Manager pre-order,
@@ -57,6 +71,8 @@ pub struct EvaluatedNode {
 #[derive(Debug, Default)]
 pub struct EvaluatedScene {
     nodes: Vec<EvaluatedNode>,
+    /// The visible light objects, in pre-order.
+    lights: Vec<EvaluatedLight>,
     /// The meshes of the visible polygon objects as shown (hidden polygons left
     /// out), for drawing and picking.
     meshes: HashMap<MeshId, MeshHandle>,
@@ -154,12 +170,16 @@ impl EvaluatedScene {
             let inherited = material_stack.last().and_then(|&(_, m)| m);
             let material = data.tags.material().filter(|&m| materials.contains(m)).or(inherited);
             material_stack.push((depth, material));
-            let material_colour = material.and_then(|m| materials.get(m)).map(|m| m.color);
-            let mut drawable = drawable(&data.kind, data.display_color).map(|d| Drawable {
-                shading: Shading::from_angle(data.tags.smoothing_angle()),
-                // Markers (cameras, lights) keep their own colour.
-                color: material_colour.filter(|_| !d.marker).unwrap_or(d.color),
-                ..d
+            // Markers (cameras, lights) keep their own colour and surface.
+            let own_material = material.and_then(|m| materials.get(m));
+            let mut drawable = drawable(&data.kind, data.display_color).map(|d| {
+                let material = own_material.filter(|_| !d.marker);
+                Drawable {
+                    shading: Shading::from_angle(data.tags.smoothing_angle()),
+                    color: material.map_or(d.color, |m| m.color),
+                    surface: material.map_or(d.surface, Surface::of),
+                    ..d
+                }
             });
             let mut pick = pick_shape(&data.kind);
             if let ObjectKind::Polygon { mesh, components } = &data.kind {
@@ -196,15 +216,13 @@ impl EvaluatedScene {
                         let cage_material = cage_tags
                             .and_then(|cage| cage.data.tags.material())
                             .filter(|&m| materials.contains(m));
-                        let colour = material
-                            .or(cage_material)
-                            .and_then(|m| materials.get(m))
-                            .map_or(result.colour, |m| m.color);
+                        let shown = material.or(cage_material).and_then(|m| materials.get(m));
                         drawable = Some(Drawable {
                             key: MeshKey::Polygon(mesh.id()),
                             shading: Shading::from_angle(tags.smoothing_angle()),
-                            scale: glam::Vec3::ONE,
-                            color: colour,
+                            scale: Vec3::ONE,
+                            color: shown.map_or(result.colour, |m| m.color),
+                            surface: shown.map_or_else(Surface::default, Surface::of),
                             unlit: false,
                             marker: false,
                         });
@@ -241,6 +259,27 @@ impl EvaluatedScene {
         {
             apply_aims(scene, &mut self.nodes, &mut self.aim_index, &mut self.aim_stack);
         }
+        // The lights where animation and Target tags put them.
+        self.lights.clear();
+        for node in &self.nodes {
+            let Some(&ObjectKind::Light {
+                color,
+                intensity,
+                light_type,
+                details,
+            }) = scene.get(node.id).map(|n| &n.data.kind)
+            else {
+                continue;
+            };
+            self.lights.push(EvaluatedLight {
+                id: node.id,
+                light_type,
+                position: node.world.w_axis.truncate(),
+                direction: node.world.transform_vector3(Vec3::NEG_Z).normalize_or(Vec3::NEG_Z),
+                color: color.map(|c| c * intensity),
+                details,
+            });
+        }
         // Objects gone, hidden or with nothing hidden any more.
         self.shown.retain(|_, entry| self.meshes.contains_key(&entry.mesh.id()));
         self.generated.retain(|_, entry| entry.seen == revision);
@@ -252,6 +291,12 @@ impl EvaluatedScene {
     #[must_use]
     pub fn nodes(&self) -> &[EvaluatedNode] {
         &self.nodes
+    }
+
+    /// The visible light objects, in Object Manager pre-order.
+    #[must_use]
+    pub fn lights(&self) -> &[EvaluatedLight] {
+        &self.lights
     }
 
     /// The mesh behind a [`MeshKey::Polygon`](crate::MeshKey::Polygon) or
@@ -335,7 +380,7 @@ fn apply_aims(
         let up = aim
             .up
             .and_then(|u| index.get(&u))
-            .map_or(glam::Vec3::Y, |&u| nodes[u].world.w_axis.truncate() - translation);
+            .map_or(Vec3::Y, |&u| nodes[u].world.w_axis.truncate() - translation);
         let Some(rotation) = look_rotation(forward, up) else {
             continue;
         };
@@ -349,14 +394,14 @@ fn apply_aims(
 
 /// The rotation whose −Z axis points along `forward` and whose Y axis leans towards
 /// `up`; `None` if `forward` has no length.
-fn look_rotation(forward: glam::Vec3, up: glam::Vec3) -> Option<glam::Quat> {
+fn look_rotation(forward: Vec3, up: Vec3) -> Option<glam::Quat> {
     let back = (-forward).try_normalize()?;
     // An up direction along the line of sight: fall back to another axis.
     let side = up
         .cross(back)
         .try_normalize()
-        .or_else(|| glam::Vec3::Z.cross(back).try_normalize())
-        .or_else(|| glam::Vec3::X.cross(back).try_normalize())?;
+        .or_else(|| Vec3::Z.cross(back).try_normalize())
+        .or_else(|| Vec3::X.cross(back).try_normalize())?;
     let true_up = back.cross(side);
     Some(glam::Quat::from_mat3(&glam::Mat3::from_cols(side, true_up, back)))
 }
@@ -600,13 +645,13 @@ mod tests {
         let mut doc = Document::new("aim");
         let target = doc.scene.insert(Node::new("Target", ObjectKind::Null));
         let camera = doc.scene.insert(
-            Node::new("Cam", ObjectKind::Camera { fov_y_deg: 40.0 }).with_position(glam::Vec3::new(300.0, 200.0, 0.0)),
+            Node::new("Cam", ObjectKind::Camera { fov_y_deg: 40.0 }).with_position(Vec3::new(300.0, 200.0, 0.0)),
         );
         let child = doc
             .scene
             .insert_child(
                 camera,
-                Node::new("Child", ObjectKind::Null).with_position(glam::Vec3::new(0.0, 0.0, -100.0)),
+                Node::new("Child", ObjectKind::Null).with_position(Vec3::new(0.0, 0.0, -100.0)),
             )
             .unwrap();
         let world = |eval: &EvaluatedScene, id| eval.nodes().iter().find(|n| n.id == id).unwrap().world;
@@ -622,33 +667,31 @@ mod tests {
         aim(&mut doc, Some(target), true);
         eval.update(&doc.scene);
         let cam = world(&eval, camera);
-        let forward = cam.transform_vector3(-glam::Vec3::Z).normalize();
-        let expected = (glam::Vec3::ZERO - glam::Vec3::new(300.0, 200.0, 0.0)).normalize();
+        let forward = cam.transform_vector3(-Vec3::Z).normalize();
+        let expected = (Vec3::ZERO - Vec3::new(300.0, 200.0, 0.0)).normalize();
         assert!(forward.abs_diff_eq(expected, 1e-5), "−Z faces the target: {forward}");
-        assert!(cam.transform_vector3(glam::Vec3::Y).y > 0.0, "and stays upright");
+        assert!(cam.transform_vector3(Vec3::Y).y > 0.0, "and stays upright");
         assert!(
-            cam.w_axis
-                .truncate()
-                .abs_diff_eq(glam::Vec3::new(300.0, 200.0, 0.0), 1e-4),
+            cam.w_axis.truncate().abs_diff_eq(Vec3::new(300.0, 200.0, 0.0), 1e-4),
             "it only turns"
         );
         // The child sits 100 cm in front of the camera, along its line of sight.
         let ahead = world(&eval, child).w_axis.truncate();
         assert!(
-            ahead.abs_diff_eq(glam::Vec3::new(300.0, 200.0, 0.0) + expected * 100.0, 1e-3),
+            ahead.abs_diff_eq(Vec3::new(300.0, 200.0, 0.0) + expected * 100.0, 1e-3),
             "{ahead}"
         );
         assert_eq!(
             doc.scene.get(camera).unwrap().data.transform.rotation,
-            glam::Vec3::ZERO,
+            Vec3::ZERO,
             "the document's rotation is untouched"
         );
 
         aim(&mut doc, Some(target), false);
         eval.update(&doc.scene);
-        let level = world(&eval, camera).transform_vector3(-glam::Vec3::Z).normalize();
+        let level = world(&eval, camera).transform_vector3(-Vec3::Z).normalize();
         assert!(
-            level.abs_diff_eq(glam::Vec3::new(-1.0, 0.0, 0.0), 1e-5),
+            level.abs_diff_eq(Vec3::new(-1.0, 0.0, 0.0), 1e-5),
             "Pitch off: level, {level}"
         );
 
@@ -669,6 +712,47 @@ mod tests {
             doc.scene.world_matrix(camera),
             "a hidden target changes nothing"
         );
+    }
+
+    #[test]
+    fn visible_lights_are_listed_where_they_shine() {
+        use grid4d_scene::Transform;
+        let mut doc = Document::new("lights");
+        let target = doc
+            .scene
+            .insert(Node::new("Target", ObjectKind::Null).with_position(Vec3::new(300.0, 0.0, 0.0)));
+        let mut spot = Node::new(
+            "Spot",
+            ObjectKind::Light {
+                color: [1.0, 0.5, 0.0],
+                intensity: 2.0,
+                light_type: LightType::Spot,
+                details: LightDetails::default(),
+            },
+        )
+        .with_transform(Transform::from_position(Vec3::new(0.0, 300.0, 0.0)));
+        spot.data.tags = vec![Tag::Target {
+            target: Some(target),
+            up: None,
+            pitch: true,
+        }];
+        let spot = doc.scene.insert(spot);
+        let mut off = Node::new("Off", ObjectKind::light([1.0; 3], 1.0));
+        off.data.visible_in_editor = false;
+        doc.scene.insert(off);
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let [light] = eval.lights() else {
+            panic!("one visible light: {:?}", eval.lights())
+        };
+        assert_eq!((light.id, light.light_type), (spot, LightType::Spot));
+        assert!(light.position.abs_diff_eq(Vec3::new(0.0, 300.0, 0.0), 1e-4));
+        let towards_target = (Vec3::new(300.0, 0.0, 0.0) - light.position).normalize();
+        assert!(
+            light.direction.abs_diff_eq(towards_target, 1e-4),
+            "the Target tag aims it"
+        );
+        assert_eq!(light.color, [2.0, 1.0, 0.0], "colour × intensity");
     }
 
     #[test]

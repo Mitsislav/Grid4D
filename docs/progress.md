@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 7 — Viewport: cameras, lights, 4-view, shading (v0.7) |
-| Last step done | 7.3 — Display modes per view (2026-10-21) |
-| Next step | 7.4 — Lights in the viewport, shading from materials |
-| Tests | 452, all passing; clippy and rustfmt clean |
+| Last step done | 7.4 — Lights in the viewport, shading from materials (2026-10-21) |
+| Next step | 7.5 — Filter menu (object types, grid, HUD per view) |
+| Tests | 459, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -513,7 +513,8 @@ write animation yet (planned).
 |------|-------|-------|
 | 7.1 (`ed7102e`) | Scene cameras: look through a camera (Cameras ▸ Use Camera, a double-click on its icon) or any object, with its position, bank and field of view; navigation moves it (one undo step per gesture, Autokeying, Protection); wire pyramids for the other cameras; new cameras clone the view | 441 |
 | 7.2 (`ebbf93b`) | Four views (Perspective, Top, Right, Front) with orthographic projections: Panel menu arrangements, F1–F4 / F5, middle click shows a view alone; every view has its own camera, projection (Cameras menu) and Options; the active view takes input and a click elsewhere activates and acts; the grid lies in the view's plane | 448 |
-| 7.3 | Display modes per view (Display menu, N~ chords): Gouraud, Quick and Constant Shading, each also with lines, Hidden Line and Lines; Wireframe (polygon edges) or Box (each object as its bounding box); selected objects' lines in orange | 452 |
+| 7.3 (`96cc183`) | Display modes per view (Display menu, N~ chords): Gouraud, Quick and Constant Shading, each also with lines, Hidden Line and Lines; Wireframe (polygon edges) or Box (each object as its bounding box); selected objects' lines in orange | 452 |
+| 7.4 | Lights light the viewport: Omni, Spot (cone with inner and outer angle) and Infinite lights with falloff, the default light when there are none, Quick Shading always with it; materials' roughness, metallic and luminance shade the surfaces; spot cones and infinite arrows in the view | 459 |
 
 *Problems and solutions:*
 - **The view camera had no bank.** The turntable camera kept world Y up, so a banked
@@ -598,6 +599,38 @@ write animation yet (planned).
   boxes, then shaded boxes. With four views, the Top view showed Lines, Front
   Hidden Line and Right Gouraud Shading (Lines) next to the shaded perspective
   view; the Display menu marked each view's own mode.
+- **Lights needed more than colour and intensity.** A viewport lit by point lights
+  only would not show what a scene's lighting is about, so the Light object got
+  its type (Omni, Spot, Infinite) and the cone and falloff of the reference's
+  Details tab. They are stored next to colour and intensity; the file format
+  writes them only when they differ from the defaults, so every existing file —
+  and the golden test file — stays byte for byte the same.
+- **Lights where they really are.** Lights are collected after animation and
+  Target tags have placed everything, so an animated or aimed spot lights the
+  scene from where it is drawn. Like cameras, lights shine along −Z.
+- **Any number of lights, no per-frame cost.** The lights go to the GPU in a
+  storage buffer that only grows (to the next power of two) and is rewritten each
+  frame from a reused list; the bind group is rebuilt only when the buffer grows.
+- **Materials in the viewport.** Each instance now carries its material's
+  roughness, metallic and luminance (160 bytes per instance). The shader sums the
+  lights with a highlight whose size follows the roughness; metals have no
+  diffuse colour and tint their highlights.
+- **Black metal.** Under a single light a chrome sphere was almost black, because
+  a metal only reflects and there was nothing to reflect. A dim studio reflection,
+  brighter overhead, now shows on metals (dielectrics barely reflect it).
+- **Bug found on screen: selecting a light made the document "modified".** egui's
+  colour button converts the colour on every frame and writes it back (0.9 becomes
+  0.90000004), so showing a light's colour — or a material's, or an object's
+  display colour — changed the document, recorded an undo step and asked to save
+  on closing. The swatch now writes back only when the user changes the colour;
+  tests show every light setup and a colour without changing them.
+- **On-screen testing:** a test scene (a floor, chrome, glossy red and matte blue
+  spheres, a glowing cube, a spot light pointing down and a bluish Infinite light)
+  showed the spot's soft-edged pool of light, the highlights following roughness,
+  the chrome reflecting and the cube glowing; Quick Shading lit everything evenly
+  with the default light; the demo scene is now lit by its light. The Spot's
+  Type, Use Inner, angles and Falloff showed in the Attribute Manager, and the
+  document stayed unmodified.
 
 ---
 

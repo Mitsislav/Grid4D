@@ -4,6 +4,7 @@ use egui::{Align2, CornerRadius, FontId, Mesh, Painter, Pos2, Rect, Shape, Strok
 use glam::{Mat4, Vec3};
 use grid4d_eval::EvaluatedScene;
 use grid4d_render::OrbitCamera;
+use grid4d_scene::LightType;
 
 use super::project;
 use crate::{Selection, theme::palette as p};
@@ -124,6 +125,66 @@ pub(super) fn camera_frustums(
         let peak = top + up * half_h * 0.35;
         line(top + right * half_w * 0.3, peak);
         line(peak, top - right * half_w * 0.3);
+    }
+}
+
+/// Where the visible lights shine: a Spot's cone (its outer angle) and an
+/// Infinite light's direction, in the light colour (orange when selected). Omni
+/// lights show only their marker.
+pub(super) fn light_shapes(
+    painter: &Painter,
+    rect: Rect,
+    view_proj: &Mat4,
+    evaluated: &EvaluatedScene,
+    selection: &Selection,
+) {
+    /// How far the cone and the arrow reach, in cm.
+    const LENGTH: f32 = 160.0;
+    /// Segments of the cone's rim.
+    const RIM: u8 = 24;
+    for light in evaluated.lights() {
+        let colour = if selection.contains(light.id) {
+            p::HIGHLIGHT
+        } else {
+            p::ICON_LIGHT.gamma_multiply(0.8)
+        };
+        let stroke = Stroke::new(1.2, colour);
+        let line = |a: Vec3, b: Vec3| {
+            if let (Some(a), Some(b)) = (project(view_proj, rect, a), project(view_proj, rect, b)) {
+                painter.line_segment([a, b], stroke);
+            }
+        };
+        let forward = light.direction;
+        let side = forward.any_orthonormal_vector();
+        let other = forward.cross(side);
+        match light.light_type {
+            LightType::Omni => {}
+            LightType::Spot => {
+                let apex = light.position;
+                let half = (light.details.outer_angle_deg.to_radians() * 0.5).min(1.5);
+                let radius = half.tan() * LENGTH;
+                let centre = apex + forward * LENGTH;
+                let rim = |k: u8| {
+                    let a = f32::from(k) / f32::from(RIM) * std::f32::consts::TAU;
+                    centre + (side * a.cos() + other * a.sin()) * radius
+                };
+                for k in 0..RIM {
+                    line(rim(k), rim(k + 1));
+                }
+                for k in [0, RIM / 4, RIM / 2, RIM * 3 / 4] {
+                    line(apex, rim(k));
+                }
+            }
+            LightType::Infinite => {
+                let start = light.position;
+                let tip = start + forward * LENGTH;
+                line(start, tip);
+                for along in [side, other] {
+                    line(tip, tip - forward * 24.0 + along * 10.0);
+                    line(tip, tip - forward * 24.0 - along * 10.0);
+                }
+            }
+        }
     }
 }
 

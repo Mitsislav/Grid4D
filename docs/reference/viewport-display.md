@@ -29,7 +29,7 @@ N~ shortcuts, which act on the active view). A mode has two parts:
 |------|----------|-------|
 | Gouraud Shading (N~A) | smooth, lit (by the scene's lights once 7.4 is done; until then by the default light) | — |
 | Gouraud Shading (Lines) (N~B) | as above | on top |
-| Quick Shading (N~C) | lit by the default light only — always the light from over the viewer's shoulder, never the scene's lights; simpler (no highlights) | — |
+| Quick Shading (N~C) | lit by the default light only — always the light from over the viewer's shoulder, never the scene's lights | — |
 | Quick Shading (Lines) (N~D) | as above | on top |
 | Constant Shading (N~E) | flat, in the object's colour, no lighting | — |
 | Constant Shading (Lines) | as above | on top |

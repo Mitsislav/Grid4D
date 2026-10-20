@@ -7,7 +7,7 @@ use grid4d_eval::{MeshKey, Shading};
 use grid4d_scene::MeshHandle;
 
 use crate::{
-    DisplayStyle, FrameData, InstanceRaw, Vertex, ViewportTarget,
+    DisplayStyle, FrameData, InstanceRaw, LightRaw, Vertex, ViewportTarget,
     components::{ComponentOverlay, EdgeInstance, FaceVertex, PointInstance},
     display::{Fill, bounding_box, edge_lines},
     mesh::{TessellationScratch, tessellate},
@@ -42,6 +42,9 @@ struct CameraUniform {
     sizes: [f32; 4],
     /// Selected face, hovered face and context edge opacity.
     alphas: [f32; 4],
+    /// x: scene lights to use (0: the default light), y: ambient light with
+    /// scene lights.
+    lighting: [f32; 4],
 }
 
 /// The grid plane and the parallel flag as the shaders read them from `light_dir.w`.
@@ -52,6 +55,11 @@ fn grid_flags(plane: crate::GridPlane, parallel: bool) -> f32 {
 
 /// Overlay vertices are pulled towards the eye by this share of their distance.
 const OVERLAY_PULL: f32 = 0.002;
+/// How much of the default light's soft fill remains when scene lights light the
+/// view, so sides no light reaches stay readable.
+const SCENE_AMBIENT: f32 = 0.35;
+const LIGHT_STRIDE: u64 = size_of::<LightRaw>() as u64;
+const INITIAL_LIGHT_CAPACITY: usize = 4;
 
 /// A vertex buffer refilled from a CPU array when it changes; grows to the next
 /// power of two, never shrinks.
@@ -204,11 +212,12 @@ const POSITION_FLAGS_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_
 /// `EdgeInstance`: a, flags, b.
 const EDGE_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32, 2 => Float32x3];
-const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
+const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
     2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, // model
     6 => Float32x4, 7 => Float32x4, 8 => Float32x4,                 // normal matrix
     9 => Float32x4,                                                 // color
     10 => Float32x4,                                                // params
+    11 => Float32x4,                                                // emission
 ];
 
 /// Owns every GPU resource of the 3D viewport and records its draw commands.
@@ -229,6 +238,10 @@ pub struct ViewportRenderer {
     face_pipeline: wgpu::RenderPipeline,
     overlay: OverlayBuffers,
     camera_buffer: wgpu::Buffer,
+    /// The scene's lights (a storage buffer that only grows).
+    light_buffer: wgpu::Buffer,
+    light_capacity: usize,
+    camera_layout: wgpu::BindGroupLayout,
     camera_bind_group: wgpu::BindGroup,
     meshes: HashMap<DrawKey, GpuMesh>,
     /// Reused while generating meshes for new keys.
@@ -259,25 +272,31 @@ impl ViewportRenderer {
         });
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("grid4d.camera.layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(size_of::<CameraUniform>() as u64),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(size_of::<CameraUniform>() as u64),
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(LIGHT_STRIDE),
+                    },
+                    count: None,
+                },
+            ],
         });
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("grid4d.camera.bind_group"),
-            layout: &camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-        });
+        let light_buffer = create_light_buffer(device, INITIAL_LIGHT_CAPACITY);
+        let camera_bind_group = create_camera_bind_group(device, &camera_layout, &camera_buffer, &light_buffer);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("grid4d.viewport.layout"),
             bind_group_layouts: &[Some(&camera_layout)],
@@ -362,6 +381,9 @@ impl ViewportRenderer {
             face_pipeline,
             overlay: OverlayBuffers::new(device),
             camera_buffer,
+            light_buffer,
+            light_capacity: INITIAL_LIGHT_CAPACITY,
+            camera_layout,
             camera_bind_group,
             meshes: HashMap::new(),
             tessellation: TessellationScratch::default(),
@@ -423,8 +445,29 @@ impl ViewportRenderer {
                 OVERLAY_PULL,
             ],
             alphas: [style.face_alpha, style.hover_face_alpha, style.context_alpha, 0.0],
+            // Quick Shading always uses the default light.
+            lighting: [
+                if self.fill == Fill::Quick {
+                    0.0
+                } else {
+                    to_f32(frame.lights.len())
+                },
+                SCENE_AMBIENT,
+                0.0,
+                0.0,
+            ],
         };
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+
+        if frame.lights.len() > self.light_capacity {
+            self.light_capacity = frame.lights.len().next_power_of_two();
+            self.light_buffer = create_light_buffer(device, self.light_capacity);
+            self.camera_bind_group =
+                create_camera_bind_group(device, &self.camera_layout, &self.camera_buffer, &self.light_buffer);
+        }
+        if !frame.lights.is_empty() {
+            queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&frame.lights));
+        }
 
         let total = frame.instance_count();
         if total > self.instance_capacity {
@@ -638,6 +681,42 @@ fn upload<T: Pod>(device: &wgpu::Device, label: &'static str, vertices: &[T], in
 
 fn to_u32(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// A count for the shaders (exact up to 2²⁴).
+fn to_f32(n: usize) -> f32 {
+    u16::try_from(n).map_or(f32::from(u16::MAX), f32::from)
+}
+
+fn create_light_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("grid4d.lights"),
+        size: capacity.max(1) as u64 * LIGHT_STRIDE,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+fn create_camera_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    camera: &wgpu::Buffer,
+    lights: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("grid4d.camera.bind_group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: lights.as_entire_binding(),
+            },
+        ],
+    })
 }
 
 fn create_vertex_buffer(device: &wgpu::Device, label: &'static str, size: u64) -> wgpu::Buffer {

@@ -7,7 +7,9 @@ use std::{collections::HashMap, fs, path::Path};
 use glam::{Quat, Vec2, Vec3};
 use gltf::{buffer::Source, camera::Projection, mesh::Mode};
 use grid4d_geom::PolyMesh;
-use grid4d_scene::{Material, MaterialId, Materials, MeshHandle, NodeData, ObjectKind, Tag, Transform};
+use grid4d_scene::{
+    LightDetails, LightType, Material, MaterialId, Materials, MeshHandle, NodeData, ObjectKind, Tag, Transform,
+};
 
 use crate::{
     IoError,
@@ -281,9 +283,31 @@ fn camera_or_light(node: &gltf::Node<'_>) -> Option<ObjectKind> {
     let color = light.color();
     let intensity = light.intensity();
     let finite = color.iter().all(|c| c.is_finite()) && intensity.is_finite();
+    let mut details = LightDetails::default();
+    // glTF lights shine along −Z, like Grid4D's; cone angles are half openings.
+    let light_type = match light.kind() {
+        gltf::khr_lights_punctual::Kind::Point => LightType::Omni,
+        gltf::khr_lights_punctual::Kind::Directional => LightType::Infinite,
+        gltf::khr_lights_punctual::Kind::Spot {
+            inner_cone_angle,
+            outer_cone_angle,
+        } => {
+            let opening = |half: f32| (half.to_degrees() * 2.0).clamp(0.0, LightDetails::MAX_ANGLE_DEG);
+            if outer_cone_angle.is_finite() && inner_cone_angle.is_finite() {
+                let (inner, outer) = (opening(inner_cone_angle), opening(outer_cone_angle));
+                details.outer_angle_deg = outer;
+                // An inner cone as wide as the outer one is a hard edge.
+                details.use_inner = inner < outer * 0.99;
+                details.inner_angle_deg = if details.use_inner { inner } else { 0.0 };
+            }
+            LightType::Spot
+        }
+    };
     Some(ObjectKind::Light {
         color: if finite { color } else { [1.0; 3] },
         intensity: if finite { intensity } else { 1.0 },
+        light_type,
+        details,
     })
 }
 
@@ -613,13 +637,7 @@ mod tests {
                 fov_y_deg: 0.7f32.to_degrees()
             }
         );
-        assert_eq!(
-            node(4).kind,
-            ObjectKind::Light {
-                color: [1.0, 0.5, 0.25],
-                intensity: 20.0
-            }
-        );
+        assert_eq!(node(4).kind, ObjectKind::light([1.0, 0.5, 0.25], 20.0));
         assert_eq!(
             mesh_of(&imported, "Box").id(),
             mesh_of(&imported, "Box2").id(),

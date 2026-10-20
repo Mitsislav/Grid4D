@@ -32,7 +32,7 @@ pub use components::{
     paint_brush, pick_component,
 };
 pub use display::{DisplayMode, DisplayStyle, ShadingMode};
-pub use frame::{FrameData, GridPlane, InstanceRaw};
+pub use frame::{FrameData, GridPlane, InstanceRaw, LightRaw};
 pub use gpu::{GpuTargetConfig, ViewportRenderer};
 pub use mesh::{TessellationScratch, Vertex, tessellate};
 pub use picking::pick;

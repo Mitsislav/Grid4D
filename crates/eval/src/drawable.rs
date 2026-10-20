@@ -3,7 +3,7 @@
 
 use glam::Vec3;
 use grid4d_geom::{PolyMesh, Smoothing};
-use grid4d_scene::{CAMERA_MARKER_SIZE, DEFAULT_PHONG_ANGLE, LIGHT_MARKER_RADIUS, ObjectKind};
+use grid4d_scene::{CAMERA_MARKER_SIZE, DEFAULT_PHONG_ANGLE, LIGHT_MARKER_RADIUS, Material, ObjectKind};
 
 use crate::{MeshKey, Ratio};
 
@@ -37,6 +37,36 @@ impl Default for Shading {
     }
 }
 
+/// How a surface reflects light: its material's, or the material defaults.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Surface {
+    /// 0 mirror-like … 1 matte.
+    pub roughness: f32,
+    /// 0 dielectric … 1 metal.
+    pub metallic: f32,
+    /// Light the surface gives off, linear RGB.
+    pub emission: [f32; 3],
+}
+
+impl Surface {
+    /// The surface of `material`.
+    #[must_use]
+    pub const fn of(material: &Material) -> Self {
+        Self {
+            roughness: material.roughness,
+            metallic: material.metallic,
+            emission: material.emission,
+        }
+    }
+}
+
+impl Default for Surface {
+    /// A new material's surface.
+    fn default() -> Self {
+        Self::of(&Material::new(""))
+    }
+}
+
 /// How an object is drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Drawable {
@@ -46,6 +76,8 @@ pub struct Drawable {
     /// Object-space scale applied to the unit mesh.
     pub scale: Vec3,
     pub color: [f32; 3],
+    /// Roughness, metalness and luminance (its material's).
+    pub surface: Surface,
     pub unlit: bool,
     /// A viewport marker (camera, light) rather than geometry: not drawn while the
     /// eye is inside it, so a camera created at the view does not block the view.
@@ -62,6 +94,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
             shading: Shading::default(),
             scale,
             color,
+            surface: Surface::default(),
             unlit: false,
             marker: false,
         })
@@ -183,6 +216,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
             shading: Shading::default(),
             scale: Vec3::splat(CAMERA_MARKER_SIZE),
             color,
+            surface: Surface::default(),
             unlit: false,
             marker: true,
         }),
@@ -191,6 +225,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
             shading: Shading::default(),
             scale: Vec3::splat(LIGHT_MARKER_RADIUS),
             color: light,
+            surface: Surface::default(),
             unlit: true,
             marker: true,
         }),
@@ -332,10 +367,7 @@ mod tests {
 
     #[test]
     fn lights_are_unlit_markers_in_their_own_colour() {
-        let light = ObjectKind::Light {
-            color: [1.0, 0.5, 0.25],
-            intensity: 2.0,
-        };
+        let light = ObjectKind::light([1.0, 0.5, 0.25], 2.0);
         let d = drawable(&light, [0.0; 3]).unwrap();
         assert!(d.unlit);
         assert_eq!(d.color, [1.0, 0.5, 0.25]);

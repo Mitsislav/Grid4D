@@ -11,8 +11,8 @@ use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdi
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_scene::{
-    Axis, Document, KeyState, Material, MaterialId, NodeData, NodeId, ObjectKind, Param, Scene, SceneEdit, Tag,
-    TagKind, TimeSettings,
+    Axis, Document, Falloff, KeyState, LightDetails, LightType, Material, MaterialId, NodeData, NodeId, ObjectKind,
+    Param, Scene, SceneEdit, Tag, TagKind, TimeSettings,
 };
 
 use crate::{
@@ -163,7 +163,7 @@ impl AttributesPanel {
                 ui.add(TextEdit::singleline(&mut material.name).desired_width(f32::INFINITY));
                 ui.end_row();
                 attr_label(ui, "Color", LABEL_WIDTH);
-                ui.color_edit_button_rgb(&mut material.color);
+                colour_button(ui, &mut material.color);
                 ui.end_row();
                 for (label, value) in [
                     ("Roughness", &mut material.roughness),
@@ -183,7 +183,7 @@ impl AttributesPanel {
                     ui.end_row();
                 }
                 attr_label(ui, "Luminance", LABEL_WIDTH);
-                ui.color_edit_button_rgb(&mut material.emission);
+                colour_button(ui, &mut material.emission);
                 ui.end_row();
             });
         ui.add_space(4.0);
@@ -343,7 +343,7 @@ fn basic_tab(ui: &mut Ui, data: &mut NodeData) {
             ui.end_row();
 
             attr_label(ui, "Display Color", LABEL_WIDTH);
-            ui.color_edit_button_rgb(&mut data.display_color);
+            colour_button(ui, &mut data.display_color);
             ui.end_row();
 
             attr_label(ui, "Enabled", LABEL_WIDTH);
@@ -608,22 +608,40 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 );
                 ui.end_row();
             }
-            ObjectKind::Light { color, intensity } => {
+            ObjectKind::Light {
+                color,
+                intensity,
+                light_type,
+                details,
+            } => {
                 attr_label(ui, "Color", LABEL_WIDTH);
-                ui.color_edit_button_rgb(color);
+                colour_button(ui, color);
                 ui.end_row();
                 attr_label(ui, "Intensity", LABEL_WIDTH);
                 let mut percent = *intensity * 100.0;
                 if ui
                     .add_sized(
                         [FIELD_WIDTH, 19.0],
-                        DragValue::new(&mut percent).speed(1.0).range(0.0..=1000.0).suffix(" %"),
+                        DragValue::new(&mut percent)
+                            .speed(1.0)
+                            .range(0.0..=10_000.0)
+                            .suffix(" %"),
                     )
                     .changed()
                 {
                     *intensity = percent / 100.0;
                 }
                 ui.end_row();
+                attr_label(ui, "Type", LABEL_WIDTH);
+                egui::ComboBox::from_id_salt("grid4d.attr.light.type")
+                    .selected_text(light_type.label())
+                    .show_ui(ui, |ui| {
+                        for option in LightType::ALL {
+                            ui.selectable_value(light_type, option, option.label());
+                        }
+                    });
+                ui.end_row();
+                light_details(ui, *light_type, details);
             }
             ObjectKind::SubdivisionSurface {
                 viewport_levels,
@@ -1076,6 +1094,64 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
 }
 
 /// A segment count, from `min` up to what the geometry generators accept.
+/// A colour swatch with its picker. The picker converts the colour on every
+/// frame (0.9 comes back as 0.90000004), so the value is written back only when
+/// the user changes it: showing a colour must not edit the document.
+fn colour_button(ui: &mut Ui, colour: &mut [f32; 3]) -> egui::Response {
+    let mut shown = *colour;
+    let response = ui.color_edit_button_rgb(&mut shown);
+    if response.changed() {
+        *colour = shown;
+    }
+    response
+}
+
+/// A light's Details: the cone of a spot, the falloff of a light with a position.
+fn light_details(ui: &mut Ui, light_type: LightType, details: &mut LightDetails) {
+    if light_type == LightType::Spot {
+        attr_label(ui, "Use Inner", LABEL_WIDTH);
+        ui.checkbox(&mut details.use_inner, "");
+        ui.end_row();
+        let use_inner = details.use_inner;
+        for (label, value, enabled) in [
+            ("Inner Angle", &mut details.inner_angle_deg, use_inner),
+            ("Outer Angle", &mut details.outer_angle_deg, true),
+        ] {
+            attr_label(ui, label, LABEL_WIDTH);
+            ui.add_enabled(
+                enabled,
+                DragValue::new(value)
+                    .speed(0.25)
+                    .range(0.0..=LightDetails::MAX_ANGLE_DEG)
+                    .suffix("°"),
+            );
+            ui.end_row();
+        }
+    }
+    if light_type.has_position() {
+        attr_label(ui, "Falloff", LABEL_WIDTH);
+        egui::ComboBox::from_id_salt("grid4d.attr.light.falloff")
+            .selected_text(details.falloff.label())
+            .show_ui(ui, |ui| {
+                for option in Falloff::ALL {
+                    ui.selectable_value(&mut details.falloff, option, option.label());
+                }
+            });
+        ui.end_row();
+        if details.falloff != Falloff::None {
+            attr_label(ui, "Radius/Decay", LABEL_WIDTH);
+            ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut details.radius)
+                    .speed(1.0)
+                    .range(LightDetails::MIN_RADIUS..=1_000_000.0)
+                    .suffix(" cm"),
+            );
+            ui.end_row();
+        }
+    }
+}
+
 fn segments_row(ui: &mut Ui, label: &str, value: &mut u32, min: u32) {
     attr_label(ui, label, LABEL_WIDTH);
     ui.add_sized(
@@ -1100,4 +1176,52 @@ fn length_row(ui: &mut Ui, label: &str, value: &mut f32) {
 
 fn small_label(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).color(p::TEXT_DIM).size(11.5));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Showing an object's parameters must not change them.
+    #[test]
+    fn showing_light_parameters_changes_nothing() {
+        let ctx = egui::Context::default();
+        for light_type in LightType::ALL {
+            for falloff in Falloff::ALL {
+                let mut data = NodeData::new(
+                    "Light",
+                    ObjectKind::Light {
+                        color: [1.0, 0.9, 0.75],
+                        intensity: 1.6,
+                        light_type,
+                        details: LightDetails {
+                            inner_angle_deg: 20.0,
+                            outer_angle_deg: 70.0,
+                            falloff,
+                            ..LightDetails::default()
+                        },
+                    },
+                );
+                let before = data.clone();
+                for _ in 0..3 {
+                    ctx.run_ui(egui::RawInput::default(), |ui| object_tab(ui, &mut data))
+                        .drop_without_applying_deltas();
+                }
+                assert_eq!(data, before, "{light_type:?} with {falloff:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn showing_a_colour_keeps_it_exactly() {
+        let ctx = egui::Context::default();
+        let mut colour = [0.9, 0.62, 0.64];
+        for _ in 0..3 {
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                colour_button(ui, &mut colour);
+            })
+            .drop_without_applying_deltas();
+        }
+        assert_eq!(colour, [0.9, 0.62, 0.64]);
+    }
 }

@@ -673,6 +673,7 @@ impl ViewportPanel {
             &editor.selection,
             linked,
         );
+        overlay::light_shapes(painter, rect, &view_proj, &self.evaluated, &editor.selection);
         overlay::selection_brackets(painter, rect, &view_proj, &self.evaluated, &editor.selection);
         let own;
         let gizmo = match gizmo {

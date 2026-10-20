@@ -191,9 +191,9 @@ The upper part chooses the **shading**:
 
 | Mode | Shortcut | What you see |
 |------|----------|--------------|
-| Gouraud Shading | N~A | Smooth, lit surfaces (the default). |
+| Gouraud Shading | N~A | Smooth surfaces lit by the scene's lights — or by the default light when there are none (the default mode; [§4.1](#41-lights)). |
 | Gouraud Shading (Lines) | N~B | The same, with lines over the surfaces. |
-| Quick Shading | N~C | Lit by the default light only, without highlights. Scene lights do not light the viewport yet, so it differs little from Gouraud for now. |
+| Quick Shading | N~C | Lit by the default light only, whatever lights the scene has. |
 | Quick Shading (Lines) | N~D | The same, with lines. |
 | Constant Shading | N~E | Flat, in each object's colour, without light and shade. |
 | Constant Shading (Lines) | | The same, with lines. |
@@ -237,7 +237,7 @@ Click a button on the right side of the command palette, or use **Create ▸ Obj
 | Capsule | Radius, Height, Height, Cap and Rotation segments |
 | Null | An empty object used to group others |
 | Camera | Field of view; **created at the current view**, so it frames what you see |
-| Light | Colour, Intensity |
+| Light | Colour, Intensity, Type, cone and falloff ([§4.1](#41-lights)) |
 
 New objects are named like Cinema 4D's (`Cube`, `Cube.1`, `Cube.2` …) and become
 the selected object. These are **parametric** objects: change their parameters at
@@ -247,6 +247,40 @@ any time. To edit their points and polygons, make them editable
 **Generators** (Create ▸ Generator, or the green button at the right end of the
 command palette) build their shape from their children. The Subdivision Surface
 smooths a polygon mesh ([§12](#12-generators-subdivision-surface)).
+
+### 4.1 Lights
+
+Light objects light the viewport in **Gouraud Shading** — where they are, which
+way they point, their colour and strength. A scene without (visible) lights is lit
+by the **default light**, which comes from over your shoulder and moves with the
+view. **Quick Shading** always uses the default light ([§3.3](#33-display-modes)).
+
+![A spot light shining down on spheres with chrome, glossy red and matte blue materials and a glowing cube; an Infinite light's arrow at the right](images/manual/lights_viewport.png)
+
+The light's settings are on the Attribute Manager's **Object** tab:
+
+![A Spot light's settings](images/manual/light_attributes.png)
+
+| Setting | What it does |
+|---------|--------------|
+| Color, Intensity | The light's colour and strength (100 % is normal; up to 10 000 %). |
+| Type | **Omni**: shines in every direction, like a bulb. **Spot**: shines in a cone. **Infinite**: shines in one direction everywhere, like the sun — only its rotation matters, not its position. |
+| Use Inner, Inner Angle, Outer Angle (Spot) | The **Outer Angle** is the cone's opening (default 30°). Inside the **Inner Angle** the light is at full strength; it fades out towards the outer angle. With **Use Inner** off, the whole cone is at full strength and its edge is sharp. |
+| Falloff, Radius/Decay (Omni, Spot) | **None**: as strong at any distance (the default). **Linear**: fades out to nothing at the Radius/Decay distance. **Inverse Square**: exactly the set intensity at Radius/Decay, stronger nearer and weaker farther, like real light. |
+
+- Spot and Infinite lights shine along their **−Z axis**, like cameras look. Turn
+  them with the Rotate tool or the Coordinates, or give them a **Target tag** to
+  point them at an object ([§14.3](#143-target)). *Cameras ▸ Selected Object as
+  Camera* shows what a light points at.
+- In the viewport a **Spot** shows its cone and an **Infinite** light an arrow
+  along its direction (orange when selected).
+- A light hidden in the editor (the upper dot in the Object Manager) does not
+  light the viewport.
+- Sides that no light reaches keep a little soft light, so shapes stay readable.
+
+**Materials** show in the lit viewport too ([§15](#15-materials)): roughness sets
+how sharp the highlights are, metals reflect in their own colour, and luminance
+makes a surface glow whatever the light.
 
 ## 5. Selecting and transforming objects
 
@@ -408,7 +442,7 @@ What comes in:
 | Meshes | Polygon objects, ready for modelling. Points that the file repeats at seams are merged, so the mesh is connected. Texture coordinates are kept. |
 | Materials | Materials in the Material Manager (name, colour, roughness, metallic, emission), linked to the meshes by Material tags; the base colour also becomes the display colour. |
 | Cameras | Camera objects (field of view). |
-| Lights (`KHR_lights_punctual`) | Light objects (colour, intensity). |
+| Lights (`KHR_lights_punctual`) | Light objects (colour, intensity): point → Omni, spot → Spot (with its cone), directional → Infinite. |
 | Empty nodes | Nulls. |
 
 Not yet: textures, animation, skinning, morph targets and compressed
@@ -1030,8 +1064,11 @@ Manager**, the **Materials** tab at the bottom (beside Timeline and F-Curve;
 | Metallic | 0 % plastic, stone, wood … 100 % metal |
 | Luminance | light the surface gives off |
 
-The viewport shows only the colour for now; roughness, metallic and luminance will
-shade it with the lit viewport (planned), and they are saved and exported already.
+In the viewport ([§4.1](#41-lights)) the colour is the surface's colour,
+**Roughness** the size of its highlights (sharp and bright near 0 %, wide and faint
+near 100 %), **Metallic** makes highlights and reflections take the colour (a metal
+has no colour of its own otherwise) and **Luminance** adds glow that no light
+needs. Constant Shading shows the colour and the luminance only.
 
 **Giving an object a material**
 
@@ -1129,10 +1166,14 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   size parameters rather than their scale, editing several objects at once.
 - **Viewport**: the Isoparms and Skeleton display styles, separate display
   settings for selected objects, backface culling, X-Ray and textures; lines are
-  one pixel wide; three-view and the other four-view arrangements; the parallel and axonometric projections; the views and
-  their arrangement are not saved with the document, and only View 1 can look
-  through a camera; lights do not light the viewport yet; no render resolution
-  (camera pyramids use the view's proportions) and no depth-of-field handles.
+  one pixel wide; three-view and the other four-view arrangements; the parallel
+  and axonometric projections; the views and their arrangement are not saved with
+  the document, and only View 1 can look through a camera; no shadows; no render
+  resolution (camera pyramids use the view's proportions) and no depth-of-field
+  handles.
+- **Lights**: the Square Spot, Area, Parallel and IES types, shadows, visible
+  light, and the per-light switches (no illumination, ambient, diffuse or specular
+  only).
 - **Interchange and rendering**: textures, animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only), the
   offline renderer (the Render menu is disabled).

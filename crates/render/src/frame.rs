@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
-use grid4d_eval::{EvaluatedScene, MeshKey, Shading};
+use grid4d_eval::{EvaluatedLight, EvaluatedScene, MeshKey, Shading};
 use grid4d_geom::Component;
-use grid4d_scene::{MeshHandle, NodeId};
+use grid4d_scene::{Falloff, LightType, MeshHandle, NodeId};
 
 use crate::{ComponentHit, ComponentStyle, DisplayMode, OrbitCamera, components::ComponentOverlay};
 
@@ -17,8 +17,56 @@ pub struct InstanceRaw {
     pub normal: [[f32; 4]; 3],
     /// Linear RGB + alpha.
     pub color: [f32; 4],
-    /// `x`: selected (0/1), `y`: unlit (0/1), `z`/`w`: reserved.
+    /// `x`: selected (0/1), `y`: unlit (0/1), `z`: roughness, `w`: metallic.
     pub params: [f32; 4],
+    /// Linear RGB the surface gives off (its material's luminance); `w` unused.
+    pub emission: [f32; 4],
+}
+
+/// One light for the shaders. Layout must match `Light` in `shaders/mesh.wgsl`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+pub struct LightRaw {
+    /// `xyz`: world position, `w`: type (0 omni, 1 spot, 2 infinite).
+    pub position: [f32; 4],
+    /// `xyz`: the direction it shines in, `w`: cosine of half the outer angle.
+    pub direction: [f32; 4],
+    /// `rgb`: colour × intensity, `w`: cosine of half the inner angle (the outer
+    /// one's for a hard cone).
+    pub color: [f32; 4],
+    /// `x`: falloff (0 none, 1 linear, 2 inverse square), `y`: radius; `zw` unused.
+    pub falloff: [f32; 4],
+}
+
+impl LightRaw {
+    #[must_use]
+    pub fn new(light: &EvaluatedLight) -> Self {
+        let code = |n: u8| f32::from(n);
+        let kind = match light.light_type {
+            LightType::Omni => 0,
+            LightType::Spot => 1,
+            LightType::Infinite => 2,
+        };
+        let details = &light.details;
+        let half_cos = |degrees: f32| (degrees.to_radians() * 0.5).cos();
+        let cos_outer = half_cos(details.outer_angle_deg);
+        let cos_inner = if details.use_inner {
+            half_cos(details.inner_angle_deg.min(details.outer_angle_deg))
+        } else {
+            cos_outer
+        };
+        let falloff = match details.falloff {
+            Falloff::None => 0,
+            Falloff::Linear => 1,
+            Falloff::InverseSquare => 2,
+        };
+        Self {
+            position: light.position.extend(code(kind)).to_array(),
+            direction: light.direction.extend(cos_outer).to_array(),
+            color: [light.color[0], light.color[1], light.color[2], cos_inner],
+            falloff: [code(falloff), details.radius, 0.0, 0.0],
+        }
+    }
 }
 
 /// Batches unused for this many frames are dropped (their shape is gone).
@@ -103,6 +151,8 @@ pub struct FrameData {
     pub display: DisplayMode,
     /// Colours and sizes of the component overlay.
     pub component_style: ComponentStyle,
+    /// The scene's visible lights; refilled (capacity kept) every frame.
+    pub(crate) lights: Vec<LightRaw>,
     /// Points, edges and polygons of the active object in a component mode.
     pub(crate) components: ComponentOverlay,
     /// One batch per mesh key seen recently; emptied (capacity kept) every frame.
@@ -131,6 +181,7 @@ impl FrameData {
             parallel: false,
             display: DisplayMode::default(),
             component_style: ComponentStyle::default(),
+            lights: Vec::with_capacity(8),
             components: ComponentOverlay::default(),
             batches: Vec::with_capacity(16),
             batch_index: HashMap::with_capacity(16),
@@ -162,6 +213,12 @@ impl FrameData {
         self.batches.iter().map(|b| b.instances.len()).sum()
     }
 
+    /// This frame's scene lights.
+    #[must_use]
+    pub fn lights(&self) -> &[LightRaw] {
+        &self.lights
+    }
+
     pub fn set_camera(&mut self, camera: &OrbitCamera, aspect: f32) {
         self.view_proj = camera.view_projection(aspect);
         self.eye = camera.eye();
@@ -190,6 +247,8 @@ impl FrameData {
         for batch in &mut self.batches {
             batch.instances.clear();
         }
+        self.lights.clear();
+        self.lights.extend(scene.lights().iter().map(LightRaw::new));
         for node in scene.nodes() {
             let Some(draw) = node.drawable else { continue };
             let model = node.world * Mat4::from_scale(draw.scale);
@@ -216,6 +275,7 @@ impl FrameData {
             });
             let batch = &mut self.batches[slot];
             batch.last_used = frame;
+            let surface = &draw.surface;
             batch.instances.push(InstanceRaw {
                 model: model.to_cols_array_2d(),
                 normal: normal_matrix(&model),
@@ -223,9 +283,10 @@ impl FrameData {
                 params: [
                     f32::from(u8::from(is_selected(node.id))),
                     f32::from(u8::from(draw.unlit)),
-                    0.0,
-                    0.0,
+                    surface.roughness,
+                    surface.metallic,
                 ],
+                emission: [surface.emission[0], surface.emission[1], surface.emission[2], 0.0],
             });
         }
         // A polygon object's mesh changes id on every edit (each frame of a
@@ -310,8 +371,68 @@ mod tests {
     }
 
     #[test]
-    fn instance_layout_is_144_bytes() {
-        assert_eq!(size_of::<InstanceRaw>(), 144);
+    fn instance_layout_is_160_bytes() {
+        assert_eq!(size_of::<InstanceRaw>(), 160);
+    }
+
+    #[test]
+    fn light_layout_is_64_bytes() {
+        assert_eq!(size_of::<LightRaw>(), 64);
+    }
+
+    #[test]
+    fn lights_reach_the_frame_with_their_cone_and_falloff() {
+        use grid4d_scene::{LightDetails, Material, Tag, Transform};
+        let mut doc = Document::new("lights");
+        let spot = ObjectKind::Light {
+            color: [1.0, 0.5, 0.25],
+            intensity: 2.0,
+            light_type: LightType::Spot,
+            details: LightDetails {
+                inner_angle_deg: 20.0,
+                outer_angle_deg: 60.0,
+                falloff: Falloff::Linear,
+                radius: 300.0,
+                ..LightDetails::default()
+            },
+        };
+        // Turned 90° about X: its −Z axis points down.
+        doc.scene.insert(Node::new("Spot", spot).with_transform(
+            Transform::from_position(Vec3::new(0.0, 400.0, 0.0)).with_rotation_deg(Vec3::new(0.0, -90.0, 0.0)),
+        ));
+        let mut hidden = Node::new("Off", ObjectKind::light([1.0; 3], 1.0));
+        hidden.data.visible_in_editor = false;
+        doc.scene.insert(hidden);
+        // A material's surface reaches the instances.
+        let mut shiny = Material::new("Shiny");
+        (shiny.roughness, shiny.metallic, shiny.emission) = (0.2, 1.0, [0.5, 0.0, 0.0]);
+        let id = doc.scene.materials_mut().insert(shiny);
+        let mut cube = Node::new("Cube", ObjectKindTag::Cube.default_kind());
+        cube.data.tags = vec![Tag::Material { material: Some(id) }];
+        doc.scene.insert(cube);
+
+        let mut frame = FrameData::new();
+        frame.extract(&evaluated(&doc), |_| false);
+        assert_eq!(frame.lights().len(), 1, "a light hidden in the editor does not light");
+        let light = frame.lights()[0];
+        assert_eq!(light.position, [0.0, 400.0, 0.0, 1.0]);
+        let direction = Vec3::from_slice(&light.direction[..3]);
+        assert!(direction.abs_diff_eq(Vec3::NEG_Y, 1e-5), "{direction}");
+        assert!(
+            (light.direction[3] - 30f32.to_radians().cos()).abs() < 1e-6,
+            "half the outer angle"
+        );
+        assert!(
+            (light.color[3] - 10f32.to_radians().cos()).abs() < 1e-6,
+            "half the inner angle"
+        );
+        assert_eq!(light.color[..3], [2.0, 1.0, 0.5], "colour × intensity");
+        assert_eq!(light.falloff[..2], [1.0, 300.0]);
+
+        let cube = frame.batches().find(|(key, _, _)| matches!(key, MeshKey::Cube { .. }));
+        let instance = cube.unwrap().2[0];
+        assert_eq!(instance.params[2..], [0.2, 1.0]);
+        assert_eq!(instance.emission, [0.5, 0.0, 0.0, 0.0]);
     }
 
     #[test]
@@ -323,12 +444,23 @@ mod tests {
         let count = frame.instance_count();
         assert!(count >= 5, "demo scene should produce instances, got {count}");
         let caps = |f: &FrameData| -> Vec<usize> { f.batches.iter().map(|b| b.instances.capacity()).collect() };
-        let before = (caps(&frame), frame.batches.capacity(), frame.batch_index.capacity());
+        let before = (
+            caps(&frame),
+            frame.batches.capacity(),
+            frame.batch_index.capacity(),
+            frame.lights.capacity(),
+        );
+        assert_eq!(frame.lights().len(), 1, "the demo scene's light");
         for _ in 0..(2 * BATCH_TTL_FRAMES) {
             frame.extract(&eval, |_| false);
         }
         assert_eq!(frame.instance_count(), count);
-        let after = (caps(&frame), frame.batches.capacity(), frame.batch_index.capacity());
+        let after = (
+            caps(&frame),
+            frame.batches.capacity(),
+            frame.batch_index.capacity(),
+            frame.lights.capacity(),
+        );
         assert_eq!(before, after, "steady-state extraction must not reallocate");
     }
 

@@ -278,7 +278,7 @@ impl From<KindDto> for ObjectKind {
                 cap_segments,
             },
             KindDto::Camera { fov_y_deg } => Self::Camera { fov_y_deg },
-            KindDto::Light { color, intensity } => Self::Light { color, intensity },
+            KindDto::Light { color, intensity } => Self::light(color, intensity),
         }
     }
 }

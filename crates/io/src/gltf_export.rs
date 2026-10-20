@@ -10,7 +10,7 @@ use std::{collections::HashMap, path::Path};
 
 use glam::{Quat, Vec3};
 use grid4d_geom::{Smoothing, TriMesh, Triangulator};
-use grid4d_scene::{Materials, MeshHandle, MeshId, ObjectKind, Tags};
+use grid4d_scene::{LightType, Materials, MeshHandle, MeshId, ObjectKind, Tags};
 use serde_json::{Map, Value, json};
 
 use crate::{
@@ -155,7 +155,12 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
                 node.insert("camera".into(), json!(cameras.len()));
                 cameras.push(json!({ "type": "perspective", "perspective": { "yfov": yfov, "znear": 0.01 } }));
             }
-            ObjectKind::Light { color, intensity } => {
+            ObjectKind::Light {
+                color,
+                intensity,
+                light_type,
+                details,
+            } => {
                 if !finite(color) || !intensity.is_finite() {
                     return Err(invalid(format!("light \"{}\" has a non-finite colour", data.name)));
                 }
@@ -163,7 +168,31 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
                     "extensions".into(),
                     json!({ "KHR_lights_punctual": { "light": lights.len() } }),
                 );
-                lights.push(json!({ "type": "point", "color": color, "intensity": intensity }));
+                // glTF lights shine along −Z, like Grid4D's; cone angles are half openings.
+                lights.push(match light_type {
+                    LightType::Omni => json!({ "type": "point", "color": color, "intensity": intensity }),
+                    LightType::Infinite => {
+                        json!({ "type": "directional", "color": color, "intensity": intensity })
+                    }
+                    LightType::Spot => {
+                        let outer = details.outer_angle_deg.to_radians() * 0.5;
+                        // glTF wants the inner cone strictly inside the outer one.
+                        let inner = if details.use_inner {
+                            (details.inner_angle_deg.to_radians() * 0.5).min(outer * 0.999)
+                        } else {
+                            outer * 0.999
+                        };
+                        if !outer.is_finite() || !inner.is_finite() {
+                            return Err(invalid(format!("light \"{}\" has a non-finite cone", data.name)));
+                        }
+                        json!({
+                            "type": "spot",
+                            "color": color,
+                            "intensity": intensity,
+                            "spot": { "innerConeAngle": inner, "outerConeAngle": outer },
+                        })
+                    }
+                });
             }
             // Baked by the caller; whatever is left has no geometry here.
             ObjectKind::Null
@@ -447,7 +476,7 @@ fn percent_encode(name: &str) -> String {
 mod tests {
     use glam::{Vec2, Vec3};
     use grid4d_geom::{PolyMesh, primitives};
-    use grid4d_scene::{NodeData, ObjectKindTag, Transform};
+    use grid4d_scene::{LightDetails, NodeData, ObjectKindTag, Transform};
 
     use super::*;
     use crate::{import::ObjectEntry, import_gltf};
@@ -497,14 +526,7 @@ mod tests {
             entry(Some(0), "Pillar", ObjectKind::polygon(cylinder)),
             entry(Some(0), "Twin", ObjectKind::polygon(cube)),
             entry(None, "Cam", ObjectKind::Camera { fov_y_deg: 35.0 }),
-            entry(
-                None,
-                "Lamp",
-                ObjectKind::Light {
-                    color: [1.0, 0.8, 0.6],
-                    intensity: 2.5,
-                },
-            ),
+            entry(None, "Lamp", ObjectKind::light([1.0, 0.8, 0.6], 2.5)),
             entry(None, "Empty", ObjectKind::polygon(MeshHandle::new(PolyMesh::new()))),
         ];
         nodes[0].data.transform = Transform {
@@ -609,6 +631,54 @@ mod tests {
             mesh(&back, "Twin").id(),
             "a shared mesh stays shared"
         );
+    }
+
+    #[test]
+    fn spot_and_infinite_lights_keep_their_type_and_cone() {
+        let light = |light_type, details| ObjectKind::Light {
+            color: [1.0, 0.9, 0.8],
+            intensity: 1.5,
+            light_type,
+            details,
+        };
+        let soft = LightDetails {
+            inner_angle_deg: 20.0,
+            outer_angle_deg: 50.0,
+            ..LightDetails::default()
+        };
+        let hard = LightDetails {
+            use_inner: false,
+            ..soft
+        };
+        let objects = Objects {
+            nodes: vec![
+                entry(None, "Soft", light(LightType::Spot, soft)),
+                entry(None, "Hard", light(LightType::Spot, hard)),
+                entry(None, "Sun", light(LightType::Infinite, LightDetails::default())),
+            ],
+            ..Objects::default()
+        };
+        let back = import_gltf(&glb_bytes(&objects).unwrap(), None).unwrap();
+        let kinds: Vec<(LightType, LightDetails)> = back
+            .nodes
+            .iter()
+            .map(|n| match n.data.kind {
+                ObjectKind::Light {
+                    light_type, details, ..
+                } => (light_type, details),
+                _ => panic!("not a light"),
+            })
+            .collect();
+        assert_eq!(kinds[0].0, LightType::Spot);
+        let (a, b) = (kinds[0].1, soft);
+        assert!(
+            a.use_inner && (a.inner_angle_deg - b.inner_angle_deg).abs() < 1e-3,
+            "{a:?}"
+        );
+        assert!((a.outer_angle_deg - b.outer_angle_deg).abs() < 1e-3);
+        assert_eq!(kinds[1].0, LightType::Spot);
+        assert!(!kinds[1].1.use_inner, "a hard cone stays hard");
+        assert_eq!(kinds[2], (LightType::Infinite, LightDetails::default()));
     }
 
     #[test]
