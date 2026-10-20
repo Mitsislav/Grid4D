@@ -59,6 +59,8 @@ pub mod palette {
     pub const ICON_LIGHT: Color32 = Color32::from_rgb(0xf2, 0xc9, 0x4c);
     /// Generators (Subdivision Surface …).
     pub const ICON_GENERATOR: Color32 = Color32::from_rgb(0x6c, 0xc2, 0x8a);
+    /// Tag icons in the Object Manager.
+    pub const TAG: Color32 = Color32::from_rgb(0xc8, 0xcd, 0xd6);
     /// The snap target a drag is stuck to, and its label.
     pub const SNAP: Color32 = Color32::from_rgb(0xff, 0xd8, 0x3d);
 

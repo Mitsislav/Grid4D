@@ -7,11 +7,12 @@
 use std::f32::consts::{PI, TAU};
 
 use egui::{Color32, CornerRadius, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, vec2};
-use grid4d_scene::ObjectKindTag;
+use grid4d_scene::{ObjectKindTag, TagKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Icon {
     Object(ObjectKindTag),
+    Tag(TagKind),
     // Tools
     LiveSelection,
     RectangleSelection,
@@ -68,6 +69,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
 
     match icon {
         Icon::Object(tag) => paint_object(&c, tag, soft),
+        Icon::Tag(kind) => paint_tag(&c, kind, soft),
 
         Icon::LiveSelection => {
             c.circle((0.42, 0.42), 0.3);
@@ -524,6 +526,47 @@ impl Canvas<'_> {
             self.color,
             Stroke::NONE,
         ));
+    }
+}
+
+/// Tag icons: a smooth curve over a faceted one (Phong), a padlock (Protection),
+/// a sight (Target).
+fn paint_tag(c: &Canvas<'_>, kind: TagKind, soft: Color32) {
+    match kind {
+        TagKind::Phong => {
+            c.polyline(&[(0.1, 0.8), (0.3, 0.42), (0.7, 0.42), (0.9, 0.8)], false);
+            let curve: Vec<P> = (0..=16)
+                .map(|i| {
+                    let a = PI * i as f32 / 16.0;
+                    (0.5 - 0.4 * a.cos(), 0.62 - 0.42 * a.sin())
+                })
+                .collect();
+            c.polyline_stroke(&curve, false, Stroke::new(c.stroke.width * 1.3, c.color));
+            c.fill_with(&[(0.1, 0.8), (0.9, 0.8), (0.9, 0.9), (0.1, 0.9)], soft);
+        }
+        TagKind::Protection => {
+            c.rect_fill((0.18, 0.45), (0.82, 0.9), c.color);
+            let shackle: Vec<P> = (0..=12)
+                .map(|i| {
+                    let a = PI + PI * i as f32 / 12.0;
+                    (0.5 + 0.22 * a.cos(), 0.45 + 0.28 * a.sin())
+                })
+                .collect();
+            c.polyline_stroke(&shackle, false, Stroke::new(c.stroke.width * 1.4, c.color));
+            c.disc_with((0.5, 0.64), 0.07, soft);
+        }
+        TagKind::Target => {
+            c.circle((0.5, 0.5), 0.34);
+            c.disc((0.5, 0.5), 0.1);
+            for (a, b) in [
+                ((0.5, 0.04), (0.5, 0.26)),
+                ((0.5, 0.74), (0.5, 0.96)),
+                ((0.04, 0.5), (0.26, 0.5)),
+                ((0.74, 0.5), (0.96, 0.5)),
+            ] {
+                c.line(a, b);
+            }
+        }
     }
 }
 

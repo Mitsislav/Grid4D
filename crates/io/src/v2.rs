@@ -147,6 +147,7 @@ impl ObjectDto {
             visible_in_editor: self.visible_in_editor,
             visible_in_render: self.visible_in_render,
             enabled: self.enabled,
+            tags: Vec::new(),
         }
     }
 

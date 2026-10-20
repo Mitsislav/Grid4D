@@ -2,10 +2,12 @@ use std::collections::HashMap;
 
 use glam::Mat4;
 use grid4d_geom::{BitSet, subdivision::SubdivisionOptions};
-use grid4d_scene::{Aabb, Components, LIGHT_MARKER_RADIUS, MeshHandle, MeshId, NodeId, ObjectKind, Scene, WalkItem};
+use grid4d_scene::{
+    Aabb, Components, LIGHT_MARKER_RADIUS, MeshHandle, MeshId, NodeId, ObjectKind, Scene, TagKind, Tags, WalkItem,
+};
 
 use crate::{
-    Drawable, MeshKey, drawable,
+    Drawable, MeshKey, Shading, drawable,
     generator::{self, Input, viewport_options},
 };
 
@@ -44,6 +46,9 @@ pub struct EvaluatedNode {
 /// A generator draws its result instead of its cage: the cage's nodes stay listed
 /// (component modes edit them, framing sees them) but are neither drawn nor picked.
 ///
+/// A Target tag turns its object's forward axis (−Z) towards the target here; the
+/// object's children follow. The document's own rotations are left as they are.
+///
 /// Keep one per document view and call [`EvaluatedScene::update`] each frame
 /// before drawing or picking.
 #[derive(Debug, Default)]
@@ -63,6 +68,10 @@ pub struct EvaluatedScene {
     inputs: Vec<Input>,
     cage_stack: Vec<NodeId>,
     walk_stack: Vec<WalkItem>,
+    /// Scratch space for Target tags: node index by id, and the corrections of
+    /// turned objects whose subtree is being visited.
+    aim_index: HashMap<NodeId, usize>,
+    aim_stack: Vec<(u32, Mat4)>,
     /// [`Scene::revision`] of the scene `nodes` were built from.
     revision: Option<u64>,
 }
@@ -105,7 +114,10 @@ impl EvaluatedScene {
                 cage_depth = Some(depth);
                 next_cage = None;
             }
-            let mut drawable = drawable(&data.kind, data.display_color);
+            let mut drawable = drawable(&data.kind, data.display_color).map(|d| Drawable {
+                shading: Shading::from_angle(data.tags.smoothing_angle()),
+                ..d
+            });
             let mut pick = pick_shape(&data.kind);
             if let ObjectKind::Polygon { mesh, components } = &data.kind {
                 polygons.insert(id, (mesh.clone(), components.clone()));
@@ -130,8 +142,16 @@ impl EvaluatedScene {
                         meshes.insert(mesh.id(), mesh.clone());
                         bounds = mesh.bounds();
                         pick = PickShape::Mesh(mesh.id());
+                        // Its own Phong tag, else the cage's.
+                        let cage_tags = scene.children(id).first().and_then(|&c| scene.get(c));
+                        let tags = if data.tags.tag_index(TagKind::Phong).is_some() {
+                            &data.tags
+                        } else {
+                            cage_tags.map_or(&data.tags, |cage| &cage.data.tags)
+                        };
                         drawable = Some(Drawable {
                             key: MeshKey::Polygon(mesh.id()),
+                            shading: Shading::from_angle(tags.smoothing_angle()),
                             scale: glam::Vec3::ONE,
                             color: result.colour,
                             unlit: false,
@@ -156,6 +176,13 @@ impl EvaluatedScene {
             });
             true
         });
+        if self
+            .nodes
+            .iter()
+            .any(|n| scene.get(n.id).is_some_and(|node| node.data.tags.aim().is_some()))
+        {
+            apply_aims(scene, &mut self.nodes, &mut self.aim_index, &mut self.aim_stack);
+        }
         // Objects gone, hidden or with nothing hidden any more.
         self.shown.retain(|_, entry| self.meshes.contains_key(&entry.mesh.id()));
         self.generated.retain(|_, entry| entry.seen == revision);
@@ -185,6 +212,75 @@ impl EvaluatedScene {
         let node = self.nodes.iter().find(|n| n.id == id)?;
         Some((node, mesh, components))
     }
+}
+
+/// Turns every object with a Target tag towards its target (in pre-order, so a
+/// turned parent's children follow it): its forward axis (−Z) faces the target,
+/// its up axis leans towards the up object (world up without one); with `pitch`
+/// off only the heading changes. Missing or hidden targets, and targets inside the
+/// object itself, change nothing.
+fn apply_aims(
+    scene: &Scene,
+    nodes: &mut [EvaluatedNode],
+    index: &mut HashMap<NodeId, usize>,
+    stack: &mut Vec<(u32, Mat4)>,
+) {
+    index.clear();
+    index.extend(nodes.iter().enumerate().map(|(i, n)| (n.id, i)));
+    stack.clear();
+    for i in 0..nodes.len() {
+        let depth = nodes[i].depth;
+        while stack.last().is_some_and(|&(d, _)| d >= depth) {
+            stack.pop();
+        }
+        if let Some(&(_, correction)) = stack.last() {
+            nodes[i].world = correction * nodes[i].world;
+        }
+        let Some(aim) = scene.get(nodes[i].id).and_then(|n| n.data.tags.aim()) else {
+            continue;
+        };
+        let Some(&t) = index.get(&aim.target) else { continue };
+        // The object itself, or something inside it, cannot be its target.
+        let subtree_end = nodes[i + 1..]
+            .iter()
+            .position(|n| n.depth <= depth)
+            .map_or(nodes.len(), |k| i + 1 + k);
+        if (i..subtree_end).contains(&t) {
+            continue;
+        }
+        let old = nodes[i].world;
+        let (scale, _, translation) = old.to_scale_rotation_translation();
+        let mut forward = nodes[t].world.w_axis.truncate() - translation;
+        if !aim.pitch {
+            forward.y = 0.0;
+        }
+        let up = aim
+            .up
+            .and_then(|u| index.get(&u))
+            .map_or(glam::Vec3::Y, |&u| nodes[u].world.w_axis.truncate() - translation);
+        let Some(rotation) = look_rotation(forward, up) else {
+            continue;
+        };
+        let new = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+        if old.determinant().abs() > f32::EPSILON {
+            stack.push((depth, new * old.inverse()));
+        }
+        nodes[i].world = new;
+    }
+}
+
+/// The rotation whose −Z axis points along `forward` and whose Y axis leans towards
+/// `up`; `None` if `forward` has no length.
+fn look_rotation(forward: glam::Vec3, up: glam::Vec3) -> Option<glam::Quat> {
+    let back = (-forward).try_normalize()?;
+    // An up direction along the line of sight: fall back to another axis.
+    let side = up
+        .cross(back)
+        .try_normalize()
+        .or_else(|| glam::Vec3::Z.cross(back).try_normalize())
+        .or_else(|| glam::Vec3::X.cross(back).try_normalize())?;
+    let true_up = back.cross(side);
+    Some(glam::Quat::from_mat3(&glam::Mat3::from_cols(side, true_up, back)))
 }
 
 /// A generator's result and what it was built from.
@@ -281,12 +377,131 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
 
 #[cfg(test)]
 mod tests {
-    use grid4d_scene::{Document, Node};
+    use grid4d_scene::{DEFAULT_PHONG_ANGLE, Document, Node, Tag};
 
     use super::*;
 
     fn id_of(doc: &Document, name: &str) -> NodeId {
         doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0
+    }
+
+    #[test]
+    fn a_phong_tag_sets_the_shading_of_its_object_only() {
+        let mut doc = Document::with_demo_scene();
+        let (cube, sphere) = (id_of(&doc, "Cube"), id_of(&doc, "Sphere"));
+        let mut eval = EvaluatedScene::new();
+        let shading = |eval: &EvaluatedScene, id| {
+            eval.nodes()
+                .iter()
+                .find(|n| n.id == id)
+                .unwrap()
+                .drawable
+                .unwrap()
+                .shading
+        };
+        eval.update(&doc.scene);
+        assert_eq!(
+            shading(&eval, cube),
+            Shading::from_angle(DEFAULT_PHONG_ANGLE),
+            "no tag: the default"
+        );
+
+        doc.scene.get_mut(cube).unwrap().data.tags = vec![Tag::Phong {
+            angle_limit: true,
+            angle: 0.0,
+        }];
+        doc.scene.get_mut(sphere).unwrap().data.tags = vec![Tag::Phong {
+            angle_limit: false,
+            angle: 0.2,
+        }];
+        eval.update(&doc.scene);
+        assert_eq!(shading(&eval, cube), Shading::from_angle(0.0), "flat");
+        assert_eq!(
+            shading(&eval, sphere),
+            Shading::from_angle(std::f32::consts::PI),
+            "no limit: all smooth"
+        );
+        assert_eq!(
+            shading(&eval, id_of(&doc, "Box")),
+            Shading::default(),
+            "others keep the default"
+        );
+    }
+
+    #[test]
+    fn a_target_tag_turns_the_object_and_its_children_follow() {
+        let mut doc = Document::new("aim");
+        let target = doc.scene.insert(Node::new("Target", ObjectKind::Null));
+        let camera = doc.scene.insert(
+            Node::new("Cam", ObjectKind::Camera { fov_y_deg: 40.0 }).with_position(glam::Vec3::new(300.0, 200.0, 0.0)),
+        );
+        let child = doc
+            .scene
+            .insert_child(
+                camera,
+                Node::new("Child", ObjectKind::Null).with_position(glam::Vec3::new(0.0, 0.0, -100.0)),
+            )
+            .unwrap();
+        let world = |eval: &EvaluatedScene, id| eval.nodes().iter().find(|n| n.id == id).unwrap().world;
+        let aim = |doc: &mut Document, target: Option<NodeId>, pitch: bool| {
+            doc.scene.get_mut(camera).unwrap().data.tags = vec![Tag::Target {
+                target,
+                up: None,
+                pitch,
+            }];
+        };
+        let mut eval = EvaluatedScene::new();
+
+        aim(&mut doc, Some(target), true);
+        eval.update(&doc.scene);
+        let cam = world(&eval, camera);
+        let forward = cam.transform_vector3(-glam::Vec3::Z).normalize();
+        let expected = (glam::Vec3::ZERO - glam::Vec3::new(300.0, 200.0, 0.0)).normalize();
+        assert!(forward.abs_diff_eq(expected, 1e-5), "−Z faces the target: {forward}");
+        assert!(cam.transform_vector3(glam::Vec3::Y).y > 0.0, "and stays upright");
+        assert!(
+            cam.w_axis
+                .truncate()
+                .abs_diff_eq(glam::Vec3::new(300.0, 200.0, 0.0), 1e-4),
+            "it only turns"
+        );
+        // The child sits 100 cm in front of the camera, along its line of sight.
+        let ahead = world(&eval, child).w_axis.truncate();
+        assert!(
+            ahead.abs_diff_eq(glam::Vec3::new(300.0, 200.0, 0.0) + expected * 100.0, 1e-3),
+            "{ahead}"
+        );
+        assert_eq!(
+            doc.scene.get(camera).unwrap().data.transform.rotation,
+            glam::Vec3::ZERO,
+            "the document's rotation is untouched"
+        );
+
+        aim(&mut doc, Some(target), false);
+        eval.update(&doc.scene);
+        let level = world(&eval, camera).transform_vector3(-glam::Vec3::Z).normalize();
+        assert!(
+            level.abs_diff_eq(glam::Vec3::new(-1.0, 0.0, 0.0), 1e-5),
+            "Pitch off: level, {level}"
+        );
+
+        for ignored in [Some(camera), Some(child), None] {
+            aim(&mut doc, ignored, true);
+            eval.update(&doc.scene);
+            assert_eq!(
+                world(&eval, camera),
+                doc.scene.world_matrix(camera),
+                "{ignored:?} changes nothing"
+            );
+        }
+        aim(&mut doc, Some(target), true);
+        doc.scene.get_mut(target).unwrap().data.visible_in_editor = false;
+        eval.update(&doc.scene);
+        assert_eq!(
+            world(&eval, camera),
+            doc.scene.world_matrix(camera),
+            "a hidden target changes nothing"
+        );
     }
 
     #[test]

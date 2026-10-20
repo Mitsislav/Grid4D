@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
-use grid4d_eval::{EvaluatedScene, MeshKey};
+use grid4d_eval::{EvaluatedScene, MeshKey, Shading};
 use grid4d_geom::Component;
 use grid4d_scene::{MeshHandle, NodeId};
 
@@ -28,6 +28,8 @@ const BATCH_TTL_FRAMES: u64 = 240;
 #[derive(Debug)]
 struct Batch {
     key: MeshKey,
+    /// Meshes with another Phong angle are other GPU meshes.
+    shading: Shading,
     /// The geometry of a [`MeshKey::Polygon`], for the renderer to upload.
     mesh: Option<MeshHandle>,
     instances: Vec<InstanceRaw>,
@@ -53,7 +55,7 @@ pub struct FrameData {
     pub(crate) components: ComponentOverlay,
     /// One batch per mesh key seen recently; emptied (capacity kept) every frame.
     batches: Vec<Batch>,
-    batch_index: HashMap<MeshKey, usize>,
+    batch_index: HashMap<(MeshKey, Shading), usize>,
     frame: u64,
 }
 
@@ -90,6 +92,16 @@ impl FrameData {
             .map(|b| (b.key, b.mesh.as_ref(), b.instances.as_slice()))
     }
 
+    /// [`batches`](Self::batches) with each batch's shading (what the renderer uploads by).
+    pub(crate) fn draw_batches(
+        &self,
+    ) -> impl Iterator<Item = (MeshKey, Shading, Option<&MeshHandle>, &[InstanceRaw])> + '_ {
+        self.batches
+            .iter()
+            .filter(|b| !b.instances.is_empty())
+            .map(|b| (b.key, b.shading, b.mesh.as_ref(), b.instances.as_slice()))
+    }
+
     #[must_use]
     pub fn instance_count(&self) -> usize {
         self.batches.iter().map(|b| b.instances.len()).sum()
@@ -123,7 +135,7 @@ impl FrameData {
                 continue;
             }
             let batches = &mut self.batches;
-            let slot = *self.batch_index.entry(draw.key).or_insert_with(|| {
+            let slot = *self.batch_index.entry((draw.key, draw.shading)).or_insert_with(|| {
                 // A key's mesh never changes (an edited mesh has a new id), so the
                 // handle is looked up once, when its batch is created.
                 let mesh = match draw.key {
@@ -132,6 +144,7 @@ impl FrameData {
                 };
                 batches.push(Batch {
                     key: draw.key,
+                    shading: draw.shading,
                     mesh,
                     instances: Vec::new(),
                     last_used: frame,
@@ -183,7 +196,7 @@ impl FrameData {
         });
         self.batch_index.clear();
         for (slot, batch) in self.batches.iter().enumerate() {
-            self.batch_index.insert(batch.key, slot);
+            self.batch_index.insert((batch.key, batch.shading), slot);
         }
     }
 }
@@ -373,6 +386,33 @@ mod tests {
         assert_eq!(
             Mat4::from_cols_array_2d(&unscaled),
             Mat4::from_translation(Vec3::new(300.0, 0.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn objects_with_other_phong_angles_get_their_own_batches() {
+        let mut doc = Document::new("phong");
+        for (name, angle) in [("A", None), ("B", None), ("C", Some(0.0f32))] {
+            let mut node = Node::new(name, ObjectKindTag::Cube.default_kind());
+            if let Some(angle) = angle {
+                node.data.tags = vec![grid4d_scene::Tag::Phong {
+                    angle_limit: true,
+                    angle,
+                }];
+            }
+            doc.scene.insert(node);
+        }
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let mut frame = FrameData::new();
+        frame.extract(&eval, |_| false);
+        let mut counts: Vec<usize> = frame.draw_batches().map(|(_, _, _, i)| i.len()).collect();
+        counts.sort_unstable();
+        assert_eq!(counts, [1, 2], "two cubes share the default, the flat one is apart");
+        assert!(
+            frame
+                .draw_batches()
+                .any(|(_, shading, _, _)| shading == Shading::from_angle(0.0))
         );
     }
 }

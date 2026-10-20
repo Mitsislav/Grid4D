@@ -10,7 +10,7 @@
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
-use grid4d_scene::{Document, NodeData, NodeId, ObjectKind, SceneEdit, TimeSettings};
+use grid4d_scene::{Document, NodeData, NodeId, ObjectKind, Scene, SceneEdit, Tag, TagKind, TimeSettings};
 
 use crate::{
     CommandQueue, EditorCommand, EditorState, Tool,
@@ -112,7 +112,8 @@ impl AttributesPanel {
                     match (self.view, editor.selection.active()) {
                         (View::Tool, _) => tool_ui(ui, doc, editor),
                         (View::Objects, Some(id)) => {
-                            self.node_ui(ui, doc, id, editor.selection.len(), &mut editor.commands);
+                            let tag = editor.selected_tag(doc).map(|(tag, index)| (tag.kind, index));
+                            self.node_ui(ui, doc, id, tag, editor.selection.len(), &mut editor.commands);
                         }
                         (View::Objects, None) => self.project_ui(ui, doc, &mut editor.commands),
                     }
@@ -120,11 +121,14 @@ impl AttributesPanel {
             });
     }
 
+    /// The active object's attributes, or those of its selected tag (`tag`: the
+    /// kind and its index in the object's tags).
     fn node_ui(
         &mut self,
         ui: &mut Ui,
         doc: &mut Document,
         id: NodeId,
+        tag: Option<(TagKind, usize)>,
         selection_len: usize,
         commands: &mut CommandQueue,
     ) {
@@ -134,6 +138,25 @@ impl AttributesPanel {
             return;
         };
         self.node_edit.begin(id, &data);
+
+        if let Some((kind, index)) = tag {
+            // Title: "Phong Tag [Cube]"
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                icons::paint(ui.painter(), rect, Icon::Tag(kind), p::TAG);
+                ui.label(
+                    RichText::new(format!("{} Tag [{}]", kind.label(), data.name))
+                        .strong()
+                        .color(p::TEXT_STRONG),
+                );
+            });
+            ui.add_space(4.0);
+            if let Some(tag) = data.tags.get_mut(index) {
+                tag_ui(ui, tag, &doc.scene, id);
+            }
+            self.finish_node_edit(ui, doc, id, &data, "Edit Tag", commands);
+            return;
+        }
 
         // Title: "Cube Object [Cube]"
         ui.horizontal(|ui| {
@@ -169,16 +192,30 @@ impl AttributesPanel {
             Tab::Coord => coord_tab(ui, &mut data),
             Tab::Object => object_tab(ui, &mut data),
         }
-        if doc.scene.get(id).is_some_and(|node| node.data != data)
+        let label = self.tab.edit_label();
+        self.finish_node_edit(ui, doc, id, &data, label, commands);
+    }
+
+    /// Writes the edited copy back when it changed, and records one undo step when
+    /// the interaction ends.
+    fn finish_node_edit(
+        &mut self,
+        ui: &Ui,
+        doc: &mut Document,
+        id: NodeId,
+        data: &NodeData,
+        label: &'static str,
+        commands: &mut CommandQueue,
+    ) {
+        if doc.scene.get(id).is_some_and(|node| node.data != *data)
             && let Some(node) = doc.scene.get_mut(id)
         {
-            node.data.clone_from(&data);
+            node.data.clone_from(data);
         }
-
-        if let Some((id, before)) = self.node_edit.end(id, &data, interaction_ongoing(ui)) {
+        if let Some((id, before)) = self.node_edit.end(id, data, interaction_ongoing(ui)) {
             commands.push(EditorCommand::CommitLive {
                 inverse: SceneEdit::SetData { id, data: before },
-                label: self.tab.edit_label(),
+                label,
             });
         }
     }
@@ -239,6 +276,8 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData) {
         ["P . Y", "S . Y", "R . P"],
         ["P . Z", "S . Z", "R . B"],
     ];
+    // A Protection tag makes its channels read-only.
+    let protection = grid4d_scene::Tags::protection(data.tags.as_slice());
     let t = &mut data.transform;
     Grid::new("grid4d.attr.coord")
         .num_columns(6)
@@ -246,37 +285,49 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData) {
         .show(ui, |ui| {
             for (axis, [pl, sl, rl]) in ROWS.into_iter().enumerate() {
                 small_label(ui, pl);
-                ui.add_sized(
-                    [70.0, 19.0],
-                    DragValue::new(&mut t.position[axis])
-                        .speed(1.0)
-                        .suffix(" cm")
-                        .max_decimals(2),
-                );
+                ui.add_enabled_ui(!protection.position, |ui| {
+                    ui.add_sized(
+                        [70.0, 19.0],
+                        DragValue::new(&mut t.position[axis])
+                            .speed(1.0)
+                            .suffix(" cm")
+                            .max_decimals(2),
+                    )
+                });
                 small_label(ui, sl);
-                ui.add_sized(
-                    [52.0, 19.0],
-                    DragValue::new(&mut t.scale[axis])
-                        .speed(0.01)
-                        .range(0.001..=10_000.0)
-                        .max_decimals(3),
-                );
+                ui.add_enabled_ui(!protection.scale, |ui| {
+                    ui.add_sized(
+                        [52.0, 19.0],
+                        DragValue::new(&mut t.scale[axis])
+                            .speed(0.01)
+                            .range(0.001..=10_000.0)
+                            .max_decimals(3),
+                    )
+                });
                 small_label(ui, rl);
                 let mut degrees = t.rotation[axis].to_degrees();
-                if ui
-                    .add_sized(
-                        [60.0, 19.0],
-                        DragValue::new(&mut degrees).speed(0.5).suffix("°").max_decimals(2),
-                    )
-                    .changed()
-                {
+                let rotated = ui
+                    .add_enabled_ui(!protection.rotation, |ui| {
+                        ui.add_sized(
+                            [60.0, 19.0],
+                            DragValue::new(&mut degrees).speed(0.5).suffix("°").max_decimals(2),
+                        )
+                    })
+                    .inner
+                    .changed();
+                if rotated {
                     t.rotation[axis] = degrees.to_radians();
                 }
                 ui.end_row();
             }
         });
     ui.add_space(6.0);
-    if ui.button("Reset Transform").clicked() {
+    let unprotected = !(protection.position || protection.scale || protection.rotation);
+    if ui
+        .add_enabled(unprotected, Button::new("Reset Transform"))
+        .on_disabled_hover_text("A Protection tag guards this object's transform")
+        .clicked()
+    {
         *t = grid4d_scene::Transform::IDENTITY;
     }
 }
@@ -632,6 +683,70 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
         }
         ui.label(RichText::new("Or drag left/right in the viewport: every drag is a new operation").color(p::TEXT_DIM));
     }
+}
+
+/// A tag's settings (Attribute Manager, Mode ▸ Tags); `owner` is the tagged object.
+fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
+    section_heading(ui, "Tag Properties");
+    Grid::new("grid4d.attr.tag")
+        .num_columns(2)
+        .spacing([6.0, 4.0])
+        .show(ui, |ui| match tag {
+            Tag::Phong { angle_limit, angle } => {
+                check_row(ui, "Angle Limit", angle_limit);
+                if *angle_limit {
+                    angle_row(ui, "Phong Angle", angle, 0.0..=180.0);
+                } else {
+                    attr_label(ui, "Phong Angle", LABEL_WIDTH);
+                    ui.label(RichText::new("no limit (180°)").color(p::TEXT_DIM));
+                    ui.end_row();
+                }
+            }
+            Tag::Protection {
+                position,
+                scale,
+                rotation,
+            } => {
+                check_row(ui, "Position", position);
+                check_row(ui, "Scale", scale);
+                check_row(ui, "Rotation", rotation);
+            }
+            Tag::Target { target, up, pitch } => {
+                object_row(ui, "Target Object", target, scene, owner);
+                object_row(ui, "Up Vector", up, scene, owner);
+                check_row(ui, "Pitch", pitch);
+            }
+        });
+    let hint = match tag {
+        Tag::Phong { .. } => "Edges sharper than the angle stay hard; with Angle Limit off everything is smooth",
+        Tag::Protection { .. } => "Protected channels cannot be changed with the gizmo or the Coordinates fields",
+        Tag::Target { .. } => "The object turns its forward axis (−Z) towards the target; Pitch off keeps it level",
+    };
+    ui.add_space(4.0);
+    ui.label(RichText::new(hint).color(p::TEXT_DIM));
+}
+
+/// A link to another object: a list of the document's objects, `None` first.
+fn object_row(ui: &mut Ui, label: &str, value: &mut Option<NodeId>, scene: &Scene, owner: NodeId) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let name = value
+        .and_then(|id| scene.get(id))
+        .map_or("None", |n| n.data.name.as_str());
+    egui::ComboBox::from_id_salt(("grid4d.attr.tag.link", label))
+        .selected_text(name)
+        .width(FIELD_WIDTH + 40.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(value, None, "None");
+            // Built only while the list is open.
+            scene.walk(&mut Vec::new(), |id, node, _, depth| {
+                if id != owner {
+                    let indent = "   ".repeat(usize::try_from(depth).unwrap_or(0));
+                    ui.selectable_value(value, Some(id), format!("{indent}{}", node.data.name));
+                }
+                true
+            });
+        });
+    ui.end_row();
 }
 
 /// Snapping options (Move tool; the same settings as the snap button's menu).

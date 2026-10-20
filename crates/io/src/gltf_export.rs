@@ -10,7 +10,7 @@ use std::{collections::HashMap, path::Path};
 
 use glam::{Quat, Vec3};
 use grid4d_geom::{Smoothing, TriMesh, Triangulator};
-use grid4d_scene::{MeshHandle, MeshId, ObjectKind};
+use grid4d_scene::{MeshHandle, MeshId, ObjectKind, Tags};
 use serde_json::{Map, Value, json};
 
 use crate::{IoError, import::Objects, write_atomic};
@@ -129,7 +129,8 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
         }
         match &data.kind {
             ObjectKind::Polygon { mesh, .. } => {
-                if let Some(index) = writer.mesh(mesh, data.display_color, &data.name)? {
+                let angle = data.tags.smoothing_angle();
+                if let Some(index) = writer.mesh(mesh, data.display_color, angle, &data.name)? {
                     node.insert("mesh".into(), json!(index));
                 }
             }
@@ -224,8 +225,9 @@ struct Writer {
     materials: Vec<Value>,
     /// One material per display colour (by bits).
     material_of: HashMap<[u32; 3], usize>,
-    /// One glTF mesh per (mesh, colour): objects sharing both share the mesh.
-    mesh_of: HashMap<(MeshId, [u32; 3]), Option<usize>>,
+    /// One glTF mesh per (mesh, colour, Phong angle): objects sharing all three
+    /// share the mesh.
+    mesh_of: HashMap<(MeshId, [u32; 3], u32), Option<usize>>,
     triangulator: Triangulator,
     tri: TriMesh,
 }
@@ -268,25 +270,37 @@ impl Writer {
         Ok(index)
     }
 
-    /// The glTF mesh of `handle` in `colour` (written on first use); `None` for a
-    /// mesh without polygons.
-    fn mesh(&mut self, handle: &MeshHandle, colour: [f32; 3], name: &str) -> Result<Option<usize>, IoError> {
-        let key = (handle.id(), colour.map(f32::to_bits));
+    /// The glTF mesh of `handle` in `colour`, smoothed up to `angle` (radians;
+    /// written on first use); `None` for a mesh without polygons.
+    fn mesh(
+        &mut self,
+        handle: &MeshHandle,
+        colour: [f32; 3],
+        angle: f32,
+        name: &str,
+    ) -> Result<Option<usize>, IoError> {
+        let key = (handle.id(), colour.map(f32::to_bits), angle.to_bits());
         if let Some(&index) = self.mesh_of.get(&key) {
             return Ok(index);
         }
-        let index = self.write_mesh(handle, colour, name)?;
+        let index = self.write_mesh(handle, colour, angle, name)?;
         self.mesh_of.insert(key, index);
         Ok(index)
     }
 
-    fn write_mesh(&mut self, handle: &MeshHandle, colour: [f32; 3], name: &str) -> Result<Option<usize>, IoError> {
+    fn write_mesh(
+        &mut self,
+        handle: &MeshHandle,
+        colour: [f32; 3],
+        angle: f32,
+        name: &str,
+    ) -> Result<Option<usize>, IoError> {
         let mesh = handle.mesh();
         if mesh.face_count() == 0 {
             return Ok(None);
         }
         let mut tri = std::mem::take(&mut self.tri);
-        self.triangulator.triangulate(mesh, Smoothing::default(), &mut tri);
+        self.triangulator.triangulate(mesh, Smoothing::Angle(angle), &mut tri);
         let has_uvs = tri.uvs.len() == tri.positions.len();
 
         // Corners that agree in position, normal and UV share one vertex.
@@ -616,6 +630,35 @@ mod tests {
             "only .glb and .gltf"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_phong_tag_sets_the_exported_normals() {
+        let sphere = MeshHandle::new(primitives::sphere(100.0, 16));
+        let vertices = |tags: Vec<grid4d_scene::Tag>| {
+            let mut node = entry(None, "Ball", ObjectKind::polygon(sphere.clone()));
+            node.data.tags = tags;
+            let (json, _) = gltf_document(&Objects { nodes: vec![node] }, None).unwrap();
+            let doc: Value = serde_json::from_slice(&json).unwrap();
+            let position = doc["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
+                .as_u64()
+                .unwrap();
+            doc["accessors"][position as usize]["count"].as_u64().unwrap()
+        };
+        let smooth = vertices(Vec::new());
+        let flat = vertices(vec![grid4d_scene::Tag::Phong {
+            angle_limit: true,
+            angle: 0.0,
+        }]);
+        assert!(
+            flat > smooth,
+            "flat shading needs a vertex per polygon corner: {flat} vs {smooth}"
+        );
+        let unlimited = vertices(vec![grid4d_scene::Tag::Phong {
+            angle_limit: false,
+            angle: 0.0,
+        }]);
+        assert!(unlimited <= smooth);
     }
 
     #[test]

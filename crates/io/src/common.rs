@@ -40,6 +40,15 @@ pub(crate) fn assemble(
     time: TimeSettings,
     objects: impl IntoIterator<Item = (Option<usize>, NodeData)>,
 ) -> Result<Document, IoError> {
+    assemble_with_ids(name, time, objects).map(|(doc, _)| doc)
+}
+
+/// [`assemble`], also returning each object's id (in the order given).
+pub(crate) fn assemble_with_ids(
+    name: String,
+    time: TimeSettings,
+    objects: impl IntoIterator<Item = (Option<usize>, NodeData)>,
+) -> Result<(Document, Vec<NodeId>), IoError> {
     let mut doc = Document::new(name);
     // Validated (fps and range clamped) exactly like an edit in the UI.
     doc.time.set_settings(time);
@@ -61,7 +70,7 @@ pub(crate) fn assemble(
             .map_err(|err| IoError::Invalid(err.to_string()))?;
         ids.push(id);
     }
-    Ok(doc)
+    Ok((doc, ids))
 }
 
 /// JSON has no NaN or infinity (serde_json would write `null`, which then fails

@@ -344,6 +344,9 @@ pub struct NodeData {
     pub visible_in_render: bool,
     /// The check mark in the Object Manager.
     pub enabled: bool,
+    /// Tags (Phong, Protection, Target …), at most one of each kind, in the order
+    /// the Object Manager shows them.
+    pub tags: Vec<crate::Tag>,
 }
 
 impl NodeData {
@@ -360,6 +363,7 @@ impl NodeData {
             visible_in_editor: true,
             visible_in_render: true,
             enabled: true,
+            tags: Vec::new(),
         }
     }
 

@@ -19,17 +19,16 @@ pub struct TessellationScratch {
     tri: TriMesh,
 }
 
-/// Triangulates `mesh` into GPU vertices and indices (both cleared first), with
-/// Phong-angle smoothing.
+/// Triangulates `mesh` into GPU vertices and indices (both cleared first),
+/// smoothed with `smoothing` (the object's Phong angle).
 pub fn tessellate(
     mesh: &PolyMesh,
+    smoothing: Smoothing,
     scratch: &mut TessellationScratch,
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u32>,
 ) {
-    scratch
-        .triangulator
-        .triangulate(mesh, Smoothing::default(), &mut scratch.tri);
+    scratch.triangulator.triangulate(mesh, smoothing, &mut scratch.tri);
     vertices.clear();
     vertices.extend(
         scratch
@@ -98,7 +97,13 @@ mod tests {
         let mut scratch = TessellationScratch::default();
         let (mut vertices, mut indices) = (Vec::new(), Vec::new());
         for key in sample_keys() {
-            tessellate(&key.build().unwrap(), &mut scratch, &mut vertices, &mut indices);
+            tessellate(
+                &key.build().unwrap(),
+                Smoothing::default(),
+                &mut scratch,
+                &mut vertices,
+                &mut indices,
+            );
             assert!(!indices.is_empty() && indices.len() % 3 == 0, "{key:?}");
             let n = u32::try_from(vertices.len()).unwrap();
             assert!(indices.iter().all(|&i| i < n), "{key:?}");
@@ -122,7 +127,7 @@ mod tests {
         let mesh = grid4d_geom::primitives::torus(200.0, 50.0, 1000, 500);
         let (mut scratch, mut vertices, mut indices) = (TessellationScratch::default(), Vec::new(), Vec::new());
         let start = Instant::now();
-        tessellate(&mesh, &mut scratch, &mut vertices, &mut indices);
+        tessellate(&mesh, Smoothing::default(), &mut scratch, &mut vertices, &mut indices);
         let tessellation = start.elapsed();
         let triangles = indices.len() / 3;
 

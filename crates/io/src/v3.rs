@@ -23,14 +23,15 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
 };
 use grid4d_scene::{
-    ComponentState, Components, Document, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, TimeSettings, Transform,
+    ComponentState, Components, Document, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, Tag, TimeSettings,
+    Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
 
 use crate::{
     FORMAT_TAG, IoError,
-    common::{Archive, assemble, check_finite},
+    common::{Archive, assemble_with_ids, check_finite},
 };
 
 pub(crate) const VERSION: u32 = 3;
@@ -81,6 +82,88 @@ struct ObjectDto {
     visible_in_editor: bool,
     visible_in_render: bool,
     enabled: bool,
+    /// Added in the course of version 3; absent when the object has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<TagDto>,
+}
+
+/// A tag; objects it refers to are given by their index in `objects`.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum TagDto {
+    Phong {
+        angle_limit: bool,
+        /// Radians.
+        angle: f32,
+    },
+    Protection {
+        position: bool,
+        scale: bool,
+        rotation: bool,
+    },
+    Target {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        up: Option<usize>,
+        pitch: bool,
+    },
+}
+
+impl TagDto {
+    fn new(tag: &Tag, index_of: &HashMap<NodeId, usize>) -> Self {
+        let index = |id: Option<NodeId>| id.and_then(|id| index_of.get(&id).copied());
+        match *tag {
+            Tag::Phong { angle_limit, angle } => Self::Phong { angle_limit, angle },
+            Tag::Protection {
+                position,
+                scale,
+                rotation,
+            } => Self::Protection {
+                position,
+                scale,
+                rotation,
+            },
+            Tag::Target { target, up, pitch } => Self::Target {
+                target: index(target),
+                up: index(up),
+                pitch,
+            },
+        }
+    }
+
+    /// The tag, with object references resolved through `ids` (an index that names
+    /// no object drops the reference).
+    fn into_tag(self, ids: &[NodeId]) -> Tag {
+        let id = |index: Option<usize>| index.and_then(|i| ids.get(i).copied());
+        match self {
+            Self::Phong { angle_limit, angle } => Tag::Phong {
+                angle_limit,
+                angle: angle.clamp(0.0, std::f32::consts::PI),
+            },
+            Self::Protection {
+                position,
+                scale,
+                rotation,
+            } => Tag::Protection {
+                position,
+                scale,
+                rotation,
+            },
+            Self::Target { target, up, pitch } => Tag::Target {
+                target: id(target),
+                up: id(up),
+                pitch,
+            },
+        }
+    }
+
+    fn parameters(&self) -> Vec<f32> {
+        match self {
+            Self::Phong { angle, .. } => vec![*angle],
+            Self::Protection { .. } | Self::Target { .. } => Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -288,16 +371,21 @@ impl MeshTable {
 
 /// Writes `doc` as a version 3 archive.
 pub(crate) fn write(doc: &Document) -> Result<Vec<u8>, IoError> {
-    let mut index_of: HashMap<NodeId, usize> = HashMap::with_capacity(doc.scene.len());
-    let mut objects = Vec::with_capacity(doc.scene.len());
-    let mut table = MeshTable::default();
     // Pre-order: a parent is always written (and indexed) before its children.
-    doc.scene.walk(&mut Vec::new(), |id, node, _, _| {
-        index_of.insert(id, objects.len());
-        let parent = node.parent().and_then(|p| index_of.get(&p).copied());
-        objects.push(ObjectDto::new(&node.data, parent, &mut table));
+    // Indexed first, so tags can refer to objects written after them.
+    let mut order: Vec<NodeId> = Vec::with_capacity(doc.scene.len());
+    doc.scene.walk(&mut Vec::new(), |id, _, _, _| {
+        order.push(id);
         true
     });
+    let index_of: HashMap<NodeId, usize> = order.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+    let mut objects = Vec::with_capacity(order.len());
+    let mut table = MeshTable::default();
+    for &id in &order {
+        let Some(node) = doc.scene.get(id) else { continue };
+        let parent = node.parent().and_then(|p| index_of.get(&p).copied());
+        objects.push(ObjectDto::new(&node.data, parent, &mut table, &index_of));
+    }
     for object in &objects {
         object.check_finite()?;
     }
@@ -368,11 +456,15 @@ impl File {
             .collect::<Result<Vec<_>, IoError>>()?;
 
         let DocumentDto { name, time, objects } = self.document;
+        let mut tags: Vec<Vec<TagDto>> = Vec::with_capacity(objects.len());
         let objects = objects
             .into_iter()
             .map(|object| {
                 object.check_finite()?;
-                Ok((object.parent, object.into_data(&meshes)?))
+                let parent = object.parent;
+                let (data, object_tags) = object.into_data(&meshes)?;
+                tags.push(object_tags);
+                Ok((parent, data))
             })
             .collect::<Result<Vec<_>, IoError>>()?;
         let time = TimeSettings {
@@ -381,12 +473,21 @@ impl File {
             end: time.end,
             looping: time.looping,
         };
-        assemble(name, time, objects)
+        let (mut doc, ids) = assemble_with_ids(name, time, objects)?;
+        // Tags last: they may refer to any object.
+        for (&id, object_tags) in ids.iter().zip(tags) {
+            if !object_tags.is_empty()
+                && let Some(node) = doc.scene.get_mut(id)
+            {
+                node.data.tags = object_tags.into_iter().map(|tag| tag.into_tag(&ids)).collect();
+            }
+        }
+        Ok(doc)
     }
 }
 
 impl ObjectDto {
-    fn new(data: &NodeData, parent: Option<usize>, meshes: &mut MeshTable) -> Self {
+    fn new(data: &NodeData, parent: Option<usize>, meshes: &mut MeshTable, index_of: &HashMap<NodeId, usize>) -> Self {
         let t = &data.transform;
         Self {
             name: data.name.clone(),
@@ -399,10 +500,13 @@ impl ObjectDto {
             visible_in_editor: data.visible_in_editor,
             visible_in_render: data.visible_in_render,
             enabled: data.enabled,
+            tags: data.tags.iter().map(|tag| TagDto::new(tag, index_of)).collect(),
         }
     }
 
-    fn into_data(self, meshes: &[MeshHandle]) -> Result<NodeData, IoError> {
+    /// The object's data; its tags come back separately, still referring to
+    /// objects by index (they are resolved once every object exists).
+    fn into_data(self, meshes: &[MeshHandle]) -> Result<(NodeData, Vec<TagDto>), IoError> {
         let kind = self.kind.into_kind(meshes, &self.name)?;
         Ok(NodeData {
             name: self.name,
@@ -416,7 +520,9 @@ impl ObjectDto {
             visible_in_editor: self.visible_in_editor,
             visible_in_render: self.visible_in_render,
             enabled: self.enabled,
+            tags: Vec::new(),
         })
+        .map(|data| (data, self.tags))
     }
 
     fn check_finite(&self) -> Result<(), IoError> {
@@ -428,6 +534,10 @@ impl ObjectDto {
                 ("scale", &self.scale),
                 ("display colour", &self.display_color),
                 ("parameters", &self.kind.parameters()),
+                (
+                    "tag",
+                    &self.tags.iter().flat_map(TagDto::parameters).collect::<Vec<f32>>(),
+                ),
             ],
         )
     }
@@ -877,6 +987,71 @@ mod tests {
             parent = Some(id);
         }
         assert_eq!(snapshot(&round_trip(&doc)), snapshot(&doc));
+    }
+
+    #[test]
+    fn tags_round_trip_with_their_object_references() {
+        let mut doc = Document::with_demo_scene();
+        let id = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+        let (cube, sphere, camera) = (id(&doc, "Cube"), id(&doc, "Sphere"), id(&doc, "Camera"));
+        doc.scene.get_mut(cube).unwrap().data.tags = vec![Tag::Phong {
+            angle_limit: false,
+            angle: 0.3,
+        }];
+        doc.scene.get_mut(sphere).unwrap().data.tags = vec![Tag::Protection {
+            position: true,
+            scale: false,
+            rotation: true,
+        }];
+        // Aims at an object written before it and names one written after it as up.
+        doc.scene.get_mut(camera).unwrap().data.tags = vec![Tag::Target {
+            target: Some(cube),
+            up: Some(sphere),
+            pitch: false,
+        }];
+        let json = String::from_utf8(entries(&to_bytes(&doc).unwrap())[0].1.clone()).unwrap();
+        assert!(json.contains("\"tags\""));
+
+        let back = round_trip(&doc);
+        let tags = |name: &str| back.scene.get(id(&back, name)).unwrap().data.tags.clone();
+        assert_eq!(
+            tags("Cube"),
+            [Tag::Phong {
+                angle_limit: false,
+                angle: 0.3
+            }]
+        );
+        assert_eq!(tags("Sphere"), doc.scene.get(sphere).unwrap().data.tags);
+        assert_eq!(
+            tags("Camera"),
+            [Tag::Target {
+                target: Some(id(&back, "Cube")),
+                up: Some(id(&back, "Sphere")),
+                pitch: false
+            }],
+            "references follow the objects"
+        );
+        assert!(tags("Box").is_empty());
+
+        // A reference to an object that is not saved (deleted) is dropped.
+        let detached = doc.scene.detach(sphere).unwrap();
+        let back = round_trip(&doc);
+        let Tag::Target { up, target, .. } = tags_of(&back, "Camera")[0] else {
+            panic!("the Target tag is kept")
+        };
+        assert_eq!((target.is_some(), up), (true, None));
+        let _ = detached;
+    }
+
+    fn tags_of(doc: &Document, name: &str) -> Vec<Tag> {
+        doc.scene
+            .iter()
+            .find(|(_, n)| n.data.name == name)
+            .unwrap()
+            .1
+            .data
+            .tags
+            .clone()
     }
 
     #[test]

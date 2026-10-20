@@ -46,7 +46,7 @@ docs/reference/
 Area prefixes: `object-` (primitives, cameras, lights), `generator-`, `deformer-`,
 `modeling-` (mesh tools and modes), `animation-` (keys, F-curves, timeline),
 `manager-` (Object/Attribute/Coordinate/Material managers), `viewport-`, `render-`,
-`interchange-` (other file formats).
+`interchange-` (other file formats), `tag-`.
 
 A spec is done when it lists the parameters with defaults, the behaviour (including
 edge cases) and acceptance criteria that can become tests. The matching phase in
@@ -62,6 +62,7 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 4.8 | [`modeling-snapping.md`](modeling-snapping.md) — snap targets, 2D/3D, radius, Shift+S | implemented 2026-10-20 |
 | 5.1–5.2 | [`interchange-gltf.md`](interchange-gltf.md) — glTF 2.0 import and export, File ▸ Merge / Export, drag and drop | implemented 2026-10-20 |
 | 5.3 | [`interchange-obj.md`](interchange-obj.md) — Wavefront OBJ import and export | implemented 2026-10-20 |
+| 6.1 | [`tag-basics.md`](tag-basics.md) — tags: Phong, Protection, Target | implemented 2026-10-20 |
 | later | `modeling-sds-weights.md` — point/edge weights (creases) | todo |
 | 6 | `animation-keyframes.md` — keys, tracks, F-curve interpolation, timeline | todo |
 | 6 | `manager-coordinate.md`, `manager-material.md` | todo |

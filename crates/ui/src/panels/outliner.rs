@@ -1,7 +1,8 @@
 //! Object Manager (the "Outliner"): the scene hierarchy as a tree.
 //!
-//! Rows show fold arrow, type icon, name, the two visibility "traffic light"
-//! dots (editor / renderer) and the enabled check mark — like Cinema 4D.
+//! Rows show fold arrow, type icon, name, the object's tags, the two visibility
+//! "traffic light" dots (editor / renderer) and the enabled check mark — like
+//! Cinema 4D. Clicking a tag selects it (the Attribute Manager shows it).
 //! Double-click renames, dragging a row onto another re-parents it.
 
 use std::collections::HashSet;
@@ -10,10 +11,10 @@ use egui::{
     Align2, Button, CornerRadius, FontId, Id, Key, LayerId, Margin, Order, Rect, RichText, ScrollArea, Sense, Stroke,
     StrokeKind, TextEdit, TextStyle, Ui, Vec2, pos2, vec2,
 };
-use grid4d_scene::{Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit};
+use grid4d_scene::{Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit, TagKind};
 
 use crate::{
-    EditorCommand, EditorState, SelectMode,
+    EditorCommand, EditorState, SelectMode, TagRef,
     commands::tag_color,
     icons::{self, Icon},
     theme::{metrics, palette as p},
@@ -21,6 +22,8 @@ use crate::{
 };
 
 const INDENT: f32 = 16.0;
+/// Horizontal distance between tag icons.
+const TAG_STEP: f32 = 19.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RowAction {
@@ -35,6 +38,11 @@ enum RowAction {
     Delete(NodeId),
     MakeRoot(NodeId),
     Frame(NodeId),
+    /// A click on a tag icon: select the tag (and its object).
+    SelectTag(NodeId, TagKind),
+    DeleteTag(NodeId, TagKind),
+    /// Context menu: add a tag to the (just selected) object.
+    AddTag(TagKind),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,7 +137,17 @@ impl OutlinerPanel {
                     }
                 });
                 ui.menu_button("Tags", |ui| {
-                    ui.add_enabled(false, Button::new("Tags — planned"));
+                    let any = !editor.selection.is_empty();
+                    for kind in TagKind::ALL {
+                        if ui
+                            .add_enabled(any, Button::new(format!("{} Tag", kind.label())))
+                            .on_disabled_hover_text("Select the objects to tag first")
+                            .clicked()
+                        {
+                            editor.commands.push(EditorCommand::AddTag(kind));
+                            ui.close();
+                        }
+                    }
                 });
                 ui.menu_button("Bookmarks", |ui| {
                     ui.add_enabled(false, Button::new("Bookmarks — planned"));
@@ -236,10 +254,41 @@ impl OutlinerPanel {
         );
         x += 22.0;
 
+        // Tags: icons right of the name, before the visibility dots.
+        let tags_right = rect.right() - 44.0;
+        let tags_left = tags_right - node.data.tags.len() as f32 * TAG_STEP;
+        let selected_tag = editor.tag_selection.filter(|t| t.node == id).map(|t| t.kind);
+        for (k, tag) in node.data.tags.iter().enumerate() {
+            let kind = tag.kind();
+            let icon_rect = Rect::from_min_size(pos2(tags_left + k as f32 * TAG_STEP, cy - 8.0), Vec2::splat(16.0));
+            let hit = ui.interact(icon_rect, ui.scope_id().with(("tag", id, k)), Sense::click());
+            if selected_tag == Some(kind) {
+                painter.rect_stroke(
+                    icon_rect.expand(1.5),
+                    CornerRadius::same(2),
+                    Stroke::new(1.5, p::HIGHLIGHT),
+                    StrokeKind::Inside,
+                );
+            }
+            let color = if hit.hovered() { p::TEXT_STRONG } else { p::TAG };
+            icons::paint(&painter, icon_rect.shrink(1.0), Icon::Tag(kind), color);
+            let hit = hit.on_hover_text(format!("{} Tag", kind.label()));
+            if hit.clicked() {
+                self.actions.push(RowAction::SelectTag(id, kind));
+            }
+            let actions = &mut self.actions;
+            hit.context_menu(|ui| {
+                if ui.button("Delete Tag").clicked() {
+                    actions.push(RowAction::DeleteTag(id, kind));
+                    ui.close();
+                }
+            });
+        }
+
         // Name (or the inline rename editor).
         let name_rect = Rect::from_min_max(
             pos2(x, rect.top() + 1.0),
-            pos2(rect.right() - 46.0, rect.bottom() - 1.0),
+            pos2((tags_left - 4.0).max(x + 20.0), rect.bottom() - 1.0),
         );
         if self.renaming == Some(id) {
             let edit = ui.put(
@@ -331,6 +380,15 @@ impl OutlinerPanel {
                 actions.push(RowAction::MakeRoot(id));
                 ui.close();
             }
+            ui.menu_button("Add Tag", |ui| {
+                for kind in TagKind::ALL {
+                    if ui.button(format!("{} Tag", kind.label())).clicked() {
+                        actions.push(RowAction::Select(id, SelectMode::Replace));
+                        actions.push(RowAction::AddTag(kind));
+                        ui.close();
+                    }
+                }
+            });
             ui.separator();
             if ui.button("Delete").clicked() {
                 actions.push(RowAction::Delete(id));
@@ -391,7 +449,21 @@ impl OutlinerPanel {
         let mut actions = std::mem::take(&mut self.actions);
         for action in actions.drain(..) {
             match action {
-                RowAction::Select(id, mode) => editor.commands.push(EditorCommand::Select { id, mode }),
+                RowAction::Select(id, mode) => {
+                    editor.tag_selection = None;
+                    editor.commands.push(EditorCommand::Select { id, mode });
+                }
+                RowAction::SelectTag(id, kind) => {
+                    if editor.selection.active() != Some(id) {
+                        editor.commands.push(EditorCommand::Select {
+                            id,
+                            mode: SelectMode::Replace,
+                        });
+                    }
+                    editor.tag_selection = Some(TagRef { node: id, kind });
+                }
+                RowAction::DeleteTag(node, kind) => editor.commands.push(EditorCommand::DeleteTag { node, kind }),
+                RowAction::AddTag(kind) => editor.commands.push(EditorCommand::AddTag(kind)),
                 RowAction::ToggleFold(id) => {
                     if !self.collapsed.remove(&id) {
                         self.collapsed.insert(id);
@@ -566,6 +638,68 @@ mod tests {
         frame(vec![], &mut doc, &mut editor, &mut panel);
         assert_eq!(panel.renaming, Some(sphere));
         assert_eq!(panel.rename_buffer, "Sphere");
+    }
+
+    #[test]
+    fn clicking_a_tag_icon_selects_the_tag() {
+        use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
+
+        let mut doc = Document::with_demo_scene();
+        let sphere = doc.scene.roots()[1];
+        doc.scene.get_mut(sphere).unwrap().data.tags = vec![grid4d_scene::TagKind::Phong.default_tag()];
+        let mut editor = EditorState::default();
+        let mut panel = super::OutlinerPanel::default();
+        let mut viewport = ViewportPanel::new(None);
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut click = |at: Pos2, doc: &mut Document, editor: &mut EditorState| {
+            let button = |pressed| Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            };
+            for events in [
+                vec![Event::PointerMoved(at)],
+                vec![button(true)],
+                vec![button(false)],
+                vec![],
+            ] {
+                time += 0.5; // never a double click
+                let input = RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 500.0))),
+                    time: Some(time),
+                    events,
+                    ..RawInput::default()
+                };
+                ctx.run_ui(input, |ui| {
+                    egui::CentralPanel::no_frame().show(ui, |ui| panel.show(ui, doc, editor));
+                })
+                .drop_without_applying_deltas();
+                commands::apply_pending(doc, editor, &mut viewport);
+            }
+        };
+        let row_y = (0..100)
+            .map(|i| 60.0 + 4.0 * f32::from(u8::try_from(i).unwrap()))
+            .find(|&y| {
+                click(pos2(120.0, y), &mut doc, &mut editor);
+                editor.selection.active() == Some(sphere)
+            })
+            .expect("the Sphere's row");
+        assert_eq!(editor.tag_selection, None);
+        // The icon sits in the middle of the row, right of the name.
+        let hit = (0..6)
+            .flat_map(|dy: u8| (0..40u8).map(move |i| pos2(400.0 - 3.0 * f32::from(i), row_y + 4.0 * f32::from(dy))))
+            .find(|&at| {
+                click(at, &mut doc, &mut editor);
+                editor.tag_selection.is_some()
+            });
+        assert!(hit.is_some(), "a click on the tag icon selects it");
+        let (tag, index) = editor.selected_tag(&doc).unwrap();
+        assert_eq!((tag.node, tag.kind, index), (sphere, grid4d_scene::TagKind::Phong, 0));
+        // Clicking the object's name shows the object again.
+        click(pos2(120.0, row_y), &mut doc, &mut editor);
+        assert_eq!(editor.tag_selection, None);
     }
 
     #[test]

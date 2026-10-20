@@ -10,7 +10,7 @@ use egui::{Color32, CornerRadius, PointerButton, Pos2, Rect, Response, Shape, St
 use glam::{Mat3, Mat4, Quat, Vec3};
 use grid4d_geom::{BitSet, Component, selection};
 use grid4d_render::OrbitCamera;
-use grid4d_scene::{MeshHandle, NodeData, NodeId, ObjectKind, Scene, SceneEdit};
+use grid4d_scene::{MeshHandle, NodeData, NodeId, ObjectKind, Scene, SceneEdit, Tags};
 
 use super::{
     project,
@@ -63,6 +63,29 @@ impl GizmoGeometry {
         }
         let id = editor.selection.active()?;
         let node = scene.get(id)?;
+        // A Protection tag keeps the tool's channel of the object as it is.
+        if editor.mode.component().is_none() {
+            let protection = node.data.tags.protection();
+            let locked = match editor.tool {
+                Tool::Move => protection.position,
+                Tool::Scale => protection.scale,
+                Tool::Rotate => protection.rotation,
+                Tool::LiveSelection
+                | Tool::RectangleSelection
+                | Tool::LoopSelection
+                | Tool::RingSelection
+                | Tool::Extrude
+                | Tool::Inset
+                | Tool::LoopCut
+                | Tool::LineCut
+                | Tool::Bevel
+                | Tool::Bridge
+                | Tool::Weld => false,
+            };
+            if locked {
+                return None;
+            }
+        }
 
         let world = scene.world_matrix(id);
         let (_, rotation, translation) = world.to_scale_rotation_translation();

@@ -12,10 +12,10 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 5 — Interchange: glTF, OBJ (v0.5) |
-| Last step done | 5.3 — OBJ import and export (2026-10-20); phase 5's steps done (5.4 belongs to phase 6) |
-| Next step | Phase 6 — tags, animation, materials and managers (6A: tags) |
-| Tests | 368, all passing; clippy and rustfmt clean |
+| Current phase | 6 — Tags, animation, materials, managers (v0.6) |
+| Last step done | 6.1 — Tags: Phong, Protection, Target (2026-10-20) |
+| Next step | 6.2 — Tracks, curves and keys + evaluation |
+| Tests | 378, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -260,7 +260,7 @@ Maxon's public manual, in our own words (clean-room).
 |------|-------|-------|
 | 5.1 (`02b7d94`) | glTF 2.0 import (`.gltf` + `.bin`, embedded buffers, `.glb`): hierarchy, transforms, meshes (welded, with UVs), base colours, cameras, lights; Open makes a new document, File ▸ Merge (Ctrl+Shift+O) and drag and drop add to the current one (one undo step); Merge also takes `.g4d` files | 354 |
 | 5.2 (`e54fbdb`) | glTF 2.0 export (File ▸ Export…, `.glb` or `.gltf` + `.bin`): hierarchy, transforms, triangulated meshes with the viewport's normals and UVs, primitives and Subdivision Surfaces baked, colours as materials, cameras, lights; checked in the app by exporting, validating, reopening and merging | 362 |
-| 5.3 | Wavefront OBJ import and export: polygons keep their corners both ways, per-corner UVs (V flipped), colours through `.mtl`, objects split by `o`/`g`; Open, Merge, drop and Export accept `.obj`; exported generators take their cage's colour | 368 |
+| 5.3 (`f6c67ab`) | Wavefront OBJ import and export: polygons keep their corners both ways, per-corner UVs (V flipped), colours through `.mtl`, objects split by `o`/`g`; Open, Merge, drop and Export accept `.obj`; exported generators take their cage's colour | 368 |
 
 *Problems and solutions:*
 - **The `gltf` crate's default features decode textures** (they pull in an image
@@ -324,9 +324,41 @@ Maxon's public manual, in our own words (clean-room).
   - the imported table scene (hierarchy, rotations), exported to OBJ, matched
     world-space positions computed straight from the glTF to 3·10⁻⁶ cm.
 
----
+## Phase 6 — Tags, animation, materials, managers (2026-10-20 – )
 
-## How this file is kept
+| Step | Built | Tests |
+|------|-------|-------|
+| 6.1 | Tags on objects (saved, undoable): Phong (smoothing angle, in the viewport and in exports), Protection (no gizmo, read-only Coordinates for protected channels), Target (turns the object's −Z towards another object, children follow); icons in the Object Manager, the tag view in the Attribute Manager, Tags menu, Delete removes a selected tag | 378 |
+
+*Problems and solutions:*
+- **Where tags live.** Tags sit in `NodeData`, the unit of attribute edits. Adding,
+  editing and removing them are therefore ordinary data edits: undo and saving
+  needed no new machinery.
+- **A per-object Phong angle with cached GPU meshes.** Meshes are cached on the GPU
+  by their key, and before 6.1 the smoothing was the same for everything. The
+  cache key is now the mesh key plus the shading angle (kept as bits, so it can be
+  hashed). Two cubes with the default angle still share one instanced mesh; a
+  flat-shaded one gets its own.
+- **Target without changing the document.** The tag is evaluated: the evaluated
+  world matrix of the tagged object is replaced, and a correction matrix is passed
+  down its subtree so children follow. The document's rotation values stay as the
+  user set them. Targets that are hidden, missing, the object itself or inside it
+  are ignored.
+- **Tags refer to other objects.** In the file they are stored by object index:
+  every object is indexed first, then written. On load the references are resolved
+  once all objects exist, and an index that names nothing is dropped.
+- **Two deliberate differences from the reference**, written in the spec and the
+  manual:
+  - objects without a Phong tag keep Grid4D's 80° smoothing, so existing
+    documents look unchanged;
+  - the Target tag aims −Z, the axis Grid4D's cameras look along.
+- **Checked in the app:**
+  - the tag icons appear;
+  - a click on a tag shows its settings, and clicking the name shows the object
+    again;
+  - a tag added from the Tags menu is selected, and Delete removes only the tag;
+  - a sphere tagged Phong 0° is flat-shaded;
+  - a protected box has no Move gizmo and grey Coordinates.
 
 ---
 

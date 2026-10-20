@@ -763,6 +763,29 @@ mod tests {
     }
 
     #[test]
+    fn a_protection_tag_hides_the_gizmo_of_its_channels() {
+        let mut h = Harness::new();
+        h.frame(vec![]);
+        let cube = h.editor.selection.active().unwrap();
+        h.doc.scene.get_mut(cube).unwrap().data.tags = vec![grid4d_scene::Tag::Protection {
+            position: true,
+            scale: false,
+            rotation: true,
+        }];
+        let gizmo = |h: &Harness, tool| {
+            let mut editor = EditorState {
+                tool,
+                ..EditorState::default()
+            };
+            editor.selection.set_single(cube);
+            GizmoGeometry::new(&h.doc.scene, &editor, &h.viewport.camera, h.viewport.view_rect).is_some()
+        };
+        assert!(!gizmo(&h, Tool::Move), "position protected");
+        assert!(gizmo(&h, Tool::Scale), "scale free");
+        assert!(!gizmo(&h, Tool::Rotate), "rotation protected");
+    }
+
+    #[test]
     fn a_gizmo_drag_is_one_undo_step() {
         let mut h = Harness::new();
         h.frame(vec![]); // lay out once so the viewport knows its 3D rect

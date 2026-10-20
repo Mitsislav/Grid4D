@@ -22,6 +22,7 @@ mod edit;
 mod mesh;
 mod node;
 mod scene;
+mod tag;
 mod time;
 mod transform;
 
@@ -34,5 +35,6 @@ pub use edit::SceneEdit;
 pub use mesh::{ComponentState, Components, MeshHandle, MeshId};
 pub use node::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, Node, NodeData, NodeId, ObjectKind, ObjectKindTag};
 pub use scene::{Detached, Scene, SceneError, WalkItem};
+pub use tag::{Aim, DEFAULT_PHONG_ANGLE, Protection, Tag, TagKind, Tags};
 pub use time::{Playback, TimeSettings, TimeState};
 pub use transform::Transform;

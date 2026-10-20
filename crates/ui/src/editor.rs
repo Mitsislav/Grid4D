@@ -493,6 +493,14 @@ impl Selection {
     }
 }
 
+/// A tag selected in the Object Manager: the object and the kind of tag (an
+/// object holds at most one of each kind).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TagRef {
+    pub node: NodeId,
+    pub kind: grid4d_scene::TagKind,
+}
+
 /// Everything the editor needs besides the document itself.
 #[derive(Debug)]
 pub struct EditorState {
@@ -509,6 +517,8 @@ pub struct EditorState {
     /// World (`true`) or object (`false`) coordinate system for the gizmo.
     pub world_coordinates: bool,
     pub snap: SnapSettings,
+    /// The tag shown in the Attribute Manager (only while its object is active).
+    pub tag_selection: Option<TagRef>,
     pub commands: CommandQueue,
     /// Undo/redo steps; written only by `commands::apply`.
     pub history: History,
@@ -524,6 +534,21 @@ pub struct EditorState {
     pub show_optimize: bool,
 }
 
+impl EditorState {
+    /// The selected tag and its index in its object's tags, if it is still there
+    /// and its object is the active one.
+    #[must_use]
+    pub fn selected_tag(&self, doc: &grid4d_scene::Document) -> Option<(TagRef, usize)> {
+        let tag = self.tag_selection?;
+        if self.selection.active() != Some(tag.node) {
+            return None;
+        }
+        let node = doc.scene.get(tag.node)?;
+        let index = grid4d_scene::Tags::tag_index(node.data.tags.as_slice(), tag.kind)?;
+        Some((tag, index))
+    }
+}
+
 impl Default for EditorState {
     fn default() -> Self {
         Self {
@@ -537,6 +562,7 @@ impl Default for EditorState {
             axes: [true; 3],
             world_coordinates: false,
             snap: SnapSettings::default(),
+            tag_selection: None,
             commands: CommandQueue::default(),
             history: History::default(),
             file: DocumentFile::default(),

@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Range};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt as _;
 
-use grid4d_eval::MeshKey;
+use grid4d_eval::{MeshKey, Shading};
 use grid4d_scene::MeshHandle;
 
 use crate::{
@@ -138,7 +138,7 @@ struct GpuMesh {
 /// One instanced draw: a cached mesh and its instances in the instance buffer.
 #[derive(Clone, Debug)]
 struct Draw {
-    key: MeshKey,
+    key: (MeshKey, Shading),
     instances: Range<u32>,
 }
 
@@ -178,7 +178,7 @@ pub struct ViewportRenderer {
     overlay: OverlayBuffers,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    meshes: HashMap<MeshKey, GpuMesh>,
+    meshes: HashMap<(MeshKey, Shading), GpuMesh>,
     /// Reused while generating meshes for new keys.
     tessellation: TessellationScratch,
     vertex_scratch: Vec<Vertex>,
@@ -330,8 +330,8 @@ impl ViewportRenderer {
 
         self.draws.clear();
         let mut offset = 0usize;
-        for (key, mesh, instances) in frame.batches() {
-            if !self.ensure_mesh(device, key, mesh) {
+        for (key, shading, mesh, instances) in frame.draw_batches() {
+            if !self.ensure_mesh(device, (key, shading), mesh) {
                 continue; // nothing to draw for this shape
             }
             queue.write_buffer(
@@ -341,7 +341,7 @@ impl ViewportRenderer {
             );
             let end = offset + instances.len();
             self.draws.push(Draw {
-                key,
+                key: (key, shading),
                 instances: to_u32(offset)..to_u32(end),
             });
             offset = end;
@@ -350,7 +350,7 @@ impl ViewportRenderer {
         // drag): free them as soon as they are not drawn. Primitives linger a while.
         let frame_now = self.frame;
         let periodic = self.frame.is_multiple_of(EVICTION_INTERVAL);
-        self.meshes.retain(|key, mesh| match key {
+        self.meshes.retain(|(key, _), mesh| match key {
             MeshKey::Polygon(_) => mesh.last_used == frame_now,
             _ => !periodic || mesh.last_used + MESH_TTL_FRAMES > frame_now,
         });
@@ -360,13 +360,14 @@ impl ViewportRenderer {
 
     /// Makes sure the mesh for `key` is on the GPU (`polygon` holds the geometry of
     /// a [`MeshKey::Polygon`]); `false` if it has no triangles.
-    fn ensure_mesh(&mut self, device: &wgpu::Device, key: MeshKey, polygon: Option<&MeshHandle>) -> bool {
+    fn ensure_mesh(&mut self, device: &wgpu::Device, key: (MeshKey, Shading), polygon: Option<&MeshHandle>) -> bool {
         if let Some(mesh) = self.meshes.get_mut(&key) {
             mesh.last_used = self.frame;
             return true;
         }
+        let (mesh_key, shading) = key;
         let generated;
-        let source = match (polygon, key.build()) {
+        let source = match (polygon, mesh_key.build()) {
             (Some(handle), _) => handle.mesh(),
             (None, Some(mesh)) => {
                 generated = mesh;
@@ -376,6 +377,7 @@ impl ViewportRenderer {
         };
         tessellate(
             source,
+            shading.smoothing(),
             &mut self.tessellation,
             &mut self.vertex_scratch,
             &mut self.index_scratch,

@@ -23,8 +23,9 @@ screenshots come from the application itself.
 11. [Polygon modelling](#11-polygon-modelling)
 12. [Generators: Subdivision Surface](#12-generators-subdivision-surface)
 13. [Snapping](#13-snapping)
-14. [Keyboard shortcuts](#14-keyboard-shortcuts)
-15. [Limitations and what is planned](#15-limitations-and-what-is-planned)
+14. [Tags](#14-tags)
+15. [Keyboard shortcuts](#15-keyboard-shortcuts)
+16. [Limitations and what is planned](#16-limitations-and-what-is-planned)
 
 ---
 
@@ -158,7 +159,8 @@ Every drag is one undo step.
 - **Re-parent**: drag a row onto another row. The object keeps its position in the
   world. Right-click ▸ *Move to Top Level* takes it out of its group.
 - **Search**: type in the search field to show only matching objects.
-- Right-click a row for Rename, Frame Object, Move to Top Level and Delete.
+- **Tags** appear as icons after the name; click one to edit it ([§14](#14-tags)).
+- Right-click a row for Rename, Frame Object, Move to Top Level, Add Tag and Delete.
 
 ## 7. The Attribute Manager
 
@@ -646,7 +648,65 @@ Move tool and look at the **Snap** group in the Attribute Manager's Tool mode
 Within the radius, points win over edges and grid lines, which win over surfaces,
 so a corner can be caught right next to its edges.
 
-## 14. Keyboard shortcuts
+## 14. Tags
+
+Tags add a property or a behaviour to an object without changing what kind of
+object it is. They show as small icons to the right of the object's name in the
+Object Manager.
+
+![Tags in the Object Manager, and the selected Phong tag in the Attribute Manager](images/manual/tags_phong.png)
+
+**Adding a tag:** select the objects, then choose a tag in the Object Manager's
+**Tags** menu (or right-click an object ▸ *Add Tag*). Every selected object gets
+the tag, in one undo step. An object has at most one tag of each kind.
+
+![The Object Manager's Tags menu](images/manual/menu_tags.png)
+
+**Editing:** click a tag icon. The Attribute Manager shows the tag's settings
+instead of the object's (click the object's name to get back to the object). Every
+change can be undone and is saved with the document.
+
+**Removing:** click the tag icon, then press **Delete** (or right-click the icon ▸
+*Delete Tag*). With a tag selected, Delete removes only the tag, not its object.
+
+### 14.1 Phong
+
+Controls how smooth the object looks.
+
+- **Angle Limit** on: edges between polygons that meet at more than the **Phong
+  Angle** stay hard, flatter ones are shaded smooth. 0° gives faceted, flat shading.
+- **Angle Limit** off: everything connected is shaded smooth.
+- The setting also decides the normals written by glTF and OBJ export.
+- Objects without a Phong tag are smoothed up to 80°. (Cinema 4D instead shades
+  objects without a Phong tag flat.)
+
+![A sphere with a Phong tag at 0°: flat shading](images/manual/tags_flat.png)
+
+### 14.2 Protection
+
+Guards an object against accidental changes. Tick **Position**, **Scale** and/or
+**Rotation**. A protected channel cannot be changed with the gizmo (the Move, Scale
+or Rotate gizmo does not appear for the object) or in the Coordinates fields of the
+Attribute Manager, which turn grey. The object's points, edges and polygons can still
+be edited in the component modes.
+
+### 14.3 Target
+
+Turns the object to face another object.
+
+- **Target Object:** the object to face. The object's forward axis (−Z, the
+  direction Grid4D's cameras look) turns towards it, and its children turn along
+  with it.
+- **Up Vector:** optionally, an object the object's top turns towards (otherwise
+  it keeps world up).
+- **Pitch** off: the object only turns around the vertical axis and stays level.
+- The object's own rotation values are not changed; the tag overrides them while
+  it has a target. A target that is the object itself, one of its children, or
+  hidden has no effect.
+
+![The Target tag's settings](images/manual/tags_target.png)
+
+## 15. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -685,7 +745,7 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 15. Limitations and what is planned
+## 16. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
@@ -697,6 +757,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Generators**: only the Subdivision Surface, with one type (Catmull-Clark) and
   without edge weights (creases) or UV options. Extrude, Lathe, Loft, Sweep and
   Cloner are planned.
+- **Tags**: Material tags (with materials), Protection limits, Phong edge breaks,
+  copying tags between objects.
 - **Animation**: keyframes, F-curves, the Coordinate and Material managers.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.

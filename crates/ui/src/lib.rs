@@ -31,7 +31,7 @@ pub mod window;
 
 pub use commands::{CommandQueue, EditorCommand, SelectMode};
 pub use editor::{
-    EditMode, EditorState, ModelingSettings, Selection, SelectionSettings, SnapSettings, SnapType, Tool,
+    EditMode, EditorState, ModelingSettings, Selection, SelectionSettings, SnapSettings, SnapType, TagRef, Tool,
     TransformSettings,
 };
 pub use file::{DocumentFile, FileAction, FileDialogs, NativeDialogs, UnsavedChoice};

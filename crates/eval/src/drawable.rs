@@ -2,15 +2,47 @@
 //! and the mesh a primitive becomes when it is made editable.
 
 use glam::Vec3;
-use grid4d_geom::PolyMesh;
-use grid4d_scene::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, ObjectKind};
+use grid4d_geom::{PolyMesh, Smoothing};
+use grid4d_scene::{CAMERA_MARKER_SIZE, DEFAULT_PHONG_ANGLE, LIGHT_MARKER_RADIUS, ObjectKind};
 
 use crate::{MeshKey, Ratio};
+
+/// How a drawn mesh's normals are smoothed: its Phong angle (radians), kept as
+/// bits so it can be part of the renderer's cache key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Shading(u32);
+
+impl Shading {
+    #[must_use]
+    pub fn from_angle(radians: f32) -> Self {
+        // `+ 0.0` keeps -0.0 and 0.0 one key.
+        Self((radians.clamp(0.0, std::f32::consts::PI) + 0.0).to_bits())
+    }
+
+    #[must_use]
+    pub const fn angle(self) -> f32 {
+        f32::from_bits(self.0)
+    }
+
+    #[must_use]
+    pub const fn smoothing(self) -> Smoothing {
+        Smoothing::Angle(self.angle())
+    }
+}
+
+impl Default for Shading {
+    /// Grid4D's smoothing for objects without a Phong tag.
+    fn default() -> Self {
+        Self::from_angle(DEFAULT_PHONG_ANGLE)
+    }
+}
 
 /// How an object is drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Drawable {
     pub key: MeshKey,
+    /// The Phong angle the mesh is shaded with (a Phong tag, or the default).
+    pub shading: Shading,
     /// Object-space scale applied to the unit mesh.
     pub scale: Vec3,
     pub color: [f32; 3],
@@ -27,6 +59,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
     let shaded = |key, scale| {
         Some(Drawable {
             key,
+            shading: Shading::default(),
             scale,
             color,
             unlit: false,
@@ -147,6 +180,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
         }
         ObjectKind::Camera { .. } => Some(Drawable {
             key: MeshKey::Cube { segments: [1, 1, 1] },
+            shading: Shading::default(),
             scale: Vec3::splat(CAMERA_MARKER_SIZE),
             color,
             unlit: false,
@@ -154,6 +188,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
         }),
         ObjectKind::Light { color: light, .. } => Some(Drawable {
             key: MeshKey::Sphere { segments: 24 },
+            shading: Shading::default(),
             scale: Vec3::splat(LIGHT_MARKER_RADIUS),
             color: light,
             unlit: true,

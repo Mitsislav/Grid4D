@@ -8,7 +8,7 @@ use std::{collections::HashMap, fmt::Write as _, fs, path::Path};
 
 use glam::{Mat3, Mat4, Vec2, Vec3};
 use grid4d_geom::{PolyMesh, Smoothing, TriMesh, Triangulator};
-use grid4d_scene::{MeshHandle, NodeData, ObjectKind};
+use grid4d_scene::{MeshHandle, NodeData, ObjectKind, Tags};
 
 use crate::{
     IoError,
@@ -214,7 +214,7 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
         }
         let normal_matrix = Mat3::from_mat4(*world).inverse().transpose();
         // Per-corner normals in the mesh's corner order (what the viewport shows).
-        triangulator.triangulate(mesh, Smoothing::default(), &mut tri);
+        triangulator.triangulate(mesh, Smoothing::Angle(data.tags.smoothing_angle()), &mut tri);
 
         let _ = writeln!(body, "o {}", one_line(&data.name));
         if mtl_name.is_some() {

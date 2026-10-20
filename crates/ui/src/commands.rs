@@ -71,8 +71,16 @@ pub enum EditorCommand {
     Merge,
     /// Adds the objects of this file (a dropped glTF file). One undo step.
     MergeFile(std::path::PathBuf),
-    /// Asks where, then writes the document as glTF (File ▸ Export).
+    /// Asks where, then writes the document as glTF or OBJ (File ▸ Export).
     Export,
+    /// Adds a tag of this kind to every selected object that has none (one undo
+    /// step) and selects it on the active object.
+    AddTag(grid4d_scene::TagKind),
+    /// Removes the tag of this kind from the object (one undo step).
+    DeleteTag {
+        node: NodeId,
+        kind: grid4d_scene::TagKind,
+    },
     /// Saves to the current file, asking for a path if there is none yet.
     Save,
     /// Asks for a path and saves there.
@@ -259,6 +267,25 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         }
         EditorCommand::MergeFile(path) => file::merge(&path, doc, editor, viewport),
         EditorCommand::Export => file::export(doc, editor),
+        EditorCommand::AddTag(kind) => {
+            let edits = editor
+                .selection
+                .as_slice()
+                .iter()
+                .filter_map(|&id| {
+                    let data = &doc.scene.get(id)?.data;
+                    if data.tags.iter().any(|t| t.kind() == kind) {
+                        return None;
+                    }
+                    let mut data = data.clone();
+                    data.tags.push(kind.default_tag());
+                    Some(SceneEdit::SetData { id, data })
+                })
+                .collect();
+            commit(doc, editor, "Add Tag", edits, |_, _| {});
+            editor.tag_selection = editor.selection.active().map(|node| crate::TagRef { node, kind });
+        }
+        EditorCommand::DeleteTag { node, kind } => delete_tag(doc, editor, node, kind),
         EditorCommand::Save => {
             file::save(doc, editor, false);
         }
@@ -279,6 +306,12 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     selection.set_single(id);
                 }
             });
+        }
+        // A selected tag goes first: Delete removes it, not its object.
+        EditorCommand::DeleteSelected if editor.mode == EditMode::Model && editor.selected_tag(doc).is_some() => {
+            if let Some((tag, _)) = editor.selected_tag(doc) {
+                delete_tag(doc, editor, tag.node, tag.kind);
+            }
         }
         // In a component mode Delete removes components, never objects.
         EditorCommand::DeleteSelected if editor.mode != EditMode::Model => {
@@ -782,6 +815,18 @@ fn rebuild_selection(
     if let Some(data) = data {
         commit(doc, editor, label, vec![SceneEdit::SetData { id, data }], |_, _| {});
     }
+}
+
+/// Removes `node`'s tag of `kind` as one undo step and clears the tag selection.
+fn delete_tag(doc: &mut Document, editor: &mut EditorState, node: NodeId, kind: grid4d_scene::TagKind) {
+    let edit = doc.scene.get(node).and_then(|n| {
+        let mut data = n.data.clone();
+        let before = data.tags.len();
+        data.tags.retain(|t| t.kind() != kind);
+        (data.tags.len() != before).then_some(SceneEdit::SetData { id: node, data })
+    });
+    commit(doc, editor, "Delete Tag", edit.into_iter().collect(), |_, _| {});
+    editor.tag_selection = None;
 }
 
 /// Alt + create: a new generator takes the active object's place (same parent and
@@ -2344,5 +2389,92 @@ mod tests {
         editor.selection.set_single(sphere);
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ToggleParentGenerator]);
         assert_eq!(editor.history.undo_len(), steps);
+    }
+
+    #[test]
+    fn tags_are_added_selected_and_deleted_as_undo_steps() {
+        use grid4d_scene::{Tag, TagKind};
+        let (mut doc, mut editor, mut vp) = demo();
+        let (cube, sphere) = (id_of(&doc, "Cube"), id_of(&doc, "Sphere"));
+        editor.selection.set_all([sphere, cube]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::AddTag(TagKind::Phong)]);
+        for id in [cube, sphere] {
+            assert_eq!(doc.scene.get(id).unwrap().data.tags, [TagKind::Phong.default_tag()]);
+        }
+        assert_eq!(editor.history.undo_label(), Some("Add Tag"));
+        let (tag, index) = editor
+            .selected_tag(&doc)
+            .expect("the active object's new tag is selected");
+        assert_eq!((tag.node, tag.kind, index), (cube, TagKind::Phong, 0));
+
+        // A second Phong tag is not added; another kind is.
+        let steps = editor.history.undo_len();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::AddTag(TagKind::Phong)]);
+        assert_eq!(editor.history.undo_len(), steps, "nothing to add");
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AddTag(TagKind::Protection)],
+        );
+        assert_eq!(doc.scene.get(cube).unwrap().data.tags.len(), 2);
+
+        // Delete removes the selected tag, not the object.
+        assert_eq!(editor.selected_tag(&doc).unwrap().0.kind, TagKind::Protection);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
+        assert!(doc.scene.contains(cube), "the object stays");
+        assert_eq!(doc.scene.get(cube).unwrap().data.tags, [TagKind::Phong.default_tag()]);
+        assert_eq!(editor.history.undo_label(), Some("Delete Tag"));
+        assert_eq!(editor.tag_selection, None);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(cube).unwrap().data.tags.len(), 2, "undo brings it back");
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::DeleteTag {
+                node: sphere,
+                kind: TagKind::Phong,
+            }],
+        );
+        assert!(
+            doc.scene
+                .get(sphere)
+                .unwrap()
+                .data
+                .tags
+                .iter()
+                .all(|t| t.kind() != TagKind::Phong),
+            "the Sphere's Phong tag is gone (its Protection tag stays)"
+        );
+        // With no tag selected, Delete deletes objects again.
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
+        assert!(!doc.scene.contains(cube));
+        let _ = Tag::Phong {
+            angle_limit: true,
+            angle: 0.0,
+        };
+    }
+
+    #[test]
+    fn a_tag_selection_only_counts_while_its_object_is_active() {
+        use grid4d_scene::TagKind;
+        let (mut doc, mut editor, mut vp) = demo();
+        let (cube, sphere) = (id_of(&doc, "Cube"), id_of(&doc, "Sphere"));
+        editor.selection.set_single(cube);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AddTag(TagKind::Target)],
+        );
+        assert!(editor.selected_tag(&doc).is_some());
+        editor.selection.set_single(sphere);
+        assert_eq!(editor.selected_tag(&doc), None, "another object is active");
+        editor.selection.set_single(cube);
+        assert!(editor.selected_tag(&doc).is_some());
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(editor.selected_tag(&doc), None, "the tag is gone");
     }
 }
