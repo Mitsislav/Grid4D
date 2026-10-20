@@ -1,6 +1,6 @@
 use std::f32::consts::FRAC_PI_2;
 
-use glam::{Mat4, Vec2, Vec3, camera::rh};
+use glam::{Mat4, Quat, Vec2, Vec3, camera::rh};
 
 /// A ray in world space. `dir` is normalised.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -20,6 +20,9 @@ pub struct OrbitCamera {
     pub yaw: f32,
     /// Elevation above the XZ plane, radians (clamped short of the poles).
     pub pitch: f32,
+    /// Bank: rotation about the viewing direction, radians (0 keeps world Y up).
+    /// Set when the view looks through a scene camera; navigation keeps it.
+    pub roll: f32,
     /// Vertical field of view, radians.
     pub fov_y: f32,
     pub near: f32,
@@ -33,6 +36,7 @@ impl Default for OrbitCamera {
             distance: 1500.0,
             yaw: 0.62,
             pitch: 0.42,
+            roll: 0.0,
             fov_y: 40f32.to_radians(),
             near: 2.0,
             far: 200_000.0,
@@ -65,7 +69,12 @@ impl OrbitCamera {
 
     #[must_use]
     pub fn right(&self) -> Vec3 {
-        self.forward().cross(Vec3::Y).normalize_or(Vec3::X)
+        let level = self.forward().cross(Vec3::Y).normalize_or(Vec3::X);
+        if self.roll == 0.0 {
+            level
+        } else {
+            Quat::from_axis_angle(self.forward(), self.roll) * level
+        }
     }
 
     #[must_use]
@@ -75,7 +84,52 @@ impl OrbitCamera {
 
     #[must_use]
     pub fn view(&self) -> Mat4 {
-        rh::view::look_at_mat4(self.eye(), self.target, Vec3::Y)
+        rh::view::look_at_mat4(self.eye(), self.target, self.up())
+    }
+
+    /// The view as an object placed in the world: at the eye, looking along its
+    /// −Z with its +Y up (Grid4D's camera axes), unit scale.
+    #[must_use]
+    pub fn eye_matrix(&self) -> Mat4 {
+        Mat4::from_cols(
+            self.right().extend(0.0),
+            self.up().extend(0.0),
+            self.back().extend(0.0),
+            self.eye().extend(1.0),
+        )
+    }
+
+    /// The view of an eye placed by `world` (looking along its −Z, up its +Y; scale
+    /// ignored), with field of view `fov_y` (radians) and the orbit target
+    /// `distance` ahead; near and far planes as the default view's.
+    #[must_use]
+    pub fn from_world(world: &Mat4, fov_y: f32, distance: f32) -> Self {
+        let (_, rotation, eye) = world.to_scale_rotation_translation();
+        let forward = (rotation * Vec3::NEG_Z).normalize_or(Vec3::NEG_Z);
+        let up = (rotation * Vec3::Y).normalize_or(Vec3::Y);
+        let back = -forward;
+        let mut camera = Self {
+            distance: distance.clamp(Self::MIN_DISTANCE, Self::MAX_DISTANCE),
+            yaw: back.x.atan2(back.z).rem_euclid(std::f32::consts::TAU),
+            pitch: back
+                .y
+                .clamp(-1.0, 1.0)
+                .asin()
+                .clamp(-Self::PITCH_LIMIT, Self::PITCH_LIMIT),
+            roll: 0.0,
+            fov_y: if fov_y.is_finite() && fov_y > 0.0 {
+                fov_y
+            } else {
+                Self::default().fov_y
+            },
+            ..Self::default()
+        };
+        // Bank: the angle from the level up vector to the object's, about the view axis.
+        let level = camera.up();
+        let axis = camera.forward();
+        camera.roll = axis.dot(level.cross(up)).atan2(level.dot(up));
+        camera.target = eye + camera.forward() * camera.distance;
+        camera
     }
 
     /// Right-handed perspective with wgpu's `[0, 1]` depth range.
@@ -157,6 +211,64 @@ mod tests {
         let ray = cam.ray_from_ndc(Vec2::ZERO, 1.5);
         let hit = ray.origin + ray.dir * cam.distance;
         assert!(hit.abs_diff_eq(cam.target, 1e-2), "{hit:?}");
+    }
+
+    #[test]
+    fn a_world_placement_round_trips_through_the_view() {
+        let cam = OrbitCamera {
+            yaw: 2.1,
+            pitch: -0.4,
+            roll: 0.3,
+            distance: 700.0,
+            target: Vec3::new(10.0, -20.0, 30.0),
+            ..Default::default()
+        };
+        let world = cam.eye_matrix();
+        assert!(world.determinant() > 0.99, "a right-handed rotation");
+        let back = OrbitCamera::from_world(&world, cam.fov_y, cam.distance);
+        assert!(
+            back.eye().abs_diff_eq(cam.eye(), 1e-2),
+            "{} vs {}",
+            back.eye(),
+            cam.eye()
+        );
+        assert!(back.forward().abs_diff_eq(cam.forward(), 1e-4));
+        assert!(back.up().abs_diff_eq(cam.up(), 1e-4), "the bank survives");
+        assert!((back.roll - 0.3).abs() < 1e-4);
+        assert!(back.view().abs_diff_eq(cam.view(), 1e-3));
+
+        // An object turned 90° about Y looks along −X; scale is ignored.
+        let turned = Mat4::from_scale_rotation_translation(
+            Vec3::splat(3.0),
+            Quat::from_rotation_y(FRAC_PI_2),
+            Vec3::new(0.0, 100.0, 0.0),
+        );
+        let view = OrbitCamera::from_world(&turned, 0.5, 400.0);
+        assert!(view.forward().abs_diff_eq(Vec3::NEG_X, 1e-5), "{}", view.forward());
+        assert!(view.eye().abs_diff_eq(Vec3::new(0.0, 100.0, 0.0), 1e-3));
+        assert!(view.roll.abs() < 1e-5);
+        assert_eq!(view.fov_y, 0.5);
+    }
+
+    #[test]
+    fn a_banked_view_rays_and_pans_along_its_own_axes() {
+        let cam = OrbitCamera {
+            roll: FRAC_PI_2,
+            ..Default::default()
+        };
+        let level = OrbitCamera::default();
+        // A quarter bank: screen up is the level view's right (or left).
+        assert!(cam.up().dot(level.right()).abs() > 0.999, "{}", cam.up());
+        let ray = cam.ray_from_ndc(Vec2::new(0.0, 0.5), 1.0);
+        let level_ray = level.ray_from_ndc(Vec2::new(0.5, 0.0), 1.0);
+        assert!(
+            ray.dir.abs_diff_eq(level_ray.dir, 1e-4)
+                || ray
+                    .dir
+                    .abs_diff_eq(level.ray_from_ndc(Vec2::new(-0.5, 0.0), 1.0).dir, 1e-4)
+        );
+        let p = cam.view_projection(1.0).project_point3(cam.target);
+        assert!(p.truncate().abs_diff_eq(Vec2::ZERO, 1e-4), "the target stays centred");
     }
 
     #[test]

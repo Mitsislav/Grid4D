@@ -492,7 +492,7 @@ yet (planned, with glTF animation import).
 
 | Step | Size | Work |
 |------|------|------|
-| 7.1 | M | Scene cameras: Cameras ▸ use scene camera, look-through, camera `fov` used; camera frustum drawn in the viewport |
+| 7.1 ✅ | M | Scene cameras: Cameras ▸ use scene camera, look-through, camera `fov` used; camera frustum drawn in the viewport — done 2026-10-21 per [`reference/object-camera.md`](reference/object-camera.md) (new spec): `OrbitCamera::roll` (bank), `from_world` / `eye_matrix`; `EditorState::view_camera` (Cameras ▸ Default Camera / Use Camera ▸ … / Selected Object as Camera, double-click a camera's icon in the Object Manager); the viewport follows the linked object at the current frame (evaluated world: animation, Target tags) with its field of view, and writes navigation (incl. H / O / Reset View) back through `set_transform_at` (temporary values, Autokeying), one `CommitLive` ("Move Camera") per gesture; Protection holds it; leaving restores the editor camera; the view's title names the object; wire frustums for the other cameras (`overlay::camera_frustums`); new cameras clone the view with bank and field of view. Checked in the app. **Later:** saving the linked camera with the document (per view, with 7.2), render resolution aspect, focus distance / DOF handles |
 | 7.2 | M | 4-view layout (Perspective, Top, Front, Right) with orthographic cameras; Panel menu arrangements; each view its own offscreen target and settings (from Phase 3C) |
 | 7.3 | M | Display modes: Gouraud, Gouraud + Lines, Quick Shading, Wireframe, Box; per-view |
 | 7.4 | M | Light objects affect the viewport (storage buffer of N lights; "default light" when the scene has none); PBR-lite shading from materials |

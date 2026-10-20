@@ -1176,10 +1176,12 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
 fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> NodeData {
     let mut data = NodeData::new(scene.unique_name(tag.label()), tag.default_kind());
     match tag {
-        // Like C4D: a new camera is created at the current view.
+        // Like C4D: a new camera clones the current view (place, bank, field of view).
         ObjectKindTag::Camera => {
-            data.transform = Transform::from_position(camera.eye());
-            data.transform.rotation = Vec3::new(camera.yaw, -camera.pitch, 0.0);
+            data.transform = Transform::from_matrix(&camera.eye_matrix());
+            data.kind = ObjectKind::Camera {
+                fov_y_deg: camera.fov_y.to_degrees(),
+            };
             data.display_color = [0.3, 0.3, 0.32];
         }
         ObjectKindTag::Light => {

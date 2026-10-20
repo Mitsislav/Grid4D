@@ -718,6 +718,9 @@ pub struct EditorState {
     pub managers: ManagerTab,
     /// The Material Manager's selection, focus and drag.
     pub materials: MaterialSelection,
+    /// The object the viewport looks through (Cameras ▸ Use Camera); `None`: the
+    /// view's own editor camera.
+    pub view_camera: Option<NodeId>,
     /// The pointer is over the bottom panel (last frame): Tab switches its tab.
     pub bottom_hovered: bool,
     /// The frame temporary values were last checked against (see
@@ -773,6 +776,7 @@ impl Default for EditorState {
             bottom: BottomPanel::default(),
             managers: ManagerTab::default(),
             materials: MaterialSelection::default(),
+            view_camera: None,
             bottom_hovered: false,
             seen_frame: None,
             commands: CommandQueue::default(),

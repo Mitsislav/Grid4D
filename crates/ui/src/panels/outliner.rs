@@ -47,6 +47,8 @@ enum RowAction {
     AssignMaterial(NodeId, grid4d_scene::MaterialId),
     /// A double-click on a Material tag: show its material.
     ShowMaterial(grid4d_scene::MaterialId),
+    /// A double-click on a camera's icon: look through it (again: stop).
+    LookThrough(NodeId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -263,14 +265,29 @@ impl OutlinerPanel {
         }
         x += 15.0;
 
-        // Type icon.
+        // Type icon; a camera's links the view on a double-click.
         let tag = node.data.kind.tag();
-        icons::paint(
-            &painter,
-            Rect::from_min_size(pos2(x, cy - 8.0), Vec2::splat(16.0)),
-            Icon::Object(tag),
-            tag_color(tag),
-        );
+        let icon_rect = Rect::from_min_size(pos2(x, cy - 8.0), Vec2::splat(16.0));
+        if tag == ObjectKindTag::Camera {
+            let linked = editor.view_camera == Some(id);
+            if linked {
+                painter.rect_filled(icon_rect.expand(2.0), CornerRadius::same(3), p::ACCENT);
+            }
+            let hit = ui
+                .interact(icon_rect, ui.scope_id().with(("camera", id)), Sense::click())
+                .on_hover_text(if linked {
+                    "The view looks through this camera · double-click: back to the default camera"
+                } else {
+                    "Double-click: look through this camera"
+                });
+            if hit.double_clicked() {
+                self.actions.push(RowAction::LookThrough(id));
+            } else if hit.clicked() {
+                let mode = SelectMode::from_modifiers(ui.input(|i| i.modifiers));
+                self.actions.push(RowAction::Select(id, mode));
+            }
+        }
+        icons::paint(&painter, icon_rect, Icon::Object(tag), tag_color(tag));
         x += 22.0;
 
         // Tags: icons right of the name, before the visibility dots.
@@ -507,6 +524,9 @@ impl OutlinerPanel {
                     material,
                     nodes: vec![node],
                 }),
+                RowAction::LookThrough(id) => {
+                    editor.view_camera = if editor.view_camera == Some(id) { None } else { Some(id) };
+                }
                 RowAction::ShowMaterial(material) => {
                     editor.materials.selected = Some(material);
                     editor.materials.shown = true;

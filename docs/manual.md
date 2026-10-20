@@ -87,6 +87,41 @@ managers to make them wider.
   100 cm …).
 - Units are centimetres; Y points up.
 
+### 3.1 Looking through a camera
+
+The viewport has its own camera (the *default camera*). It can also look through a
+camera object of the scene, or through any object.
+
+![The Cameras menu: Default Camera, Use Camera with the scene's cameras, and Selected Object as Camera](images/manual/cameras_menu.png)
+
+- **Cameras ▸ Use Camera ▸** *a camera*: the view looks through that camera — from
+  its position, along its viewing direction, with its bank and field of view. The
+  view's title shows the camera's name.
+- **Double-click a camera's icon** in the Object Manager to look through it; the
+  icon of the camera in use is highlighted. Double-click it again to go back.
+- **Cameras ▸ Selected Object as Camera** looks along the active object's −Z axis
+  (for example, to see what a light points at). The view keeps its own field of
+  view.
+- **Cameras ▸ Default Camera** goes back to the view's own camera, where you left
+  it.
+
+![Looking through the scene's Camera; its icon in the Object Manager is highlighted](images/manual/camera_view.png)
+
+While the view looks through a camera, **navigating moves the camera**: orbit, pan,
+zoom and H / O framing change its position and direction, like moving it with the
+gizmo. Each gesture is one undo step. On an animated camera the change is
+temporary until you record it, or becomes a key with Autokeying
+([§10.2](#102-recording-keys)). A Protection tag on the camera's position or
+rotation keeps it — and the view — where it is. An animated camera, or one with a
+Target tag, is followed while the animation plays.
+
+Every camera that the view is not looking through is drawn with a **wire pyramid**
+showing what it sees (its field of view, at the view's proportions), with a small
+triangle marking its top. Selected cameras are drawn in orange.
+
+A **new camera** (Create ▸ Object ▸ Camera) is placed where the view is, looking
+the same way, with the same bank and field of view.
+
 ## 4. Creating objects
 
 Click a button on the right side of the command palette, or use **Create ▸ Object**:
@@ -988,8 +1023,10 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   Scene/Selected following the animation.
 - **Coordinate Manager**: frozen coordinates (Object Abs), changing primitives'
   size parameters rather than their scale, editing several objects at once.
-- **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
-  lights do not light the viewport yet.
+- **Viewport**: the 4-view layout and orthographic views, wireframe and other display
+  modes; lights do not light the viewport yet; the camera a view looks through is
+  not saved with the document; no render resolution (camera pyramids use the
+  view's proportions) and no depth-of-field handles.
 - **Interchange and rendering**: textures, animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only), the
   offline renderer (the Render menu is disabled).

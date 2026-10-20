@@ -69,4 +69,5 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 6.4 | [`animation-fcurves.md`](animation-fcurves.md) — the F-Curve editor | implemented 2026-10-20 |
 | 6.5 | [`manager-coordinate.md`](manager-coordinate.md) — the Coordinate Manager | implemented 2026-10-20 |
 | 6.6 | [`manager-material.md`](manager-material.md) — materials, the Material Manager, the Material tag | implemented 2026-10-21 |
-| 7 | `object-camera.md`, `object-light.md`, `viewport-layouts.md` | todo |
+| 7.1 | [`object-camera.md`](object-camera.md) — scene cameras in the viewport | implemented 2026-10-21 |
+| 7 | `object-light.md`, `viewport-layouts.md` | todo |

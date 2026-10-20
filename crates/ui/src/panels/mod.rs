@@ -65,6 +65,17 @@ mod tests {
         assert_idle_frames_leave_the_document_alone(doc, editor);
     }
 
+    /// Looking through a scene camera writes nothing while nothing moves.
+    #[test]
+    fn idle_frames_through_a_scene_camera_do_not_touch_the_document() {
+        let doc = Document::with_demo_scene();
+        let mut editor = EditorState::default();
+        let camera = doc.scene.iter().find(|(_, n)| n.data.name == "Camera").unwrap().0;
+        editor.view_camera = Some(camera);
+        editor.selection.set_single(camera);
+        assert_idle_frames_leave_the_document_alone(doc, editor);
+    }
+
     /// The Attribute Manager and the gizmo show animated values between keys.
     #[test]
     fn idle_frames_between_keys_do_not_touch_the_document() {

@@ -17,7 +17,7 @@ use grid4d_geom::Component;
 use grid4d_render::{
     ComponentHit, ComponentStyle, FrameData, OrbitCamera, ScreenView, SnapCache, SnapHit, pick, pick_component,
 };
-use grid4d_scene::{Aabb, Document, NodeId, ObjectKindTag, Scene, WalkItem};
+use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, Tags, Transform, WalkItem};
 
 use self::{gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView, select_tools::Gesture};
 use crate::{
@@ -59,6 +59,15 @@ pub struct ViewportPanel {
     snap_cache: SnapCache,
     /// The target the current drag is snapped to, shown in the view.
     snap_hit: Option<SnapHit>,
+    /// The object the view looked through last frame (`EditorState::view_camera`).
+    linked: Option<NodeId>,
+    /// The editor camera, kept while the view looks through an object.
+    editor_camera: Option<OrbitCamera>,
+    /// The view as last taken from (or written to) the linked object: a different
+    /// camera at the start of a frame was moved outside `show` (framing).
+    synced: Option<OrbitCamera>,
+    /// Navigation moving the linked object: its data before, for one undo step.
+    camera_edit: Option<(NodeId, NodeData)>,
 }
 
 impl ViewportPanel {
@@ -85,6 +94,10 @@ impl ViewportPanel {
             loop_preview: None,
             snap_cache: SnapCache::default(),
             snap_hit: None,
+            linked: None,
+            editor_camera: None,
+            synced: None,
+            camera_edit: None,
         }
     }
 
@@ -134,7 +147,8 @@ impl ViewportPanel {
     }
 
     pub fn show(&mut self, ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
-        self.header(ui, editor);
+        self.follow_view_camera(doc, editor);
+        self.header(ui, doc, editor);
 
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         if rect.width() < 1.0 || rect.height() < 1.0 {
@@ -146,6 +160,11 @@ impl ViewportPanel {
         let brush = (editor.tool == Tool::LiveSelection && editor.mode.component().is_some())
             .then_some(&mut editor.selection_settings.radius);
         let navigating = self.navigate(ui, &response, rect, brush);
+        // Navigation (or the header's icons) moved a linked camera: move the object.
+        let moved_view = self.synced.is_some_and(|s| s != self.camera);
+        if moved_view && let Some(id) = self.linked {
+            self.write_view_camera(doc, editor, id);
+        }
         // Built once per frame (after navigation moved the camera) and shared by
         // interaction and painting; rebuilt only if a drag just moved the object.
         let keying = crate::keys::Keying::of(doc, editor);
@@ -227,11 +246,28 @@ impl ViewportPanel {
             );
         }
 
-        overlay::view_label(&painter, rect, "Perspective");
+        let label = self
+            .linked
+            .and_then(|id| doc.scene.get(id))
+            .map_or_else(|| "Perspective".to_owned(), |n| n.data.name.clone());
+        overlay::view_label(&painter, rect, &label);
+        // A gesture that moved the linked object has ended: one undo step.
+        if !moved_view && !ui.input(|i| i.pointer.any_down()) {
+            self.finish_camera_edit(editor);
+        }
         if editor.animation.autokey {
             overlay::autokey_frame(&painter, rect);
         }
         let view_proj = self.camera.view_projection(rect.aspect_ratio());
+        overlay::camera_frustums(
+            &painter,
+            rect,
+            &view_proj,
+            &self.evaluated,
+            &doc.scene,
+            &editor.selection,
+            self.linked,
+        );
         overlay::selection_brackets(&painter, rect, &view_proj, &self.evaluated, &editor.selection);
         if let Some(geo) = &gizmo_geo {
             geo.paint(&painter, self.gizmo.hot_axis());
@@ -338,7 +374,91 @@ impl ViewportPanel {
     }
 
     /// Viewport header with C4D's menu set and the navigation drag-icons.
-    fn header(&mut self, ui: &mut Ui, editor: &mut EditorState) {
+    /// Links the view to `editor.view_camera` (or back to the editor camera) and
+    /// follows the linked object at the current frame. A view moved outside `show`
+    /// (framing) is written to the object first.
+    fn follow_view_camera(&mut self, doc: &mut Document, editor: &mut EditorState) {
+        let linked = editor.view_camera.filter(|&id| doc.scene.contains(id));
+        editor.view_camera = linked;
+        if linked != self.linked {
+            self.finish_camera_edit(editor);
+            match (self.linked, linked) {
+                (None, Some(_)) => self.editor_camera = Some(self.camera),
+                (Some(_), None) => {
+                    if let Some(camera) = self.editor_camera.take() {
+                        self.camera = camera;
+                    }
+                }
+                (Some(_), Some(_)) | (None, None) => {}
+            }
+            self.linked = linked;
+            self.synced = None;
+        }
+        let Some(id) = linked else { return };
+        if self.synced.is_some_and(|s| s != self.camera) {
+            self.write_view_camera(doc, editor, id);
+        }
+        let frame = f64::from(doc.time.frame());
+        self.evaluated.set_frame(frame);
+        self.evaluated.update(&doc.scene);
+        // Where the object is drawn (animation, Target tags); a hidden one from the scene.
+        let world = self
+            .evaluated
+            .nodes()
+            .iter()
+            .find(|n| n.id == id)
+            .map_or_else(|| doc.scene.world_matrix_at(id, frame), |n| n.world);
+        let fov = match doc.scene.get(id).map(|n| &n.data.kind) {
+            Some(ObjectKind::Camera { fov_y_deg }) => fov_y_deg.to_radians(),
+            _ => self.camera.fov_y,
+        };
+        self.camera = OrbitCamera::from_world(&world, fov, self.camera.distance);
+        self.synced = Some(self.camera);
+    }
+
+    /// Moves the linked object to where the view now is (a temporary value or a
+    /// key, as for the gizmo); a Protection tag on position or rotation holds it.
+    fn write_view_camera(&mut self, doc: &mut Document, editor: &mut EditorState, id: NodeId) {
+        self.synced = Some(self.camera);
+        let Some(node) = doc.scene.get(id) else { return };
+        let protection = node.data.tags.protection();
+        if protection.position || protection.rotation {
+            return; // the next frame follows the object again
+        }
+        if self.camera_edit.as_ref().is_none_or(|(edited, _)| *edited != id) {
+            self.finish_camera_edit(editor);
+            self.camera_edit = Some((id, node.data.clone()));
+        }
+        let keying = crate::keys::Keying::of(doc, editor);
+        let parent = doc.scene.parent_world_matrix_at(id, keying.frame);
+        let local = Transform::from_matrix(&(parent.inverse() * self.camera.eye_matrix()));
+        let mut shown = node.data.transform_at(keying.frame);
+        shown.position = local.position;
+        // Continuous angles (no jump from 180° to −180°), as with the gizmo.
+        for i in 0..3 {
+            let d = local.rotation[i] - shown.rotation[i];
+            shown.rotation[i] += (d + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        }
+        let mut data = node.data.clone();
+        data.set_transform_at(&shown, keying.frame, keying.autokey);
+        if let Some(node) = doc.scene.get_mut(id)
+            && node.data != data
+        {
+            node.data = data;
+        }
+    }
+
+    /// Records the navigation that moved the linked object as one undo step.
+    fn finish_camera_edit(&mut self, editor: &mut EditorState) {
+        if let Some((id, before)) = self.camera_edit.take() {
+            editor.commands.push(EditorCommand::CommitLive {
+                inverse: grid4d_scene::SceneEdit::SetData { id, data: before },
+                label: "Move Camera",
+            });
+        }
+    }
+
+    fn header(&mut self, ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
         egui::Frame::new()
             .fill(p::BG_HEADER)
             .inner_margin(Margin::symmetric(6, 0))
@@ -358,10 +478,7 @@ impl ViewportPanel {
                                 }
                             }
                         });
-                        ui.menu_button("Cameras", |ui| {
-                            ui.add(egui::Button::new("Default Camera").selected(true));
-                            ui.add_enabled(false, egui::Button::new("Use Scene Camera — planned"));
-                        });
+                        ui.menu_button("Cameras", |ui| cameras_menu(ui, doc, editor));
                         ui.menu_button("Display", |ui| {
                             ui.add(egui::Button::new("Gouraud Shading").selected(true));
                             for planned in ["Gouraud Shading (Lines)", "Quick Shading", "Wireframe", "Box"] {
@@ -523,6 +640,47 @@ impl ViewportPanel {
 }
 
 /// Size of `rect` in physical pixels, at least 1 × 1.
+/// The Cameras menu: the editor camera, the scene's cameras, the active object.
+fn cameras_menu(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
+    let linked = editor.view_camera;
+    if ui
+        .add(egui::Button::new("Default Camera").selected(linked.is_none()))
+        .on_hover_text("The view's own camera")
+        .clicked()
+    {
+        editor.view_camera = None;
+        ui.close();
+    }
+    ui.menu_button("Use Camera", |ui| {
+        let mut any = false;
+        doc.scene.walk(&mut Vec::new(), |id, node, _, _| {
+            if matches!(node.data.kind, ObjectKind::Camera { .. }) {
+                any = true;
+                if ui
+                    .add(egui::Button::new(&node.data.name).selected(linked == Some(id)))
+                    .clicked()
+                {
+                    editor.view_camera = Some(id);
+                    ui.close();
+                }
+            }
+            true
+        });
+        if !any {
+            ui.add_enabled(false, egui::Button::new("No cameras in the scene"));
+        }
+    });
+    let active = editor.selection.active();
+    if ui
+        .add_enabled(active.is_some(), egui::Button::new("Selected Object as Camera"))
+        .on_hover_text("Look along the active object's −Z axis (e.g. to aim a light)")
+        .clicked()
+    {
+        editor.view_camera = active;
+        ui.close();
+    }
+}
+
 fn pixel_size(rect: Rect, pixels_per_point: f32) -> [u32; 2] {
     let px = |points: f32| {
         let pixels = (points * pixels_per_point).round().clamp(1.0, 16_384.0);
@@ -722,15 +880,14 @@ mod tests {
         }
 
         fn mesh(&self, id: NodeId) -> grid4d_scene::MeshHandle {
-            let grid4d_scene::ObjectKind::Polygon { mesh, .. } = &self.doc.scene.get(id).unwrap().data.kind else {
+            let ObjectKind::Polygon { mesh, .. } = &self.doc.scene.get(id).unwrap().data.kind else {
                 panic!("not a polygon object");
             };
             mesh.clone()
         }
 
         fn components(&self, id: NodeId) -> grid4d_scene::Components {
-            let grid4d_scene::ObjectKind::Polygon { components, .. } = &self.doc.scene.get(id).unwrap().data.kind
-            else {
+            let ObjectKind::Polygon { components, .. } = &self.doc.scene.get(id).unwrap().data.kind else {
                 panic!("not a polygon object");
             };
             components.clone()
@@ -780,8 +937,7 @@ mod tests {
         }
 
         fn selected(&self, id: NodeId, component: Component) -> Vec<usize> {
-            let grid4d_scene::ObjectKind::Polygon { components, .. } = &self.doc.scene.get(id).unwrap().data.kind
-            else {
+            let ObjectKind::Polygon { components, .. } = &self.doc.scene.get(id).unwrap().data.kind else {
                 panic!("not a polygon object");
             };
             components.selected().get(component).iter().collect()
@@ -919,7 +1075,7 @@ mod tests {
         let mut h = Harness::new();
         let sphere = h.edit("Sphere", EditMode::Edges, Tool::LoopSelection);
         let node = h.doc.scene.get(sphere).unwrap();
-        let grid4d_scene::ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
+        let ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
             panic!("the sphere was made editable");
         };
         let mesh = mesh.clone();
@@ -977,7 +1133,7 @@ mod tests {
         h.frame(vec![]);
         let cube = h.editor.selection.active().unwrap();
         let node = h.doc.scene.get(cube).unwrap();
-        let grid4d_scene::ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
+        let ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
             panic!("the cube was made editable");
         };
         let world = h.doc.scene.world_matrix(cube);
@@ -1000,7 +1156,7 @@ mod tests {
         h.frame(vec![Harness::button(at, false)]);
         h.frame(vec![]);
         let node = h.doc.scene.get(cube).unwrap();
-        let grid4d_scene::ObjectKind::Polygon { components, .. } = &node.data.kind else {
+        let ObjectKind::Polygon { components, .. } = &node.data.kind else {
             panic!();
         };
         assert_eq!(components.selected().points.iter().collect::<Vec<_>>(), [nearest]);
@@ -1181,8 +1337,7 @@ mod tests {
         use grid4d_render::SnapKind;
         let target = |h: &mut Harness| {
             // A Null on the cube's X line (the cube's axis is at y = 100).
-            let null = grid4d_scene::Node::new("Target", grid4d_scene::ObjectKind::Null)
-                .with_position(Vec3::new(400.0, 100.0, 0.0));
+            let null = grid4d_scene::Node::new("Target", ObjectKind::Null).with_position(Vec3::new(400.0, 100.0, 0.0));
             h.doc.scene.insert(null);
         };
         let mut h = Harness::new();
@@ -1415,7 +1570,7 @@ mod tests {
         let state = |h: &Harness, cube: NodeId| {
             let node = h.doc.scene.get(cube).unwrap();
             let faces = match &node.data.kind {
-                grid4d_scene::ObjectKind::Polygon { mesh, .. } => mesh.mesh().face_count(),
+                ObjectKind::Polygon { mesh, .. } => mesh.mesh().face_count(),
                 _ => 0,
             };
             let parent = node
@@ -1526,7 +1681,7 @@ mod tests {
         // Saved and reloaded: the same mesh under the same generator.
         let loaded = grid4d_io::from_bytes(&grid4d_io::to_bytes(&h.doc).unwrap()).unwrap();
         let (id, node) = loaded.scene.iter().find(|(_, n)| n.data.name == "Cube").unwrap();
-        let grid4d_scene::ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
+        let ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
             panic!("not a polygon object after loading")
         };
         assert_eq!(mesh.mesh(), final_mesh.mesh());
@@ -1539,6 +1694,166 @@ mod tests {
             parent.map(|n| n.data.kind.tag()),
             Some(ObjectKindTag::SubdivisionSurface)
         );
+    }
+
+    fn camera_id(h: &Harness) -> NodeId {
+        h.doc.scene.iter().find(|(_, n)| n.data.name == "Camera").unwrap().0
+    }
+
+    /// Orbits with Alt + left drag across the view.
+    fn orbit(h: &mut Harness) {
+        let rect = h.viewport.view_rect;
+        let (from, to) = (rect.center(), rect.center() + vec2(80.0, 30.0));
+        let press = |pos, pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::ALT,
+        };
+        h.frame(vec![Event::ModifiersChanged(Modifiers::ALT), Event::PointerMoved(from)]);
+        h.frame(vec![press(from, true)]);
+        for k in 1..=6 {
+            h.frame(vec![Event::PointerMoved(from + (to - from) * (k as f32 / 6.0))]);
+        }
+        h.frame(vec![press(to, false)]);
+        h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+        h.frame(vec![]);
+    }
+
+    #[test]
+    fn the_view_looks_through_a_linked_camera_and_navigation_moves_it() {
+        let mut h = Harness::new();
+        let camera = camera_id(&h);
+        let editor_view = h.viewport.camera;
+        h.editor.view_camera = Some(camera);
+        h.frame(vec![]);
+        let world = h.doc.scene.world_matrix(camera);
+        let view = h.viewport.camera;
+        assert!(view.eye().abs_diff_eq(world.w_axis.truncate(), 1e-2), "at the camera");
+        let forward = world.transform_vector3(Vec3::NEG_Z).normalize();
+        assert!(view.forward().abs_diff_eq(forward, 1e-4), "along its −Z");
+        assert!((view.fov_y - 40f32.to_radians()).abs() < 1e-5, "its field of view");
+
+        let before = h.doc.scene.get(camera).unwrap().data.clone();
+        let steps = h.editor.history.undo_len();
+        orbit(&mut h);
+        let after = h.doc.scene.get(camera).unwrap().data.transform;
+        assert_ne!(after, before.transform, "orbiting moved the camera object");
+        assert!(
+            h.viewport
+                .camera
+                .eye()
+                .abs_diff_eq(h.doc.scene.world_matrix(camera).w_axis.truncate(), 1e-2),
+            "and the view stays on it"
+        );
+        assert_eq!(h.editor.history.undo_len(), steps + 1, "one step per gesture");
+        assert_eq!(h.editor.history.undo_label(), Some("Move Camera"));
+
+        h.editor.commands.push(EditorCommand::Undo);
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert_eq!(h.doc.scene.get(camera).unwrap().data, before);
+        assert!(
+            h.viewport.camera.eye().abs_diff_eq(view.eye(), 1e-2),
+            "the view follows the undo"
+        );
+
+        // Framing moves the camera too.
+        h.editor.commands.push(EditorCommand::FrameScene);
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert_ne!(h.doc.scene.get(camera).unwrap().data.transform, before.transform);
+        assert_eq!(h.editor.history.undo_label(), Some("Move Camera"));
+
+        // Back to the default camera: the editor view as it was.
+        h.editor.view_camera = None;
+        h.frame(vec![]);
+        assert_eq!(h.viewport.camera, editor_view);
+    }
+
+    #[test]
+    fn an_animated_camera_is_followed_and_autokeying_keys_it() {
+        use grid4d_scene::{Axis, Param};
+        let mut h = Harness::new();
+        let camera = camera_id(&h);
+        let px = Param::Position(Axis::X);
+        let data = &mut h.doc.scene.get_mut(camera).unwrap().data;
+        data.record([px], 0.0, 0.0);
+        data.set_value_at(px, 500.0, 10.0, true);
+        h.editor.view_camera = Some(camera);
+        h.doc.time.set_frame(10);
+        h.frame(vec![]);
+        assert!(
+            (h.viewport.camera.eye().x - 500.0).abs() < 1e-2,
+            "at its frame-10 place"
+        );
+
+        h.editor.animation.autokey = true;
+        orbit(&mut h);
+        let data = &h.doc.scene.get(camera).unwrap().data;
+        let key = data
+            .tracks
+            .iter()
+            .find(|t| t.param == px)
+            .unwrap()
+            .curve
+            .key_at(10.0)
+            .unwrap();
+        assert!(
+            (key.value - 500.0).abs() > 1.0,
+            "the key moved with the view: {}",
+            key.value
+        );
+        assert!(
+            data.tracks.iter().any(|t| t.param == px),
+            "Autokeying writes keys for animated channels"
+        );
+    }
+
+    #[test]
+    fn a_protected_camera_holds_the_view() {
+        let mut h = Harness::new();
+        let camera = camera_id(&h);
+        h.doc
+            .scene
+            .get_mut(camera)
+            .unwrap()
+            .data
+            .tags
+            .push(grid4d_scene::TagKind::Protection.default_tag());
+        h.editor.view_camera = Some(camera);
+        h.frame(vec![]);
+        let (before, view) = (h.doc.scene.get(camera).unwrap().data.clone(), h.viewport.camera);
+        let steps = h.editor.history.undo_len();
+        orbit(&mut h);
+        assert_eq!(h.doc.scene.get(camera).unwrap().data, before);
+        assert_eq!(h.editor.history.undo_len(), steps, "nothing recorded");
+        assert!(
+            h.viewport.camera.eye().abs_diff_eq(view.eye(), 1e-3),
+            "the view snaps back"
+        );
+    }
+
+    #[test]
+    fn any_object_can_be_the_view_and_deleting_it_unlinks() {
+        let mut h = Harness::new();
+        let light = h.doc.scene.iter().find(|(_, n)| n.data.name == "Light").unwrap().0;
+        let fov = h.viewport.camera.fov_y;
+        let editor_view = h.viewport.camera;
+        h.editor.view_camera = Some(light);
+        h.frame(vec![]);
+        let at = h.doc.scene.world_matrix(light).w_axis.truncate();
+        assert!(h.viewport.camera.eye().abs_diff_eq(at, 1e-2));
+        assert_eq!(
+            h.viewport.camera.fov_y, fov,
+            "not a camera: the view's own field of view"
+        );
+        h.editor.selection.set_single(light);
+        h.editor.commands.push(EditorCommand::DeleteSelected);
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert_eq!(h.editor.view_camera, None);
+        assert_eq!(h.viewport.camera, editor_view, "the editor view returns");
     }
 
     #[test]
@@ -1556,7 +1871,7 @@ mod tests {
         h.frame(vec![Event::PointerMoved(centre)]);
         h.frame(vec![Harness::button(centre, false)]);
         let tags = &h.doc.scene.get(cube).unwrap().data.tags;
-        assert_eq!(grid4d_scene::Tags::material(tags.as_slice()), Some(material));
+        assert_eq!(tags.material(), Some(material));
         assert_eq!(h.editor.history.undo_label(), Some("Assign Material"));
     }
 
@@ -1611,7 +1926,7 @@ mod tests {
         // Bridge: drag from the front face's middle polygon to the top's.
         let mut h = Harness::new();
         let cube = h.doc.scene.iter().find(|(_, n)| n.data.name == "Cube").unwrap().0;
-        h.doc.scene.get_mut(cube).unwrap().data.kind = grid4d_scene::ObjectKind::Cube {
+        h.doc.scene.get_mut(cube).unwrap().data.kind = ObjectKind::Cube {
             size: Vec3::splat(200.0),
             segments: [3, 3, 3],
         };

@@ -71,6 +71,62 @@ pub(super) fn view_label(painter: &Painter, rect: Rect, label: &str) {
     );
 }
 
+/// Every visible camera object except the one the view looks through (`linked`),
+/// as a wire pyramid of its field of view (at the view's aspect ratio) with a
+/// small triangle marking its up side.
+pub(super) fn camera_frustums(
+    painter: &Painter,
+    rect: Rect,
+    view_proj: &Mat4,
+    evaluated: &EvaluatedScene,
+    scene: &grid4d_scene::Scene,
+    selection: &Selection,
+    linked: Option<grid4d_scene::NodeId>,
+) {
+    /// How far the pyramid reaches, in cm.
+    const DEPTH: f32 = 160.0;
+    let aspect = rect.aspect_ratio().max(0.1);
+    for node in evaluated.nodes() {
+        if Some(node.id) == linked {
+            continue;
+        }
+        let Some(grid4d_scene::ObjectKind::Camera { fov_y_deg }) = scene.get(node.id).map(|n| &n.data.kind) else {
+            continue;
+        };
+        let (_, rotation, apex) = node.world.to_scale_rotation_translation();
+        let (right, up, forward) = (rotation * Vec3::X, rotation * Vec3::Y, rotation * Vec3::NEG_Z);
+        let half_h = (fov_y_deg.to_radians() * 0.5).tan() * DEPTH;
+        let half_w = half_h * aspect;
+        let centre = apex + forward * DEPTH;
+        let corners = [
+            centre + right * half_w + up * half_h,
+            centre - right * half_w + up * half_h,
+            centre - right * half_w - up * half_h,
+            centre + right * half_w - up * half_h,
+        ];
+        let colour = if selection.contains(node.id) {
+            p::HIGHLIGHT
+        } else {
+            p::ICON_CAMERA.gamma_multiply(0.8)
+        };
+        let stroke = Stroke::new(1.2, colour);
+        let line = |a: Vec3, b: Vec3| {
+            if let (Some(a), Some(b)) = (project(view_proj, rect, a), project(view_proj, rect, b)) {
+                painter.line_segment([a, b], stroke);
+            }
+        };
+        for k in 0..4 {
+            line(apex, corners[k]);
+            line(corners[k], corners[(k + 1) % 4]);
+        }
+        // The up marker: a triangle above the top edge.
+        let top = centre + up * half_h;
+        let peak = top + up * half_h * 0.35;
+        line(top + right * half_w * 0.3, peak);
+        line(peak, top - right * half_w * 0.3);
+    }
+}
+
 /// The red frame around the view while Autokeying is on.
 pub(super) fn autokey_frame(painter: &Painter, rect: Rect) {
     painter.rect_stroke(

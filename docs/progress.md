@@ -12,10 +12,10 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 6 — Tags, animation, materials, managers (v0.6) |
-| Last step done | 6.6 — Materials (2026-10-21) |
-| Next step | Phase 7 — Viewport: cameras, lights, 4-view, shading (7.1 scene cameras) |
-| Tests | 434, all passing; clippy and rustfmt clean |
+| Current phase | 7 — Viewport: cameras, lights, 4-view, shading (v0.7) |
+| Last step done | 7.1 — Scene cameras (2026-10-21) |
+| Next step | 7.2 — The 4-view layout with orthographic views |
+| Tests | 441, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -333,7 +333,7 @@ Maxon's public manual, in our own words (clean-room).
 | 6.3 (`09acb58`) | Recording keys: Record Active Objects (F9), Autokeying (Ctrl+F9, red view frame), key buttons in the Coord. tab, temporary (unrecorded) changes, the timeline's key strip (select, move, delete, Ctrl+click records), previous / next key (Ctrl+F / Ctrl+G); the gizmo and the Coordinates work at the current frame | 403 |
 | 6.4 (`4724314`) | The F-Curve editor, a tab beside the Timeline (Tab switches): track list, curves with keys, selecting (click, Ctrl, box, curve), moving keys (Shift constrains), tangent handles (Shift breaks), Ctrl+click adds a key, interpolation and tangent presets, zoom, pan, H / S framing, the selected key's frame and value | 415 |
 | 6.5 (`dfdc469`) | The Coordinate Manager, a tab beside the Attribute Manager (Shift+F7 / Shift+F5): position, scale / size / size+ and rotation of the active object in object or world space, or of the selected points, edges or polygons (centre, size, relative rotation); Apply | 421 |
-| 6.6 | Materials: the Material Manager (a bottom tab, Shift+F2), materials with colour, roughness, metallic and luminance, Material tags (drag a material onto an object, Apply), inheritance by children, the viewport in the material's colour, saved in `.g4d` and carried by glTF and OBJ; Merge keeps materials and object references | 434 |
+| 6.6 (`4745867`) | Materials: the Material Manager (a bottom tab, Shift+F2), materials with colour, roughness, metallic and luminance, Material tags (drag a material onto an object, Apply), inheritance by children, the viewport in the material's colour, saved in `.g4d` and carried by glTF and OBJ; Merge keeps materials and object references | 434 |
 
 *Problems and solutions:*
 - **Where tags live.** Tags sit in `NodeData`, the unit of attribute edits. Adding,
@@ -503,6 +503,38 @@ Maxon's public manual, in our own words (clean-room).
   Group's row: the Sphere and the Group's Cylinder and Box turned yellow and the tags
   showed the colour. Posted double-clicks do not reach the app (the second click is
   lost), so the double-click and Ctrl+N are covered by headless tests.
+
+Phase 6 is complete except one part of its acceptance test: glTF export does not
+write animation yet (planned).
+
+## Phase 7 — Viewport: cameras, lights, 4-view, shading (2026-10-21 – )
+
+| Step | Built | Tests |
+|------|-------|-------|
+| 7.1 | Scene cameras: look through a camera (Cameras ▸ Use Camera, a double-click on its icon) or any object, with its position, bank and field of view; navigation moves it (one undo step per gesture, Autokeying, Protection); wire pyramids for the other cameras; new cameras clone the view | 441 |
+
+*Problems and solutions:*
+- **The view camera had no bank.** The turntable camera kept world Y up, so a banked
+  scene camera could not be shown. It now has a roll angle that its right and up
+  vectors, the view matrix and the picking rays all follow, plus conversions to and
+  from an object's world matrix (tested to round-trip, bank included).
+- **One source of truth.** The view does not keep a copy of the camera object: every
+  frame it takes the object's evaluated placement (so animation and Target tags are
+  followed), and when navigation moved the view it writes the object back through
+  the same path as the gizmo (temporary values, Autokeying, one undo step per
+  gesture). Framing (H, O) happens outside the viewport's frame; a view that differs
+  from what was last taken from the object is written back first.
+- **Idle frames stay idle.** Writing only when the view actually moved keeps the
+  document untouched while looking through a camera; a test covers it.
+- **Unlinking** (Default Camera, or the object deleted) restores the editor camera
+  where it was before linking.
+- **On-screen testing:** the scene's Camera was linked through Cameras ▸ Use Camera:
+  the view showed the scene from it, with its name as the title and its icon
+  highlighted; dragging the orbit icon moved the camera object (the document became
+  modified) and the view stayed on it; Default Camera brought the editor view back.
+  The wire pyramid of the camera was visible from the editor view. Posted Alt and
+  double-clicks do not reach the app, so Alt-navigation, the icon double-click and
+  Protection are covered by headless tests.
 
 ---
 
