@@ -167,6 +167,9 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
             if i.key_pressed(Key::C) {
                 editor.commands.push(EditorCommand::MakeEditable);
             }
+            if i.key_pressed(Key::Q) {
+                editor.commands.push(EditorCommand::ToggleParentGenerator);
+            }
             if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
                 editor.commands.push(EditorCommand::DeleteSelected);
             }
@@ -283,6 +286,15 @@ mod tests {
         assert_eq!(press(Key::S, ctrl, false), [EditorCommand::Save]);
         assert_eq!(press(Key::S, ctrl | Modifiers::SHIFT, false), [EditorCommand::SaveAs]);
         assert!(press(Key::S, Modifiers::NONE, false).is_empty());
+    }
+
+    #[test]
+    fn q_toggles_the_parent_generator_like_c4d() {
+        assert_eq!(
+            press(Key::Q, Modifiers::NONE, false),
+            [EditorCommand::ToggleParentGenerator]
+        );
+        assert!(press(Key::Q, Modifiers::COMMAND, false).is_empty(), "Ctrl+Q quits");
     }
 
     #[test]

@@ -57,6 +57,8 @@ pub mod palette {
     pub const ICON_NULL: Color32 = Color32::from_rgb(0xb8, 0xbb, 0xc0);
     pub const ICON_CAMERA: Color32 = Color32::from_rgb(0xa9, 0x8b, 0xe8);
     pub const ICON_LIGHT: Color32 = Color32::from_rgb(0xf2, 0xc9, 0x4c);
+    /// Generators (Subdivision Surface …).
+    pub const ICON_GENERATOR: Color32 = Color32::from_rgb(0x6c, 0xc2, 0x8a);
 
     pub const AXIS: [Color32; 3] = [AXIS_X, AXIS_Y, AXIS_Z];
 }

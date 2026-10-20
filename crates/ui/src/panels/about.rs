@@ -4,7 +4,7 @@ use egui::{Grid, Id, Modal, RichText, ScrollArea};
 
 use crate::{EditorState, theme::palette as p};
 
-const SHORTCUTS: [(&str, &str); 25] = [
+const SHORTCUTS: [(&str, &str); 26] = [
     ("Alt + Left drag", "Orbit"),
     ("Alt + Middle drag / Middle drag", "Pan"),
     ("Alt + Right drag / Wheel", "Zoom"),
@@ -14,6 +14,7 @@ const SHORTCUTS: [(&str, &str); 25] = [
     ("9 / 0", "Live / Rectangle Selection tool"),
     ("U~L / U~B", "Loop / Ring Selection tool (U, then L)"),
     ("C", "Make editable (primitive → polygon object)"),
+    ("Q", "Enable / disable the (parent) generator"),
     ("D / I", "Extrude / Inset tool (drag left or right)"),
     ("K~L / K~K", "Loop/Path Cut / Line Cut tool"),
     ("M~M / M~N / U~Z", "Connect / Dissolve / Melt"),

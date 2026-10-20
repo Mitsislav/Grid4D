@@ -1242,6 +1242,52 @@ mod tests {
     }
 
     #[test]
+    fn a_subdivision_surface_is_picked_by_its_result_and_its_cage_is_edited() {
+        let mut h = Harness::new();
+        let cube = h.editor.selection.active().unwrap();
+        h.editor.commands.push(EditorCommand::MakeEditable);
+        h.frame(vec![]);
+        h.editor
+            .commands
+            .push(EditorCommand::WrapInGenerator(ObjectKindTag::SubdivisionSurface));
+        h.frame(vec![]);
+        let sds = h.editor.selection.active().unwrap();
+        assert_ne!(sds, cube);
+
+        // Model mode: a click on the smooth surface selects the generator.
+        h.editor.selection.clear();
+        h.frame(vec![]);
+        let rect = h.viewport.view_rect;
+        let view_proj = h.viewport.camera.view_projection(rect.aspect_ratio());
+        let centre = h.doc.scene.world_matrix(cube).transform_point3(Vec3::ZERO);
+        let at = project(&view_proj, rect, centre).unwrap();
+        h.frame(vec![Event::PointerMoved(at)]);
+        h.frame(vec![Harness::button(at, true)]);
+        h.frame(vec![Harness::button(at, false)]);
+        h.frame(vec![]);
+        assert_eq!(h.editor.selection.as_slice(), &[sds]);
+
+        // Points mode on the cage: its corners stay visible outside the smooth surface.
+        h.editor.selection.set_single(cube);
+        h.editor.mode = EditMode::Points;
+        h.frame(vec![]);
+        let world = h.doc.scene.world_matrix(cube);
+        let eye = h.viewport.camera.eye();
+        let (nearest, position) = h
+            .mesh(cube)
+            .mesh()
+            .points()
+            .iter()
+            .map(|&p| world.transform_point3(p))
+            .enumerate()
+            .min_by(|a, b| a.1.distance(eye).total_cmp(&b.1.distance(eye)))
+            .unwrap();
+        let at = project(&view_proj, rect, position).unwrap() + vec2(2.0, 1.0);
+        h.frame(vec![Event::PointerMoved(at)]);
+        assert_eq!(h.viewport.hover, [ComponentHit::Point(u32::try_from(nearest).unwrap())]);
+    }
+
+    #[test]
     fn a_click_without_drag_records_nothing() {
         let mut h = Harness::new();
         h.frame(vec![]);

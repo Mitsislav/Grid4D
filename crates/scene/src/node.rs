@@ -92,6 +92,17 @@ pub enum ObjectKind {
         mesh: MeshHandle,
         components: Components,
     },
+    /// Subdivision Surface generator: shows its first child (the cage) smoothed
+    /// with Catmull-Clark and hides the cage's own surface.
+    SubdivisionSurface {
+        /// Levels shown in the viewport (0–6).
+        viewport_levels: u32,
+        /// Levels for the final renderer (0–6; used from Phase 8).
+        render_levels: u32,
+        /// Bilinear splits before smoothing (0–6): keeps the result closer to the cage.
+        linear_pre: u32,
+        boundary: grid4d_geom::subdivision::Boundary,
+    },
 }
 
 /// Field-less discriminant of [`ObjectKind`] — for icons, menus and dispatch tables.
@@ -109,10 +120,11 @@ pub enum ObjectKindTag {
     Camera,
     Light,
     Polygon,
+    SubdivisionSurface,
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -125,7 +137,11 @@ impl ObjectKindTag {
         Self::Camera,
         Self::Light,
         Self::Polygon,
+        Self::SubdivisionSurface,
     ];
+
+    /// Generators: objects that build their geometry from their children.
+    pub const GENERATORS: [Self; 1] = [Self::SubdivisionSurface];
 
     /// Geometric primitives (the "Create ▸ Object" family).
     pub const PRIMITIVES: [Self; 8] = [
@@ -154,6 +170,7 @@ impl ObjectKindTag {
             Self::Camera => "Camera",
             Self::Light => "Light",
             Self::Polygon => "Polygon",
+            Self::SubdivisionSurface => "Subdivision Surface",
         }
     }
 
@@ -215,6 +232,14 @@ impl ObjectKindTag {
             },
             // Empty, like C4D's Create ▸ Polygon Object.
             Self::Polygon => ObjectKind::polygon(MeshHandle::new(grid4d_geom::PolyMesh::new())),
+            // The manual states no defaults: 2 / 3 levels are the long-standing
+            // convention; corners kept (docs/reference/generator-subdivision-surface.md).
+            Self::SubdivisionSurface => ObjectKind::SubdivisionSurface {
+                viewport_levels: 2,
+                render_levels: 3,
+                linear_pre: 0,
+                boundary: grid4d_geom::subdivision::Boundary::EdgeAndCorner,
+            },
         }
     }
 }
@@ -244,7 +269,14 @@ impl ObjectKind {
             Self::Camera { .. } => ObjectKindTag::Camera,
             Self::Light { .. } => ObjectKindTag::Light,
             Self::Polygon { .. } => ObjectKindTag::Polygon,
+            Self::SubdivisionSurface { .. } => ObjectKindTag::SubdivisionSurface,
         }
+    }
+
+    /// Builds its geometry from its children (see [`ObjectKindTag::GENERATORS`]).
+    #[must_use]
+    pub const fn is_generator(&self) -> bool {
+        matches!(self, Self::SubdivisionSurface { .. })
     }
 
     #[must_use]
@@ -257,7 +289,8 @@ impl ObjectKind {
     #[must_use]
     pub fn local_bounds(&self) -> Option<Aabb> {
         let half = match *self {
-            Self::Null => return None,
+            // A generator's extent is its result's: evaluation knows it.
+            Self::Null | Self::SubdivisionSurface { .. } => return None,
             Self::Cube { size, .. } => size * 0.5,
             Self::Sphere { radius, .. } => Vec3::splat(radius),
             Self::Cylinder { radius, height, .. } => Vec3::new(radius, height * 0.5, radius),

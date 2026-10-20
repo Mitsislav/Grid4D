@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 4 — Polygon modelling & Subdivision Surface (v0.4) |
-| Last step done | 4.6 — Bevel, Bridge, Weld, Optimize (2026-10-20) |
-| Next step | 4.7 — Generator framework + Subdivision Surface |
-| Tests | 308, all passing; clippy and rustfmt clean |
+| Last step done | 4.7 — Generator framework + Subdivision Surface (2026-10-20) |
+| Next step | 4.8 — Snapping |
+| Tests | 328, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -132,7 +132,8 @@ The starting point, `64d00bf`:
 | 4.4 (`93d0ffb`) | Extrude and Inset (drag or Apply); fixes from testing the app | 269 |
 | 4.5 (`781e547`) | Delete, Melt, Dissolve, Connect, Loop/Path Cut, Line Cut; two-key shortcuts | 292 |
 | docs (`163ac7c`) | The user manual and this progress log; the shortcuts dialog fits small windows again | 292 |
-| 4.6 | Bevel (edges and points, rounded profile), Bridge (polygons, border edges), Weld, Optimize (dialog) | 308 |
+| 4.6 (`c73d732`) | Bevel (edges and points, rounded profile), Bridge (polygons, border edges), Weld, Optimize (dialog) | 308 |
+| 4.7 | Generators; the Subdivision Surface (Catmull-Clark on n-gons, Linear Pre-Subdivision, border rules); Alt-create wraps the selection, Q switches, Make Editable bakes | 328 |
 
 Before each step we write a behaviour spec in [`reference/`](reference/README.md) from
 Maxon's public manual, in our own words (clean-room).
@@ -201,6 +202,33 @@ Maxon's public manual, in our own words (clean-room).
   tools' results were therefore checked by opening documents built with the real
   algorithms, and the interaction by the headless tests, which run the real viewport
   code.
+
+*Step 4.7 — problems and solutions:*
+- **Where a generator's result lives.** The scene stays plain data: a generator is an
+  object kind with parameters and nothing else. The evaluation layer builds the result
+  and keeps it per generator. It rebuilds only when an input changes: the cage's
+  meshes (by id), primitive parameters, their placement relative to the generator,
+  or the options. Idle frames, moving the generator itself and selecting cage
+  components rebuild nothing.
+- **The cage is hidden but must stay editable.** Its objects stay in the evaluated
+  scene (component modes and framing use them) but are neither drawn nor picked.
+  In component modes the cage's points and edges are drawn over the smooth surface.
+- **A disabled generator** acts as a plain group, so its cage shows as it is; a
+  hidden one hides everything below it.
+- **The Make Editable button asks every frame** whether the selection can be made
+  editable. A first version answered by baking the meshes, which would have
+  subdivided every frame. The check is cheap again; only the command bakes.
+- **Make Editable with the cage selected as well** would have converted the cage and
+  then removed it. Objects inside a cage that is being removed are now skipped.
+- **Alt-create is two structural edits** (insert the generator where the object was,
+  move the object under it). They are recorded as a single undo step.
+- **Defaults the reference does not document**: 2 viewport and 3 render levels and
+  the *Edge and Corner* border rule are our choice, written down in the spec. `Q`
+  was verified in Maxon's shortcut list before binding it.
+- **Screenshots.** The Attribute Manager is too short at 1280 × 800 for all the
+  parameters, so the window was maximised for one capture. The app remembers the
+  window state, so it was restored afterwards. Reducing the large smooth gradients
+  to a 256-colour palette produced bands, so the manual's images are now dithered.
 
 ---
 

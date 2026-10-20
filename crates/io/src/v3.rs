@@ -18,7 +18,10 @@ use std::{
 };
 
 use glam::{Vec2, Vec3};
-use grid4d_geom::{BitSet, ComponentSet, PolyMesh};
+use grid4d_geom::{
+    BitSet, ComponentSet, PolyMesh,
+    subdivision::{Boundary, MAX_LEVEL},
+};
 use grid4d_scene::{
     ComponentState, Components, Document, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, TimeSettings, Transform,
 };
@@ -146,6 +149,38 @@ enum KindDto {
         #[serde(default, skip_serializing_if = "SetDto::is_empty")]
         hidden: SetDto,
     },
+    /// Added to v3 before its release (additive): files without it still load.
+    SubdivisionSurface {
+        viewport_levels: u32,
+        render_levels: u32,
+        linear_pre: u32,
+        boundary: BoundaryDto,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BoundaryDto {
+    Edge,
+    EdgeAndCorner,
+}
+
+impl From<Boundary> for BoundaryDto {
+    fn from(boundary: Boundary) -> Self {
+        match boundary {
+            Boundary::Edge => Self::Edge,
+            Boundary::EdgeAndCorner => Self::EdgeAndCorner,
+        }
+    }
+}
+
+impl From<BoundaryDto> for Boundary {
+    fn from(boundary: BoundaryDto) -> Self {
+        match boundary {
+            BoundaryDto::Edge => Self::Edge,
+            BoundaryDto::EdgeAndCorner => Self::EdgeAndCorner,
+        }
+    }
 }
 
 /// Flagged components as inclusive index ranges `[first, last]`, ascending;
@@ -487,6 +522,17 @@ impl KindDto {
                 selected: SetDto::new(components.selected()),
                 hidden: SetDto::new(components.hidden()),
             },
+            ObjectKind::SubdivisionSurface {
+                viewport_levels,
+                render_levels,
+                linear_pre,
+                boundary,
+            } => Self::SubdivisionSurface {
+                viewport_levels,
+                render_levels,
+                linear_pre,
+                boundary: boundary.into(),
+            },
         }
     }
 
@@ -586,13 +632,25 @@ impl KindDto {
                     components: Components::new(state),
                 }
             }
+            // Never trust a level a file claims: each one multiplies the faces by 4.
+            Self::SubdivisionSurface {
+                viewport_levels,
+                render_levels,
+                linear_pre,
+                boundary,
+            } => ObjectKind::SubdivisionSurface {
+                viewport_levels: viewport_levels.min(MAX_LEVEL),
+                render_levels: render_levels.min(MAX_LEVEL),
+                linear_pre: linear_pre.min(MAX_LEVEL),
+                boundary: boundary.into(),
+            },
         })
     }
 
     /// Every floating-point parameter, for validation.
     fn parameters(&self) -> Vec<f32> {
         match *self {
-            Self::Null | Self::Polygon { .. } => Vec::new(),
+            Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } => Vec::new(),
             Self::Cube { size, .. } => size.to_vec(),
             Self::Sphere { radius, .. } => vec![radius],
             Self::Cylinder { radius, height, .. } | Self::Capsule { radius, height, .. } => vec![radius, height],
@@ -819,6 +877,36 @@ mod tests {
             parent = Some(id);
         }
         assert_eq!(snapshot(&round_trip(&doc)), snapshot(&doc));
+    }
+
+    #[test]
+    fn subdivision_surfaces_keep_their_parameters_and_levels_are_clamped() {
+        let mut doc = Document::new("sds");
+        let kind = ObjectKind::SubdivisionSurface {
+            viewport_levels: 3,
+            render_levels: 5,
+            linear_pre: 1,
+            boundary: Boundary::Edge,
+        };
+        doc.scene.insert(Node::new("Subdivision Surface", kind.clone()));
+        let loaded = round_trip(&doc);
+        assert_eq!(loaded.scene.get(loaded.scene.roots()[0]).unwrap().data.kind, kind);
+        let json = r#"{"type": "subdivision_surface", "viewport_levels": 1000, "render_levels": 7,
+            "linear_pre": 99, "boundary": "edge_and_corner"}"#;
+        let dto: KindDto = serde_json::from_str(json).unwrap();
+        let ObjectKind::SubdivisionSurface {
+            viewport_levels,
+            render_levels,
+            linear_pre,
+            ..
+        } = dto.into_kind(&[], "test").unwrap()
+        else {
+            panic!("not a generator")
+        };
+        assert_eq!(
+            (viewport_levels, render_levels, linear_pre),
+            (MAX_LEVEL, MAX_LEVEL, MAX_LEVEL)
+        );
     }
 
     #[test]

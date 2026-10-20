@@ -122,9 +122,9 @@ polygon object (semi-sharp creases, decreasing by one per level), as its own spe
 
 | Piece | Where |
 |-------|-------|
-| `ObjectKind::SubdivisionSurface { viewport_levels, render_levels, linear_pre, boundary, kind }` + `ObjectKindTag`, label, icon, Attribute Manager fields | `scene/node.rs`, `ui/icons.rs` (original icon), `ui/panels/attributes.rs` |
-| Generator framework: "generator consumes first child, hides it" | `grid4d-eval` — `EvaluatedScene::update` asks each generator for its output; consumed children are skipped as drawables but stay pickable in component modes |
-| `subdivide(mesh, levels, options) -> PolyMesh` | `grid4d-geom::subdivision` (pure, tested on `shapes.rs`) |
+| `ObjectKind::SubdivisionSurface { viewport_levels, render_levels, linear_pre, boundary }` + `ObjectKindTag`, label, icon, Attribute Manager fields | `scene/node.rs`, `ui/icons.rs` (original icon), `ui/panels/attributes.rs` |
+| Generator framework: "generator consumes first child, hides it" | `grid4d-eval::generator` — `EvaluatedScene::update` builds (or reuses) each generator's output; the cage's nodes get no drawable or pick shape but stay evaluated, so component modes still edit them |
+| `subdivide(mesh, &SubdivisionOptions) -> PolyMesh` | `grid4d-geom::subdivision` (pure, tested on `shapes.rs`) |
 | Cache | keyed by (cage `MeshId` or primitive `MeshKey`, cage transform-independent params, levels, options); recomputed only when one changes, so idle frames do nothing. The result is a `MeshHandle` → its own GPU buffer |
 | Alt-create wrap, Make Editable on generator, `Q` toggle | `EditorCommand`s through `commit` (one undo step each) |
 | File format | new kind in `.g4d` v3 (`KindDto`) |
@@ -141,35 +141,54 @@ Add a criterion bench.
    does exactly this is unconfirmed; it is our rule either way.)
 2. **Make Editable on the generator** bakes the **viewport** level.
 
+## Decisions made while implementing (2026-10-20)
+
+3. **Defaults**: Subdivision Viewport 2, Subdivision Renderer 3, Linear
+   Pre-Subdivision 0, Boundary Interpolation *Edge and Corner*. The manual does not
+   state them; 2/3 is the long-standing convention.
+4. **`Q`** (Toggle Parent Generator) is in Maxon's shortcut list. It switches the
+   selected generator, or the nearest generator above a selected object; each
+   generator is switched once even when several of its objects are selected.
+5. **Alt-create**: the generator is inserted at the object's parent and position
+   among its siblings, at the parent's origin; the object keeps its own transform,
+   so it does not move. Without a selection it is an ordinary create.
+6. **Make Editable** skips disabled generators (they show their cage as it is) and
+   objects inside a cage that goes with its generator.
+7. **Non-manifold edges** (more than two faces) are smoothed like borders.
+8. **Hidden or disabled** objects inside the cage are left out of the input; a
+   generator inside a cage is not merged (no nesting yet).
+
 ## Open questions
 
 1. Default **Type** and **Boundary Interpolation** in 2027.0 (likely an OpenSubdiv
    type). Our single scheme makes the Type choice moot for v0.4, but the default
    boundary rule changes how open meshes (a plane) look.
-2. Viewport/renderer default levels (2/3 is the long-standing convention — verify).
+2. Viewport/renderer default levels (2/3 is the long-standing convention — we use
+   it; verify against the application when possible).
 
 ## Acceptance criteria
 
-- [ ] Level 0 returns the cage unchanged (same points and faces).
-- [ ] A welded cube (8 points, 6 quads) at level 1 gives 26 points and 24 quads; all
+- [x] Level 0 returns the cage unchanged (same points and faces).
+- [x] A welded cube (8 points, 6 quads) at level 1 gives 26 points and 24 quads; all
       points lie inside the cage's bounds; the mesh is closed and manifold.
-- [ ] Face count after *L* levels = (corner count of the cage) × 4^(L−1) for any
+- [x] Face count after *L* levels = (corner count of the cage) × 4^(L−1) for any
       cage (tested on cube, n-gon cylinder, torus, L-shape, star).
-- [ ] An n-gon with *k* corners becomes *k* quads at level 1.
-- [ ] Six unwelded cube faces give six separate patches (no shared points); after
-      Optimize they give the rounded box.
-- [ ] On an open plane with *Edge and Corner*, the 4 corner points do not move; with
+- [x] An n-gon with *k* corners becomes *k* quads at level 1.
+- [x] Six unwelded cube faces give six separate patches (no shared points); after
+      Optimize they give the rounded box (= the welded cube case).
+- [x] On an open plane with *Edge and Corner*, the 4 corner points do not move; with
       *Edge* they do.
-- [ ] A non-manifold edge (3 faces) does not panic and gives finite points.
-- [ ] Linear Pre-Subdivision 1 + level 0 equals one bilinear split (each face → quads
+- [x] A non-manifold edge (3 faces) does not panic and gives finite points.
+- [x] Linear Pre-Subdivision 1 + level 0 equals one bilinear split (each face → quads
       around its centre, no smoothing).
-- [ ] Moving a cage point updates the smooth result the same frame; idle frames do
+- [x] Moving a cage point updates the smooth result the same frame; idle frames do
       not recompute (cache hit) and allocate nothing.
-- [ ] Alt-create wraps the selected object in one undo step; undo restores the
+- [x] Alt-create wraps the selected object in one undo step; undo restores the
       hierarchy exactly.
-- [ ] Disabling the generator shows the cage as a normal object; re-enabling hides it.
-- [ ] Make Editable on the generator yields one polygon object with the mesh at the
+- [x] Disabling the generator shows the cage as a normal object; re-enabling hides it.
+- [x] Make Editable on the generator yields one polygon object with the mesh at the
       viewport level and removes the cage; undo restores both.
-- [ ] A cage with a child of its own smooths both as one mesh; a second child of the
+- [x] A cage with a child of its own smooths both as one mesh; a second child of the
       generator is drawn unsmoothed.
-- [ ] Save/reload keeps all parameters (`.g4d` v3 golden fixture updated).
+- [x] Save/reload keeps all parameters (round-trip test; the golden demo document
+      has no generator, so its fixture is unchanged).

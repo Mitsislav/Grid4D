@@ -165,6 +165,8 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
             }
             shaded(MeshKey::Polygon(mesh.id()), Vec3::ONE)
         }
+        // A generator draws its result, which evaluation builds.
+        ObjectKind::SubdivisionSurface { .. } => None,
     }
 }
 
@@ -190,7 +192,11 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
             }
             Some(mesh)
         }
-        ObjectKind::Null | ObjectKind::Camera { .. } | ObjectKind::Light { .. } | ObjectKind::Polygon { .. } => None,
+        ObjectKind::Null
+        | ObjectKind::Camera { .. }
+        | ObjectKind::Light { .. }
+        | ObjectKind::Polygon { .. }
+        | ObjectKind::SubdivisionSurface { .. } => None,
     }
 }
 
@@ -220,8 +226,11 @@ mod tests {
     fn every_kind_is_drawable_except_nulls_and_empty_shapes() {
         for tag in ObjectKindTag::ALL {
             let style = drawable(&tag.default_kind(), [1.0; 3]);
-            // The default polygon object is empty.
-            let expected = !matches!(tag, ObjectKindTag::Null | ObjectKindTag::Polygon);
+            // The default polygon object is empty; a generator draws its result.
+            let expected = !matches!(
+                tag,
+                ObjectKindTag::Null | ObjectKindTag::Polygon | ObjectKindTag::SubdivisionSurface
+            );
             assert_eq!(style.is_some(), expected, "{tag:?}");
         }
         let flat_cone = ObjectKind::Cone {

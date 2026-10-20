@@ -78,8 +78,15 @@ pub enum EditorCommand {
     CreateObject(ObjectKindTag),
     DeleteSelected,
     /// Turns the selected primitives into polygon objects that look the same
-    /// (C4D's "Make Editable", `C`); other objects are left alone.
+    /// (C4D's "Make Editable", `C`), and the selected generators into polygon
+    /// objects holding their result (their cage goes); others are left alone.
     MakeEditable,
+    /// A new generator of kind `tag` that takes the active object's place in the
+    /// hierarchy, with the object as its child (Alt + create). One undo step.
+    WrapInGenerator(ObjectKindTag),
+    /// Enables or disables the selected generators, or the generator above each
+    /// selected object (C4D's "Toggle Parent Generator", `Q`). One undo step.
+    ToggleParentGenerator,
     /// Component modes: merges the selected points, edges or polygons into the
     /// polygons around them (Melt, U~Z / Alt+Backspace). One undo step.
     MeltSelected,
@@ -255,7 +262,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 }
             });
         }
-        // Deleting components comes with step 4.5; objects stay put meanwhile.
+        // In a component mode Delete removes components, never objects.
         EditorCommand::DeleteSelected if editor.mode != EditMode::Model => {
             let label = match editor.mode {
                 EditMode::Points => "Delete Points",
@@ -337,19 +344,35 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             commit(doc, editor, "Delete", edits, |_, selection| selection.clear());
         }
         EditorCommand::MakeEditable => {
-            let edits = editor
-                .selection
-                .as_slice()
-                .iter()
-                .filter_map(|&id| {
-                    let data = &doc.scene.get(id)?.data;
-                    let mesh = grid4d_eval::editable_mesh(&data.kind)?;
-                    let mut data = data.clone();
-                    data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
+            let edits = make_editable_edits(doc, editor.selection.as_slice());
+            commit(doc, editor, "Make Editable", edits, |_, _| {});
+        }
+        EditorCommand::WrapInGenerator(tag) => wrap_in_generator(doc, editor, viewport, tag),
+        EditorCommand::ToggleParentGenerator => {
+            let mut generators: Vec<NodeId> = Vec::new();
+            for &id in editor.selection.as_slice() {
+                // The object itself if it is a generator, else the nearest one above it.
+                let mut current = Some(id);
+                while let Some(at) = current {
+                    let Some(node) = doc.scene.get(at) else { break };
+                    if node.data.kind.is_generator() {
+                        if !generators.contains(&at) {
+                            generators.push(at);
+                        }
+                        break;
+                    }
+                    current = node.parent();
+                }
+            }
+            let edits = generators
+                .into_iter()
+                .filter_map(|id| {
+                    let mut data = doc.scene.get(id)?.data.clone();
+                    data.enabled = !data.enabled;
                     Some(SceneEdit::SetData { id, data })
                 })
                 .collect();
-            commit(doc, editor, "Make Editable", edits, |_, _| {});
+            commit(doc, editor, "Toggle Generator", edits, |_, _| {});
         }
         EditorCommand::ApplyMeshTool => {
             let tool = editor.tool;
@@ -743,6 +766,51 @@ fn rebuild_selection(
     }
 }
 
+/// Alt + create: a new generator takes the active object's place (same parent and
+/// position among its siblings) and the object moves under it, keeping its
+/// transform (the generator sits at the parent's origin). Without an active
+/// object it is an ordinary create. One undo step, the generator selected.
+fn wrap_in_generator(doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel, tag: ObjectKindTag) {
+    let Some(target) = editor.selection.active().filter(|&id| doc.scene.contains(id)) else {
+        apply(EditorCommand::CreateObject(tag), doc, editor, viewport);
+        return;
+    };
+    let parent = doc.scene.get(target).and_then(Node::parent);
+    let index = doc.scene.index_in_parent(target).unwrap_or(usize::MAX);
+    let transform = doc.scene.get(target).map(|n| n.data.transform).unwrap_or_default();
+    let selection_before = editor.selection.clone();
+    let insert = SceneEdit::Insert {
+        parent,
+        index,
+        data: new_object_data(tag, &doc.scene, viewport.camera()),
+    };
+    let Ok(undo_insert) = doc.apply(insert) else { return };
+    let Some(generator) = undo_insert.node() else { return };
+    let mov = SceneEdit::Move {
+        id: target,
+        parent: Some(generator),
+        index: 0,
+        transform,
+    };
+    match doc.apply(mov) {
+        Ok(undo_move) => {
+            editor.selection.set_single(generator);
+            let selection_after = editor.selection.clone();
+            editor.history.record(
+                doc,
+                "Create Generator",
+                vec![undo_move, undo_insert],
+                selection_before,
+                selection_after,
+            );
+        }
+        Err(err) => {
+            log::warn!("Wrapping in a generator rejected: {err}");
+            let _ = doc.apply(undo_insert);
+        }
+    }
+}
+
 /// A Bridge between two faces (Polygons) or two unique edges (Edges) of `mesh`.
 fn bridge(
     mesh: &MeshHandle,
@@ -839,15 +907,72 @@ fn idx(index: u32) -> usize {
     usize::try_from(index).unwrap_or(usize::MAX)
 }
 
-/// `true` if [`EditorCommand::MakeEditable`] has a primitive to convert in
+/// `true` if [`EditorCommand::MakeEditable`] has a primitive or generator to convert in
 /// `selection` (enables the menu entry and the palette button).
 #[must_use]
 pub fn can_make_editable(doc: &Document, selection: &Selection) -> bool {
+    // Cheap (called every frame): no mesh is built here.
     selection.as_slice().iter().any(|&id| {
+        doc.scene.get(id).is_some_and(|node| {
+            let kind = &node.data.kind;
+            ObjectKindTag::PRIMITIVES.contains(&kind.tag())
+                || (kind.is_generator() && node.data.enabled && !node.children().is_empty())
+        })
+    })
+}
+
+/// Make Editable as document edits: each selected primitive becomes a polygon
+/// object; each selected, enabled generator a polygon object holding its result
+/// at the viewport level, its cage removed. Objects inside such a cage are not
+/// baked on their own (they go with it); everything else is left alone.
+fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
+    let enabled_generator = |id: NodeId| {
         doc.scene
             .get(id)
-            .is_some_and(|node| ObjectKindTag::PRIMITIVES.contains(&node.data.kind.tag()))
-    })
+            .filter(|node| node.data.kind.is_generator() && node.data.enabled)
+    };
+    let all_cages: Vec<NodeId> = selection
+        .iter()
+        .filter_map(|&id| enabled_generator(id)?.children().first().copied())
+        .collect();
+    let in_cage = |id: NodeId| {
+        let mut at = Some(id);
+        while let Some(current) = at {
+            if all_cages.contains(&current) {
+                return true;
+            }
+            at = doc.scene.get(current).and_then(Node::parent);
+        }
+        false
+    };
+    let mut edits = Vec::new();
+    let mut cages = Vec::new();
+    for &id in selection {
+        let Some(node) = doc.scene.get(id).filter(|_| !in_cage(id)) else {
+            continue;
+        };
+        let mesh = if node.data.kind.is_generator() {
+            // A disabled generator shows its children as they are: nothing to bake.
+            if enabled_generator(id).is_none() {
+                continue;
+            }
+            let Some(mesh) = grid4d_eval::generator_mesh(&doc.scene, id) else {
+                continue;
+            };
+            cages.extend(node.children().first());
+            mesh
+        } else {
+            let Some(mesh) = grid4d_eval::editable_mesh(&node.data.kind) else {
+                continue;
+            };
+            mesh
+        };
+        let mut data = node.data.clone();
+        data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
+        edits.push(SceneEdit::SetData { id, data });
+    }
+    edits.extend(cages.into_iter().map(|root| SceneEdit::Detach { root }));
+    edits
 }
 
 /// Default data for a new object, named uniquely, C4D-style.
@@ -873,7 +998,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Torus
         | ObjectKindTag::Disc
         | ObjectKindTag::Capsule
-        | ObjectKindTag::Polygon => {}
+        | ObjectKindTag::Polygon
+        | ObjectKindTag::SubdivisionSurface => {}
     }
     data
 }
@@ -911,6 +1037,7 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         ObjectKindTag::Null => palette::ICON_NULL,
         ObjectKindTag::Camera => palette::ICON_CAMERA,
         ObjectKindTag::Light => palette::ICON_LIGHT,
+        ObjectKindTag::SubdivisionSurface => palette::ICON_GENERATOR,
         ObjectKindTag::Cube
         | ObjectKindTag::Sphere
         | ObjectKindTag::Cylinder
@@ -2077,5 +2204,127 @@ mod tests {
         );
         assert_eq!(editor.history.undo_label(), Some("Delete"));
         assert_eq!(editor.history.undo_len(), 1);
+    }
+
+    #[test]
+    fn alt_create_wraps_the_active_object_in_one_undo_step() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let (group, boxed) = (id_of(&doc, "Group"), id_of(&doc, "Box"));
+        let world_before = doc.scene.world_matrix(boxed);
+        let transform_before = doc.scene.get(boxed).unwrap().data.transform;
+        editor.selection.set_single(boxed);
+        let wrap = EditorCommand::WrapInGenerator(ObjectKindTag::SubdivisionSurface);
+        run(&mut doc, &mut editor, &mut vp, std::slice::from_ref(&wrap));
+
+        let sds = editor.selection.active().unwrap();
+        assert_eq!(
+            doc.scene.get(sds).unwrap().data.kind.tag(),
+            ObjectKindTag::SubdivisionSurface
+        );
+        assert_eq!(
+            doc.scene.get(sds).unwrap().parent(),
+            Some(group),
+            "takes the object's place"
+        );
+        assert_eq!(doc.scene.index_in_parent(sds), Some(1));
+        assert_eq!(doc.scene.get(boxed).unwrap().parent(), Some(sds));
+        assert_eq!(doc.scene.get(boxed).unwrap().data.transform, transform_before);
+        assert!(
+            doc.scene.world_matrix(boxed).abs_diff_eq(world_before, 1e-4),
+            "stays where it was"
+        );
+        assert_eq!(
+            (editor.history.undo_len(), editor.history.undo_label()),
+            (1, Some("Create Generator"))
+        );
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert!(!doc.scene.contains(sds));
+        assert_eq!(doc.scene.get(boxed).unwrap().parent(), Some(group));
+        assert_eq!(doc.scene.index_in_parent(boxed), Some(1));
+        assert_eq!(editor.selection.active(), Some(boxed));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        assert_eq!(doc.scene.get(boxed).unwrap().parent(), Some(sds), "same generator back");
+
+        // Nothing selected: an ordinary create at the top level.
+        editor.selection.clear();
+        run(&mut doc, &mut editor, &mut vp, &[wrap]);
+        let empty = editor.selection.active().unwrap();
+        assert_eq!(doc.scene.get(empty).unwrap().parent(), None);
+        assert!(doc.scene.children(empty).is_empty());
+        assert_eq!(doc.scene.get(empty).unwrap().data.name, "Subdivision Surface.1");
+    }
+
+    #[test]
+    fn make_editable_on_a_generator_bakes_its_result_and_removes_the_cage() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let cube = id_of(&doc, "Cube");
+        editor.selection.set_single(cube);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::WrapInGenerator(ObjectKindTag::SubdivisionSurface)],
+        );
+        let sds = editor.selection.active().unwrap();
+        let before = doc.scene.get(sds).unwrap().data.clone();
+        let expected = grid4d_eval::generator_mesh(&doc.scene, sds).unwrap();
+        assert_eq!(expected.face_count(), 6 * 4 * 4, "level 2 of a one-segment cube");
+
+        // The cage selected too: it goes with the generator, not baked on its own.
+        editor.selection.set_all([sds, cube]);
+        assert!(can_make_editable(&doc, &editor.selection));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let ObjectKind::Polygon { mesh, .. } = &doc.scene.get(sds).unwrap().data.kind else {
+            panic!("not baked")
+        };
+        assert_eq!(mesh.mesh(), &expected, "the viewport level, as shown");
+        assert_eq!(doc.scene.get(sds).unwrap().data.name, before.name);
+        assert!(!doc.scene.contains(cube), "the cage is gone");
+        assert_eq!(editor.history.undo_label(), Some("Make Editable"));
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(sds).unwrap().data, before);
+        assert_eq!(doc.scene.get(cube).unwrap().parent(), Some(sds), "the cage is back");
+
+        // A disabled generator shows its cage as it is: nothing to bake.
+        let mut disabled = before;
+        disabled.enabled = false;
+        doc.scene.get_mut(sds).unwrap().data = disabled;
+        editor.selection.set_single(sds);
+        assert!(!can_make_editable(&doc, &editor.selection));
+    }
+
+    #[test]
+    fn q_toggles_the_generator_of_the_selection() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let (cube, sphere) = (id_of(&doc, "Cube"), id_of(&doc, "Sphere"));
+        editor.selection.set_single(cube);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::WrapInGenerator(ObjectKindTag::SubdivisionSurface)],
+        );
+        let sds = editor.selection.active().unwrap();
+        let enabled = |doc: &Document| doc.scene.get(sds).unwrap().data.enabled;
+
+        // The cage selected: its parent generator toggles.
+        editor.selection.set_single(cube);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ToggleParentGenerator]);
+        assert!(!enabled(&doc));
+        assert_eq!(editor.history.undo_label(), Some("Toggle Generator"));
+        // The generator and its cage selected: toggled once, not twice.
+        editor.selection.set_all([sds, cube]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ToggleParentGenerator]);
+        assert!(enabled(&doc));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert!(!enabled(&doc));
+
+        // No generator above: nothing changes, nothing is recorded.
+        let steps = editor.history.undo_len();
+        editor.selection.set_single(sphere);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ToggleParentGenerator]);
+        assert_eq!(editor.history.undo_len(), steps);
     }
 }

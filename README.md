@@ -9,8 +9,8 @@ workflow and layout inspired by Cinema 4D.
 
 **Status: v0.4 in progress — polygon modelling.** The workspace, scene graph, GPU
 viewport, undo/redo and `.g4d` files work, and polygon objects can be modelled with
-component selection, Extrude, Inset, Bevel, Bridge, cuts and more; Subdivision Surface,
-keyframes, glTF and rendering are on the roadmap (see
+component selection, Extrude, Inset, Bevel, Bridge, cuts and more, then smoothed with
+the Subdivision Surface generator; keyframes, glTF and rendering are on the roadmap (see
 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)).
 
 **How to use it:** the [user manual](docs/manual.md). **What changed in each step:**
@@ -50,6 +50,10 @@ the [progress log](docs/progress.md).
   Delete in every component mode; Bevel (`M~S`, edges and points, with a rounded
   profile), Bridge (`B`, between polygons or border edges), Weld and Optimize (`U~O`).
   Each operation is one undo step, and selections follow their components.
+- **Subdivision Surface** generator: smooths its first child (the cage) live with
+  Catmull-Clark (levels, Linear Pre-Subdivision, border rule). Alt + create wraps the
+  selected object, `Q` switches it off and on, Make Editable bakes the result; edit
+  the cage in the component modes while the smooth surface follows.
 - **Cinema 4D shortcuts**, including two-key chords such as `U~L` (Loop Selection) and
   `M~N` (Dissolve); the status bar shows a pending first key.
 - **wgpu viewport**: renders into its own offscreen target (4× MSAA, depth) shown as

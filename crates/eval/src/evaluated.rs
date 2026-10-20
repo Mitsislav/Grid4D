@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
 use glam::Mat4;
-use grid4d_geom::BitSet;
+use grid4d_geom::{BitSet, subdivision::SubdivisionOptions};
 use grid4d_scene::{Aabb, Components, LIGHT_MARKER_RADIUS, MeshHandle, MeshId, NodeId, ObjectKind, Scene, WalkItem};
 
-use crate::{Drawable, MeshKey, drawable};
+use crate::{
+    Drawable, MeshKey, drawable,
+    generator::{self, Input, viewport_options},
+};
 
 /// How picking tests a ray against a node, in its object space.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -34,8 +37,12 @@ pub struct EvaluatedNode {
 }
 
 /// The document as viewers see it: every node that is visible in the editor and
-/// enabled (a hidden or disabled node hides its whole subtree), in Object Manager
-/// pre-order, with world matrices.
+/// enabled (a hidden or disabled node hides its whole subtree — except a disabled
+/// generator, whose children then show as they are), in Object Manager pre-order,
+/// with world matrices.
+///
+/// A generator draws its result instead of its cage: the cage's nodes stay listed
+/// (component modes edit them, framing sees them) but are neither drawn nor picked.
 ///
 /// Keep one per document view and call [`EvaluatedScene::update`] each frame
 /// before drawing or picking.
@@ -50,6 +57,11 @@ pub struct EvaluatedScene {
     /// Shown meshes of polygon objects with hidden polygons, kept across updates
     /// so one is built only when the mesh or its hidden polygons change.
     shown: HashMap<NodeId, Shown>,
+    /// Each enabled generator's result, rebuilt only when its inputs change.
+    generated: HashMap<NodeId, Generated>,
+    /// Scratch space for gathering a generator's inputs.
+    inputs: Vec<Input>,
+    cage_stack: Vec<NodeId>,
     walk_stack: Vec<WalkItem>,
     /// [`Scene::revision`] of the scene `nodes` were built from.
     revision: Option<u64>,
@@ -73,11 +85,25 @@ impl EvaluatedScene {
         self.nodes.clear();
         self.meshes.clear();
         self.polygons.clear();
+        let revision = scene.revision();
         let (nodes, meshes, polygons, shown) = (&mut self.nodes, &mut self.meshes, &mut self.polygons, &mut self.shown);
+        let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
+        // The next cage root to consume, and the depth of the cage being consumed.
+        let mut next_cage: Option<NodeId> = None;
+        let mut cage_depth: Option<u32> = None;
         scene.walk(&mut self.walk_stack, |id, node, world, depth| {
+            if cage_depth.is_some_and(|d| depth <= d) {
+                cage_depth = None;
+            }
             let data = &node.data;
-            if !data.visible_in_editor || !data.enabled {
+            let generator = viewport_options(&data.kind);
+            // A disabled generator is a plain group: its children show as they are.
+            if !data.visible_in_editor || (!data.enabled && generator.is_none()) {
                 return false;
+            }
+            if next_cage == Some(id) {
+                cage_depth = Some(depth);
+                next_cage = None;
             }
             let mut drawable = drawable(&data.kind, data.display_color);
             let mut pick = pick_shape(&data.kind);
@@ -96,11 +122,35 @@ impl EvaluatedScene {
                     ..d
                 });
             }
+            let mut bounds = data.kind.local_bounds();
+            if let Some(options) = generator.filter(|_| data.enabled) {
+                if let Some(result) = generated_mesh(generated, inputs, cage_stack, scene, id, options, revision) {
+                    let mesh = &result.mesh;
+                    if mesh.mesh().face_count() > 0 {
+                        meshes.insert(mesh.id(), mesh.clone());
+                        bounds = mesh.bounds();
+                        pick = PickShape::Mesh(mesh.id());
+                        drawable = Some(Drawable {
+                            key: MeshKey::Polygon(mesh.id()),
+                            scale: glam::Vec3::ONE,
+                            color: result.colour,
+                            unlit: false,
+                            marker: false,
+                        });
+                    }
+                }
+                next_cage = scene.children(id).first().copied();
+            }
+            if cage_depth.is_some() {
+                // Part of a cage: the generator shows it.
+                drawable = None;
+                pick = PickShape::None;
+            }
             nodes.push(EvaluatedNode {
                 id,
                 depth,
                 world: *world,
-                bounds: data.kind.local_bounds(),
+                bounds,
                 drawable,
                 pick,
             });
@@ -108,6 +158,7 @@ impl EvaluatedScene {
         });
         // Objects gone, hidden or with nothing hidden any more.
         self.shown.retain(|_, entry| self.meshes.contains_key(&entry.mesh.id()));
+        self.generated.retain(|_, entry| entry.seen == revision);
         self.revision = Some(scene.revision());
         true
     }
@@ -134,6 +185,52 @@ impl EvaluatedScene {
         let node = self.nodes.iter().find(|n| n.id == id)?;
         Some((node, mesh, components))
     }
+}
+
+/// A generator's result and what it was built from.
+#[derive(Debug)]
+struct Generated {
+    options: SubdivisionOptions,
+    inputs: Vec<Input>,
+    colour: [f32; 3],
+    mesh: MeshHandle,
+    /// The scene revision of the last update that used it.
+    seen: u64,
+}
+
+/// Generator `id`'s cached result, rebuilt if its options or inputs changed.
+/// `None` when it has no cage.
+fn generated_mesh<'a>(
+    generated: &'a mut HashMap<NodeId, Generated>,
+    inputs: &mut Vec<Input>,
+    stack: &mut Vec<NodeId>,
+    scene: &Scene,
+    id: NodeId,
+    options: SubdivisionOptions,
+    revision: u64,
+) -> Option<&'a Generated> {
+    let colour = generator::gather(scene, id, stack, inputs)?;
+    let fresh = generated
+        .get(&id)
+        .is_some_and(|entry| entry.options == options && entry.inputs == *inputs);
+    if !fresh {
+        let mesh = MeshHandle::new(generator::build(inputs, &options));
+        let entry = generated.entry(id).or_insert_with(|| Generated {
+            options,
+            inputs: Vec::new(),
+            colour,
+            mesh: mesh.clone(),
+            seen: revision,
+        });
+        entry.options = options;
+        entry.mesh = mesh;
+        // Keep the inputs; the old list (with its capacity) becomes the scratch.
+        std::mem::swap(&mut entry.inputs, inputs);
+    }
+    let entry = generated.get_mut(&id)?;
+    entry.colour = colour;
+    entry.seen = revision;
+    Some(entry)
 }
 
 /// A polygon object's mesh without its hidden polygons.
@@ -177,6 +274,8 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Disc { .. }
         | ObjectKind::Capsule { .. }
         | ObjectKind::Camera { .. } => PickShape::Bounds,
+        // Picked by its result (set during evaluation).
+        ObjectKind::SubdivisionSurface { .. } => PickShape::None,
     }
 }
 
@@ -322,6 +421,173 @@ mod tests {
         eval.update(&doc.scene);
         assert_eq!(shown(&eval).id(), own.id());
         assert!(eval.shown.is_empty(), "the shown mesh is dropped");
+    }
+
+    /// A document with a Subdivision Surface whose cage is a polygon cube, plus a
+    /// second child (a sphere). Returns (doc, generator, cage, sphere).
+    fn generator_scene() -> (Document, NodeId, NodeId, NodeId) {
+        let mut doc = Document::new("sds");
+        let sds = doc.scene.insert(Node::new(
+            "Subdivision Surface",
+            grid4d_scene::ObjectKindTag::SubdivisionSurface.default_kind(),
+        ));
+        let cage = doc.scene.insert_child(sds, Node::new("Cage", polygon_cube())).unwrap();
+        let sphere = doc
+            .scene
+            .insert_child(
+                sds,
+                Node::new("Sphere", grid4d_scene::ObjectKindTag::Sphere.default_kind()),
+            )
+            .unwrap();
+        (doc, sds, cage, sphere)
+    }
+
+    fn node(eval: &EvaluatedScene, id: NodeId) -> &EvaluatedNode {
+        eval.nodes().iter().find(|n| n.id == id).unwrap()
+    }
+
+    fn result_of(eval: &EvaluatedScene, id: NodeId) -> MeshHandle {
+        let PickShape::Mesh(mesh) = node(eval, id).pick else {
+            panic!("no result")
+        };
+        eval.mesh(mesh).unwrap().clone()
+    }
+
+    #[test]
+    fn a_generator_shows_its_cage_smoothed_and_hides_the_cage() {
+        let (doc, sds, cage, sphere) = generator_scene();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let result = result_of(&eval, sds);
+        assert_eq!(result.mesh().face_count(), 6 * 4 * 4, "two levels on a cube");
+        assert_eq!(
+            node(&eval, sds).drawable.map(|d| d.key),
+            Some(MeshKey::Polygon(result.id()))
+        );
+        assert_eq!(node(&eval, sds).bounds, result.bounds());
+        let cage_node = node(&eval, cage);
+        assert_eq!(
+            (cage_node.drawable, cage_node.pick),
+            (None, PickShape::None),
+            "the cage is not drawn"
+        );
+        assert!(cage_node.bounds.is_some(), "but can still be framed");
+        assert!(eval.polygon(cage).is_some(), "and edited in component modes");
+        assert!(
+            node(&eval, sphere).drawable.is_some(),
+            "a second child is drawn as it is"
+        );
+        assert_eq!(crate::generator_mesh(&doc.scene, sds).unwrap(), *result.mesh());
+    }
+
+    #[test]
+    fn a_generator_rebuilds_only_when_its_inputs_change() {
+        let (mut doc, sds, cage, _) = generator_scene();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let first = result_of(&eval, sds).id();
+
+        doc.scene.get_mut(sds).unwrap().data.transform.position.x = 50.0;
+        eval.update(&doc.scene);
+        assert_eq!(
+            result_of(&eval, sds).id(),
+            first,
+            "moving the generator changes nothing"
+        );
+        let ObjectKind::Polygon { components, .. } = &mut doc.scene.get_mut(cage).unwrap().data.kind else {
+            unreachable!()
+        };
+        components.make_mut().selected.points.insert(0);
+        eval.update(&doc.scene);
+        assert_eq!(
+            result_of(&eval, sds).id(),
+            first,
+            "selecting cage points changes nothing"
+        );
+
+        doc.scene.get_mut(cage).unwrap().data.transform.position.y = 10.0;
+        eval.update(&doc.scene);
+        let moved = result_of(&eval, sds);
+        assert_ne!(moved.id(), first, "moving the cage does");
+        assert!(
+            moved.bounds().unwrap().min.y > -100.0 + 9.0,
+            "the result follows the cage"
+        );
+
+        let ObjectKind::SubdivisionSurface { viewport_levels, .. } = &mut doc.scene.get_mut(sds).unwrap().data.kind
+        else {
+            unreachable!()
+        };
+        *viewport_levels = 1;
+        eval.update(&doc.scene);
+        assert_eq!(result_of(&eval, sds).mesh().face_count(), 24, "fewer levels");
+    }
+
+    #[test]
+    fn a_disabled_generator_shows_its_cage_and_a_hidden_one_hides_everything() {
+        let (mut doc, sds, cage, _) = generator_scene();
+        let mut eval = EvaluatedScene::new();
+        doc.scene.get_mut(sds).unwrap().data.enabled = false;
+        eval.update(&doc.scene);
+        assert_eq!(node(&eval, sds).drawable, None);
+        assert!(
+            node(&eval, cage).drawable.is_some(),
+            "the cage is drawn as a normal object"
+        );
+
+        doc.scene.get_mut(sds).unwrap().data.enabled = true;
+        doc.scene.get_mut(sds).unwrap().data.visible_in_editor = false;
+        eval.update(&doc.scene);
+        assert!(eval.nodes().is_empty(), "nothing of it is visible");
+    }
+
+    #[test]
+    fn a_cage_merges_its_own_children_and_primitives_work() {
+        let (mut doc, sds, cage, _) = generator_scene();
+        let child = doc
+            .scene
+            .insert_child(cage, Node::new("Child", polygon_cube()))
+            .unwrap();
+        doc.scene.get_mut(child).unwrap().data.transform.position.x = 500.0;
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        assert_eq!(
+            result_of(&eval, sds).mesh().face_count(),
+            2 * 96,
+            "both cubes, smoothed as one mesh"
+        );
+        assert_eq!(
+            node(&eval, child).drawable,
+            None,
+            "the cage's child is part of the cage"
+        );
+
+        doc.scene.get_mut(cage).unwrap().data.kind = grid4d_scene::ObjectKindTag::Cube.default_kind();
+        eval.update(&doc.scene);
+        assert_eq!(
+            result_of(&eval, sds).mesh().face_count(),
+            2 * 96,
+            "a primitive cage too"
+        );
+    }
+
+    #[test]
+    fn steady_state_updates_with_a_generator_reuse_capacity() {
+        let (mut doc, sds, _, sphere) = generator_scene();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let first = result_of(&eval, sds).id();
+        let capacity = |e: &EvaluatedScene| (e.generated.capacity(), e.inputs.capacity(), e.cage_stack.capacity());
+        // One more update fills the scratch list the first build handed over.
+        doc.scene.get_mut(sphere).unwrap().data.transform.position.z = 1.0;
+        eval.update(&doc.scene);
+        let before = capacity(&eval);
+        for i in 0..50 {
+            doc.scene.get_mut(sphere).unwrap().data.transform.position.x = f32::from(u8::try_from(i).unwrap());
+            eval.update(&doc.scene);
+        }
+        assert_eq!(capacity(&eval), before);
+        assert_eq!(result_of(&eval, sds).id(), first);
     }
 
     #[test]

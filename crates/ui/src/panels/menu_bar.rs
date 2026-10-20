@@ -70,7 +70,22 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 }
             });
             ui.menu_button("Generator", |ui| {
-                for name in ["Subdivision Surface", "Extrude", "Lathe", "Loft", "Sweep", "Cloner"] {
+                for tag in ObjectKindTag::GENERATORS {
+                    if ui
+                        .button(tag.label())
+                        .on_hover_text("Alt + click: around the selected object")
+                        .clicked()
+                    {
+                        let alt = ui.input(|i| i.modifiers.alt);
+                        editor.commands.push(if alt {
+                            EditorCommand::WrapInGenerator(tag)
+                        } else {
+                            EditorCommand::CreateObject(tag)
+                        });
+                        ui.close();
+                    }
+                }
+                for name in ["Extrude", "Lathe", "Loft", "Sweep", "Cloner"] {
                     planned(ui, name, "");
                 }
             });

@@ -57,7 +57,7 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 |-------|------|--------|
 | 3.6, 4.1–4.3 | [`modeling-modes.md`](modeling-modes.md) — Make Editable, Points / Edges / Polygons modes, component selection & transforms | draft 2026-10-19 |
 | 4.4–4.6 | [`modeling-tools.md`](modeling-tools.md) — Extrude, Inset (4.4); Delete, Melt, Dissolve, Connect, Loop/Path Cut, Line Cut, chords (4.5); Bevel, Bridge, Weld, Optimize (4.6) | draft 2026-10-20 |
-| 4.7 | [`generator-subdivision-surface.md`](generator-subdivision-surface.md) — generator framework, Catmull-Clark, levels, boundaries | draft 2026-10-19 |
+| 4.7 | [`generator-subdivision-surface.md`](generator-subdivision-surface.md) — generator framework, Catmull-Clark, levels, boundaries | implemented 2026-10-20 |
 | later | `modeling-sds-weights.md` — point/edge weights (creases) | todo |
 | 6 | `animation-keyframes.md` — keys, tracks, F-curve interpolation, timeline | todo |
 | 6 | `manager-coordinate.md`, `manager-material.md` | todo |

@@ -21,8 +21,9 @@ screenshots come from the application itself.
 9. [Files](#9-files)
 10. [Timeline and playback](#10-timeline-and-playback)
 11. [Polygon modelling](#11-polygon-modelling)
-12. [Keyboard shortcuts](#12-keyboard-shortcuts)
-13. [Limitations and what is planned](#13-limitations-and-what-is-planned)
+12. [Generators: Subdivision Surface](#12-generators-subdivision-surface)
+13. [Keyboard shortcuts](#13-keyboard-shortcuts)
+14. [Limitations and what is planned](#14-limitations-and-what-is-planned)
 
 ---
 
@@ -105,6 +106,10 @@ New objects are named like Cinema 4D's (`Cube`, `Cube.1`, `Cube.2` …) and beco
 the selected object. These are **parametric** objects: change their parameters at
 any time. To edit their points and polygons, make them editable
 ([§11.1](#111-make-editable)).
+
+**Generators** (Create ▸ Generator, or the green button at the right end of the
+command palette) build their shape from their children. The Subdivision Surface
+smooths a polygon mesh ([§12](#12-generators-subdivision-surface)).
 
 ## 5. Selecting and transforming objects
 
@@ -231,7 +236,9 @@ you shape directly.
 Select a primitive and press **C** (or click the top button of the mode palette, or
 Mesh ▸ Conversion ▸ Make Editable). It becomes a polygon object that looks exactly
 the same: same name, position and place in the hierarchy. Its icon changes to a
-triangle. One undo step turns it back into the parametric object.
+triangle. One undo step turns it back into the parametric object. On a Subdivision
+Surface, Make Editable keeps the smooth result
+([§12.4](#124-switching-it-off-and-baking-it)).
 
 ### 11.2 Component modes
 
@@ -437,7 +444,75 @@ Polygons that collapse are removed.
 - It works on the selected points (or those of the selected edges or polygons), or
   on the whole object when nothing is selected.
 
-## 12. Keyboard shortcuts
+## 12. Generators: Subdivision Surface
+
+A **generator** is an object that builds its shape from its children. The first
+one is the **Subdivision Surface**. It turns a coarse polygon mesh, the **cage**,
+into a smooth, rounded surface. The result updates live while you keep modelling
+the few points of the cage.
+
+![A cube smoothed by a Subdivision Surface, with its parameters in the Attribute Manager](images/manual/sds_object.png)
+
+### 12.1 Creating one
+
+- Select the object to smooth, then **Alt + click** the Subdivision Surface button
+  (the green button at the right end of the command palette), or hold Alt while you
+  choose **Create ▸ Generator ▸ Subdivision Surface**. The generator takes the
+  object's place in the hierarchy and the object becomes its child. The object
+  stays where it was. This is one undo step.
+- Without Alt you get an empty generator at the top of the Object Manager. To give
+  it a cage, drag an object onto it in the Object Manager.
+
+![Create ▸ Generator](images/manual/menu_generator.png)
+
+What gets smoothed:
+
+- The generator smooths its **first child**, the cage. The cage can be a polygon
+  object or a primitive (a Cube works without Make Editable).
+- If the cage has children of its own, they are merged with it and smoothed as one
+  mesh.
+- Further children of the generator are drawn as they are.
+- Pieces of the cage that are not joined are smoothed separately, for example the
+  caps of an editable cylinder. Run **Optimize** (U~O) on the cage first to merge
+  them.
+
+### 12.2 Working with the cage
+
+- In Model mode, clicking the smooth surface selects the **generator**: move it, or
+  change its parameters.
+- To reshape the result, select the **cage** in the Object Manager and switch to
+  Points, Edges or Polygons mode. The cage's points and edges are drawn over the
+  smooth surface, every modelling tool works on them, and the surface follows each
+  change at once.
+
+![Editing the cage in Points mode: the cage's points and edges around the smooth surface](images/manual/sds_cage.png)
+
+### 12.3 Parameters
+
+Select the generator and open **Attribute Manager ▸ Object**:
+
+| Parameter | Meaning |
+|-----------|---------|
+| Type | **Catmull-Clark (N-Gons)**: every polygon with *n* corners becomes *n* quads, then the surface is smoothed. It is the only type for now. |
+| Subdivision Viewport | How many times the viewport subdivides (0 shows the cage itself, 6 at most). Each level multiplies the polygons by about four, so keep it low (2) while modelling. |
+| Subdivision Renderer | The level for final renders. It will be used by the offline renderer (*planned*). |
+| Linear Pre-Subdivision | Splits the cage this many times *without* smoothing before the smoothing levels, which keeps the result closer to the cage. |
+| Boundary Interpolation | How open borders (the edge of a plane) are smoothed. **Edge and Corner** keeps a border's corners in place; **Edge** rounds them off as well. |
+
+### 12.4 Switching it off and baking it
+
+- **Q** switches the generator off and on, and so does its check mark in the Object
+  Manager. While it is off, the cage shows as a normal object. If the cage (or
+  anything else inside the generator) is selected, Q switches the generator above
+  it.
+
+  ![The generator switched off with Q: the cage shows as a plain cube, and the Object Manager marks the generator with a red cross](images/manual/sds_disabled.png)
+
+- **Make Editable** (C) on the generator replaces it with one polygon object holding
+  the smooth mesh, at the **Subdivision Viewport** level. The cage is removed. One
+  undo step brings both back. A generator that is switched off is left as it is.
+
+## 13. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -452,6 +527,8 @@ Esc cancels a chord.
 | U~L / U~B | Loop / Ring Selection tool |
 | U~I / U~W / U~Y / U~K | Invert / Select Connected / Grow / Shrink selection |
 | C | Make Editable |
+| Q | Switch the selected generator (or the one above the selection) off / on |
+| Alt + click a generator button | Create the generator around the selected object |
 | D / I | Extrude / Inset tool |
 | M~T / M~W | Extrude / Inset tool (alternatives) |
 | K~L (M~L) / K~K (M~K) | Loop/Path Cut / Line Cut tool |
@@ -472,13 +549,16 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 13. Limitations and what is planned
+## 14. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
-- **Modelling**: Subdivision Surface; snapping (the toggle exists, without effect);
+- **Modelling**: snapping (the toggle exists, without effect);
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
   Solid, Proportional and Radial modes; Bridge point by point.
+- **Generators**: only the Subdivision Surface, with one type (Catmull-Clark) and
+  without edge weights (creases) or UV options. Extrude, Lathe, Loft, Sweep and
+  Cloner are planned.
 - **Animation**: keyframes, F-curves, the Coordinate and Material managers.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.

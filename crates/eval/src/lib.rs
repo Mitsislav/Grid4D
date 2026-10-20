@@ -3,7 +3,8 @@
 //! Turns the document — what the user authored — into what viewers draw and pick
 //! this frame: an [`EvaluatedScene`] of visible nodes with world matrices,
 //! [`Drawable`]s (unit geometry named by a [`MeshKey`], plus scale and colour)
-//! and pick shapes. [`editable_mesh`] is the geometry "Make Editable" bakes.
+//! and pick shapes. [`editable_mesh`] is the geometry "Make Editable" bakes;
+//! [`generator_mesh`] what a generator (Subdivision Surface) shows.
 //!
 //! ## Architecture rule
 //!
@@ -22,8 +23,10 @@
 
 mod drawable;
 mod evaluated;
+mod generator;
 mod key;
 
 pub use drawable::{Drawable, drawable, editable_mesh};
 pub use evaluated::{EvaluatedNode, EvaluatedScene, PickShape};
+pub use generator::generator_mesh;
 pub use key::{MeshKey, Ratio};

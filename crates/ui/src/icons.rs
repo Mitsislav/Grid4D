@@ -383,6 +383,16 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.polyline(&outline, true);
             c.polyline(&[(0.71, 0.48), (0.5, 0.86), (0.29, 0.48)], true);
         }
+        ObjectKindTag::SubdivisionSurface => {
+            // A smooth shape inside its square cage, with the cage's corner points.
+            let cage = [(0.12, 0.12), (0.88, 0.12), (0.88, 0.88), (0.12, 0.88)];
+            c.polyline(&cage, true);
+            c.disc_with((0.5, 0.5), 0.27, soft);
+            c.circle((0.5, 0.5), 0.27);
+            for corner in cage {
+                c.disc(corner, 0.07);
+            }
+        }
         ObjectKindTag::Light => {
             c.disc((0.5, 0.5), 0.19);
             for i in 0..8 {

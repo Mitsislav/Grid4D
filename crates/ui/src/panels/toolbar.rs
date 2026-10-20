@@ -77,6 +77,22 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
                 editor.commands.push(EditorCommand::CreateObject(tag));
             }
         }
+        group_gap(ui);
+        for tag in ObjectKindTag::GENERATORS {
+            let style = IconStyle {
+                tint: Some(tag_color(tag)),
+                ..IconStyle::default()
+            };
+            if icon_button(ui, Icon::Object(tag), style, create_tooltip(tag)).clicked() {
+                // Alt + click wraps the selected object, as in C4D.
+                let alt = ui.input(|i| i.modifiers.alt);
+                editor.commands.push(if alt {
+                    EditorCommand::WrapInGenerator(tag)
+                } else {
+                    EditorCommand::CreateObject(tag)
+                });
+            }
+        }
     });
 }
 
@@ -207,5 +223,6 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Camera => "Add Camera (at the current view)",
         ObjectKindTag::Light => "Add Light",
         ObjectKindTag::Polygon => "Add Polygon Object",
+        ObjectKindTag::SubdivisionSurface => "Add Subdivision Surface (Alt: around the selected object)",
     }
 }

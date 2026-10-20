@@ -401,6 +401,48 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 }
                 ui.end_row();
             }
+            ObjectKind::SubdivisionSurface {
+                viewport_levels,
+                render_levels,
+                linear_pre,
+                boundary,
+            } => {
+                attr_label(ui, "Type", LABEL_WIDTH);
+                ui.label("Catmull-Clark (N-Gons)");
+                ui.end_row();
+                for (label, value) in [
+                    ("Subdivision Viewport", viewport_levels),
+                    ("Subdivision Renderer", render_levels),
+                    ("Linear Pre-Subdivision", linear_pre),
+                ] {
+                    attr_label(ui, label, LABEL_WIDTH);
+                    ui.add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(value)
+                            .speed(0.05)
+                            .range(0..=grid4d_geom::subdivision::MAX_LEVEL),
+                    );
+                    ui.end_row();
+                }
+                attr_label(ui, "Boundary Interpolation", LABEL_WIDTH);
+                egui::ComboBox::from_id_salt("grid4d.attr.sds.boundary")
+                    .selected_text(match boundary {
+                        grid4d_geom::subdivision::Boundary::Edge => "Edge",
+                        grid4d_geom::subdivision::Boundary::EdgeAndCorner => "Edge and Corner",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(boundary, grid4d_geom::subdivision::Boundary::Edge, "Edge");
+                        ui.selectable_value(
+                            boundary,
+                            grid4d_geom::subdivision::Boundary::EdgeAndCorner,
+                            "Edge and Corner",
+                        );
+                    });
+                ui.end_row();
+                ui.label("");
+                ui.label(RichText::new("Smooths its first child (the cage)").color(p::TEXT_DIM));
+                ui.end_row();
+            }
             ObjectKind::Polygon { mesh, .. } => {
                 // The geometry is edited in the viewport (Points / Edges / Polygons).
                 let mesh = mesh.mesh();
