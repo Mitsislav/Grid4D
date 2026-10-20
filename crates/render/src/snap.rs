@@ -15,7 +15,10 @@ use grid4d_eval::{EvaluatedScene, MeshKey};
 use grid4d_geom::BitSet;
 use grid4d_scene::{MeshHandle, NodeId};
 
-use crate::components::{ScreenView, edge_distance};
+use crate::{
+    GridPlane,
+    components::{ScreenView, edge_distance},
+};
 
 /// What snapping can stick to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -212,19 +215,22 @@ fn project(view: &ScreenView, p: Vec3) -> Option<Vec2> {
     (clip.w > 1e-6 && clip.z >= 0.0).then(|| view.to_screen(clip))
 }
 
-/// The world-space ray through screen position `at`, from the eye (the camera
-/// is a perspective one). The direction comes from a point deep in the view
-/// (depth 0.999, about a thousand near distances away).
+/// The world-space ray through screen position `at`: from the eye for a
+/// perspective view (towards a point deep in the view, depth 0.999, about a
+/// thousand near distances away), from the near plane along the viewing direction
+/// for a parallel one.
 fn ray(view: &ScreenView, at: Vec2) -> Option<(Vec3, Vec3)> {
     let ndc = Vec2::new(at.x / view.size.x * 2.0 - 1.0, 1.0 - at.y / view.size.y * 2.0);
     // In f64: the projection's inverse loses precision in f32 (near 2, far 200 000).
-    let deep = view
-        .view_proj
-        .as_dmat4()
-        .inverse()
-        .project_point3(ndc.extend(0.999).as_dvec3());
-    let dir = (deep - view.eye.as_dvec3()).as_vec3();
-    (dir.is_finite() && dir.length_squared() > 0.0).then_some((view.eye, dir))
+    let inverse = view.view_proj.as_dmat4().inverse();
+    let deep = inverse.project_point3(ndc.extend(0.999).as_dvec3());
+    let origin = match view.parallel {
+        Some(_) => inverse.project_point3(ndc.extend(0.0).as_dvec3()),
+        None => view.eye.as_dvec3(),
+    };
+    let dir = (deep - origin).as_vec3();
+    let origin = origin.as_vec3();
+    (dir.is_finite() && dir.length_squared() > 0.0 && origin.is_finite()).then_some((origin, dir))
 }
 
 /// The target nearest `query.at` (point-like targets first, see
@@ -378,8 +384,8 @@ fn search_mesh(
     }
 }
 
-/// Offers the floor grid's point and lines nearest to where the ray through
-/// `query.at` meets the floor (y = 0).
+/// Offers the grid's point and lines nearest to where the ray through `query.at`
+/// meets the grid's plane: the floor (y = 0), or a parallel view's own plane.
 fn search_grid(best: &mut Best, view: &ScreenView, query: &SnapQuery<'_>) {
     let spacing = query.grid_spacing;
     if spacing <= 0.0 || !spacing.is_finite() {
@@ -388,31 +394,28 @@ fn search_grid(best: &mut Best, view: &ScreenView, query: &SnapQuery<'_>) {
     let Some((origin, dir)) = ray(view, query.at) else {
         return;
     };
-    if dir.y.abs() <= f32::EPSILON {
+    let (normal, u, v) = view.parallel.map_or(GridPlane::XZ, GridPlane::facing).axes();
+    let along = dir.dot(normal);
+    if along.abs() <= f32::EPSILON {
         return;
     }
-    let t = -origin.y / dir.y;
+    let t = -origin.dot(normal) / along;
     if t <= 0.0 {
         return;
     }
-    let floor = origin + dir * t;
-    let (x, z) = (
-        (floor.x / spacing).round() * spacing,
-        (floor.z / spacing).round() * spacing,
-    );
+    let on_plane = origin + dir * t;
+    let (pu, pv) = (on_plane.dot(u), on_plane.dot(v));
+    let (gu, gv) = ((pu / spacing).round() * spacing, (pv / spacing).round() * spacing);
     if query.targets.grid_point {
-        let p = Vec3::new(x, 0.0, z);
+        let p = u * gu + v * gv;
         if let Some(screen) = project(view, p) {
             best.offer(SnapKind::GridPoint, screen.distance(query.at), p, screen, None);
         }
     }
     if query.targets.grid_line && best.wants(SnapKind::GridLine) {
         let reach = spacing * 5.0;
-        // The line x = const through the floor point, and the line z = const.
-        for (p, along) in [
-            (Vec3::new(x, 0.0, floor.z), Vec3::Z),
-            (Vec3::new(floor.x, 0.0, z), Vec3::X),
-        ] {
+        // The grid line along v through the point, and the one along u.
+        for (p, along) in [(u * gu + v * pv, v), (u * pu + v * gv, u)] {
             if let Some(screen) = project(view, p) {
                 let segment = [p - along * reach, p + along * reach];
                 best.offer(SnapKind::GridLine, screen.distance(query.at), p, screen, Some(segment));
@@ -477,11 +480,7 @@ mod tests {
 
     fn view() -> ScreenView {
         let camera = OrbitCamera::default();
-        ScreenView {
-            view_proj: camera.view_projection(1.5),
-            eye: camera.eye(),
-            size: Vec2::new(900.0, 600.0),
-        }
+        ScreenView::new(&camera, Vec2::new(900.0, 600.0))
     }
 
     fn screen(view: &ScreenView, p: Vec3) -> Vec2 {
@@ -544,6 +543,38 @@ mod tests {
     }
 
     const CORNER: Vec3 = Vec3::new(100.0, 100.0, 100.0);
+
+    #[test]
+    fn a_front_view_snaps_to_its_own_grid_plane() {
+        let f = fixture();
+        let camera = OrbitCamera {
+            yaw: 0.0,
+            pitch: 0.0,
+            projection: crate::Projection::Parallel,
+            ..OrbitCamera::default()
+        };
+        let v = ScreenView::new(&camera, Vec2::new(900.0, 600.0));
+        // Off the objects, near the grid point (−300, 200) of the XY plane.
+        let target = Vec3::new(-300.0, 200.0, 0.0);
+        let at = screen(&v, target) + Vec2::new(2.0, 3.0);
+        let hit = find_snap(
+            &f.eval,
+            &v,
+            &mut SnapCache::default(),
+            &query(at, only(&[SnapKind::GridPoint])),
+        )
+        .unwrap();
+        assert_eq!(hit.kind, SnapKind::GridPoint);
+        assert!(hit.position.abs_diff_eq(target, 1e-2), "{}", hit.position);
+        let line = find_snap(
+            &f.eval,
+            &v,
+            &mut SnapCache::default(),
+            &query(at, only(&[SnapKind::GridLine])),
+        )
+        .unwrap();
+        assert!(line.position.z.abs() < 1e-2, "in the XY plane: {}", line.position);
+    }
 
     #[test]
     fn a_vertex_is_found_at_its_exact_position() {

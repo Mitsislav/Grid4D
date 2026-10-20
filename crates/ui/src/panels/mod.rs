@@ -65,6 +65,16 @@ mod tests {
         assert_idle_frames_leave_the_document_alone(doc, editor);
     }
 
+    /// Four views draw without writing anything either.
+    #[test]
+    fn idle_frames_with_four_views_do_not_touch_the_document() {
+        let doc = Document::with_demo_scene();
+        let mut editor = EditorState::default();
+        editor.selection.set_single(doc.scene.roots()[0]);
+        editor.commands.push(crate::EditorCommand::ShowView(None));
+        assert_idle_frames_leave_the_document_alone(doc, editor);
+    }
+
     /// Looking through a scene camera writes nothing while nothing moves.
     #[test]
     fn idle_frames_through_a_scene_camera_do_not_touch_the_document() {

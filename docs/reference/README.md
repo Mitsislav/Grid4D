@@ -70,4 +70,5 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 6.5 | [`manager-coordinate.md`](manager-coordinate.md) — the Coordinate Manager | implemented 2026-10-20 |
 | 6.6 | [`manager-material.md`](manager-material.md) — materials, the Material Manager, the Material tag | implemented 2026-10-21 |
 | 7.1 | [`object-camera.md`](object-camera.md) — scene cameras in the viewport | implemented 2026-10-21 |
-| 7 | `object-light.md`, `viewport-layouts.md` | todo |
+| 7.2 | [`viewport-layouts.md`](viewport-layouts.md) — four views, orthographic projections, the Panel menu | implemented 2026-10-21 |
+| 7 | `object-light.md` | todo |

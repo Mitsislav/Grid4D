@@ -241,6 +241,9 @@ pub enum EditorCommand {
         inverses: Vec<SceneEdit>,
         label: &'static str,
     },
+    /// Shows view `Some(i)` alone and makes it active (F1–F4), or all four views
+    /// (`None`, F5).
+    ShowView(Option<usize>),
     FrameScene,
     FrameSelected,
     ResetView,
@@ -872,6 +875,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 .history
                 .record(doc, label, inverses, selection.clone(), selection);
         }
+        EditorCommand::ShowView(view) => viewport.show_views(view),
         EditorCommand::FrameScene => viewport.frame_scene(&doc.scene),
         EditorCommand::FrameSelected => viewport.frame_selection(&doc.scene, &editor.selection),
         EditorCommand::ResetView => viewport.reset_view(),

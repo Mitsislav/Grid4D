@@ -9,6 +9,18 @@ pub struct Ray {
     pub dir: Vec3,
 }
 
+/// How a camera maps the world to the screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Projection {
+    /// Things further away look smaller.
+    #[default]
+    Perspective,
+    /// Orthographic: rays are parallel, sizes do not change with depth; the
+    /// visible height is `2 · distance · tan(fov_y / 2)`, so zooming still changes
+    /// `distance`.
+    Parallel,
+}
+
 /// Turntable editor camera orbiting around a target point.
 ///
 /// Navigation mirrors Cinema 4D: Alt+LMB orbits, Alt+MMB pans, Alt+RMB dollies.
@@ -27,6 +39,7 @@ pub struct OrbitCamera {
     pub fov_y: f32,
     pub near: f32,
     pub far: f32,
+    pub projection: Projection,
 }
 
 impl Default for OrbitCamera {
@@ -40,6 +53,7 @@ impl Default for OrbitCamera {
             fov_y: 40f32.to_radians(),
             near: 2.0,
             far: 200_000.0,
+            projection: Projection::Perspective,
         }
     }
 }
@@ -48,6 +62,20 @@ impl OrbitCamera {
     const MIN_DISTANCE: f32 = 1.0;
     const MAX_DISTANCE: f32 = 100_000.0;
     const PITCH_LIMIT: f32 = FRAC_PI_2 - 0.001;
+    /// A parallel camera's eye sits this far behind its target, so the scene in
+    /// front of the target and well behind it is in view.
+    const PARALLEL_EYE: f32 = 50_000.0;
+
+    #[must_use]
+    pub fn is_parallel(&self) -> bool {
+        self.projection == Projection::Parallel
+    }
+
+    /// Half the visible height at the target (what a parallel camera shows).
+    #[must_use]
+    pub fn half_height(&self) -> f32 {
+        self.distance * (self.fov_y * 0.5).tan()
+    }
 
     /// Unit vector from the target towards the eye.
     #[must_use]
@@ -59,7 +87,10 @@ impl OrbitCamera {
 
     #[must_use]
     pub fn eye(&self) -> Vec3 {
-        self.target + self.back() * self.distance
+        match self.projection {
+            Projection::Perspective => self.target + self.back() * self.distance,
+            Projection::Parallel => self.target + self.back() * Self::PARALLEL_EYE,
+        }
     }
 
     #[must_use]
@@ -67,9 +98,12 @@ impl OrbitCamera {
         -self.back()
     }
 
+    /// Screen right: level (world Y up) turned by the bank; well defined even when
+    /// looking straight down or up.
     #[must_use]
     pub fn right(&self) -> Vec3 {
-        let level = self.forward().cross(Vec3::Y).normalize_or(Vec3::X);
+        let (sy, cy) = self.yaw.sin_cos();
+        let level = Vec3::new(cy, 0.0, -sy);
         if self.roll == 0.0 {
             level
         } else {
@@ -132,10 +166,19 @@ impl OrbitCamera {
         camera
     }
 
-    /// Right-handed perspective with wgpu's `[0, 1]` depth range.
+    /// Right-handed perspective or orthographic projection with wgpu's `[0, 1]`
+    /// depth range.
     #[must_use]
     pub fn projection(&self, aspect: f32) -> Mat4 {
-        rh::proj::directx::perspective(self.fov_y, aspect.max(1e-4), self.near, self.far)
+        let aspect = aspect.max(1e-4);
+        match self.projection {
+            Projection::Perspective => rh::proj::directx::perspective(self.fov_y, aspect, self.near, self.far),
+            Projection::Parallel => {
+                let h = self.half_height().max(1e-3);
+                let w = h * aspect;
+                rh::proj::directx::orthographic(-w, w, -h, h, 1.0, Self::PARALLEL_EYE + self.far)
+            }
+        }
     }
 
     #[must_use]
@@ -162,9 +205,14 @@ impl OrbitCamera {
         }
     }
 
-    /// Size in world units of one pixel at `depth` along the view direction.
+    /// Size in world units of one pixel at `depth` along the view direction (the
+    /// same at every depth for a parallel camera).
     #[must_use]
     pub fn world_units_per_pixel(&self, depth: f32, viewport_height_px: f32) -> f32 {
+        let depth = match self.projection {
+            Projection::Perspective => depth,
+            Projection::Parallel => self.distance,
+        };
         2.0 * depth * (self.fov_y * 0.5).tan() / viewport_height_px.max(1.0)
     }
 
@@ -172,17 +220,33 @@ impl OrbitCamera {
     pub fn frame_sphere(&mut self, center: Vec3, radius: f32) {
         self.target = center;
         let radius = radius.max(10.0);
-        self.distance = (radius / (self.fov_y * 0.5).sin() * 1.15).clamp(Self::MIN_DISTANCE, Self::MAX_DISTANCE);
+        let distance = match self.projection {
+            Projection::Perspective => radius / (self.fov_y * 0.5).sin() * 1.15,
+            // The visible half-height is the radius, with the same margin.
+            Projection::Parallel => radius * 1.15 / (self.fov_y * 0.5).tan(),
+        };
+        self.distance = distance.clamp(Self::MIN_DISTANCE, Self::MAX_DISTANCE);
     }
 
     /// Picking ray through a point in normalised device coordinates (`[-1, 1]`, Y up).
     #[must_use]
     pub fn ray_from_ndc(&self, ndc: Vec2, aspect: f32) -> Ray {
         let half_h = (self.fov_y * 0.5).tan();
-        let dir = self.forward() + self.right() * (ndc.x * half_h * aspect) + self.up() * (ndc.y * half_h);
-        Ray {
-            origin: self.eye(),
-            dir: dir.normalize_or(self.forward()),
+        match self.projection {
+            Projection::Perspective => {
+                let dir = self.forward() + self.right() * (ndc.x * half_h * aspect) + self.up() * (ndc.y * half_h);
+                Ray {
+                    origin: self.eye(),
+                    dir: dir.normalize_or(self.forward()),
+                }
+            }
+            Projection::Parallel => {
+                let h = self.half_height();
+                Ray {
+                    origin: self.eye() + self.right() * (ndc.x * h * aspect) + self.up() * (ndc.y * h),
+                    dir: self.forward(),
+                }
+            }
         }
     }
 
@@ -269,6 +333,45 @@ mod tests {
         );
         let p = cam.view_projection(1.0).project_point3(cam.target);
         assert!(p.truncate().abs_diff_eq(Vec2::ZERO, 1e-4), "the target stays centred");
+    }
+
+    #[test]
+    fn parallel_views_keep_sizes_and_cast_parallel_rays() {
+        // Looking straight down (the Top view): X right, −Z up on screen.
+        let top = OrbitCamera {
+            yaw: 0.0,
+            pitch: FRAC_PI_2,
+            target: Vec3::ZERO,
+            distance: 1000.0,
+            projection: Projection::Parallel,
+            ..Default::default()
+        };
+        assert!(top.forward().abs_diff_eq(Vec3::NEG_Y, 1e-6));
+        assert!(top.right().abs_diff_eq(Vec3::X, 1e-6));
+        assert!(top.up().abs_diff_eq(Vec3::NEG_Z, 1e-6));
+        let vp = top.view_projection(1.0);
+        let screen = |p: Vec3| vp.project_point3(p).truncate();
+        // Equal sizes at any height: no perspective.
+        let near = screen(Vec3::new(100.0, 500.0, 0.0)) - screen(Vec3::new(0.0, 500.0, 0.0));
+        let far = screen(Vec3::new(100.0, -500.0, 0.0)) - screen(Vec3::new(0.0, -500.0, 0.0));
+        assert!(near.abs_diff_eq(far, 1e-5), "{near} vs {far}");
+        assert!(screen(Vec3::new(0.0, 0.0, -100.0)).y > 0.0, "−Z is up");
+        let a = top.ray_from_ndc(Vec2::new(0.5, 0.0), 1.0);
+        let b = top.ray_from_ndc(Vec2::new(-0.5, 0.3), 1.0);
+        assert_eq!(a.dir, b.dir, "parallel rays");
+        let hit = a.origin + a.dir * (a.origin.y / -a.dir.y);
+        assert!(
+            hit.abs_diff_eq(Vec3::new(top.half_height() * 0.5, 0.0, 0.0), 1e-2),
+            "{hit}"
+        );
+        assert_eq!(
+            top.world_units_per_pixel(1.0, 100.0),
+            top.world_units_per_pixel(9_000.0, 100.0),
+            "the same at every depth"
+        );
+        let mut framed = top;
+        framed.frame_sphere(Vec3::ZERO, 200.0);
+        assert!((framed.half_height() - 230.0).abs() < 1e-2, "{}", framed.half_height());
     }
 
     #[test]

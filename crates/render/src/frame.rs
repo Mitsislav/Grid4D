@@ -36,6 +36,52 @@ struct Batch {
     last_used: u64,
 }
 
+/// The plane the grid lies in: the ground in perspective views and looking down
+/// or up, the view's own plane in front and side views.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GridPlane {
+    #[default]
+    XZ,
+    XY,
+    ZY,
+}
+
+impl GridPlane {
+    /// The plane a parallel view looking along `direction` (either way) shows its
+    /// grid in: the one the direction is (nearly) normal to.
+    #[must_use]
+    pub fn facing(direction: Vec3) -> Self {
+        let d = direction.abs();
+        if d.y >= d.x && d.y >= d.z {
+            Self::XZ
+        } else if d.z >= d.x {
+            Self::XY
+        } else {
+            Self::ZY
+        }
+    }
+
+    /// The plane's normal, then its two axes (the grid's lines run along them).
+    #[must_use]
+    pub const fn axes(self) -> (Vec3, Vec3, Vec3) {
+        match self {
+            Self::XZ => (Vec3::Y, Vec3::X, Vec3::Z),
+            Self::XY => (Vec3::Z, Vec3::X, Vec3::Y),
+            Self::ZY => (Vec3::X, Vec3::Z, Vec3::Y),
+        }
+    }
+
+    /// How the shaders number the plane.
+    #[must_use]
+    pub const fn code(self) -> u32 {
+        match self {
+            Self::XZ => 0,
+            Self::XY => 1,
+            Self::ZY => 2,
+        }
+    }
+}
+
 /// Everything the GPU needs to draw one viewport frame. Owned by the UI, filled
 /// every frame from an [`EvaluatedScene`], consumed by
 /// [`ViewportRenderer::prepare`](crate::ViewportRenderer::prepare).
@@ -49,6 +95,10 @@ pub struct FrameData {
     /// Half-size of the grid quad; the grid fades out towards this distance.
     pub grid_extent: f32,
     pub show_grid: bool,
+    pub grid_plane: GridPlane,
+    /// The camera is a parallel (orthographic) one: no grid fade, overlays pulled
+    /// a fixed amount towards the viewer.
+    pub parallel: bool,
     /// Colours and sizes of the component overlay.
     pub component_style: ComponentStyle,
     /// Points, edges and polygons of the active object in a component mode.
@@ -75,6 +125,8 @@ impl FrameData {
             grid_spacing: 100.0,
             grid_extent: 20_000.0,
             show_grid: true,
+            grid_plane: GridPlane::XZ,
+            parallel: false,
             component_style: ComponentStyle::default(),
             components: ComponentOverlay::default(),
             batches: Vec::with_capacity(16),
@@ -111,7 +163,15 @@ impl FrameData {
         self.view_proj = camera.view_projection(aspect);
         self.eye = camera.eye();
         self.grid_spacing = camera.grid_spacing();
-        self.grid_extent = (camera.distance * 12.0).max(self.grid_spacing * 100.0);
+        self.parallel = camera.is_parallel();
+        if self.parallel {
+            self.grid_plane = GridPlane::facing(camera.back());
+            // What is in view, with room to spare.
+            self.grid_extent = (camera.half_height() * aspect.max(1.0) * 3.0).max(self.grid_spacing * 100.0);
+        } else {
+            self.grid_plane = GridPlane::XZ;
+            self.grid_extent = (camera.distance * 12.0).max(self.grid_spacing * 100.0);
+        }
         // C4D-style default light: comes from over the viewer's left shoulder.
         self.light_dir = (camera.back() * 0.6 + camera.up() * 0.7 - camera.right() * 0.4).normalize_or(Vec3::Y);
     }
@@ -225,6 +285,25 @@ mod tests {
         let mut eval = EvaluatedScene::new();
         eval.update(&doc.scene);
         eval
+    }
+
+    #[test]
+    fn the_grid_lies_in_the_view_plane_of_parallel_views() {
+        let mut frame = FrameData::new();
+        let side = |yaw: f32, pitch: f32| OrbitCamera {
+            yaw,
+            pitch,
+            projection: crate::Projection::Parallel,
+            ..OrbitCamera::default()
+        };
+        frame.set_camera(&OrbitCamera::default(), 1.5);
+        assert_eq!((frame.grid_plane, frame.parallel), (GridPlane::XZ, false));
+        frame.set_camera(&side(0.0, 0.0), 1.5);
+        assert_eq!((frame.grid_plane, frame.parallel), (GridPlane::XY, true), "front");
+        frame.set_camera(&side(std::f32::consts::FRAC_PI_2, 0.0), 1.5);
+        assert_eq!(frame.grid_plane, GridPlane::ZY, "right");
+        frame.set_camera(&side(0.0, std::f32::consts::FRAC_PI_2), 1.5);
+        assert_eq!(frame.grid_plane, GridPlane::XZ, "top");
     }
 
     #[test]

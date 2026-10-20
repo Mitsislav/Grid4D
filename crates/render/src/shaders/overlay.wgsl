@@ -42,7 +42,12 @@ fn quad_corner(index: u32) -> vec2<f32> {
 }
 
 fn pulled(p: vec3<f32>, amount: f32) -> vec4<f32> {
-    let q = p + (camera.eye.xyz - p) * amount;
+    var q = p + (camera.eye.xyz - p) * amount;
+    // A parallel camera's eye is far away: pull a fixed distance instead, so
+    // points do not shift sideways (light_dir.w: + 8 for a parallel camera).
+    if ((u32(camera.light_dir.w) & 8u) != 0u) {
+        q = p + normalize(camera.eye.xyz - p) * amount * 1000.0;
+    }
     return camera.view_proj * vec4<f32>(q, 1.0);
 }
 

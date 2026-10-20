@@ -48,9 +48,23 @@ pub struct ScreenView {
     pub view_proj: Mat4,
     pub eye: Vec3,
     pub size: Vec2,
+    /// For a parallel (orthographic) camera: the viewing direction, which every
+    /// ray under the cursor follows. `None` for a perspective one (rays from `eye`).
+    pub parallel: Option<Vec3>,
 }
 
 impl ScreenView {
+    /// What `camera` shows in a view of `size` (points or pixels).
+    #[must_use]
+    pub fn new(camera: &crate::OrbitCamera, size: Vec2) -> Self {
+        Self {
+            view_proj: camera.view_projection(size.x / size.y.max(1e-3)),
+            eye: camera.eye(),
+            size,
+            parallel: camera.is_parallel().then(|| camera.forward()),
+        }
+    }
+
     /// Screen position of a clip-space point (`w > 0`).
     pub(crate) fn to_screen(self, clip: Vec4) -> Vec2 {
         let ndc = clip.truncate().truncate() / clip.w;
@@ -78,6 +92,8 @@ struct ObjectView<'a> {
     world: Mat4,
     /// The camera position in object space.
     eye: Vec3,
+    /// A parallel view's direction in object space, as long as the object is big.
+    parallel: Option<Vec3>,
     view: &'a ScreenView,
     hidden: Hidden,
 }
@@ -93,6 +109,10 @@ impl<'a> ObjectView<'a> {
             handle,
             world,
             eye: world.inverse().transform_point3(view.eye),
+            parallel: view.parallel.map(|dir| {
+                let reach = handle.bounds().map_or(1.0, |b| (b.max - b.min).length()) + 1.0;
+                world.inverse().transform_vector3(dir).normalize_or_zero() * reach
+            }),
             view,
             hidden: Hidden::new(handle, components.state()),
         })
@@ -108,10 +128,12 @@ impl<'a> ObjectView<'a> {
         (clip.w > 1e-6 && clip.z >= 0.0).then(|| self.view.to_screen(clip))
     }
 
-    /// No (unhidden) polygon lies between the camera and object-space point `target`.
+    /// No (unhidden) polygon lies between the camera and object-space point `target`
+    /// (for a parallel view: along the viewing direction).
     fn visible(&self, target: Vec3) -> bool {
+        let origin = self.parallel.map_or(self.eye, |dir| target - dir);
         self.handle
-            .raycast_where(self.eye, target - self.eye, |f| !self.hidden.polygons.contains(idx(f)))
+            .raycast_where(origin, target - origin, |f| !self.hidden.polygons.contains(idx(f)))
             .is_none_or(|hit| hit.t >= 1.0 - VISIBLE_TOLERANCE)
     }
 
@@ -794,11 +816,7 @@ mod tests {
 
     fn view() -> ScreenView {
         let camera = OrbitCamera::default();
-        ScreenView {
-            view_proj: camera.view_projection(1.5),
-            eye: camera.eye(),
-            size: Vec2::new(900.0, 600.0),
-        }
+        ScreenView::new(&camera, Vec2::new(900.0, 600.0))
     }
 
     fn screen(view: &ScreenView, world: Vec3) -> Vec2 {
@@ -843,6 +861,34 @@ mod tests {
             pick_component(&eval, id, Component::Point, &view, cursor, 4.0),
             Some(ComponentHit::Point(u32::try_from(near).unwrap())),
             "hidden points are not pickable"
+        );
+    }
+
+    #[test]
+    fn a_parallel_view_picks_the_visible_of_two_points_on_one_pixel() {
+        let (_, id, eval) = scene_with_cube(ComponentState::default());
+        // Looking straight down: each top corner hides the bottom one under it.
+        let camera = OrbitCamera {
+            yaw: 0.0,
+            pitch: std::f32::consts::FRAC_PI_2,
+            target: Vec3::ZERO,
+            distance: 600.0,
+            projection: crate::Projection::Parallel,
+            ..OrbitCamera::default()
+        };
+        let view = ScreenView::new(&camera, Vec2::new(900.0, 600.0));
+        assert!(view.parallel.is_some());
+        let mesh = mesh_of(&eval, id);
+        let points = mesh.mesh().points();
+        let top = points.iter().position(|p| p.y > 0.0 && p.x > 0.0 && p.z > 0.0).unwrap();
+        let bottom = points.iter().position(|p| p.y < 0.0 && p.x > 0.0 && p.z > 0.0).unwrap();
+        let cursor = screen(&view, points[top]);
+        assert!(cursor.abs_diff_eq(screen(&view, points[bottom]), 1e-3), "one pixel");
+        let hit = pick_component(&eval, id, Component::Point, &view, cursor, 6.0);
+        assert_eq!(
+            hit,
+            Some(ComponentHit::Point(u32::try_from(top).unwrap())),
+            "the visible one"
         );
     }
 

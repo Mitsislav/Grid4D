@@ -15,7 +15,8 @@ use glam::{Mat4, Vec2 as GVec2, Vec3};
 use grid4d_eval::EvaluatedScene;
 use grid4d_geom::Component;
 use grid4d_render::{
-    ComponentHit, ComponentStyle, FrameData, OrbitCamera, ScreenView, SnapCache, SnapHit, pick, pick_component,
+    ComponentHit, ComponentStyle, FrameData, OrbitCamera, Projection, ScreenView, SnapCache, SnapHit, pick,
+    pick_component,
 };
 use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, Tags, Transform, WalkItem};
 
@@ -32,9 +33,130 @@ const DOLLY_DRAG_SPEED: f32 = 0.005;
 const DOLLY_WHEEL_SPEED: f32 = 0.0015;
 const NAV_HINT: &str = "Alt+Left: orbit · Alt+Middle / Middle: pan · Alt+Right / Wheel: zoom · H: frame scene";
 
+/// What a view looks at: in perspective, or straight along a world axis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewKind {
+    Perspective,
+    Top,
+    Bottom,
+    Front,
+    Back,
+    Left,
+    Right,
+}
+
+impl ViewKind {
+    pub const ALL: [Self; 7] = [
+        Self::Perspective,
+        Self::Top,
+        Self::Bottom,
+        Self::Front,
+        Self::Back,
+        Self::Left,
+        Self::Right,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Perspective => "Perspective",
+            Self::Top => "Top",
+            Self::Bottom => "Bottom",
+            Self::Front => "Front",
+            Self::Back => "Back",
+            Self::Left => "Left",
+            Self::Right => "Right",
+        }
+    }
+
+    /// `camera` turned to look this way (target and zoom kept). Front looks
+    /// along −Z, Right along −X, Top down −Y (with −Z up on screen).
+    #[must_use]
+    pub fn aim(self, camera: OrbitCamera) -> OrbitCamera {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        let (yaw, pitch) = match self {
+            Self::Perspective => {
+                let default = OrbitCamera::default();
+                (default.yaw, default.pitch)
+            }
+            Self::Front => (0.0, 0.0),
+            Self::Back => (PI, 0.0),
+            Self::Right => (FRAC_PI_2, 0.0),
+            Self::Left => (PI + FRAC_PI_2, 0.0),
+            Self::Top => (0.0, FRAC_PI_2),
+            Self::Bottom => (0.0, -FRAC_PI_2),
+        };
+        OrbitCamera {
+            yaw,
+            pitch,
+            roll: 0.0,
+            projection: match self {
+                Self::Perspective => Projection::Perspective,
+                Self::Top | Self::Bottom | Self::Front | Self::Back | Self::Left | Self::Right => Projection::Parallel,
+            },
+            ..camera
+        }
+    }
+}
+
+/// How the panel's views are arranged (the Panel menu).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Arrangement {
+    /// The active view alone.
+    #[default]
+    Single,
+    /// Views 1 and 2, one above the other.
+    TwoStacked,
+    /// Views 1 and 2 next to each other.
+    TwoSideBySide,
+    /// Views 1–4 in a grid.
+    Four,
+}
+
+impl Arrangement {
+    pub const ALL: [Self; 4] = [Self::Single, Self::TwoStacked, Self::TwoSideBySide, Self::Four];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Single => "Single View",
+            Self::TwoStacked => "2 Views Stacked",
+            Self::TwoSideBySide => "2 Views Side-by-Side",
+            Self::Four => "4 Views",
+        }
+    }
+}
+
+/// One view's own settings (the active view's live in the panel's fields).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ViewState {
+    camera: OrbitCamera,
+    kind: ViewKind,
+    show_grid: bool,
+    show_axis_triad: bool,
+    show_hud: bool,
+    rect: Rect,
+}
+
+/// The views a fresh panel has: View 1 Perspective, 2 Top, 3 Right, 4 Front.
+const DEFAULT_VIEWS: [ViewKind; 4] = [ViewKind::Perspective, ViewKind::Top, ViewKind::Right, ViewKind::Front];
+/// Space between views, in points.
+const VIEW_GAP: f32 = 2.0;
+
 #[derive(Debug)]
 pub struct ViewportPanel {
     camera: OrbitCamera,
+    /// The active view's projection.
+    kind: ViewKind,
+    /// Every view's settings; the active view's entry is stale (its live state is
+    /// in the panel's own fields).
+    views: [ViewState; 4],
+    active: usize,
+    arrangement: Arrangement,
+    /// A view shown alone (F1–F4, a middle click), whatever the arrangement.
+    solo: Option<usize>,
+    /// Navigation moved the linked camera this frame.
+    camera_moved: bool,
     /// What the document looks like this frame; re-evaluated only when it changed.
     evaluated: EvaluatedScene,
     /// Render snapshot, refilled every frame (no per-frame allocation).
@@ -78,8 +200,22 @@ impl ViewportPanel {
         if render_state.is_none() {
             log::error!("No wgpu render state: the 3D viewport is disabled. Run with the wgpu renderer.");
         }
+        let view = |kind: ViewKind| ViewState {
+            camera: kind.aim(OrbitCamera::default()),
+            kind,
+            show_grid: true,
+            show_axis_triad: true,
+            show_hud: true,
+            rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0)),
+        };
         Self {
             camera: OrbitCamera::default(),
+            kind: ViewKind::Perspective,
+            views: DEFAULT_VIEWS.map(view),
+            active: 0,
+            arrangement: Arrangement::Single,
+            solo: None,
+            camera_moved: false,
             evaluated: EvaluatedScene::new(),
             frame: FrameData::new(),
             gpu: render_state.map(GpuView::new),
@@ -146,24 +282,206 @@ impl ViewportPanel {
         }
     }
 
+    /// The active view's projection.
+    #[must_use]
+    pub fn view_kind(&self) -> ViewKind {
+        self.kind
+    }
+
+    /// The view arrangement and the view shown alone, if any.
+    #[must_use]
+    pub fn layout(&self) -> (Arrangement, Option<usize>) {
+        (self.arrangement, self.solo)
+    }
+
+    /// Shows view `index` alone (F1–F4) and makes it active; `None`: all four views
+    /// (F5).
+    pub fn show_views(&mut self, index: Option<usize>) {
+        match index {
+            Some(i) if i < self.views.len() => {
+                self.set_active(i);
+                self.solo = Some(i);
+            }
+            Some(_) => {}
+            None => {
+                self.arrangement = Arrangement::Four;
+                self.solo = None;
+            }
+        }
+    }
+
+    /// The active view's settings as a [`ViewState`].
+    fn current(&self) -> ViewState {
+        ViewState {
+            camera: self.camera,
+            kind: self.kind,
+            show_grid: self.show_grid,
+            show_axis_triad: self.show_axis_triad,
+            show_hud: self.show_hud,
+            rect: self.view_rect,
+        }
+    }
+
+    fn load(&mut self, view: ViewState) {
+        self.camera = view.camera;
+        self.kind = view.kind;
+        self.show_grid = view.show_grid;
+        self.show_axis_triad = view.show_axis_triad;
+        self.show_hud = view.show_hud;
+        self.view_rect = view.rect;
+    }
+
+    /// Exchanges the panel's fields with view `index`'s (a no-op for the active
+    /// view): call once to work on that view, and again to put it back.
+    fn swap_view(&mut self, index: usize) {
+        if index == self.active || index >= self.views.len() {
+            return;
+        }
+        let other = self.views[index];
+        self.views[index] = self.current();
+        self.load(other);
+    }
+
+    /// Makes view `index` the active one (tools, picking and the gizmo work in it).
+    fn set_active(&mut self, index: usize) {
+        if index == self.active || index >= self.views.len() {
+            return;
+        }
+        self.views[self.active] = self.current();
+        let next = self.views[index];
+        self.load(next);
+        self.active = index;
+    }
+
+    /// The views on show and where: up to four (view, cell).
+    fn cells(&self, area: Rect) -> [Option<(usize, Rect)>; 4] {
+        let half = |a: f32, b: f32| (a + b) * 0.5;
+        let (mid_x, mid_y) = (half(area.left(), area.right()), half(area.top(), area.bottom()));
+        let g = VIEW_GAP * 0.5;
+        let left = Rect::from_min_max(area.min, pos2(mid_x - g, area.bottom()));
+        let right = Rect::from_min_max(pos2(mid_x + g, area.top()), area.max);
+        let top = Rect::from_min_max(area.min, pos2(area.right(), mid_y - g));
+        let bottom = Rect::from_min_max(pos2(area.left(), mid_y + g), area.max);
+        if let Some(solo) = self.solo {
+            return [Some((solo, area)), None, None, None];
+        }
+        match self.arrangement {
+            Arrangement::Single => [Some((self.active, area)), None, None, None],
+            Arrangement::TwoStacked => [Some((0, top)), Some((1, bottom)), None, None],
+            Arrangement::TwoSideBySide => [Some((0, left)), Some((1, right)), None, None],
+            Arrangement::Four => [
+                Some((0, Rect::from_min_max(area.min, pos2(mid_x - g, mid_y - g)))),
+                Some((
+                    1,
+                    Rect::from_min_max(pos2(mid_x + g, area.top()), pos2(area.right(), mid_y - g)),
+                )),
+                Some((
+                    2,
+                    Rect::from_min_max(pos2(area.left(), mid_y + g), pos2(mid_x - g, area.bottom())),
+                )),
+                Some((3, Rect::from_min_max(pos2(mid_x + g, mid_y + g), area.max))),
+            ],
+        }
+    }
+
     pub fn show(&mut self, ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
+        let area = ui.available_rect_before_wrap();
+        ui.allocate_rect(area, Sense::hover());
+        if area.width() < 2.0 || area.height() < 2.0 {
+            return;
+        }
+        let mut cells = self.cells(area);
+        // The active view must be on show.
+        if !cells.iter().flatten().any(|&(i, _)| i == self.active)
+            && let Some((first, _)) = cells.iter().flatten().next().copied()
+        {
+            self.set_active(first);
+            cells = self.cells(area);
+        }
+        // A press or a scroll in another view makes it active, and acts there. The
+        // press's own position: the pointer may have left by the end of the frame.
+        let at = ui.input(|i| {
+            let press = i.events.iter().find_map(|event| match event {
+                egui::Event::PointerButton { pos, pressed: true, .. } => Some(*pos),
+                _ => None,
+            });
+            let scrolled = i.smooth_scroll_delta != egui::Vec2::ZERO;
+            press.or_else(|| i.pointer.latest_pos().filter(|_| scrolled))
+        });
+        if let Some(pos) = at
+            && let Some((i, _)) = cells.iter().flatten().find(|(_, cell)| cell.contains(pos))
+        {
+            self.set_active(*i);
+        }
+        // View 1 may look through a scene camera.
+        self.swap_view(0);
         self.follow_view_camera(doc, editor);
-        self.header(ui, doc, editor);
+        self.swap_view(0);
+
+        let several = cells.iter().flatten().count() > 1;
+        self.camera_moved = false;
+        for (index, cell) in cells.into_iter().flatten() {
+            let interactive = index == self.active;
+            self.swap_view(index);
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cell).id_salt(("grid4d.view", index)));
+            self.show_view(&mut child, doc, editor, index, interactive);
+            self.swap_view(index);
+            if several && interactive {
+                ui.painter().rect_stroke(
+                    cell.expand(0.5),
+                    egui::CornerRadius::ZERO,
+                    egui::Stroke::new(1.0, p::ACCENT.gamma_multiply(0.8)),
+                    egui::StrokeKind::Outside,
+                );
+            }
+        }
+        // A gesture that moved the linked object has ended: one undo step.
+        if !self.camera_moved && !ui.input(|i| i.pointer.any_down()) {
+            self.finish_camera_edit(editor);
+        }
+    }
+
+    /// One view: its header, then the 3D area. Only the active view (`interactive`)
+    /// takes input; the others are drawn.
+    fn show_view(
+        &mut self,
+        ui: &mut Ui,
+        doc: &mut Document,
+        editor: &mut EditorState,
+        index: usize,
+        interactive: bool,
+    ) {
+        self.header(ui, doc, editor, index);
 
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         if rect.width() < 1.0 || rect.height() < 1.0 {
             return;
         }
         self.view_rect = rect;
+        let painter = ui.painter_at(rect);
+        if !interactive {
+            self.paint_view(ui, &painter, rect, doc, editor, index, None);
+            return;
+        }
+
+        // A middle click (no drag) shows the view alone, or the arrangement again.
+        if response.clicked_by(PointerButton::Middle) {
+            self.solo = match self.solo {
+                Some(_) => None,
+                None if self.arrangement != Arrangement::Single => Some(index),
+                None => None,
+            };
+        }
 
         // With Live Selection in a component mode, a middle drag sizes the brush.
         let brush = (editor.tool == Tool::LiveSelection && editor.mode.component().is_some())
             .then_some(&mut editor.selection_settings.radius);
         let navigating = self.navigate(ui, &response, rect, brush);
         // Navigation (or the header's icons) moved a linked camera: move the object.
-        let moved_view = self.synced.is_some_and(|s| s != self.camera);
+        let moved_view = index == 0 && self.synced.is_some_and(|s| s != self.camera);
         if moved_view && let Some(id) = self.linked {
             self.write_view_camera(doc, editor, id);
+            self.camera_moved = true;
         }
         // Built once per frame (after navigation moved the camera) and shared by
         // interaction and painting; rebuilt only if a drag just moved the object.
@@ -210,9 +528,6 @@ impl ViewportPanel {
         }
         self.context_menu(&response, editor);
 
-        // ── Paint ────────────────────────────────────────────────────────────
-        let painter = ui.painter_at(rect);
-        overlay::background(&painter, rect);
         // A gizmo drag above may have moved an object; free if nothing changed.
         // Animation is shown at the current (whole) frame.
         self.evaluated.set_frame(f64::from(doc.time.frame()));
@@ -221,63 +536,8 @@ impl ViewportPanel {
         // Component modes: the active polygon object, and what a click would select.
         let target = self.component_target(editor);
         self.update_hover(target, &response, rect, editor, navigating);
-
-        if let Some(gpu) = &mut self.gpu {
-            self.frame.set_camera(&self.camera, rect.aspect_ratio());
-            self.frame.show_grid = self.show_grid;
-            self.frame.extract(&self.evaluated, |id| editor.selection.contains(id));
-            self.frame.component_style = component_style(ui.ctx().pixels_per_point());
-            self.frame.extract_components(&self.evaluated, target, &self.hover);
-            let texture = gpu.render(&self.frame, pixel_size(rect, ui.ctx().pixels_per_point()));
-            // Drawn over the background gradient: the target is cleared to transparent.
-            painter.image(
-                texture,
-                rect,
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-        } else {
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                "3D viewport unavailable: wgpu renderer not initialised",
-                egui::FontId::proportional(14.0),
-                p::TEXT_DIM,
-            );
-        }
-
-        let label = self
-            .linked
-            .and_then(|id| doc.scene.get(id))
-            .map_or_else(|| "Perspective".to_owned(), |n| n.data.name.clone());
-        overlay::view_label(&painter, rect, &label);
-        // A gesture that moved the linked object has ended: one undo step.
-        if !moved_view && !ui.input(|i| i.pointer.any_down()) {
-            self.finish_camera_edit(editor);
-        }
-        if editor.animation.autokey {
-            overlay::autokey_frame(&painter, rect);
-        }
+        self.paint_view(ui, &painter, rect, doc, editor, index, gizmo_geo.as_ref());
         let view_proj = self.camera.view_projection(rect.aspect_ratio());
-        overlay::camera_frustums(
-            &painter,
-            rect,
-            &view_proj,
-            &self.evaluated,
-            &doc.scene,
-            &editor.selection,
-            self.linked,
-        );
-        overlay::selection_brackets(&painter, rect, &view_proj, &self.evaluated, &editor.selection);
-        if let Some(geo) = &gizmo_geo {
-            geo.paint(&painter, self.gizmo.hot_axis());
-        }
-        if self.show_axis_triad {
-            overlay::axis_triad(&painter, rect, &self.camera);
-        }
-        if self.show_hud {
-            overlay::hud(&painter, rect, &self.camera);
-        }
         match &self.gesture {
             Gesture::Frame { start, end } => overlay::marquee(&painter, Rect::from_two_pos(*start, *end)),
             Gesture::LineCut { start, end, .. } | Gesture::Bridge { start, end, .. } => {
@@ -305,6 +565,90 @@ impl ViewportPanel {
                 (false, Some(component)) => component_hint(component, editor.tool, target.is_some()),
                 (false, None) => editor.tool.hint(),
             });
+        }
+    }
+
+    /// Draws a view: the rendered scene, then the overlays every view shows (title,
+    /// frustums, brackets, the gizmo, triad, HUD). `gizmo`: the active view's,
+    /// already built; other views build their own (drawn, not used).
+    #[expect(clippy::too_many_arguments, reason = "the pieces of one view's frame")]
+    fn paint_view(
+        &mut self,
+        ui: &Ui,
+        painter: &egui::Painter,
+        rect: Rect,
+        doc: &Document,
+        editor: &EditorState,
+        index: usize,
+        gizmo: Option<&GizmoGeometry>,
+    ) {
+        overlay::background(painter, rect);
+        self.evaluated.set_frame(f64::from(doc.time.frame()));
+        self.evaluated.update(&doc.scene);
+        let target = self.component_target(editor);
+        let interactive = index == self.active;
+        if let Some(gpu) = &mut self.gpu {
+            self.frame.set_camera(&self.camera, rect.aspect_ratio());
+            self.frame.show_grid = self.show_grid;
+            self.frame.extract(&self.evaluated, |id| editor.selection.contains(id));
+            self.frame.component_style = component_style(ui.ctx().pixels_per_point());
+            // What a click would select shows where the pointer is.
+            let hover: &[ComponentHit] = if interactive { &self.hover } else { &[] };
+            self.frame.extract_components(&self.evaluated, target, hover);
+            let texture = gpu.render(index, &self.frame, pixel_size(rect, ui.ctx().pixels_per_point()));
+            // Drawn over the background gradient: the target is cleared to transparent.
+            painter.image(
+                texture,
+                rect,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        } else {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "3D viewport unavailable: wgpu renderer not initialised",
+                egui::FontId::proportional(14.0),
+                p::TEXT_DIM,
+            );
+        }
+
+        let linked = self.linked.filter(|_| index == 0);
+        let label = linked
+            .and_then(|id| doc.scene.get(id))
+            .map_or_else(|| self.kind.label().to_owned(), |n| n.data.name.clone());
+        overlay::view_label(painter, rect, &label);
+        if editor.animation.autokey {
+            overlay::autokey_frame(painter, rect);
+        }
+        let view_proj = self.camera.view_projection(rect.aspect_ratio());
+        overlay::camera_frustums(
+            painter,
+            rect,
+            &view_proj,
+            &self.evaluated,
+            &doc.scene,
+            &editor.selection,
+            linked,
+        );
+        overlay::selection_brackets(painter, rect, &view_proj, &self.evaluated, &editor.selection);
+        let own;
+        let gizmo = match gizmo {
+            Some(geo) => Some(geo),
+            None if !interactive => {
+                own = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect, f64::from(doc.time.frame()));
+                own.as_ref()
+            }
+            None => None,
+        };
+        if let Some(geo) = gizmo {
+            geo.paint(painter, if interactive { self.gizmo.hot_axis() } else { None });
+        }
+        if self.show_axis_triad {
+            overlay::axis_triad(painter, rect, &self.camera);
+        }
+        if self.show_hud {
+            overlay::hud(painter, rect, &self.camera);
         }
     }
 
@@ -366,11 +710,7 @@ impl ViewportPanel {
 
     /// The camera as screen-space picking sees it, in points relative to `rect`.
     fn screen_view(&self, rect: Rect) -> ScreenView {
-        ScreenView {
-            view_proj: self.camera.view_projection(rect.aspect_ratio()),
-            eye: self.camera.eye(),
-            size: GVec2::new(rect.width(), rect.height()),
-        }
+        ScreenView::new(&self.camera, GVec2::new(rect.width(), rect.height()))
     }
 
     /// Viewport header with C4D's menu set and the navigation drag-icons.
@@ -458,7 +798,7 @@ impl ViewportPanel {
         }
     }
 
-    fn header(&mut self, ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
+    fn header(&mut self, ui: &mut Ui, doc: &Document, editor: &mut EditorState, index: usize) {
         egui::Frame::new()
             .fill(p::BG_HEADER)
             .inner_margin(Margin::symmetric(6, 0))
@@ -478,7 +818,24 @@ impl ViewportPanel {
                                 }
                             }
                         });
-                        ui.menu_button("Cameras", |ui| cameras_menu(ui, doc, editor));
+                        ui.menu_button("Cameras", |ui| {
+                            // View 1 may look through a camera; every view picks its projection.
+                            if index == 0 {
+                                cameras_menu(ui, doc, editor);
+                                ui.separator();
+                            }
+                            for kind in ViewKind::ALL {
+                                let current = self.kind == kind && (index != 0 || editor.view_camera.is_none());
+                                if ui.add(egui::Button::new(kind.label()).selected(current)).clicked() {
+                                    if index == 0 {
+                                        editor.view_camera = None;
+                                    }
+                                    self.kind = kind;
+                                    self.camera = kind.aim(self.camera);
+                                    ui.close();
+                                }
+                            }
+                        });
                         ui.menu_button("Display", |ui| {
                             ui.add(egui::Button::new("Gouraud Shading").selected(true));
                             for planned in ["Gouraud Shading (Lines)", "Quick Shading", "Wireframe", "Box"] {
@@ -494,7 +851,42 @@ impl ViewportPanel {
                             ui.add_enabled(false, egui::Button::new("Object filters — planned"));
                         });
                         ui.menu_button("Panel", |ui| {
-                            ui.add_enabled(false, egui::Button::new("4-View Arrangement — planned"));
+                            for arrangement in Arrangement::ALL {
+                                let current = self.arrangement == arrangement && self.solo.is_none();
+                                if ui
+                                    .add(egui::Button::new(arrangement.label()).selected(current))
+                                    .clicked()
+                                {
+                                    self.arrangement = arrangement;
+                                    self.solo = None;
+                                    ui.close();
+                                }
+                            }
+                            ui.separator();
+                            for (i, label, key) in [
+                                (0, "View 1", "F1"),
+                                (1, "View 2", "F2"),
+                                (2, "View 3", "F3"),
+                                (3, "View 4", "F4"),
+                            ] {
+                                let alone = self.solo == Some(i);
+                                if ui
+                                    .add(egui::Button::new(label).shortcut_text(key).selected(alone))
+                                    .clicked()
+                                {
+                                    editor.commands.push(EditorCommand::ShowView(Some(i)));
+                                    ui.close();
+                                }
+                            }
+                            if ui.add(egui::Button::new("All Views").shortcut_text("F5")).clicked() {
+                                editor.commands.push(EditorCommand::ShowView(None));
+                                ui.close();
+                            }
+                            ui.label(
+                                egui::RichText::new("Middle-click a view to show it alone or in place")
+                                    .color(p::TEXT_DIM)
+                                    .size(11.0),
+                            );
                         });
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -503,10 +895,19 @@ impl ViewportPanel {
                             size: 22.0,
                             ..IconStyle::default()
                         };
-                        let orbit = icon_button(ui, Icon::Rotate, style, "Drag to orbit").interact(Sense::drag());
-                        if orbit.dragged() {
-                            let d = orbit.drag_delta();
-                            self.camera.orbit(-d.x * ORBIT_SPEED, d.y * ORBIT_SPEED);
+                        // A narrow view (four on a small window) keeps its menus
+                        // and drops the icons rather than drawing them over the menus.
+                        let icons = if self.camera.is_parallel() { 2.0 } else { 3.0 };
+                        if ui.available_width() < icons * (style.size + 1.0) {
+                            return;
+                        }
+                        // Orthographic views do not orbit.
+                        if !self.camera.is_parallel() {
+                            let orbit = icon_button(ui, Icon::Rotate, style, "Drag to orbit").interact(Sense::drag());
+                            if orbit.dragged() {
+                                let d = orbit.drag_delta();
+                                self.camera.orbit(-d.x * ORBIT_SPEED, d.y * ORBIT_SPEED);
+                            }
                         }
                         let zoom = icon_button(ui, Icon::NavZoom, style, "Drag to zoom").interact(Sense::drag());
                         if zoom.dragged() {
@@ -537,7 +938,12 @@ impl ViewportPanel {
             }
             active = true;
         } else if alt && response.dragged_by(PointerButton::Primary) {
-            self.camera.orbit(-d.x * ORBIT_SPEED, d.y * ORBIT_SPEED);
+            // Orthographic views look along an axis: Alt + left drag pans there.
+            if self.camera.is_parallel() {
+                self.camera.pan(GVec2::new(d.x, d.y), rect.height());
+            } else {
+                self.camera.orbit(-d.x * ORBIT_SPEED, d.y * ORBIT_SPEED);
+            }
             active = true;
         } else if alt && response.dragged_by(PointerButton::Secondary) {
             self.camera.dolly((-(d.x - d.y) * DOLLY_DRAG_SPEED).exp());
@@ -1854,6 +2260,105 @@ mod tests {
         h.frame(vec![]);
         assert_eq!(h.editor.view_camera, None);
         assert_eq!(h.viewport.camera, editor_view, "the editor view returns");
+    }
+
+    #[test]
+    fn four_views_each_keep_their_camera_and_a_press_activates_one() {
+        let mut h = Harness::new();
+        let perspective = h.viewport.camera;
+        h.editor.commands.push(EditorCommand::ShowView(None));
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert_eq!(h.viewport.layout(), (Arrangement::Four, None));
+        let first = h.viewport.view_rect;
+        assert!(first.width() < 520.0 && first.height() < 360.0, "a quarter: {first:?}");
+
+        // A click in the bottom-right quarter: View 4, Front, becomes active.
+        let corner = pos2(first.right() + 300.0, first.bottom() + 200.0);
+        h.frame(vec![Event::PointerMoved(corner)]);
+        h.frame(vec![Harness::button(corner, true)]);
+        h.frame(vec![Harness::button(corner, false)]);
+        assert_eq!(h.viewport.view_kind(), ViewKind::Front);
+        assert!(h.viewport.camera.is_parallel());
+        assert!(h.viewport.camera.forward().abs_diff_eq(Vec3::NEG_Z, 1e-5));
+
+        // In the Top view a click on the cube selects it.
+        let top_right = pos2(first.right() + 300.0, first.top() + 100.0);
+        h.frame(vec![Event::PointerMoved(top_right)]);
+        h.frame(vec![Harness::button(top_right, true)]);
+        h.frame(vec![Harness::button(top_right, false)]);
+        assert_eq!(h.viewport.view_kind(), ViewKind::Top);
+        h.editor.selection.clear();
+        for _ in 0..30 {
+            h.frame(vec![]); // past the double-click delay
+        }
+        let cube = h.doc.scene.roots()[0];
+        let rect = h.viewport.view_rect;
+        let view_proj = h.viewport.camera.view_projection(rect.aspect_ratio());
+        let at = project(&view_proj, rect, h.doc.scene.world_matrix(cube).w_axis.truncate()).unwrap();
+        h.frame(vec![Event::PointerMoved(at)]);
+        h.frame(vec![Harness::button(at, true)]);
+        h.frame(vec![Harness::button(at, false)]);
+        assert_eq!(h.editor.selection.as_slice(), &[cube], "picked from above");
+
+        // Back in View 1: its own camera, untouched.
+        h.editor.commands.push(EditorCommand::ShowView(Some(0)));
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert_eq!(h.viewport.layout(), (Arrangement::Four, Some(0)), "View 1 alone");
+        assert_eq!(h.viewport.view_kind(), ViewKind::Perspective);
+        assert_eq!(h.viewport.camera, perspective);
+
+        // A middle click (no drag) puts it back among the others.
+        let centre = h.viewport.view_rect.center();
+        let middle = |pressed| Event::PointerButton {
+            pos: centre,
+            button: PointerButton::Middle,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        h.frame(vec![Event::PointerMoved(centre)]);
+        h.frame(vec![middle(true)]);
+        h.frame(vec![middle(false)]);
+        h.frame(vec![]);
+        assert_eq!(h.viewport.layout(), (Arrangement::Four, None));
+
+        // And alone again, then back, each with one middle click.
+        for _ in 0..30 {
+            h.frame(vec![]); // past the double-click delay
+        }
+        for solo in [Some(0), None] {
+            let at = h.viewport.view_rect.center();
+            let click = |pressed| Event::PointerButton {
+                pos: at,
+                button: PointerButton::Middle,
+                pressed,
+                modifiers: Modifiers::NONE,
+            };
+            h.frame(vec![Event::PointerMoved(at), click(true), click(false)]);
+            h.frame(vec![]);
+            assert_eq!(h.viewport.layout(), (Arrangement::Four, solo));
+            for _ in 0..30 {
+                h.frame(vec![]);
+            }
+        }
+    }
+
+    #[test]
+    fn orthographic_views_pan_instead_of_orbiting() {
+        let mut h = Harness::new();
+        h.viewport.kind = ViewKind::Right;
+        h.viewport.camera = ViewKind::Right.aim(h.viewport.camera);
+        h.frame(vec![]);
+        let before = h.viewport.camera;
+        orbit(&mut h);
+        let after = h.viewport.camera;
+        assert_eq!(
+            (after.yaw, after.pitch),
+            (before.yaw, before.pitch),
+            "still looking along −X"
+        );
+        assert_ne!(after.target, before.target, "panned");
     }
 
     #[test]

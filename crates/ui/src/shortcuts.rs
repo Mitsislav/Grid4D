@@ -20,6 +20,7 @@
 //! | `F` / `G`      | Previous / next frame      |
 //! | `Ctrl+F` / `Ctrl+G` | Previous / next key   |
 //! | `F9`           | Record Active Objects      |
+//! | `F1`–`F4` / `F5` | View 1–4 alone / all views |
 //! | `Tab` (over the bottom panel) | Timeline / F-Curve ([`take_tab`]) |
 //! | `H` / `S` (over the F-Curve graph) | Frame all / selected keys |
 //! | `Ctrl+F9`      | Autokeying on / off        |
@@ -243,6 +244,17 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
             }
             if i.key_pressed(Key::F9) {
                 editor.commands.push(EditorCommand::RecordKeys { at: time.frame() });
+            }
+            for (key, view) in [
+                (Key::F1, Some(0)),
+                (Key::F2, Some(1)),
+                (Key::F3, Some(2)),
+                (Key::F4, Some(3)),
+                (Key::F5, None),
+            ] {
+                if i.key_pressed(key) {
+                    editor.commands.push(EditorCommand::ShowView(view));
+                }
             }
             if i.key_pressed(Key::F6) {
                 time.play_backward();

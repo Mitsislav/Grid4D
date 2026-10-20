@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 7 — Viewport: cameras, lights, 4-view, shading (v0.7) |
-| Last step done | 7.1 — Scene cameras (2026-10-21) |
-| Next step | 7.2 — The 4-view layout with orthographic views |
-| Tests | 441, all passing; clippy and rustfmt clean |
+| Last step done | 7.2 — Four views with orthographic projections (2026-10-21) |
+| Next step | 7.3 — Display modes (Gouraud, Lines, Quick, Wireframe, Box), per view |
+| Tests | 448, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -511,7 +511,8 @@ write animation yet (planned).
 
 | Step | Built | Tests |
 |------|-------|-------|
-| 7.1 | Scene cameras: look through a camera (Cameras ▸ Use Camera, a double-click on its icon) or any object, with its position, bank and field of view; navigation moves it (one undo step per gesture, Autokeying, Protection); wire pyramids for the other cameras; new cameras clone the view | 441 |
+| 7.1 (`ed7102e`) | Scene cameras: look through a camera (Cameras ▸ Use Camera, a double-click on its icon) or any object, with its position, bank and field of view; navigation moves it (one undo step per gesture, Autokeying, Protection); wire pyramids for the other cameras; new cameras clone the view | 441 |
+| 7.2 | Four views (Perspective, Top, Right, Front) with orthographic projections: Panel menu arrangements, F1–F4 / F5, middle click shows a view alone; every view has its own camera, projection (Cameras menu) and Options; the active view takes input and a click elsewhere activates and acts; the grid lies in the view's plane | 448 |
 
 *Problems and solutions:*
 - **The view camera had no bank.** The turntable camera kept world Y up, so a banked
@@ -535,6 +536,40 @@ write animation yet (planned).
   The wire pyramid of the camera was visible from the editor view. Posted Alt and
   double-clicks do not reach the app, so Alt-navigation, the icon double-click and
   Protection are covered by headless tests.
+- **One panel, four views, no duplicated tools.** The viewport's tools (gizmo,
+  selection, modelling, snapping) all read the panel's camera and rectangle. Rather
+  than threading a view index through all of them, the panel keeps the active
+  view's state in its own fields and swaps another view's state in while that one
+  is drawn. Only the active view handles input, so the tools never see a
+  half-swapped state.
+- **Orthographic cameras.** A parallel projection has no eye position, but the
+  overlays, occlusion tests and snapping all use one. The camera puts its eye far
+  behind the target (50 000 cm) and uses `distance` as the zoom (the visible
+  height); occlusion and snapping cast rays from the view plane along the viewing
+  direction instead of from the eye, and overlay lines are pulled a fixed distance
+  towards the viewer (a share of the distance would shift them sideways). A test
+  checks that a top view picks the corner on top of two corners on one pixel.
+- **The grid in the view's plane.** The grid shader now takes the plane (XZ, XY or
+  ZY) and a parallel flag in a spare uniform component, and picks the axis colours
+  for that plane; fading towards the horizon is off in parallel views. Grid
+  snapping still assumed the floor, so in Front and side views (whose rays run
+  parallel to the floor) it never found the grid — it now uses the same plane.
+- **One renderer for all views.** Pipelines and the GPU mesh cache are shared; each
+  view has its own offscreen target and egui texture, made on first use. Views
+  render one after another, each submitting its own pass.
+- **Narrow headers.** With four views on a small window the navigation icons were
+  drawn over the Panel menu. They are left out when there is no room.
+- **Bug found on screen: a click did not activate another view.** The test driver's
+  move, press and release can arrive in one frame together with the pointer leaving
+  the window, so the pointer's last position was already empty at the end of the
+  frame. The activation now takes the position from the press event itself.
+- **On-screen testing:** F5 showed the four views with the demo scene exact from
+  every side; a click in the Front view made it active (blue frame) and deselected;
+  a click on the cylinder in the Top view selected it, with the gizmo in all four
+  views; F4 / F3 showed Front / Right alone; a middle click showed Top alone and a
+  second one brought the four back; the Panel and Cameras menus and the
+  side-by-side arrangement worked. Posted Alt does not reach the app, so
+  Alt-panning in orthographic views is covered by a headless test.
 
 ---
 

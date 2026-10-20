@@ -58,7 +58,7 @@ sessions.
 | 1 | **Menu bar** | Every command: File, Edit, Create, Modes, Select, Tools, Mesh, Animate, Window, Help. |
 | 2 | **Command palette** | Undo/redo, the selection tools, Move/Scale/Rotate, axis locks, World/Object coordinates, render buttons (*planned*) and buttons that create objects. |
 | 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§13](#13-snapping)). |
-| 4 | **Viewport** | The 3D view of the scene. Its header has the View, Cameras, Display, Options, Filter and Panel menus and three navigation icons. |
+| 4 | **Viewport** | The 3D view of the scene, or up to four views ([§3.2](#32-several-views-top-front-and-side)). Each view's header has the View, Cameras, Display, Options, Filter and Panel menus and three navigation icons. |
 | 5 | **Object Manager** | The scene's objects as a hierarchy. |
 | 6 | **Attribute Manager** | The parameters of the selected object, or the options of the current tool. |
 | 7 | **Timeline** | The current frame, playback and the frame range. |
@@ -90,7 +90,9 @@ managers to make them wider.
 ### 3.1 Looking through a camera
 
 The viewport has its own camera (the *default camera*). It can also look through a
-camera object of the scene, or through any object.
+camera object of the scene, or through any object. With several views
+([§3.2](#32-several-views-top-front-and-side)), this is offered in View 1, the
+perspective view at the top left.
 
 ![The Cameras menu: Default Camera, Use Camera with the scene's cameras, and Selected Object as Camera](images/manual/cameras_menu.png)
 
@@ -121,6 +123,60 @@ triangle marking its top. Selected cameras are drawn in orange.
 
 A **new camera** (Create ▸ Object ▸ Camera) is placed where the view is, looking
 the same way, with the same bank and field of view.
+
+### 3.2 Several views: top, front and side
+
+The viewport can show **four views** at once — a perspective view and exact top,
+side and front views — to model from several sides.
+
+![Four views: Perspective, Top, Right and Front, with the Cylinder selected in all of them](images/manual/four_views.png)
+
+| View | Shows | Where |
+|------|-------|-------|
+| View 1 | Perspective | top left |
+| View 2 | Top | top right |
+| View 3 | Right | bottom left |
+| View 4 | Front | bottom right |
+
+- **F5** (or **Panel ▸ All Views**) shows the four views; **F1**–**F4** (Panel ▸
+  View 1 … View 4) show one of them alone, filling the viewport.
+- **Middle-click a view** (without dragging) to show it alone, and middle-click
+  again to put it back among the others.
+- **Panel** also offers *Single View*, *2 Views Stacked* (views 1 and 2, one above
+  the other) and *2 Views Side-by-Side*. The viewport starts as a single
+  perspective view.
+
+![The Panel menu](images/manual/panel_menu.png)
+
+**The active view** has a thin blue frame. It is the one you last clicked or
+scrolled in: just click in another view to work there — the same click already
+selects, starts a drag or uses the current tool. Selection, the gizmo, the
+modelling tools and snapping work in every view; H, O and View ▸ Reset View act on
+the active view.
+
+**Each view's Cameras menu** chooses what it shows: *Perspective*, or one of the
+orthographic projections *Top*, *Bottom*, *Front*, *Back*, *Left* and *Right*.
+
+![A view's Cameras menu with the projections; Top is in use](images/manual/projections_menu.png)
+
+The orthographic views look straight along a world axis, without perspective, so
+sizes and distances can be compared directly (a cube is a square):
+
+- **Front** looks along −Z, with X to the right and Y up; **Back** looks the other
+  way. **Right** looks along −X (Z to the left), **Left** the other way. **Top**
+  looks down, with X to the right and Z towards the bottom of the view; **Bottom**
+  looks up.
+- They **cannot orbit**: Alt + left drag pans in them. Panning (middle drag) and
+  zooming (wheel, Alt + right drag) work as usual; zooming changes how much of the
+  scene is in view.
+- The **grid lies in the view's plane**: the XY plane in Front and Back, ZY in
+  Left and Right, the ground (XZ) in Top and Bottom. Its axis lines keep their
+  colours (X red, Y green, Z blue). Grid snapping uses that plane too.
+
+Every view keeps **its own camera and Options** (grid, axis triad, HUD), and shows
+its projection — or the name of the camera it looks through — at the top left.
+When a view is too narrow for its menus and navigation icons, the icons are left
+out; the mouse navigation works as always.
 
 ## 4. Creating objects
 
@@ -965,6 +1021,8 @@ Esc cancels a chord.
 |------|--------|
 | Alt + left / middle / right drag, wheel | Orbit / pan / zoom |
 | H / O | Frame scene / frame selected objects |
+| F1–F4 / F5 | View 1–4 alone / all four views |
+| Middle click on a view | Show it alone / back among the others |
 | E / T / R | Move / Scale / Rotate tool |
 | 9 / 0 | Live / Rectangle Selection tool |
 | U~L / U~B | Loop / Ring Selection tool |
@@ -1023,10 +1081,11 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   Scene/Selected following the animation.
 - **Coordinate Manager**: frozen coordinates (Object Abs), changing primitives'
   size parameters rather than their scale, editing several objects at once.
-- **Viewport**: the 4-view layout and orthographic views, wireframe and other display
-  modes; lights do not light the viewport yet; the camera a view looks through is
-  not saved with the document; no render resolution (camera pyramids use the
-  view's proportions) and no depth-of-field handles.
+- **Viewport**: wireframe and other display modes; three-view and the other
+  four-view arrangements; the parallel and axonometric projections; the views and
+  their arrangement are not saved with the document, and only View 1 can look
+  through a camera; lights do not light the viewport yet; no render resolution
+  (camera pyramids use the view's proportions) and no depth-of-field handles.
 - **Interchange and rendering**: textures, animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only), the
   offline renderer (the Render menu is disabled).

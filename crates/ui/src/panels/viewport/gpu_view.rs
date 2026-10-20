@@ -9,13 +9,14 @@ use std::fmt;
 use egui_wgpu::wgpu;
 use grid4d_render::{FrameData, ViewportRenderer, ViewportTarget};
 
-/// The GPU side of one viewport.
+/// The GPU side of the viewport: one renderer (pipelines, mesh cache) shared by
+/// the views, and an offscreen target per view.
 pub(super) struct GpuView {
     render_state: egui_wgpu::RenderState,
     renderer: ViewportRenderer,
-    target: ViewportTarget,
-    /// The target's resolved colour, registered with egui.
-    texture: egui::TextureId,
+    samples: u32,
+    /// Per view: its target and the target's resolved colour, registered with egui.
+    targets: Vec<(ViewportTarget, egui::TextureId)>,
 }
 
 impl GpuView {
@@ -28,43 +29,59 @@ impl GpuView {
             target.view(),
             wgpu::FilterMode::Linear,
         );
-        log::info!("Viewport: offscreen target, {samples}× MSAA");
+        log::info!("Viewport: offscreen targets, {samples}× MSAA");
         Self {
             render_state: render_state.clone(),
             renderer,
-            target,
-            texture,
+            samples,
+            targets: vec![(target, texture)],
         }
     }
 
-    /// Renders `frame` at `size` physical pixels and returns the texture to show.
-    /// The textures are recreated only when the size changes.
-    pub(super) fn render(&mut self, frame: &FrameData, size: [u32; 2]) -> egui::TextureId {
+    /// Renders `frame` for view `view` at `size` physical pixels and returns the
+    /// texture to show. A view's target is made on its first use and recreated
+    /// only when its size changes.
+    pub(super) fn render(&mut self, view: usize, frame: &FrameData, size: [u32; 2]) -> egui::TextureId {
         let rs = &self.render_state;
-        if self.target.resize(&rs.device, size) {
+        while self.targets.len() <= view {
+            let target = ViewportTarget::new(&rs.device, [1, 1], self.samples);
+            let texture =
+                rs.renderer
+                    .write()
+                    .register_native_texture(&rs.device, target.view(), wgpu::FilterMode::Linear);
+            self.targets.push((target, texture));
+        }
+        let Some((target, texture)) = self.targets.get_mut(view) else {
+            return egui::TextureId::default();
+        };
+        if target.resize(&rs.device, size) {
             rs.renderer.write().update_egui_texture_from_wgpu_texture(
                 &rs.device,
-                self.target.view(),
+                target.view(),
                 wgpu::FilterMode::Linear,
-                self.texture,
+                *texture,
             );
         }
-        self.renderer.render(&rs.device, &rs.queue, frame, &self.target);
-        self.texture
+        // One renderer for every view: each render writes its camera and
+        // instances, then submits its own pass, so they never mix.
+        self.renderer.render(&rs.device, &rs.queue, frame, target);
+        *texture
     }
 }
 
 impl Drop for GpuView {
     fn drop(&mut self) {
-        self.render_state.renderer.write().free_texture(&self.texture);
+        let mut renderer = self.render_state.renderer.write();
+        for (_, texture) in &self.targets {
+            renderer.free_texture(texture);
+        }
     }
 }
 
 impl fmt::Debug for GpuView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GpuView")
-            .field("target", &self.target)
-            .field("texture", &self.texture)
+            .field("targets", &self.targets.len())
             .finish_non_exhaustive()
     }
 }

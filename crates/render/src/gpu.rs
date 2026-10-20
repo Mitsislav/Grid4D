@@ -42,6 +42,12 @@ struct CameraUniform {
     alphas: [f32; 4],
 }
 
+/// The grid plane and the parallel flag as the shaders read them from `light_dir.w`.
+fn grid_flags(plane: crate::GridPlane, parallel: bool) -> f32 {
+    let code = plane.code() + if parallel { 8 } else { 0 };
+    f32::from(u8::try_from(code).unwrap_or(0))
+}
+
 /// Overlay vertices are pulled towards the eye by this share of their distance.
 const OVERLAY_PULL: f32 = 0.002;
 
@@ -301,7 +307,11 @@ impl ViewportRenderer {
         let uniform = CameraUniform {
             view_proj: frame.view_proj.to_cols_array_2d(),
             eye: frame.eye.extend(if self.encode_srgb { 1.0 } else { 0.0 }).to_array(),
-            light_dir: frame.light_dir.extend(0.0).to_array(),
+            // w: the grid's plane (0 XZ, 1 XY, 2 ZY) + 8 for a parallel camera.
+            light_dir: frame
+                .light_dir
+                .extend(grid_flags(frame.grid_plane, frame.parallel))
+                .to_array(),
             grid: [
                 frame.grid_spacing,
                 frame.grid_spacing * 10.0,
