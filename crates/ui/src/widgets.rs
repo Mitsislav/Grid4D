@@ -146,6 +146,25 @@ pub(crate) fn manager_tabs(ui: &mut Ui, tabs: &[&str], active: usize) -> Option<
     clicked
 }
 
+/// The bottom panel's tabs (Timeline | F-Curve): a click switches
+/// `editor.bottom`. Returns the strip's rect (the panel may add to its right).
+pub(crate) fn bottom_tabs(ui: &mut Ui, editor: &mut crate::EditorState) -> Rect {
+    let rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), metrics::HEADER_HEIGHT));
+    let tabs = crate::BottomPanel::ALL.map(crate::BottomPanel::label);
+    let active = crate::BottomPanel::ALL
+        .iter()
+        .position(|&b| b == editor.bottom)
+        .unwrap_or(0);
+    if let Some(i) = manager_tabs(ui, &tabs, active)
+        && let Some(&tab) = crate::BottomPanel::ALL.get(i)
+    {
+        editor.bottom = tab;
+    }
+    // Tab over the panel switches (read by the shortcuts next frame).
+    editor.bottom_hovered = ui.rect_contains_pointer(ui.max_rect());
+    rect
+}
+
 /// Attribute label with Cinema 4D's dotted leader: `Name . . . . . .`
 pub(crate) fn attr_label(ui: &mut Ui, text: &str, width: f32) {
     let (rect, _) = ui.allocate_exact_size(vec2(width, metrics::ROW_HEIGHT - 2.0), Sense::hover());

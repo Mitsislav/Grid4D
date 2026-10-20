@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 6 — Tags, animation, materials, managers (v0.6) |
-| Last step done | 6.3 — Recording keys (F9), Autokeying, key buttons, keys on the timeline (2026-10-20) |
-| Next step | 6.4 — The F-Curve editor |
-| Tests | 403, all passing; clippy and rustfmt clean |
+| Last step done | 6.4 — The F-Curve editor (2026-10-20) |
+| Next step | 6.5 — The Coordinate Manager |
+| Tests | 415, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -330,7 +330,8 @@ Maxon's public manual, in our own words (clean-room).
 |------|-------|-------|
 | 6.1 (`becd43a`) | Tags on objects (saved, undoable): Phong (smoothing angle, in the viewport and in exports), Protection (no gizmo, read-only Coordinates for protected channels), Target (turns the object's −Z towards another object, children follow); icons in the Object Manager, the tag view in the Attribute Manager, Tags menu, Delete removes a selected tag | 378 |
 | 6.2 (`2e1086a`) | Animation data: tracks of keys per object (position, rotation, scale), Spline / Linear / Step with clamped auto or manual tangents, evaluated at the current frame (children follow, the document untouched), saved in `.g4d` | 386 |
-| 6.3 | Recording keys: Record Active Objects (F9), Autokeying (Ctrl+F9, red view frame), key buttons in the Coord. tab, temporary (unrecorded) changes, the timeline's key strip (select, move, delete, Ctrl+click records), previous / next key (Ctrl+F / Ctrl+G); the gizmo and the Coordinates work at the current frame | 403 |
+| 6.3 (`09acb58`) | Recording keys: Record Active Objects (F9), Autokeying (Ctrl+F9, red view frame), key buttons in the Coord. tab, temporary (unrecorded) changes, the timeline's key strip (select, move, delete, Ctrl+click records), previous / next key (Ctrl+F / Ctrl+G); the gizmo and the Coordinates work at the current frame | 403 |
+| 6.4 | The F-Curve editor, a tab beside the Timeline (Tab switches): track list, curves with keys, selecting (click, Ctrl, box, curve), moving keys (Shift constrains), tangent handles (Shift breaks), Ctrl+click adds a key, interpolation and tangent presets, zoom, pan, H / S framing, the selected key's frame and value | 415 |
 
 *Problems and solutions:*
 - **Where tags live.** Tags sit in `NodeData`, the unit of attribute edits. Adding,
@@ -418,6 +419,33 @@ Maxon's public manual, in our own words (clean-room).
   0, frame 31, a gizmo drag, F9, frame 16, select the key, Autokeying) showed every
   state: the yellow ring, red dots, the in-between value, the selected mark and the
   red frame.
+
+*Step 6.4 — problems and solutions:*
+- **One drag, several objects.** Moving keys can change several objects at once,
+  but a live edit recorded one object's previous data. A new command records the
+  previous data of all of them as one undo step (and nothing when nothing
+  changed).
+- **Tab switches the panel, but egui uses Tab to move keyboard focus.** Handled
+  like other shortcuts, the key arrived after egui had already given focus to the
+  first widget (the File menu), which then swallowed every shortcut. Tab is now
+  taken out of the window's input before egui sees it, only while the pointer is
+  over the bottom panel and nothing has focus.
+- **Ctrl+wheel arrives as a zoom gesture and Shift+wheel as sideways scrolling**
+  in egui. The graph reads both: Ctrl zooms time only, Shift values only.
+- **Values of very different sizes share one graph.** Rotations are shown in
+  degrees, so a quarter turn (90) sits next to positions in centimetres instead of
+  1.57 next to 100.
+- **Handles stay inside their segment.** Manual handles are stored as dragged; the
+  curve shortens them to the segment when it evaluates, as since 6.2, so dragging
+  one far past the next key cannot make the curve go back in time.
+- **Two details found on screen:** the axis showed "-0" for values a hair below
+  zero, and keys at the edge of the range sat under the frame of the graph. Labels
+  now round to zero, and framing leaves a wider margin.
+- **On-screen testing:** the scenario recorded keys at frames 0 and 31, opened the
+  F-Curve tab, selected the last key (its frame and value appeared in the header)
+  and dragged its handle with the real cursor: the curve took the new shape. The
+  rest (Ctrl+click, boxes, Shift, menus, which posted input cannot reach) is
+  covered by headless tests of the real panel.
 
 ---
 

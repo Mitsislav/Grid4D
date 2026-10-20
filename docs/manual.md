@@ -400,6 +400,44 @@ has keys.
 - **Ctrl+F / Ctrl+G** (Animate ▸ Go to Previous / Next Key) jump to the previous or
   next frame with a key.
 
+### 10.4 The F-Curve editor
+
+The **F-Curve** tab beside **Timeline** (or **Tab** with the pointer over the
+timeline) shows every animated value of the selected objects as a curve: time from
+left to right, the value from bottom to top. Rotations are shown in degrees. Drag
+the top edge of the panel to make it taller.
+
+![The F-Curve editor: the cube's tracks on the left, their curves on the right; the selected key (orange) shows its tangent handle, and the header its frame and value](images/manual/fcurve.png)
+
+- **The track list** on the left names each animated value with its colour. Click
+  one to show only its curve, Shift+click to add or remove more, and click the
+  object's name to show them all again.
+- **Select keys**: click a key; **Ctrl+click** adds or removes keys; drag a box
+  around keys; click a curve between keys to select all of its keys. A click on
+  empty space clears the selection.
+- **Move keys**: drag a selected key. All selected keys move, in whole frames and
+  freely in value. Hold **Shift** to keep the move horizontal or vertical.
+- **Edit a key exactly**: with one key selected, the header shows its frame and
+  value; drag or type them.
+- **Shape the curve**: a selected key shows its **tangent handles**. Drag one to
+  change the slope; the other side follows so the curve stays smooth. Hold
+  **Shift** to move one side alone (a sharp corner).
+- **Add a key**: **Ctrl+click** on a curve adds a key there, without changing the
+  curve's shape.
+- **Right-click** for **Interpolation** (Spline, Linear, Step), **Tangents** (Auto
+  Tangents, Zero Angle for flat handles, Zero Length for a straight segment),
+  **Delete Keys**, **Frame All** and **Frame Selected**.
+- **Delete** after a click in the graph deletes the selected keys.
+- **Navigate**: the wheel zooms around the pointer (Ctrl+wheel zooms time only,
+  Shift+wheel values only); drag with the middle button (or Alt + left) to pan.
+  **H** frames all curves, **S** the selected keys, while the pointer is over the
+  graph. The view frames the curves by itself when you select other objects.
+- Click or drag on the frame numbers at the top to set the current frame.
+
+![Dragging the handle down: the curve now rises steadily into the key](images/manual/fcurve_tangent.png)
+
+Every drag, typed value and menu command is one undo step.
+
 ## 11. Polygon modelling
 
 Modelling works on **polygon objects**: meshes of points, edges and polygons that
@@ -828,6 +866,8 @@ Esc cancels a chord.
 | Ctrl+F / Ctrl+G | Previous / next key |
 | F9 | Record Active Objects |
 | Ctrl+F9 | Autokeying on / off |
+| Tab (pointer over the timeline) | Timeline / F-Curve tab |
+| H / S (pointer over the F-Curve graph) | Frame all curves / the selected keys |
 
 **Help ▸ Keyboard Shortcuts & About** shows this list inside the application.
 
@@ -847,8 +887,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   Cloner are planned.
 - **Tags**: Material tags (with materials), Protection limits, Phong edge breaks,
   copying tags between objects.
-- **Animation**: the F-Curve editor (editing tangents and interpolation), copying
-  and pasting keys, animating object parameters such as a cube's size, Frame
+- **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's
+  angle or length while dragging it (Ctrl / Alt), normalised curves, copying and
+  pasting keys, animating object parameters such as a cube's size, Frame
   Scene/Selected following the animation; the Coordinate and Material managers.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.

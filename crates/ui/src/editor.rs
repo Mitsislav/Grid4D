@@ -424,6 +424,91 @@ impl KeySelection {
     }
 }
 
+/// A key of an animated parameter (the F-Curve editor's selection).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurveKey {
+    pub node: NodeId,
+    pub param: grid4d_scene::Param,
+    pub frame: f64,
+}
+
+/// What H or S over the F-Curve graph asked for (applied by the panel).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameCurves {
+    All,
+    Selected,
+}
+
+/// The F-Curve editor's state that other parts of the editor act on. Editor state.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CurveSelection {
+    /// Selected keys.
+    pub keys: Vec<CurveKey>,
+    /// Tracks shown (picked in the track list); empty: every track of the
+    /// selected objects.
+    pub tracks: Vec<(NodeId, grid4d_scene::Param)>,
+    /// The last click was in the graph: Delete removes keys.
+    pub focused: bool,
+    /// The pointer is over the graph (last frame): H and S frame the curves.
+    pub hovered: bool,
+    /// A framing request from the keyboard.
+    pub frame: Option<FrameCurves>,
+}
+
+impl CurveSelection {
+    #[must_use]
+    pub fn contains(&self, node: NodeId, param: grid4d_scene::Param, frame: f64) -> bool {
+        self.keys
+            .iter()
+            .any(|k| k.node == node && k.param == param && k.frame == frame)
+    }
+
+    /// Adds the key, or removes it if it is selected.
+    pub fn toggle(&mut self, key: CurveKey) {
+        let before = self.keys.len();
+        self.keys
+            .retain(|k| !(k.node == key.node && k.param == key.param && k.frame == key.frame));
+        if self.keys.len() == before {
+            self.keys.push(key);
+        }
+    }
+
+    /// Adds the key if it is not selected.
+    pub fn insert(&mut self, key: CurveKey) {
+        if !self.contains(key.node, key.param, key.frame) {
+            self.keys.push(key);
+        }
+    }
+}
+
+/// What the bottom panel shows (its tabs; Tab switches over it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BottomPanel {
+    #[default]
+    Timeline,
+    FCurve,
+}
+
+impl BottomPanel {
+    pub const ALL: [Self; 2] = [Self::Timeline, Self::FCurve];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Timeline => "Timeline",
+            Self::FCurve => "F-Curve",
+        }
+    }
+
+    #[must_use]
+    pub const fn other(self) -> Self {
+        match self {
+            Self::Timeline => Self::FCurve,
+            Self::FCurve => Self::Timeline,
+        }
+    }
+}
+
 /// Component mode (left palette). Points, Edges and Polygons work on the active
 /// object when it is a polygon object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -592,6 +677,12 @@ pub struct EditorState {
     pub animation: AnimationSettings,
     /// Keys selected on the timeline.
     pub keys: KeySelection,
+    /// The F-Curve editor's selection and requests.
+    pub curves: CurveSelection,
+    /// The bottom panel's tab.
+    pub bottom: BottomPanel,
+    /// The pointer is over the bottom panel (last frame): Tab switches its tab.
+    pub bottom_hovered: bool,
     /// The frame temporary values were last checked against (see
     /// `commands::apply_pending`).
     pub seen_frame: Option<i32>,
@@ -641,6 +732,9 @@ impl Default for EditorState {
             tag_selection: None,
             animation: AnimationSettings::default(),
             keys: KeySelection::default(),
+            curves: CurveSelection::default(),
+            bottom: BottomPanel::default(),
+            bottom_hovered: false,
             seen_frame: None,
             commands: CommandQueue::default(),
             history: History::default(),

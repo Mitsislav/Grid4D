@@ -4,7 +4,7 @@ use egui::{Grid, Id, Modal, RichText, ScrollArea};
 
 use crate::{EditorState, theme::palette as p};
 
-const SHORTCUTS: [(&str, &str); 31] = [
+const SHORTCUTS: [(&str, &str); 33] = [
     ("Alt + Left drag", "Orbit"),
     ("Alt + Middle drag / Middle drag", "Pan"),
     ("Alt + Right drag / Wheel", "Zoom"),
@@ -34,6 +34,8 @@ const SHORTCUTS: [(&str, &str); 31] = [
     ("Ctrl+F / Ctrl+G", "Previous / next key"),
     ("F9", "Record Active Objects"),
     ("Ctrl+F9", "Autokeying on / off"),
+    ("Tab (over the timeline)", "Timeline / F-Curve tab"),
+    ("H / S (over the F-Curve graph)", "Frame all / selected keys"),
     ("Double-click name", "Rename (Object Manager)"),
     ("Drag row onto row", "Re-parent (Object Manager)"),
 ];

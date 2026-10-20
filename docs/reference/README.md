@@ -66,6 +66,6 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 6.2 | [`animation-keys.md`](animation-keys.md) — tracks, curves, keys, evaluation | implemented 2026-10-20 |
 | 6.3 | [`animation-recording.md`](animation-recording.md) — Record (F9), Autokeying, key buttons, keys on the timeline | implemented 2026-10-20 |
 | later | `modeling-sds-weights.md` — point/edge weights (creases) | todo |
-| 6.4 | `animation-fcurves.md` — the F-Curve editor | todo |
+| 6.4 | [`animation-fcurves.md`](animation-fcurves.md) — the F-Curve editor | implemented 2026-10-20 |
 | 6 | `manager-coordinate.md`, `manager-material.md` | todo |
 | 7 | `object-camera.md`, `object-light.md`, `viewport-layouts.md` | todo |

@@ -3,9 +3,9 @@
 //! (see `docs/reference/animation-recording.md`). The document edits are built
 //! here and committed by `commands::apply`, one undo step each.
 
-use grid4d_scene::{Document, NodeId, Param, Scene, SceneEdit};
+use grid4d_scene::{Document, Interpolation, NodeId, Param, Scene, SceneEdit, TangentPreset};
 
-use crate::{AnimationSettings, EditorState, Selection};
+use crate::{AnimationSettings, CurveKey, EditorState, Selection};
 
 /// Where edits of what is shown land: the current (whole) frame, and whether
 /// changes to animated parameters become keys there.
@@ -88,6 +88,70 @@ pub fn shift(doc: &Document, selection: &Selection, frames: &[f64], by: f64) -> 
     edit_selected(&doc.scene, selection, |data| {
         data.move_keys(|f| frames.contains(&f), by)
     })
+}
+
+/// What the F-Curve editor's menu and Delete do to the selected keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CurveOp {
+    Delete,
+    Interpolation(Interpolation),
+    Tangents(TangentPreset),
+}
+
+impl CurveOp {
+    /// The undo label.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Delete => "Delete Keys",
+            Self::Interpolation(_) => "Set Interpolation",
+            Self::Tangents(_) => "Set Tangents",
+        }
+    }
+}
+
+/// `op` applied to `keys`: one `SetData` edit per object that changes.
+/// Parameters left without keys keep the values shown at the current frame.
+#[must_use]
+pub fn curve_edits(doc: &Document, keys: &[CurveKey], op: CurveOp) -> Vec<SceneEdit> {
+    let current = f64::from(doc.time.frame());
+    let mut nodes: Vec<NodeId> = Vec::new();
+    for key in keys {
+        if !nodes.contains(&key.node) {
+            nodes.push(key.node);
+        }
+    }
+    nodes
+        .into_iter()
+        .filter_map(|id| {
+            let before = &doc.scene.get(id)?.data;
+            let mut data = before.clone();
+            let selected = |param: Param, frame: f64| {
+                keys.iter()
+                    .any(|k| k.node == id && k.param == param && k.frame == frame)
+            };
+            match op {
+                CurveOp::Delete => {
+                    data.remove_keys(selected, current);
+                }
+                CurveOp::Interpolation(interpolation) => {
+                    for key in keys.iter().filter(|k| k.node == id) {
+                        if let Some(track) = data.tracks.iter_mut().find(|t| t.param == key.param) {
+                            track.curve.set_interpolation(key.frame, interpolation);
+                        }
+                    }
+                }
+                CurveOp::Tangents(preset) => {
+                    for key in keys.iter().filter(|k| k.node == id) {
+                        if let Some(track) = data.tracks.iter_mut().find(|t| t.param == key.param) {
+                            track.curve.apply_tangent_preset(key.frame, preset);
+                        }
+                    }
+                }
+            }
+            (data != *before).then_some(SceneEdit::SetData { id, data })
+        })
+        .collect()
 }
 
 /// A `SetData` edit for every selected object that `change` actually changes.

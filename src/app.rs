@@ -4,8 +4,8 @@
 use egui::{CentralPanel, Margin, Panel};
 use grid4d_scene::Document;
 use grid4d_ui::{
-    AttributesPanel, EditorCommand, EditorState, OutlinerPanel, RecentFiles, TimelinePanel, ViewportPanel, commands,
-    file,
+    AttributesPanel, BottomPanel, EditorCommand, EditorState, FCurvePanel, OutlinerPanel, RecentFiles, TimelinePanel,
+    ViewportPanel, commands, file,
     panels::{about, alert, drop_overlay, menu_bar, mode_palette, optimize, status_bar, toolbar, unsaved_changes},
     recent, shortcuts,
     theme::{self, metrics},
@@ -13,6 +13,7 @@ use grid4d_ui::{
 };
 
 const MIN_MANAGERS_WIDTH: f32 = 280.0;
+const MIN_FCURVE_HEIGHT: f32 = 160.0;
 
 pub struct Grid4DApp {
     doc: Document,
@@ -21,6 +22,7 @@ pub struct Grid4DApp {
     outliner: OutlinerPanel,
     attributes: AttributesPanel,
     timeline: TimelinePanel,
+    fcurve: FCurvePanel,
     /// Time of the previous playback tick (egui clock, seconds).
     last_tick: Option<f64>,
     window_fit: WindowFit,
@@ -67,6 +69,7 @@ impl Grid4DApp {
             outliner: OutlinerPanel::default(),
             attributes: AttributesPanel::default(),
             timeline: TimelinePanel::default(),
+            fcurve: FCurvePanel::default(),
             last_tick: None,
             window_fit: WindowFit::default(),
         }
@@ -78,6 +81,11 @@ impl eframe::App for Grid4DApp {
     /// are persisted by eframe itself (the `persistence` feature).
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(recent::STORAGE_KEY, self.editor.file.recent.to_storage());
+    }
+
+    /// Tab over the bottom panel switches its tab, before egui moves focus with it.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        shortcuts::take_tab(ctx, &mut self.editor, raw_input);
     }
 
     /// Advances playback before the UI runs, using real elapsed time.
@@ -143,11 +151,25 @@ impl eframe::App for Grid4DApp {
             .exact_size(40.0)
             .show(ui, |ui| mode_palette::show(ui, &self.doc, &mut self.editor));
 
-        Panel::bottom("grid4d.timeline")
-            .frame(theme::panel_frame())
-            .resizable(false)
-            .exact_size(grid4d_ui::panels::timeline::HEIGHT)
-            .show(ui, |ui| self.timeline.show(ui, &mut self.doc, &mut self.editor));
+        // The bottom panel's tabs: the Timeline, or the taller F-Curve editor.
+        match self.editor.bottom {
+            BottomPanel::Timeline => {
+                Panel::bottom("grid4d.timeline")
+                    .frame(theme::panel_frame())
+                    .resizable(false)
+                    .exact_size(grid4d_ui::panels::timeline::HEIGHT)
+                    .show(ui, |ui| self.timeline.show(ui, &mut self.doc, &mut self.editor));
+            }
+            BottomPanel::FCurve => {
+                let max_height = (ui.available_height() * 0.65).max(MIN_FCURVE_HEIGHT);
+                Panel::bottom("grid4d.fcurve")
+                    .frame(theme::panel_frame())
+                    .resizable(true)
+                    .default_size(grid4d_ui::panels::fcurve::DEFAULT_HEIGHT)
+                    .size_range(MIN_FCURVE_HEIGHT..=max_height)
+                    .show(ui, |ui| self.fcurve.show(ui, &mut self.doc, &mut self.editor));
+            }
+        }
 
         CentralPanel::no_frame().show(ui, |ui| self.viewport.show(ui, &mut self.doc, &mut self.editor));
 

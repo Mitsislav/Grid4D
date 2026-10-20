@@ -18,15 +18,15 @@ use crate::{
     icons::Icon,
     keys,
     live_edit::{LiveEdit, interaction_ongoing},
-    theme::palette as p,
-    widgets::{IconStyle, icon_button},
+    theme::{metrics, palette as p},
+    widgets::{IconStyle, bottom_tabs, icon_button},
 };
 
 const RULER_HEIGHT: f32 = 30.0;
 const KEY_STRIP_HEIGHT: f32 = 16.0;
 const TRANSPORT_HEIGHT: f32 = 32.0;
 /// Height of the whole panel.
-pub const HEIGHT: f32 = RULER_HEIGHT + KEY_STRIP_HEIGHT + TRANSPORT_HEIGHT + 4.0;
+pub const HEIGHT: f32 = metrics::HEADER_HEIGHT + RULER_HEIGHT + KEY_STRIP_HEIGHT + TRANSPORT_HEIGHT + 4.0;
 const SIDE_MARGIN: f32 = 16.0;
 const FPS_PRESETS: [u32; 6] = [24, 25, 30, 48, 50, 60];
 const LEFT_GROUP_WIDTH: f32 = 135.0;
@@ -99,6 +99,7 @@ impl TimelinePanel {
     pub fn show(&mut self, ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
         self.settings_edit.begin((), &doc.time.settings());
         ui.spacing_mut().item_spacing.y = 0.0;
+        bottom_tabs(ui, editor);
         let (ruler, key_strip) = {
             let width = ui.available_width();
             let (ruler, _) = ui.allocate_exact_size(vec2(width, RULER_HEIGHT), Sense::hover());

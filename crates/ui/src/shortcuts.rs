@@ -20,6 +20,8 @@
 //! | `F` / `G`      | Previous / next frame      |
 //! | `Ctrl+F` / `Ctrl+G` | Previous / next key   |
 //! | `F9`           | Record Active Objects      |
+//! | `Tab` (over the bottom panel) | Timeline / F-Curve ([`take_tab`]) |
+//! | `H` / `S` (over the F-Curve graph) | Frame all / selected keys |
 //! | `Ctrl+F9`      | Autokeying on / off        |
 //!
 //! Two-key chords (press the first key, then the second) are listed in
@@ -28,7 +30,7 @@
 use egui::{Event, Key};
 use grid4d_scene::Document;
 
-use crate::{EditorCommand, EditorState, Tool};
+use crate::{BottomPanel, EditorCommand, EditorState, FrameCurves, Tool};
 
 /// The first key of a two-key shortcut, Cinema 4D style (`U~L`: U, then L).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +101,38 @@ impl Chord {
     }
 }
 
+/// Tab over the bottom panel switches between the Timeline and the F-Curve
+/// editor. egui would move keyboard focus to the next widget on Tab, so the key
+/// is taken out of the input before egui sees it (call from
+/// `eframe::App::raw_input_hook`). Nothing happens while a widget has focus.
+pub fn take_tab(ctx: &egui::Context, editor: &mut EditorState, input: &mut egui::RawInput) {
+    if !editor.bottom_hovered || ctx.memory(|m| m.focused().is_some()) {
+        return;
+    }
+    let is_tab = |event: &Event| matches!(event, Event::Key { key: Key::Tab, modifiers, .. } if modifiers.is_none());
+    let pressed = input
+        .events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                Event::Key {
+                    pressed: true,
+                    repeat: false,
+                    ..
+                }
+            ) && is_tab(e)
+        })
+        .count();
+    if pressed == 0 {
+        return;
+    }
+    input.events.retain(|e| !is_tab(e));
+    if pressed % 2 == 1 {
+        editor.bottom = editor.bottom.other();
+    }
+}
+
 /// Handles global shortcuts. Ignored while a text field has keyboard focus
 /// (text fields have their own undo).
 pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState) {
@@ -162,8 +196,17 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                     editor.tool = tool;
                 }
             }
+            // Over the F-Curve graph, H and S frame the curves.
+            let curves = editor.bottom == BottomPanel::FCurve && editor.curves.hovered;
             if i.key_pressed(Key::H) {
-                editor.commands.push(EditorCommand::FrameScene);
+                if curves {
+                    editor.curves.frame = Some(FrameCurves::All);
+                } else {
+                    editor.commands.push(EditorCommand::FrameScene);
+                }
+            }
+            if curves && i.key_pressed(Key::S) {
+                editor.curves.frame = Some(FrameCurves::Selected);
             }
             if i.key_pressed(Key::O) {
                 editor.commands.push(EditorCommand::FrameSelected);
@@ -175,14 +218,20 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                 editor.commands.push(EditorCommand::ToggleParentGenerator);
             }
             if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
-                // After a click in the timeline's key strip, Delete removes keys.
-                editor
-                    .commands
-                    .push(if editor.keys.focused && !editor.keys.frames.is_empty() {
+                // After a click in the timeline's key strip or the F-Curve graph,
+                // Delete removes keys.
+                let command = match editor.bottom {
+                    BottomPanel::FCurve if editor.curves.focused && !editor.curves.keys.is_empty() => {
+                        EditorCommand::EditCurveKeys {
+                            op: crate::keys::CurveOp::Delete,
+                        }
+                    }
+                    BottomPanel::Timeline if editor.keys.focused && !editor.keys.frames.is_empty() => {
                         EditorCommand::DeleteKeys
-                    } else {
-                        EditorCommand::DeleteSelected
-                    });
+                    }
+                    BottomPanel::FCurve | BottomPanel::Timeline => EditorCommand::DeleteSelected,
+                };
+                editor.commands.push(command);
             }
             if i.key_pressed(Key::F9) {
                 editor.commands.push(EditorCommand::RecordKeys { at: time.frame() });
@@ -541,6 +590,65 @@ mod tests {
         editor.keys.focused = true;
         press_on(&mut doc, &mut editor, Key::Delete, Modifiers::NONE);
         assert_eq!(editor.commands.pending(), [EditorCommand::DeleteKeys]);
+    }
+
+    #[test]
+    fn over_the_f_curve_graph_keys_act_on_curves() {
+        let (mut doc, mut editor) = (Document::default(), EditorState::default());
+        editor.bottom = BottomPanel::FCurve;
+        editor.curves.hovered = true;
+        press_on(&mut doc, &mut editor, Key::H, Modifiers::NONE);
+        press_on(&mut doc, &mut editor, Key::S, Modifiers::NONE);
+        assert_eq!(editor.curves.frame, Some(FrameCurves::Selected));
+        assert!(
+            editor.commands.pending().is_empty(),
+            "H framed the curves, not the scene"
+        );
+
+        editor.curves.focused = true;
+        editor.curves.keys.push(crate::CurveKey {
+            node: grid4d_scene::NodeId::default(),
+            param: grid4d_scene::Param::Position(grid4d_scene::Axis::X),
+            frame: 0.0,
+        });
+        press_on(&mut doc, &mut editor, Key::Delete, Modifiers::NONE);
+        assert_eq!(
+            editor.commands.pending(),
+            [EditorCommand::EditCurveKeys {
+                op: crate::keys::CurveOp::Delete
+            }]
+        );
+        // On the Timeline tab the curve selection does not matter.
+        let mut editor = EditorState {
+            curves: editor.curves.clone(),
+            ..EditorState::default()
+        };
+        press_on(&mut doc, &mut editor, Key::Delete, Modifiers::NONE);
+        assert_eq!(editor.commands.pending(), [EditorCommand::DeleteSelected]);
+    }
+
+    #[test]
+    fn tab_over_the_bottom_panel_switches_it_before_egui_sees_it() {
+        let ctx = egui::Context::default();
+        let mut editor = EditorState::default();
+        let tab = |pressed| Event::Key {
+            key: Key::Tab,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let mut input = RawInput {
+            events: vec![tab(true), tab(false)],
+            ..RawInput::default()
+        };
+        take_tab(&ctx, &mut editor, &mut input);
+        assert_eq!(editor.bottom, BottomPanel::Timeline, "not over the panel");
+        assert_eq!(input.events.len(), 2, "left for egui");
+        editor.bottom_hovered = true;
+        take_tab(&ctx, &mut editor, &mut input);
+        assert_eq!(editor.bottom, BottomPanel::FCurve);
+        assert!(input.events.is_empty(), "taken out");
     }
 
     #[test]

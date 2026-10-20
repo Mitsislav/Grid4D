@@ -124,6 +124,31 @@ impl Interpolation {
     }
 }
 
+/// A preset for a key's tangents (the F-Curve editor's Tangents menu).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TangentPreset {
+    /// Automatic: smooth, clamped.
+    Auto,
+    /// Flat handles of the current lengths: the curve does not pass the key's value
+    /// next to it.
+    ZeroAngle,
+    /// No handles: next to another such key the segment is straight.
+    ZeroLength,
+}
+
+impl TangentPreset {
+    pub const ALL: [Self; 3] = [Self::Auto, Self::ZeroAngle, Self::ZeroLength];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto Tangents",
+            Self::ZeroAngle => "Zero Angle",
+            Self::ZeroLength => "Zero Length",
+        }
+    }
+}
+
 /// A key's tangent handles.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Tangents {
@@ -224,14 +249,59 @@ impl Curve {
     /// Moves the keys whose frame is `selected` by `by` frames; they replace keys
     /// already at their new frames.
     pub fn move_keys(&mut self, selected: impl Fn(f64) -> bool, by: f64) {
+        self.shift_keys(selected, by, 0.0);
+    }
+
+    /// Moves the keys whose frame is `selected` by `frames` in time and `value`
+    /// in value; they replace keys already at their new frames.
+    pub fn shift_keys(&mut self, selected: impl Fn(f64) -> bool, frames: f64, value: f32) {
         let (mut moved, kept): (Vec<Key>, Vec<Key>) = self.keys.drain(..).partition(|k| selected(k.frame));
         self.keys = kept;
         for key in &mut moved {
-            key.frame += by;
+            key.frame += frames;
+            key.value += value;
         }
         for key in moved {
             self.set_key(key);
         }
+    }
+
+    /// Sets the interpolation of the key at `frame`; `true` if there is one.
+    pub fn set_interpolation(&mut self, frame: f64, interpolation: Interpolation) -> bool {
+        let Ok(i) = self.keys.binary_search_by(|k| k.frame.total_cmp(&frame)) else {
+            return false;
+        };
+        self.keys[i].interpolation = interpolation;
+        true
+    }
+
+    /// Sets the tangents of the key at `frame`; `true` if there is one.
+    pub fn set_tangents(&mut self, frame: f64, tangents: Tangents) -> bool {
+        let Ok(i) = self.keys.binary_search_by(|k| k.frame.total_cmp(&frame)) else {
+            return false;
+        };
+        self.keys[i].tangents = tangents;
+        true
+    }
+
+    /// Applies `preset` to the key at `frame`; `true` if there is one.
+    pub fn apply_tangent_preset(&mut self, frame: f64, preset: TangentPreset) -> bool {
+        let Ok(i) = self.keys.binary_search_by(|k| k.frame.total_cmp(&frame)) else {
+            return false;
+        };
+        let ((left, _), (right, _)) = self.handles(i);
+        self.keys[i].tangents = match preset {
+            TangentPreset::Auto => Tangents::Auto,
+            TangentPreset::ZeroAngle => Tangents::Manual {
+                left: (left, 0.0),
+                right: (right, 0.0),
+            },
+            TangentPreset::ZeroLength => Tangents::Manual {
+                left: (0.0, 0.0),
+                right: (0.0, 0.0),
+            },
+        };
+        true
     }
 
     /// Removes the keys whose frame is `selected`; `true` if there were any.
@@ -280,8 +350,14 @@ impl Curve {
     }
 
     /// The left and right handles of key `i` as (frames, value change), each
-    /// shortened so it stays within the neighbouring segment.
-    fn handles(&self, i: usize) -> ((f64, f32), (f64, f32)) {
+    /// shortened so it stays within the neighbouring segment: the left one points
+    /// back in time (its end is at `frame - left.0`, `value - left.1`), the right
+    /// one forwards.
+    ///
+    /// # Panics
+    /// If `i` is not a key index.
+    #[must_use]
+    pub fn handles(&self, i: usize) -> ((f64, f32), (f64, f32)) {
         let key = self.keys[i];
         let before = i.checked_sub(1).map(|j| self.keys[j]);
         let after = self.keys.get(i + 1).copied();
@@ -774,5 +850,48 @@ mod tests {
         assert!(data.remove_keys(|_, f| f == 10.0, 10.0));
         assert_eq!(data.tracks[0].curve.keys().len(), 1);
         assert!(!data.remove_keys(|_, f| f == 99.0, 0.0), "nothing there");
+    }
+
+    #[test]
+    fn shifting_keys_in_time_and_value() {
+        let mut c = curve(&[(0.0, 1.0), (10.0, 2.0), (20.0, 3.0)], Interpolation::Linear);
+        c.shift_keys(|f| f == 10.0, 5.0, 0.5);
+        let keys: Vec<(f64, f32)> = c.keys().iter().map(|k| (k.frame, k.value)).collect();
+        assert_eq!(keys, [(0.0, 1.0), (15.0, 2.5), (20.0, 3.0)]);
+        assert_eq!(
+            c.keys()[1].interpolation,
+            Interpolation::Linear,
+            "the key is kept as it was"
+        );
+    }
+
+    #[test]
+    fn interpolation_and_tangent_presets() {
+        let mut c = curve(&[(0.0, 0.0), (10.0, 100.0), (20.0, 50.0)], Interpolation::Spline);
+        assert!(c.set_interpolation(0.0, Interpolation::Step));
+        assert!(!c.set_interpolation(3.0, Interpolation::Step), "no key there");
+        assert_eq!(c.value_at(9.0), Some(0.0), "Step holds");
+
+        // Zero Angle: flat at the key, so the curve does not go past its value.
+        let mut c = curve(&[(0.0, 0.0), (10.0, 50.0), (20.0, 100.0)], Interpolation::Spline);
+        assert!(c.apply_tangent_preset(10.0, TangentPreset::ZeroAngle));
+        let ((l, lv), (r, rv)) = c.handles(1);
+        assert!(
+            (l - 10.0 / 3.0).abs() < 1e-9 && (r - 10.0 / 3.0).abs() < 1e-9,
+            "lengths kept"
+        );
+        assert_eq!((lv, rv), (0.0, 0.0));
+        let slope = f64::from(c.value_at(10.01).unwrap() - c.value_at(10.0).unwrap()) / 0.01;
+        assert!(slope.abs() < 0.05, "flat: {slope}");
+
+        // Zero Length on both ends of a segment: a straight line.
+        let mut c = curve(&[(0.0, 0.0), (10.0, 100.0)], Interpolation::Spline);
+        for frame in [0.0, 10.0] {
+            c.apply_tangent_preset(frame, TangentPreset::ZeroLength);
+        }
+        assert!(close(c.value_at(5.0).unwrap(), 50.0));
+        assert!(close(c.value_at(2.5).unwrap(), 25.0));
+        c.apply_tangent_preset(0.0, TangentPreset::Auto);
+        assert_eq!(c.keys()[0].tangents, Tangents::Auto);
     }
 }

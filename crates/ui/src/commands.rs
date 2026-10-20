@@ -220,6 +220,16 @@ pub enum EditorCommand {
     MoveKeys {
         by: i32,
     },
+    /// Changes or deletes the keys selected in the F-Curve editor. One undo step.
+    EditCurveKeys {
+        op: crate::keys::CurveOp,
+    },
+    /// Like [`EditorCommand::CommitLive`] for a change of several objects (an
+    /// F-Curve drag): one undo step restoring them all.
+    CommitLiveAll {
+        inverses: Vec<SceneEdit>,
+        label: &'static str,
+    },
     FrameScene,
     FrameSelected,
     ResetView,
@@ -777,6 +787,23 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 *frame += by;
             }
         }
+        EditorCommand::EditCurveKeys { op } => {
+            let edits = crate::keys::curve_edits(doc, &editor.curves.keys, op);
+            commit(doc, editor, op.label(), edits, |_, _| {});
+            if op == crate::keys::CurveOp::Delete {
+                editor.curves.keys.clear();
+            }
+        }
+        EditorCommand::CommitLiveAll { inverses, label } => {
+            let inverses: Vec<SceneEdit> = inverses
+                .into_iter()
+                .filter(|inverse| !is_current_state(doc, inverse))
+                .collect();
+            let selection = editor.selection.clone();
+            editor
+                .history
+                .record(doc, label, inverses, selection.clone(), selection);
+        }
         EditorCommand::FrameScene => viewport.frame_scene(&doc.scene),
         EditorCommand::FrameSelected => viewport.frame_selection(&doc.scene, &editor.selection),
         EditorCommand::ResetView => viewport.reset_view(),
@@ -1264,6 +1291,56 @@ mod tests {
         let tracks = &doc.scene.get(cube).unwrap().data.tracks;
         assert_eq!(tracks.len(), 3);
         assert!(tracks.iter().all(|t| matches!(t.param, Param::Rotation(_))));
+    }
+
+    #[test]
+    fn a_live_change_of_several_objects_is_one_undo_step() {
+        let mut doc = Document::with_demo_scene();
+        let (mut editor, mut vp) = (EditorState::default(), viewport());
+        let (cube, sphere) = (id_of(&doc, "Cube"), id_of(&doc, "Sphere"));
+        let before: Vec<(NodeId, NodeData)> = [cube, sphere]
+            .into_iter()
+            .map(|id| (id, doc.scene.get(id).unwrap().data.clone()))
+            .collect();
+        for &(id, _) in &before {
+            doc.scene.get_mut(id).unwrap().data.transform.position.x += 10.0;
+        }
+        let inverses = before
+            .iter()
+            .map(|(id, data)| SceneEdit::SetData {
+                id: *id,
+                data: data.clone(),
+            })
+            .collect();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CommitLiveAll {
+                inverses,
+                label: "Move Keys",
+            }],
+        );
+        assert_eq!(editor.history.undo_len(), 1);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        for (id, data) in &before {
+            assert_eq!(&doc.scene.get(*id).unwrap().data, data);
+        }
+        // Nothing changed: nothing recorded.
+        let inverses = vec![SceneEdit::SetData {
+            id: cube,
+            data: doc.scene.get(cube).unwrap().data.clone(),
+        }];
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CommitLiveAll {
+                inverses,
+                label: "Move Keys",
+            }],
+        );
+        assert_eq!(editor.history.undo_len(), 0);
     }
 
     #[test]

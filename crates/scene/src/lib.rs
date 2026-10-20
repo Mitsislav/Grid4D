@@ -30,7 +30,9 @@ mod transform;
 #[cfg(test)]
 mod test_util;
 
-pub use anim::{Axis, Curve, Interpolation, Key, KeyState, Param, ParamSet, Tangents, Track, Tracks, Unkeyed};
+pub use anim::{
+    Axis, Curve, Interpolation, Key, KeyState, Param, ParamSet, TangentPreset, Tangents, Track, Tracks, Unkeyed,
+};
 pub use bounds::Aabb;
 pub use document::Document;
 pub use edit::SceneEdit;
