@@ -169,6 +169,62 @@ pub struct SelectionSettings {
     pub grow_edges_only: bool,
 }
 
+/// Whether a snap moves the element in space or lines it up on screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SnapType {
+    /// 3D in perspective views, 2D in orthographic ones (the viewport is
+    /// perspective, so 3D for now).
+    #[default]
+    Auto,
+    /// Lined up with the target on screen; the element keeps its depth.
+    TwoD,
+    /// Onto the target's position in space.
+    ThreeD,
+}
+
+impl SnapType {
+    pub const ALL: [Self; 3] = [Self::Auto, Self::TwoD, Self::ThreeD];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto Snapping",
+            Self::TwoD => "2D Snapping",
+            Self::ThreeD => "3D Snapping",
+        }
+    }
+
+    /// Whether a snap moves the element in space (Auto: the view is perspective).
+    #[must_use]
+    pub const fn in_space(self) -> bool {
+        match self {
+            Self::Auto | Self::ThreeD => true,
+            Self::TwoD => false,
+        }
+    }
+}
+
+/// Snapping (Shift+S; see `docs/reference/modeling-snapping.md`). Editor state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SnapSettings {
+    pub enabled: bool,
+    pub kind: SnapType,
+    /// Screen distance (points) within which a target is caught.
+    pub radius: f32,
+    pub targets: grid4d_render::SnapTargets,
+}
+
+impl Default for SnapSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            kind: SnapType::Auto,
+            radius: 10.0,
+            targets: grid4d_render::SnapTargets::default(),
+        }
+    }
+}
+
 /// Options of the transform tools (Attribute Manager, Tool mode). Editor state.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TransformSettings {
@@ -452,7 +508,7 @@ pub struct EditorState {
     pub axes: [bool; 3],
     /// World (`true`) or object (`false`) coordinate system for the gizmo.
     pub world_coordinates: bool,
-    pub snapping: bool,
+    pub snap: SnapSettings,
     pub commands: CommandQueue,
     /// Undo/redo steps; written only by `commands::apply`.
     pub history: History,
@@ -480,7 +536,7 @@ impl Default for EditorState {
             chord: None,
             axes: [true; 3],
             world_coordinates: false,
-            snapping: false,
+            snap: SnapSettings::default(),
             commands: CommandQueue::default(),
             history: History::default(),
             file: DocumentFile::default(),

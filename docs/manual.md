@@ -22,8 +22,9 @@ screenshots come from the application itself.
 10. [Timeline and playback](#10-timeline-and-playback)
 11. [Polygon modelling](#11-polygon-modelling)
 12. [Generators: Subdivision Surface](#12-generators-subdivision-surface)
-13. [Keyboard shortcuts](#13-keyboard-shortcuts)
-14. [Limitations and what is planned](#14-limitations-and-what-is-planned)
+13. [Snapping](#13-snapping)
+14. [Keyboard shortcuts](#14-keyboard-shortcuts)
+15. [Limitations and what is planned](#15-limitations-and-what-is-planned)
 
 ---
 
@@ -54,7 +55,7 @@ sessions.
 |---|------|----------------|
 | 1 | **Menu bar** | Every command: File, Edit, Create, Modes, Select, Tools, Mesh, Animate, Window, Help. |
 | 2 | **Command palette** | Undo/redo, the selection tools, Move/Scale/Rotate, axis locks, World/Object coordinates, render buttons (*planned*) and buttons that create objects. |
-| 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle (*planned*). |
+| 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§13](#13-snapping)). |
 | 4 | **Viewport** | The 3D view of the scene. Its header has the View, Cameras, Display, Options, Filter and Panel menus and three navigation icons. |
 | 5 | **Object Manager** | The scene's objects as a hierarchy. |
 | 6 | **Attribute Manager** | The parameters of the selected object, or the options of the current tool. |
@@ -138,6 +139,8 @@ then drag a handle of the gizmo.
   axes and the object's own axes. Scale always uses the object's axes.
 - **Alt + drag** always navigates, even over the gizmo.
 - For exact values, type them in the Attribute Manager ([§7](#7-the-attribute-manager)).
+- To place objects exactly on other objects or on the grid, turn on snapping
+  (**Shift+S**, [§13](#13-snapping)).
 
 Every drag is one undo step.
 
@@ -512,7 +515,54 @@ Select the generator and open **Attribute Manager ▸ Object**:
   the smooth mesh, at the **Subdivision Viewport** level. The cage is removed. One
   undo step brings both back. A generator that is switched off is left as it is.
 
-## 13. Keyboard shortcuts
+## 13. Snapping
+
+With snapping on, a moved object or selection jumps onto nearby geometry or onto
+the floor grid, so you can place things exactly: an object's axis level with a
+corner, a point onto another point, a selection onto a grid crossing.
+
+**Switching it on:** press **Shift+S**, or click the magnet button at the bottom of
+the mode palette (it stays highlighted while snapping is on).
+
+**Using it:**
+
+1. Drag a **Move** handle (an arrow of the gizmo), or with **Tweak Mode** drag a
+   point, edge or polygon directly ([§11.4](#114-transforming-components)).
+2. Move the **cursor** over what you want to snap to: a corner, an edge, the middle
+   of an edge, the centre of a polygon, an object's axis or a grid crossing. The
+   target is highlighted with its name next to it.
+3. Release the mouse button. The move is one undo step, as always.
+
+![Dragging the cube's X arrow with the cursor over the middle of an edge: the cube lines up with it along X](images/manual/snap_drag.png)
+
+How the element is placed:
+
+- **Along a gizmo arrow** the move stays on that axis. The object (or the centre of
+  the selection) lines up with the target along the axis.
+- **With Tweak** the move is free: the grabbed element lands right on the target.
+- Nothing that moves with the drag is a target: the moved object and its children,
+  or the moved points and the edges and polygons that use them. So you can put a
+  point onto another point of the same object.
+- Scale and Rotate do not snap.
+
+**Settings:** right-click the magnet button, open **Tools ▸ Snap**, or select the
+Move tool and look at the **Snap** group in the Attribute Manager's Tool mode
+(Attribute Manager ▸ Mode ▸ Tool). All three show the same settings.
+
+![Tools ▸ Snap](images/manual/menu_snap.png) ![The Move tool's Snap options in the Attribute Manager](images/manual/snap_options.png)
+
+| Setting | Meaning |
+|---------|---------|
+| Auto / 2D / 3D Snapping | **3D** moves the element onto the target in space. **2D** only lines it up on screen and keeps its depth. **Auto** is 3D in the perspective view, the only view so far. |
+| Vertex, Edge, Edge Mid Point, Polygon Center, Polygon | Points, the nearest point along an edge, the middle of an edge, a polygon's centre, the surface under the cursor. All but Polygon are on at first. |
+| Axis | Objects' origins (on at first). |
+| Grid Point, Grid Line | Crossings or lines of the floor grid, at the spacing shown in the corner of the view. Grid Point is on at first. |
+| Snap Radius | How close the cursor must be to a target, in screen points (10 at first). |
+
+Within the radius, points win over edges and grid lines, which win over surfaces,
+so a corner can be caught right next to its edges.
+
+## 14. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -528,6 +578,7 @@ Esc cancels a chord.
 | U~I / U~W / U~Y / U~K | Invert / Select Connected / Grow / Shrink selection |
 | C | Make Editable |
 | Q | Switch the selected generator (or the one above the selection) off / on |
+| Shift+S | Snapping on / off |
 | Alt + click a generator button | Create the generator around the selected object |
 | D / I | Extrude / Inset tool |
 | M~T / M~W | Extrude / Inset tool (alternatives) |
@@ -549,11 +600,13 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 14. Limitations and what is planned
+## 15. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
-- **Modelling**: snapping (the toggle exists, without effect);
+- **Snapping**: Quantize (stepped moves, Shift+Q), per-tool settings, the workplane,
+  guides and snapping for tools other than Move.
+- **Modelling**:
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
   Solid, Proportional and Radial modes; Bridge point by point.
 - **Generators**: only the Subdivision Surface, with one type (Catmull-Clark) and

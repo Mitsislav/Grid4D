@@ -12,7 +12,10 @@ use grid4d_geom::{BitSet, Component, selection};
 use grid4d_render::OrbitCamera;
 use grid4d_scene::{MeshHandle, NodeData, NodeId, ObjectKind, Scene, SceneEdit};
 
-use super::project;
+use super::{
+    project,
+    snapping::{Snapper, generators_above},
+};
 use crate::{CommandQueue, EditorCommand, EditorState, Tool, theme::palette as p};
 
 /// On-screen length of the axis handles, in points.
@@ -210,6 +213,12 @@ struct Drag {
     label: &'static str,
     /// For a component transform: the points it moves.
     points: Option<PointEdit>,
+    /// World position of the gizmo's centre when the drag started.
+    start: Vec3,
+    /// Move of an object: the world offset so far, before snapping.
+    free: Vec3,
+    /// What moves with the drag besides the dragged element (snapping ignores it).
+    skip: Vec<NodeId>,
 }
 
 /// A transform of some of a polygon object's points, accumulated over a drag and
@@ -227,6 +236,10 @@ pub(super) struct PointEdit {
     pub(super) moved: Vec3,
     factor: f32,
     angle: f32,
+    /// The translation before snapping (`moved` is where snapping put it).
+    pub(super) free: Vec3,
+    /// The edited points, for snapping to leave out.
+    pub(super) moving: BitSet,
 }
 
 impl PointEdit {
@@ -240,6 +253,8 @@ impl PointEdit {
             moved: Vec3::ZERO,
             factor: 1.0,
             angle: 0.0,
+            free: Vec3::ZERO,
+            moving: points.clone(),
         }
     }
 
@@ -359,6 +374,7 @@ impl GizmoState {
         geo: Option<&GizmoGeometry>,
         scene: &mut Scene,
         commands: &mut CommandQueue,
+        snapper: &mut Snapper<'_>,
     ) -> GizmoInteraction {
         let alt = ui.input(|i| i.modifiers.alt);
 
@@ -370,9 +386,9 @@ impl GizmoState {
             {
                 moved_object = pointer != drag.last_pointer;
                 if drag.points.is_some() {
-                    apply_component_drag(geo, drag, pointer, scene);
+                    apply_component_drag(geo, drag, pointer, scene, snapper);
                 } else {
-                    apply_drag(geo, drag, pointer, scene);
+                    apply_drag(geo, drag, pointer, scene, snapper);
                 }
                 drag.last_pointer = pointer;
             } else if let Some(done) = self.drag.take() {
@@ -410,6 +426,11 @@ impl GizmoState {
                     }
                     _ => None,
                 };
+                // An object takes its children along; generators above change too.
+                let mut skip = generators_above(scene, geo.node);
+                if points.is_none() {
+                    skip.push(geo.node);
+                }
                 self.drag = Some(Drag {
                     node: geo.node,
                     axis,
@@ -417,6 +438,9 @@ impl GizmoState {
                     before: node.data.clone(),
                     label: drag_label(geo.tool, geo.target),
                     points,
+                    start: geo.origin,
+                    free: Vec3::ZERO,
+                    skip,
                 });
                 return GizmoInteraction {
                     owns_pointer: true,
@@ -458,22 +482,38 @@ fn ring_angle(geo: &GizmoGeometry, axis: usize, from: Pos2, to: Pos2) -> Option<
 }
 
 /// One frame of a component drag: accumulate, then rewrite the points.
-fn apply_component_drag(geo: &GizmoGeometry, drag: &mut Drag, pointer: Pos2, scene: &mut Scene) {
-    let axis = drag.axis;
-    let Some(edit) = &mut drag.points else { return };
+fn apply_component_drag(
+    geo: &GizmoGeometry,
+    drag: &mut Drag,
+    pointer: Pos2,
+    scene: &mut Scene,
+    snapper: &mut Snapper<'_>,
+) {
+    let (axis, node, last) = (drag.axis, drag.node, drag.last_pointer);
+    let Drag {
+        points: Some(edit),
+        skip,
+        ..
+    } = drag
+    else {
+        return;
+    };
     match geo.tool {
         Tool::Move => {
-            if let Some(share) = along_handle(geo, axis, drag.last_pointer, pointer) {
-                edit.moved += geo.axes[axis] * (share * geo.length);
+            if let Some(share) = along_handle(geo, axis, last, pointer) {
+                edit.free += geo.axes[axis] * (share * geo.length);
             }
+            let line = Some((edit.pivot, geo.axes[axis]));
+            let to = snapper.snap(pointer, edit.pivot + edit.free, line, skip, Some((node, &edit.moving)));
+            edit.moved = to - edit.pivot;
         }
         Tool::Scale => {
-            if let Some(share) = along_handle(geo, axis, drag.last_pointer, pointer) {
+            if let Some(share) = along_handle(geo, axis, last, pointer) {
                 edit.factor = (edit.factor * (1.0 + share).max(0.01)).max(0.001);
             }
         }
         Tool::Rotate => {
-            if let Some(angle) = ring_angle(geo, axis, drag.last_pointer, pointer) {
+            if let Some(angle) = ring_angle(geo, axis, last, pointer) {
                 edit.angle += angle;
             }
         }
@@ -489,26 +529,34 @@ fn apply_component_drag(geo: &GizmoGeometry, drag: &mut Drag, pointer: Pos2, sce
         | Tool::Bridge
         | Tool::Weld => return,
     }
-    edit.apply(edit.delta(geo.tool, geo.axes[axis]), scene, drag.node);
+    edit.apply(edit.delta(geo.tool, geo.axes[axis]), scene, node);
 }
 
-fn apply_drag(geo: &GizmoGeometry, drag: &Drag, pointer: Pos2, scene: &mut Scene) {
-    let Some(node) = scene.get_mut(drag.node) else { return };
+fn apply_drag(geo: &GizmoGeometry, drag: &mut Drag, pointer: Pos2, scene: &mut Scene, snapper: &mut Snapper<'_>) {
     let axis = drag.axis;
+    if geo.tool == Tool::Move {
+        // From the position the drag started at: the unsnapped offset, snapped.
+        let Some(share) = along_handle(geo, axis, drag.last_pointer, pointer) else {
+            return;
+        };
+        drag.free += geo.axes[axis] * (share * geo.length);
+        let line = Some((drag.start, geo.axes[axis]));
+        let to = snapper.snap(pointer, drag.start + drag.free, line, &drag.skip, None);
+        let Some(node) = scene.get_mut(drag.node) else { return };
+        node.data.transform.position =
+            drag.before.transform.position + geo.parent_world.inverse().transform_vector3(to - drag.start);
+        return;
+    }
+    let Some(node) = scene.get_mut(drag.node) else { return };
     let t = &mut node.data.transform;
 
     match geo.tool {
-        Tool::Move | Tool::Scale => {
+        Tool::Scale => {
             let Some(share) = along_handle(geo, axis, drag.last_pointer, pointer) else {
                 return;
             };
-            if geo.tool == Tool::Move {
-                let world_delta = geo.axes[axis] * (share * geo.length);
-                t.position += geo.parent_world.inverse().transform_vector3(world_delta);
-            } else {
-                let factor = (1.0 + share).max(0.01);
-                t.scale[axis] = (t.scale[axis] * factor).max(0.001);
-            }
+            let factor = (1.0 + share).max(0.01);
+            t.scale[axis] = (t.scale[axis] * factor).max(0.001);
         }
         Tool::Rotate => {
             let Some(angle) = ring_angle(geo, axis, drag.last_pointer, pointer) else {
@@ -519,7 +567,8 @@ fn apply_drag(geo: &GizmoGeometry, drag: &Drag, pointer: Pos2, scene: &mut Scene
             let local = parent_rotation.inverse() * world_delta * parent_rotation * t.rotation_quat();
             t.set_rotation_quat(local);
         }
-        Tool::LiveSelection
+        Tool::Move
+        | Tool::LiveSelection
         | Tool::RectangleSelection
         | Tool::LoopSelection
         | Tool::RingSelection

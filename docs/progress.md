@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 4 — Polygon modelling & Subdivision Surface (v0.4) |
-| Last step done | 4.7 — Generator framework + Subdivision Surface (2026-10-20) |
-| Next step | 4.8 — Snapping |
-| Tests | 328, all passing; clippy and rustfmt clean |
+| Last step done | 4.8 — Snapping (2026-10-20); phase 4 complete |
+| Next step | 5.1 — glTF 2.0 import |
+| Tests | 342, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -133,7 +133,8 @@ The starting point, `64d00bf`:
 | 4.5 (`781e547`) | Delete, Melt, Dissolve, Connect, Loop/Path Cut, Line Cut; two-key shortcuts | 292 |
 | docs (`163ac7c`) | The user manual and this progress log; the shortcuts dialog fits small windows again | 292 |
 | 4.6 (`c73d732`) | Bevel (edges and points, rounded profile), Bridge (polygons, border edges), Weld, Optimize (dialog) | 308 |
-| 4.7 | Generators; the Subdivision Surface (Catmull-Clark on n-gons, Linear Pre-Subdivision, border rules); Alt-create wraps the selection, Q switches, Make Editable bakes | 328 |
+| 4.7 (`d0047fc`) | Generators; the Subdivision Surface (Catmull-Clark on n-gons, Linear Pre-Subdivision, border rules); Alt-create wraps the selection, Q switches, Make Editable bakes | 328 |
+| 4.8 | Snapping (Shift+S): vertex, edge, edge mid point, polygon centre, surface, axis, grid point and line; 2D/3D; the Move handles and Tweak; highlight with the target's name; settings in the palette menu, Tools ▸ Snap and the Move tool. Phase 4 acceptance test: box → extrude → loop cut → bevel → Subdivision Surface, each step undone and redone, saved and reloaded | 342 |
 
 Before each step we write a behaviour spec in [`reference/`](reference/README.md) from
 Maxon's public manual, in our own words (clean-room).
@@ -229,6 +230,29 @@ Maxon's public manual, in our own words (clean-room).
   parameters, so the window was maximised for one capture. The app remembers the
   window state, so it was restored afterwards. Reducing the large smooth gradients
   to a 256-colour palette produced bands, so the manual's images are now dithered.
+
+*Step 4.8 — problems and solutions:*
+- **Where to look for targets.** The first version looked around the position the
+  moved element would have without snapping. On screen the result was confusing: the
+  target was highlighted somewhere between the gizmo and the cursor. The reference
+  describes the snap radius as an area around the *cursor*, so targets are now
+  looked for under the cursor: you point at what to snap to, and the element lines
+  up with it along the dragged axis.
+- **Precision of the ray under the cursor.** Inverting the camera matrix in single
+  precision (near plane 2 cm, far plane 2 km) put a 2D snap 0.03 px off. The
+  ray is now computed in double precision.
+- **A layout bug found while taking screenshots.** A long hint in the Attribute
+  Manager's Tool mode does not wrap inside its grid, so it widened the whole right
+  panel. The app remembers panel sizes, so the wider panel was saved. The hint now
+  wraps, and the panel was dragged back to its old size.
+- **Screen coordinates.** The test machine runs at 125 % display scaling. egui works in
+  points (pixels ÷ 1.25), which at first made the highlight look misplaced in the
+  captures. A temporary log of the cursor and target positions showed the snap was
+  correct.
+- **On-screen testing.** Snapping needs real drags. Posted mouse messages are not
+  enough, so these captures move the real cursor over the window for a moment
+  (and put it back). Posted right-clicks do not open menus at all, so the snap
+  button's menu is checked by a headless test instead.
 
 ---
 

@@ -155,7 +155,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             ui.checkbox(&mut editor.axes[2], "Z-Axis");
             ui.separator();
             ui.checkbox(&mut editor.world_coordinates, "World Coordinates");
-            ui.checkbox(&mut editor.snapping, "Snapping");
+            ui.menu_button("Snap", |ui| crate::widgets::snap_menu(ui, &mut editor.snap));
         });
 
         ui.menu_button("Mesh", |ui| {

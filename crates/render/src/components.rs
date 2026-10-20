@@ -52,7 +52,7 @@ pub struct ScreenView {
 
 impl ScreenView {
     /// Screen position of a clip-space point (`w > 0`).
-    fn to_screen(self, clip: Vec4) -> Vec2 {
+    pub(crate) fn to_screen(self, clip: Vec4) -> Vec2 {
         let ndc = clip.truncate().truncate() / clip.w;
         Vec2::new((ndc.x * 0.5 + 0.5) * self.size.x, (0.5 - ndc.y * 0.5) * self.size.y)
     }
@@ -435,7 +435,7 @@ pub fn paint_brush(
 /// Screen distance from `cursor` to the edge `a`–`b` (object space, with clip
 /// coordinates `ca`/`cb`), clipped to the near plane, and the edge's point closest
 /// to the cursor in object space. `None` if the edge is behind the camera.
-fn edge_distance(
+pub(crate) fn edge_distance(
     view: &ScreenView,
     mut ca: Vec4,
     mut cb: Vec4,

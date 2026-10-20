@@ -8,12 +8,15 @@ mod join_tools;
 mod mesh_tools;
 mod overlay;
 mod select_tools;
+mod snapping;
 
 use egui::{Align, Align2, Layout, Margin, PointerButton, Pos2, Rect, Response, Sense, Ui, pos2};
 use glam::{Mat4, Vec2 as GVec2, Vec3};
 use grid4d_eval::EvaluatedScene;
 use grid4d_geom::Component;
-use grid4d_render::{ComponentHit, ComponentStyle, FrameData, OrbitCamera, ScreenView, pick, pick_component};
+use grid4d_render::{
+    ComponentHit, ComponentStyle, FrameData, OrbitCamera, ScreenView, SnapCache, SnapHit, pick, pick_component,
+};
 use grid4d_scene::{Aabb, Document, NodeId, ObjectKindTag, Scene, WalkItem};
 
 use self::{gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView, select_tools::Gesture};
@@ -52,6 +55,10 @@ pub struct ViewportPanel {
     view_rect: Rect,
     /// Loop/Path Cut: the loop a click would cut.
     loop_preview: Option<cut_tools::LoopPreview>,
+    /// Primitives' meshes for snapping.
+    snap_cache: SnapCache,
+    /// The target the current drag is snapped to, shown in the view.
+    snap_hit: Option<SnapHit>,
 }
 
 impl ViewportPanel {
@@ -76,6 +83,8 @@ impl ViewportPanel {
             show_hud: true,
             view_rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0)),
             loop_preview: None,
+            snap_cache: SnapCache::default(),
+            snap_hit: None,
         }
     }
 
@@ -140,12 +149,28 @@ impl ViewportPanel {
         // Built once per frame (after navigation moved the camera) and shared by
         // interaction and painting; rebuilt only if a drag just moved the object.
         let mut gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect);
+        self.snap_hit = None;
         let gizmo_owns_pointer = if navigating {
             false
         } else {
-            let interaction =
-                self.gizmo
-                    .interact(ui, &response, gizmo_geo.as_ref(), &mut doc.scene, &mut editor.commands);
+            let mut snapper = snapping::Snapper {
+                settings: editor.snap,
+                scene: &self.evaluated,
+                view: self.screen_view(rect),
+                rect,
+                cache: &mut self.snap_cache,
+                grid_spacing: self.camera.grid_spacing(),
+                hit: None,
+            };
+            let interaction = self.gizmo.interact(
+                ui,
+                &response,
+                gizmo_geo.as_ref(),
+                &mut doc.scene,
+                &mut editor.commands,
+                &mut snapper,
+            );
+            self.snap_hit = snapper.hit;
             if interaction.moved_object {
                 gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect);
             }
@@ -217,6 +242,9 @@ impl ViewportPanel {
         }
         if let Some(preview) = &self.loop_preview {
             overlay::cut_preview(&painter, rect, &view_proj, &preview.segments);
+        }
+        if let Some(hit) = &self.snap_hit {
+            overlay::snap_target(&painter, rect, &view_proj, hit);
         }
         if target.is_some()
             && editor.tool == Tool::LiveSelection
@@ -1021,6 +1049,133 @@ mod tests {
         assert_eq!(h.editor.history.undo_label(), Some("Move Points"));
     }
 
+    /// Snap targets: only `kinds`.
+    fn snap_only(kinds: &[grid4d_render::SnapKind]) -> grid4d_render::SnapTargets {
+        let mut targets = grid4d_render::SnapTargets::default();
+        for kind in grid4d_render::SnapKind::ALL {
+            *targets.flag_mut(kind) = kinds.contains(&kind);
+        }
+        targets
+    }
+
+    /// Drags the active object's X handle in 3-point steps; the X position after each.
+    fn drag_x_in_small_steps(h: &mut Harness, frames: usize) -> Vec<(f32, Option<grid4d_render::SnapKind>)> {
+        h.frame(vec![]);
+        let geo = GizmoGeometry::new(&h.doc.scene, &h.editor, &h.viewport.camera, h.viewport.view_rect).unwrap();
+        let (start, dir) = geo.handle_for_test(0).unwrap();
+        let cube = h.editor.selection.active().unwrap();
+        h.frame(vec![Event::PointerMoved(start)]);
+        h.frame(vec![Harness::button(start, true)]);
+        let mut pointer = start;
+        let mut xs = Vec::new();
+        for _ in 0..frames {
+            pointer += dir * 3.0;
+            h.frame(vec![Event::PointerMoved(pointer)]);
+            xs.push((h.position(cube).x, h.viewport.snap_hit.map(|hit| hit.kind)));
+        }
+        h.frame(vec![Harness::button(pointer, false)]);
+        h.frame(vec![]);
+        xs
+    }
+
+    #[test]
+    fn a_snapping_move_lines_the_axis_up_with_a_target_along_the_handle() {
+        use grid4d_render::SnapKind;
+        let target = |h: &mut Harness| {
+            // A Null on the cube's X line (the cube's axis is at y = 100).
+            let null = grid4d_scene::Node::new("Target", grid4d_scene::ObjectKind::Null)
+                .with_position(Vec3::new(400.0, 100.0, 0.0));
+            h.doc.scene.insert(null);
+        };
+        let mut h = Harness::new();
+        target(&mut h);
+        h.editor.snap.enabled = true;
+        h.editor.snap.targets = snap_only(&[SnapKind::Axis]);
+        let xs = drag_x_in_small_steps(&mut h, 150);
+        let stuck: Vec<_> = xs.iter().filter(|(x, _)| (x - 400.0).abs() < 1e-3).collect();
+        assert!(stuck.len() >= 3, "held at the target for a few frames: {xs:?}");
+        assert!(stuck.iter().all(|(_, kind)| *kind == Some(SnapKind::Axis)), "and shown");
+        assert!(xs.last().unwrap().0 > 410.0, "then let go: {xs:?}");
+        assert_eq!(h.editor.history.undo_len(), 1, "one undo step");
+        assert_eq!(h.viewport.snap_hit, None, "nothing shown after the drag");
+
+        let mut free = Harness::new();
+        target(&mut free);
+        let xs = drag_x_in_small_steps(&mut free, 150);
+        // (The first frames are below egui's drag threshold.)
+        let moving: Vec<f32> = xs.iter().map(|&(x, _)| x).skip_while(|&x| x == 0.0).collect();
+        assert!(
+            moving.windows(2).all(|w| w[1] > w[0]),
+            "without snapping it never sticks: {xs:?}"
+        );
+        assert!(xs.iter().all(|(_, kind)| kind.is_none()));
+    }
+
+    #[test]
+    fn tweak_snaps_a_point_onto_another_point_in_3d_or_on_screen_in_2d() {
+        use grid4d_render::SnapKind;
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Points, Tool::Move);
+        h.editor.transform_settings.tweak = true;
+        h.editor.snap.enabled = true;
+        h.editor.snap.targets = snap_only(&[SnapKind::Vertex]);
+        let before = h.mesh(cube);
+        let world = h.doc.scene.world_matrix(cube);
+        let index_of = |p: Vec3| {
+            before
+                .mesh()
+                .points()
+                .iter()
+                .position(|&q| world.transform_point3(q).abs_diff_eq(p, 1e-3))
+                .unwrap()
+        };
+        // The cube spans y 0..200: the corner nearest the camera, and the one behind it.
+        let (a, b) = (Vec3::new(100.0, 200.0, 100.0), Vec3::new(100.0, 200.0, -100.0));
+        let (ia, ib) = (index_of(a), index_of(b));
+        let rect = h.viewport.view_rect;
+        let view_proj = h.viewport.camera.view_projection(rect.aspect_ratio());
+        let (from, to) = (
+            project(&view_proj, rect, a).unwrap(),
+            project(&view_proj, rect, b).unwrap(),
+        );
+
+        let drag = |h: &mut Harness| {
+            h.frame(vec![Event::PointerMoved(from)]);
+            h.frame(vec![Harness::button(from, true)]);
+            for step in 1..=4u8 {
+                let at = from + (to + vec2(2.0, 1.0) - from) * f32::from(step) / 4.0;
+                h.frame(vec![Event::PointerMoved(at)]);
+            }
+            let shown = h.viewport.snap_hit.map(|hit| hit.kind);
+            h.frame(vec![Harness::button(to + vec2(2.0, 1.0), false)]);
+            h.frame(vec![]);
+            shown
+        };
+        assert_eq!(
+            drag(&mut h),
+            Some(SnapKind::Vertex),
+            "the target is shown while dragging"
+        );
+        let after = h.mesh(cube);
+        assert!(
+            after.mesh().points()[ia].abs_diff_eq(before.mesh().points()[ib], 1e-3),
+            "onto the other point: {}",
+            after.mesh().points()[ia]
+        );
+        assert_eq!(h.editor.history.undo_label(), Some("Move Points"));
+
+        h.editor.commands.push(EditorCommand::Undo);
+        h.frame(vec![]);
+        h.editor.snap.kind = crate::SnapType::TwoD;
+        drag(&mut h);
+        let moved = world.transform_point3(h.mesh(cube).mesh().points()[ia]);
+        assert!(
+            project(&view_proj, rect, moved).unwrap().distance(to) < 0.1,
+            "lined up on screen"
+        );
+        assert!(moved.distance(b) > 10.0, "but at its own depth: {moved}");
+    }
+
     #[test]
     fn an_extrude_drag_is_one_undo_step_and_esc_cancels_one() {
         let mut h = Harness::new();
@@ -1150,6 +1305,141 @@ mod tests {
             h.mesh(cube).mesh().face_count(),
             10,
             "cut in one frame, even if the pointer left right after"
+        );
+    }
+
+    /// Phase 4's acceptance (`docs/IMPLEMENTATION_PLAN.md`): a box modelled with
+    /// the tools — extrude, loop cut, bevel, Subdivision Surface — each step undone
+    /// and redone, then saved and reloaded.
+    #[test]
+    fn phase_4_acceptance_model_undo_redo_save_and_reload() {
+        let mut h = Harness::new();
+        let state = |h: &Harness, cube: NodeId| {
+            let node = h.doc.scene.get(cube).unwrap();
+            let faces = match &node.data.kind {
+                grid4d_scene::ObjectKind::Polygon { mesh, .. } => mesh.mesh().face_count(),
+                _ => 0,
+            };
+            let parent = node
+                .parent()
+                .and_then(|p| h.doc.scene.get(p))
+                .map(|n| n.data.kind.tag());
+            (faces, parent)
+        };
+        // 1. The box, made editable.
+        let cube = h.edit("Cube", EditMode::Polygons, Tool::Extrude);
+        let mut states = vec![state(&h, cube)];
+        assert_eq!(states[0].0, 6);
+
+        // 2. Extrude the top polygon (Apply).
+        let mesh = h.mesh(cube);
+        let top = (0..mesh.mesh().face_count())
+            .find(|&f| mesh.mesh().face_normal(f).abs_diff_eq(Vec3::Y, 1e-4))
+            .unwrap();
+        h.select(cube, Component::Polygon, vec![u32::try_from(top).unwrap()]);
+        h.editor.modeling_settings.extrude.offset = 100.0;
+        h.editor.commands.push(EditorCommand::ApplyMeshTool);
+        h.frame(vec![]);
+        states.push(state(&h, cube));
+        assert_eq!(states[1].0, 10, "four new walls");
+
+        // 3. A loop cut around the box: click the middle of the nearest vertical edge.
+        h.editor.mode = EditMode::Edges;
+        h.editor.tool = Tool::LoopCut;
+        h.frame(vec![]);
+        let mesh = h.mesh(cube);
+        let world = h.doc.scene.world_matrix(cube);
+        let eye = h.viewport.camera.eye();
+        let topology = mesh.topology();
+        let points = mesh.mesh().points();
+        let middle = |e: usize| {
+            let [a, b] = topology.edges()[e];
+            world.transform_point3((points[a as usize] + points[b as usize]) * 0.5)
+        };
+        let vertical = (0..topology.edge_count())
+            .filter(|&e| {
+                let [a, b] = topology.edges()[e];
+                let (pa, pb) = (points[a as usize], points[b as usize]);
+                (pa.x - pb.x).abs() < 1e-3 && (pa.z - pb.z).abs() < 1e-3
+            })
+            .min_by(|&e, &f| middle(e).distance(eye).total_cmp(&middle(f).distance(eye)))
+            .unwrap();
+        let rect = h.viewport.view_rect;
+        let at = project(
+            &h.viewport.camera.view_projection(rect.aspect_ratio()),
+            rect,
+            middle(vertical),
+        )
+        .unwrap();
+        h.frame(vec![Event::PointerMoved(at)]);
+        h.frame(vec![]);
+        h.frame(vec![Harness::button(at, true)]);
+        h.frame(vec![Harness::button(at, false)]);
+        h.frame(vec![Event::PointerGone]);
+        states.push(state(&h, cube));
+        assert_eq!(states[2].0, 14, "the cut adds a ring of four polygons");
+
+        // 4. Bevel one edge (Apply).
+        h.editor.tool = Tool::Bevel;
+        h.select(cube, Component::Edge, vec![0]);
+        h.editor.commands.push(EditorCommand::ApplyMeshTool);
+        h.frame(vec![]);
+        states.push(state(&h, cube));
+        assert!(states[3].0 > states[2].0, "bevelled: {states:?}");
+
+        // 5. Smooth it: Alt-create a Subdivision Surface around it.
+        h.editor.mode = EditMode::Model;
+        h.editor.selection.set_single(cube);
+        h.editor
+            .commands
+            .push(EditorCommand::WrapInGenerator(ObjectKindTag::SubdivisionSurface));
+        h.frame(vec![]);
+        states.push(state(&h, cube));
+        assert_eq!(states[4].1, Some(ObjectKindTag::SubdivisionSurface));
+        assert_eq!(
+            h.editor.history.undo_len(),
+            7,
+            "one step per tool, plus the two selections"
+        );
+
+        // Every step undoes and redoes exactly (selection steps change no geometry).
+        let final_mesh = h.mesh(cube);
+        let step = |h: &mut Harness, command: EditorCommand, to: (usize, Option<ObjectKindTag>)| {
+            for _ in 0..2 {
+                h.editor.commands.push(command.clone());
+                h.frame(vec![]);
+                if state(h, cube) == to {
+                    return;
+                }
+            }
+            panic!("{command:?} did not reach {to:?}: {:?}", state(h, cube));
+        };
+        for expected in states.iter().rev().skip(1) {
+            step(&mut h, EditorCommand::Undo, *expected);
+        }
+        step(&mut h, EditorCommand::Undo, (0, None));
+        assert!(!h.editor.history.can_undo(), "back to the parametric cube");
+        for expected in &states {
+            step(&mut h, EditorCommand::Redo, *expected);
+        }
+        assert!(!h.editor.history.can_redo());
+        assert_eq!(h.mesh(cube).mesh(), final_mesh.mesh());
+
+        // Saved and reloaded: the same mesh under the same generator.
+        let loaded = grid4d_io::from_bytes(&grid4d_io::to_bytes(&h.doc).unwrap()).unwrap();
+        let (id, node) = loaded.scene.iter().find(|(_, n)| n.data.name == "Cube").unwrap();
+        let grid4d_scene::ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
+            panic!("not a polygon object after loading")
+        };
+        assert_eq!(mesh.mesh(), final_mesh.mesh());
+        let parent = loaded
+            .scene
+            .get(id)
+            .and_then(|n| n.parent())
+            .and_then(|p| loaded.scene.get(p));
+        assert_eq!(
+            parent.map(|n| n.data.kind.tag()),
+            Some(ObjectKindTag::SubdivisionSurface)
         );
     }
 

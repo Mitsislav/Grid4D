@@ -7,7 +7,7 @@ workflow and layout inspired by Cinema 4D.
 
 ![Grid4D workspace](docs/screenshot.png)
 
-**Status: v0.4 in progress — polygon modelling.** The workspace, scene graph, GPU
+**Status: v0.4 — polygon modelling, complete; next: glTF/OBJ interchange.** The workspace, scene graph, GPU
 viewport, undo/redo and `.g4d` files work, and polygon objects can be modelled with
 component selection, Extrude, Inset, Bevel, Bridge, cuts and more, then smoothed with
 the Subdivision Surface generator; keyframes, glTF and rendering are on the roadmap (see
@@ -50,6 +50,10 @@ the [progress log](docs/progress.md).
   Delete in every component mode; Bevel (`M~S`, edges and points, with a rounded
   profile), Bridge (`B`, between polygons or border edges), Weld and Optimize (`U~O`).
   Each operation is one undo step, and selections follow their components.
+- **Snapping** (`Shift+S`): drag a Move arrow (or Tweak a component) and point the
+  cursor at a vertex, edge, edge middle, polygon centre, surface, axis or grid
+  crossing; the target is highlighted and the element lines up with it. 2D or 3D,
+  adjustable radius and targets.
 - **Subdivision Surface** generator: smooths its first child (the cage) live with
   Catmull-Clark (levels, Linear Pre-Subdivision, border rule). Alt + create wraps the
   selected object, `Q` switches it off and on, Make Editable bakes the result; edit

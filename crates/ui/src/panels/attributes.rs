@@ -492,9 +492,13 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
             Tool::Move => {
                 check_row(ui, "Tweak Mode", &mut editor.transform_settings.tweak);
                 ui.label("");
-                ui.label(
-                    RichText::new("With nothing selected, drag a point, edge or polygon to move just it")
-                        .color(p::TEXT_DIM),
+                // Wrapped: a long label in a grid would widen the whole panel.
+                ui.add(
+                    egui::Label::new(
+                        RichText::new("With nothing selected, drag a point, edge or polygon to move just it")
+                            .color(p::TEXT_DIM),
+                    )
+                    .wrap(),
                 );
                 ui.end_row();
             }
@@ -582,6 +586,9 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 check_row(ui, "Select Cuts", &mut m.select_cuts);
             }
         });
+    if tool == Tool::Move {
+        snap_section(ui, &mut editor.snap);
+    }
     if tool == Tool::Bridge {
         ui.add_space(6.0);
         let target = crate::commands::component_target(doc, editor)
@@ -625,6 +632,39 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
         }
         ui.label(RichText::new("Or drag left/right in the viewport: every drag is a new operation").color(p::TEXT_DIM));
     }
+}
+
+/// Snapping options (Move tool; the same settings as the snap button's menu).
+fn snap_section(ui: &mut Ui, snap: &mut crate::SnapSettings) {
+    section_heading(ui, "Snap");
+    Grid::new("grid4d.attr.snap")
+        .num_columns(2)
+        .spacing([6.0, 4.0])
+        .show(ui, |ui| {
+            check_row(ui, "Enable Snapping", &mut snap.enabled);
+            attr_label(ui, "Type", LABEL_WIDTH);
+            egui::ComboBox::from_id_salt("grid4d.attr.snap.type")
+                .selected_text(snap.kind.label())
+                .show_ui(ui, |ui| {
+                    for kind in crate::SnapType::ALL {
+                        ui.selectable_value(&mut snap.kind, kind, kind.label());
+                    }
+                });
+            ui.end_row();
+            attr_label(ui, "Snap Radius", LABEL_WIDTH);
+            ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut snap.radius)
+                    .speed(0.2)
+                    .range(0.1..=100.0)
+                    .suffix(" px"),
+            );
+            ui.end_row();
+            for kind in grid4d_render::SnapKind::ALL {
+                check_row(ui, kind.label(), snap.targets.flag_mut(kind));
+            }
+        });
+    ui.label(RichText::new("The gizmo's centre (or the tweaked element) snaps while you move it").color(p::TEXT_DIM));
 }
 
 /// A length that may be negative (a tool's offset).

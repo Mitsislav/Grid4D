@@ -7,6 +7,29 @@ use crate::{
     theme::{metrics, palette as p},
 };
 
+/// The snapping settings as menu entries (the snap button's menu, Tools ▸ Snap).
+pub(crate) fn snap_menu(ui: &mut Ui, snap: &mut crate::SnapSettings) {
+    ui.checkbox(&mut snap.enabled, "Enable Snapping  (Shift+S)");
+    ui.separator();
+    for kind in crate::SnapType::ALL {
+        ui.radio_value(&mut snap.kind, kind, kind.label());
+    }
+    ui.separator();
+    for kind in grid4d_render::SnapKind::ALL {
+        ui.checkbox(snap.targets.flag_mut(kind), kind.label());
+    }
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label("Snap Radius");
+        ui.add(
+            egui::DragValue::new(&mut snap.radius)
+                .speed(0.2)
+                .range(0.1..=100.0)
+                .suffix(" px"),
+        );
+    });
+}
+
 /// Visual options for [`icon_button`].
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct IconStyle {

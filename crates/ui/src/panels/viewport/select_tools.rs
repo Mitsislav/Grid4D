@@ -17,6 +17,7 @@ use super::{
     ViewportPanel,
     gizmo::{PointEdit, centre_of, move_label},
     local, project,
+    snapping::{Snapper, generators_above},
 };
 use crate::{EditMode, EditorCommand, EditorState, SelectMode, Tool, theme::metrics};
 
@@ -51,6 +52,8 @@ pub(super) enum Gesture {
         before: NodeData,
         edit: PointEdit,
         last: Pos2,
+        /// Generators above `node` (snapping ignores them: their result moves too).
+        skip: Vec<NodeId>,
     },
     /// A modelling tool's drag (Extrude, Inset).
     MeshTool(super::mesh_tools::MeshDrag),
@@ -318,23 +321,45 @@ impl ViewportPanel {
                 before,
                 edit,
                 last: press,
+                skip: generators_above(&doc.scene, node),
             };
         }
+        let view = self.screen_view(rect);
         let camera = &self.camera;
-        let Gesture::Tweak { node, edit, last, .. } = &mut self.gesture else {
+        let mut snapper = Snapper {
+            settings: editor.snap,
+            scene: &self.evaluated,
+            view,
+            rect,
+            cache: &mut self.snap_cache,
+            grid_spacing: camera.grid_spacing(),
+            hit: None,
+        };
+        let Gesture::Tweak {
+            node, edit, last, skip, ..
+        } = &mut self.gesture
+        else {
             return false;
         };
-        if let Some(pointer) = pointer
-            && pointer != *last
-        {
-            let depth = (edit.pivot - camera.eye()).dot(camera.forward()).max(camera.near);
-            let per_point = camera.world_units_per_pixel(depth, rect.height());
-            let d = pointer - *last;
-            // Screen y points down.
-            edit.moved += (camera.right() * d.x - camera.up() * d.y) * per_point;
-            edit.apply(glam::Mat4::from_translation(edit.moved), &mut doc.scene, *node);
-            *last = pointer;
+        if let Some(pointer) = pointer {
+            if pointer != *last {
+                let depth = (edit.pivot + edit.free - camera.eye())
+                    .dot(camera.forward())
+                    .max(camera.near);
+                let per_point = camera.world_units_per_pixel(depth, rect.height());
+                let d = pointer - *last;
+                // Screen y points down.
+                edit.free += (camera.right() * d.x - camera.up() * d.y) * per_point;
+                *last = pointer;
+            }
+            // A free move: the grabbed element goes onto the target itself.
+            let to = snapper.snap(pointer, edit.pivot + edit.free, None, skip, Some((*node, &edit.moving)));
+            if to - edit.pivot != edit.moved {
+                edit.moved = to - edit.pivot;
+                edit.apply(glam::Mat4::from_translation(edit.moved), &mut doc.scene, *node);
+            }
         }
+        self.snap_hit = snapper.hit;
         if !down
             && let Gesture::Tweak {
                 node,

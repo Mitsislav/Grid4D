@@ -191,6 +191,9 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                 time.step(1);
             }
         }
+        if i.modifiers.shift_only() && i.key_pressed(Key::S) {
+            editor.snap.enabled = !editor.snap.enabled;
+        }
         let backspace = i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete);
         if backspace && i.modifiers.command && !i.modifiers.alt && !i.modifiers.shift {
             editor.commands.push(EditorCommand::DissolveSelected);
@@ -286,6 +289,35 @@ mod tests {
         assert_eq!(press(Key::S, ctrl, false), [EditorCommand::Save]);
         assert_eq!(press(Key::S, ctrl | Modifiers::SHIFT, false), [EditorCommand::SaveAs]);
         assert!(press(Key::S, Modifiers::NONE, false).is_empty());
+    }
+
+    #[test]
+    fn shift_s_toggles_snapping_like_c4d() {
+        let ctx = egui::Context::default();
+        let (mut doc, mut editor) = (Document::default(), EditorState::default());
+        let shift_s = |editor: &mut EditorState, doc: &mut Document| {
+            let modifiers = Modifiers::SHIFT;
+            let input = RawInput {
+                events: vec![
+                    Event::ModifiersChanged(modifiers),
+                    Event::Key {
+                        key: Key::S,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    },
+                ],
+                ..RawInput::default()
+            };
+            ctx.run_ui(input, |ui| handle(ui.ctx(), doc, editor))
+                .drop_without_applying_deltas();
+        };
+        shift_s(&mut editor, &mut doc);
+        assert!(editor.snap.enabled);
+        shift_s(&mut editor, &mut doc);
+        assert!(!editor.snap.enabled);
+        assert!(press(Key::S, Modifiers::COMMAND | Modifiers::SHIFT, false) == [EditorCommand::SaveAs]);
     }
 
     #[test]

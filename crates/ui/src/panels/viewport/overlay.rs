@@ -141,3 +141,32 @@ pub(super) fn marquee(painter: &Painter, frame: Rect) {
         StrokeKind::Inside,
     );
 }
+
+/// The snap target a drag is stuck to: a marker on the point (and the edge or
+/// grid line drawn over), with the target's name.
+pub(super) fn snap_target(painter: &Painter, rect: Rect, view_proj: &Mat4, hit: &grid4d_render::SnapHit) {
+    let stroke = Stroke::new(2.0, p::SNAP);
+    if let Some([a, b]) = hit.segment
+        && let (Some(a), Some(b)) = (project(view_proj, rect, a), project(view_proj, rect, b))
+    {
+        painter.line_segment([a, b], stroke);
+    }
+    let Some(at) = project(view_proj, rect, hit.position) else {
+        return;
+    };
+    painter.rect_stroke(
+        Rect::from_center_size(at, vec2(10.0, 10.0)),
+        CornerRadius::ZERO,
+        stroke,
+        StrokeKind::Middle,
+    );
+    painter.circle_filled(at, 2.0, p::SNAP);
+    let galley = painter.layout_no_wrap(hit.kind.label().to_owned(), FontId::proportional(11.5), p::SNAP);
+    let corner = at + vec2(11.0, -11.0 - galley.size().y);
+    painter.rect_filled(
+        Rect::from_min_size(corner, galley.size()).expand(3.0),
+        CornerRadius::same(3),
+        egui::Color32::from_black_alpha(180),
+    );
+    painter.galley(corner, galley, p::SNAP);
+}

@@ -22,6 +22,7 @@ mod frame;
 mod gpu;
 mod mesh;
 mod picking;
+mod snap;
 mod target;
 
 pub use camera::{OrbitCamera, Ray};
@@ -33,6 +34,7 @@ pub use frame::{FrameData, InstanceRaw};
 pub use gpu::{GpuTargetConfig, ViewportRenderer};
 pub use mesh::{TessellationScratch, Vertex, tessellate};
 pub use picking::pick;
+pub use snap::{SnapCache, SnapHit, SnapKind, SnapQuery, SnapTargets, find_snap, snapped_position};
 pub use target::ViewportTarget;
 
 /// WGSL sources, exposed for offline validation and tooling.
