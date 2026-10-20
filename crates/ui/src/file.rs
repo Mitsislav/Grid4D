@@ -10,9 +10,12 @@ use std::{
 };
 
 use egui::ViewportCommand;
-use grid4d_scene::Document;
+use grid4d_scene::{Document, NodeId, SceneEdit};
 
 use crate::{EditorCommand, EditorState, History, ViewportPanel, recent::RecentFiles};
+
+/// Every extension File ▸ Open and File ▸ Merge accept.
+const ANY_EXTENSIONS: [&str; 4] = ["g4d", "oc4d", "gltf", "glb"];
 
 /// Native open/save dialogs, behind a trait so tests never open a window.
 pub trait FileDialogs: std::fmt::Debug {
@@ -21,6 +24,10 @@ pub trait FileDialogs: std::fmt::Debug {
     /// Where to save, or `None` if the user cancelled. `suggested` is a bare
     /// file name such as `Untitled 1.g4d`.
     fn pick_save(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf>;
+    /// A file to merge into the document (File ▸ Merge), or `None` if cancelled.
+    fn pick_merge(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
+        self.pick_open(directory)
+    }
 }
 
 /// The platform dialogs (Win32, Cocoa, XDG desktop portal), via `rfd`.
@@ -29,9 +36,14 @@ pub struct NativeDialogs;
 
 impl FileDialogs for NativeDialogs {
     fn pick_open(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
-        with_directory(rfd::FileDialog::new(), directory)
+        with_filters(with_directory(rfd::FileDialog::new(), directory))
             .set_title("Open")
-            .add_filter("Grid4D Document", &grid4d_io::OPEN_EXTENSIONS)
+            .pick_file()
+    }
+
+    fn pick_merge(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
+        with_filters(with_directory(rfd::FileDialog::new(), directory))
+            .set_title("Merge")
             .pick_file()
     }
 
@@ -43,6 +55,14 @@ impl FileDialogs for NativeDialogs {
             .save_file()
             .map(with_extension)
     }
+}
+
+/// Grid4D documents and glTF files, together and each on its own.
+fn with_filters(dialog: rfd::FileDialog) -> rfd::FileDialog {
+    dialog
+        .add_filter("Grid4D Document or glTF", &ANY_EXTENSIONS)
+        .add_filter("Grid4D Document", &grid4d_io::OPEN_EXTENSIONS)
+        .add_filter("glTF 2.0", &grid4d_io::IMPORT_EXTENSIONS)
 }
 
 fn with_directory(dialog: rfd::FileDialog, directory: Option<&Path>) -> rfd::FileDialog {
@@ -236,13 +256,22 @@ fn perform(action: FileAction, doc: &mut Document, editor: &mut EditorState, vie
     }
 }
 
-/// Loads `path` and makes it the current document. On error the current
-/// document stays and an alert explains why.
+/// Loads `path` and makes it the current document. A glTF file becomes a new,
+/// untitled document named after it (saving asks for a `.g4d` path). On error
+/// the current document stays and an alert explains why.
 pub(crate) fn open_path(path: PathBuf, doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel) {
-    match grid4d_io::load(&path) {
-        Ok(loaded) => {
+    let loaded = if grid4d_io::is_importable(&path) {
+        let name = path
+            .file_stem()
+            .map_or_else(|| "Untitled".into(), |s| s.to_string_lossy());
+        grid4d_io::import(&path).map(|imported| (imported.into_document(&name), None))
+    } else {
+        grid4d_io::load(&path).map(|doc| (doc, Some(path.clone())))
+    };
+    match loaded {
+        Ok((loaded, saved_path)) => {
             editor.file.recent.touch(&path);
-            replace(doc, editor, viewport, loaded, Some(path));
+            replace(doc, editor, viewport, loaded, saved_path);
             viewport.frame_scene(&doc.scene);
         }
         Err(err) => {
@@ -271,6 +300,61 @@ fn replace(
     viewport.reset_view();
     editor.file.path = path;
     editor.file.saved_state = editor.history.state_id();
+}
+
+/// File ▸ Merge: adds the objects of `path` (a glTF file or a Grid4D document)
+/// to the document at the top level, as one undo step, and selects them. On
+/// error nothing changes and an alert explains why.
+pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel) {
+    let failed = |editor: &mut EditorState, message: String| {
+        editor.file.alert = Some(Alert {
+            title: "Could Not Merge File",
+            message: format!("{}\n\n{message}", path.display()),
+        });
+    };
+    let imported = match grid4d_io::import(path) {
+        Ok(imported) => imported,
+        Err(err) => return failed(editor, err.to_string()),
+    };
+    let selection_before = editor.selection.clone();
+    let mut ids: Vec<NodeId> = Vec::with_capacity(imported.nodes.len());
+    let mut roots: Vec<NodeId> = Vec::new();
+    let mut inverses = Vec::with_capacity(imported.nodes.len());
+    for node in imported.nodes {
+        let parent = node.parent.and_then(|p| ids.get(p).copied());
+        let insert = SceneEdit::Insert {
+            parent,
+            index: usize::MAX,
+            data: node.data,
+        };
+        match doc.apply(insert) {
+            Ok(inverse) => {
+                let Some(id) = inverse.node() else { continue };
+                if parent.is_none() {
+                    roots.push(id);
+                }
+                ids.push(id);
+                inverses.push(inverse);
+            }
+            Err(err) => {
+                // All or nothing: take back what was inserted.
+                for inverse in inverses.into_iter().rev() {
+                    let _ = doc.apply(inverse);
+                }
+                return failed(editor, err.to_string());
+            }
+        }
+    }
+    if roots.is_empty() {
+        return failed(editor, "The file contains no objects.".to_owned());
+    }
+    inverses.reverse(); // children are detached before their parents
+    editor.selection.set_all(roots);
+    let selection_after = editor.selection.clone();
+    editor
+        .history
+        .record(doc, "Merge", inverses, selection_before, selection_after);
+    viewport.frame_selection(&doc.scene, &editor.selection);
 }
 
 /// Saves to the current file, or asks where (always with `ask_path`, i.e. Save As).
@@ -341,9 +425,9 @@ pub fn is_document(path: &Path) -> bool {
     })
 }
 
-/// Opens a document dropped onto the window (asking "Save changes?" first), or
-/// explains why the dropped files cannot be opened. Call once per frame, before
-/// the commands are applied.
+/// Opens a document dropped onto the window (asking "Save changes?" first),
+/// merges a dropped glTF file, or explains why the dropped files cannot be used.
+/// Call once per frame, before the commands are applied.
 pub fn accept_dropped_files(ctx: &egui::Context, editor: &mut EditorState) {
     // Allocates only on the frame something was dropped.
     let choice = ctx.input(|i| {
@@ -352,23 +436,36 @@ pub fn accept_dropped_files(ctx: &egui::Context, editor: &mut EditorState) {
     });
     match choice {
         None => {}
-        Some(Ok(path)) => editor.commands.push(EditorCommand::OpenFile(path)),
+        Some(Ok(DropAction::Open(path))) => editor.commands.push(EditorCommand::OpenFile(path)),
+        Some(Ok(DropAction::Merge(path))) => editor.commands.push(EditorCommand::MergeFile(path)),
         Some(Err(alert)) => editor.file.alert = Some(alert),
     }
 }
 
-/// The first `.g4d` among `paths`; `None` if nothing was dropped, an alert if
-/// none of them is a document. (One document is open at a time, so further
-/// documents in the same drop are ignored.)
-fn choose_dropped(paths: &[&Path]) -> Option<Result<PathBuf, Alert>> {
+/// What a drop does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DropAction {
+    /// A Grid4D document: open it.
+    Open(PathBuf),
+    /// A glTF file: merge it (the reference's "Merge on Drag & Drop").
+    Merge(PathBuf),
+}
+
+/// The first `.g4d` among `paths` (opened), else the first glTF file (merged);
+/// `None` if nothing was dropped, an alert if none of them can be used. (One
+/// document is open at a time, so further files in the same drop are ignored.)
+fn choose_dropped(paths: &[&Path]) -> Option<Result<DropAction, Alert>> {
     if paths.is_empty() {
         return None;
     }
-    Some(match paths.iter().find(|path| is_document(path)) {
-        Some(path) => Ok(path.to_path_buf()),
+    if let Some(path) = paths.iter().find(|path| is_document(path)) {
+        return Some(Ok(DropAction::Open(path.to_path_buf())));
+    }
+    Some(match paths.iter().find(|path| grid4d_io::is_importable(path)) {
+        Some(path) => Ok(DropAction::Merge(path.to_path_buf())),
         None => {
             let mut message = format!(
-                "None of the dropped files is a Grid4D document (.{}):\n",
+                "None of the dropped files is a Grid4D document (.{}) or a glTF file (.gltf, .glb):\n",
                 grid4d_io::EXTENSION
             );
             for path in paths {
@@ -446,7 +543,7 @@ mod tests {
         history.record(
             &mut scratch,
             "Edit",
-            vec![grid4d_scene::SceneEdit::SetName("x".to_owned())],
+            vec![SceneEdit::SetName("x".to_owned())],
             crate::Selection::default(),
             crate::Selection::default(),
         );
@@ -792,19 +889,138 @@ mod tests {
         assert_eq!(f.editor.file.alert.as_ref().unwrap().title, "Could Not Open Document");
     }
 
+    // ── Merge and glTF ──────────────────────────────────────────────────────
+
+    /// `model.gltf` (+ `tri.bin`) in `dir`: Model > Tri, a one-triangle mesh.
+    fn write_gltf(dir: &Path) -> PathBuf {
+        let mut bin = Vec::new();
+        for v in [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0] {
+            bin.extend(v.to_le_bytes());
+        }
+        std::fs::write(dir.join("tri.bin"), &bin).unwrap();
+        let json = r#"{
+            "asset": { "version": "2.0" },
+            "scene": 0, "scenes": [ { "nodes": [0] } ],
+            "nodes": [ { "name": "Model", "children": [1], "translation": [0, 1, 0] },
+                       { "name": "Tri", "mesh": 0 } ],
+            "meshes": [ { "primitives": [ { "attributes": { "POSITION": 0 } } ] } ],
+            "buffers": [ { "byteLength": 36, "uri": "tri.bin" } ],
+            "bufferViews": [ { "buffer": 0, "byteLength": 36 } ],
+            "accessors": [ { "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+                             "min": [0, 0, 0], "max": [1, 1, 0] } ]
+        }"#;
+        let path = dir.join("model.gltf");
+        std::fs::write(&path, json).unwrap();
+        path
+    }
+
+    fn names(doc: &Document) -> Vec<String> {
+        grid4d_io::Imported::from_document(doc)
+            .nodes
+            .into_iter()
+            .map(|n| n.data.name)
+            .collect()
+    }
+
+    #[test]
+    fn merge_adds_a_gltf_model_as_one_undo_step_and_selects_it() {
+        let mut f = Fixture::new("merge_gltf", Some("model.gltf"), None);
+        let path = write_gltf(&f.dir);
+        let before = names(&f.doc);
+        let selection_before = f.editor.selection.clone();
+        f.run(&[EditorCommand::Merge]);
+        assert_eq!(f.log.borrow().open_calls, 1, "asked for the file");
+
+        let after = names(&f.doc);
+        assert_eq!(after.len(), before.len() + 2);
+        assert_eq!(
+            &after[before.len()..],
+            ["Model", "Tri"],
+            "added at the end, at the top level"
+        );
+        let model = f.doc.scene.iter().find(|(_, n)| n.data.name == "Model").unwrap().0;
+        assert_eq!(f.editor.selection.as_slice(), &[model], "the merged object is selected");
+        assert!(
+            f.doc
+                .scene
+                .get(model)
+                .unwrap()
+                .data
+                .transform
+                .position
+                .abs_diff_eq(glam::Vec3::new(0.0, 100.0, 0.0), 1e-4),
+            "metres → centimetres"
+        );
+        assert_eq!(f.editor.history.undo_label(), Some("Merge"));
+        assert!(f.dirty());
+        assert_eq!(f.editor.file.path(), None, "merging keeps the document's own file");
+
+        f.run(&[EditorCommand::Undo]);
+        assert_eq!(names(&f.doc), before, "undo removes all of it");
+        assert_eq!(f.editor.selection, selection_before);
+        f.run(&[EditorCommand::Redo]);
+        assert_eq!(names(&f.doc), after);
+        assert!(f.doc.scene.contains(model), "the same objects come back");
+
+        // A dropped glTF file merges straight away.
+        f.run(&[EditorCommand::MergeFile(path)]);
+        assert_eq!(names(&f.doc).len(), after.len() + 2);
+    }
+
+    #[test]
+    fn a_document_merges_too_and_a_broken_file_changes_nothing() {
+        let mut f = Fixture::new("merge_g4d", None, None);
+        let other = f.dir.join("other.g4d");
+        grid4d_io::save(&Document::with_demo_scene(), &other).unwrap();
+        let count = names(&f.doc).len();
+        f.run(&[EditorCommand::MergeFile(other)]);
+        assert_eq!(names(&f.doc).len(), count * 2);
+        assert_eq!(f.editor.history.undo_len(), 1);
+
+        let broken = f.dir.join("broken.gltf");
+        std::fs::write(&broken, "{ not json").unwrap();
+        f.run(&[EditorCommand::MergeFile(broken)]);
+        assert_eq!(names(&f.doc).len(), count * 2, "nothing added");
+        assert_eq!(f.editor.history.undo_len(), 1, "nothing recorded");
+        assert_eq!(f.editor.file.alert.as_ref().unwrap().title, "Could Not Merge File");
+    }
+
+    #[test]
+    fn opening_a_gltf_file_makes_an_untitled_document_named_after_it() {
+        let mut f = Fixture::new("open_gltf", None, Some("saved.g4d"));
+        let path = write_gltf(&f.dir);
+        f.run(&[EditorCommand::OpenFile(path.clone())]);
+        assert_eq!(names(&f.doc), ["Model", "Tri"]);
+        assert_eq!(f.doc.name, "model");
+        assert_eq!(f.editor.file.path(), None, "not a .g4d: saving asks where");
+        assert!(!f.dirty());
+        assert!(f.editor.file.recent.paths().contains(&path));
+
+        f.run(&[EditorCommand::Save]);
+        assert_eq!(f.log.borrow().save_suggestions, ["model.g4d"]);
+        assert_eq!(f.editor.file.path(), Some(f.dir.join("saved.g4d").as_path()));
+    }
+
     // ── Drag and drop ───────────────────────────────────────────────────────
 
     #[test]
-    fn the_first_document_in_a_drop_is_chosen() {
+    fn the_first_document_in_a_drop_opens_else_a_gltf_file_merges() {
         assert_eq!(choose_dropped(&[]), None);
-        let picked = choose_dropped(&[Path::new("notes.txt"), Path::new("a/shot.OC4D"), Path::new("b.g4d")]);
-        assert_eq!(picked, Some(Ok(PathBuf::from("a/shot.OC4D"))));
+        let picked = choose_dropped(&[
+            Path::new("notes.txt"),
+            Path::new("duck.glb"),
+            Path::new("a/shot.OC4D"),
+            Path::new("b.g4d"),
+        ]);
+        assert_eq!(picked, Some(Ok(DropAction::Open(PathBuf::from("a/shot.OC4D")))));
+        let picked = choose_dropped(&[Path::new("notes.txt"), Path::new("model.GLTF")]);
+        assert_eq!(picked, Some(Ok(DropAction::Merge(PathBuf::from("model.GLTF")))));
 
-        let Some(Err(alert)) = choose_dropped(&[Path::new("a/notes.txt"), Path::new("model.gltf")]) else {
-            panic!("no document was dropped");
+        let Some(Err(alert)) = choose_dropped(&[Path::new("a/notes.txt"), Path::new("model.obj")]) else {
+            panic!("nothing usable was dropped");
         };
         assert_eq!(alert.title, "Cannot Open Dropped Files");
-        assert!(alert.message.contains("notes.txt") && alert.message.contains("model.gltf"));
+        assert!(alert.message.contains("notes.txt") && alert.message.contains("model.obj"));
     }
 
     /// A file dropped onto the window, as the windowing integration reports it.

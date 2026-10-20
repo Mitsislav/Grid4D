@@ -12,10 +12,10 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 4 — Polygon modelling & Subdivision Surface (v0.4) |
-| Last step done | 4.8 — Snapping (2026-10-20); phase 4 complete |
-| Next step | 5.1 — glTF 2.0 import |
-| Tests | 342, all passing; clippy and rustfmt clean |
+| Current phase | 5 — Interchange: glTF, OBJ (v0.5) |
+| Last step done | 5.1 — glTF 2.0 import, File ▸ Merge (2026-10-20) |
+| Next step | 5.2 — glTF 2.0 export |
+| Tests | 354, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -134,7 +134,7 @@ The starting point, `64d00bf`:
 | docs (`163ac7c`) | The user manual and this progress log; the shortcuts dialog fits small windows again | 292 |
 | 4.6 (`c73d732`) | Bevel (edges and points, rounded profile), Bridge (polygons, border edges), Weld, Optimize (dialog) | 308 |
 | 4.7 (`d0047fc`) | Generators; the Subdivision Surface (Catmull-Clark on n-gons, Linear Pre-Subdivision, border rules); Alt-create wraps the selection, Q switches, Make Editable bakes | 328 |
-| 4.8 | Snapping (Shift+S): vertex, edge, edge mid point, polygon centre, surface, axis, grid point and line; 2D/3D; the Move handles and Tweak; highlight with the target's name; settings in the palette menu, Tools ▸ Snap and the Move tool. Phase 4 acceptance test: box → extrude → loop cut → bevel → Subdivision Surface, each step undone and redone, saved and reloaded | 342 |
+| 4.8 (`babca6d`) | Snapping (Shift+S): vertex, edge, edge mid point, polygon centre, surface, axis, grid point and line; 2D/3D; the Move handles and Tweak; highlight with the target's name; settings in the palette menu, Tools ▸ Snap and the Move tool. Phase 4 acceptance test: box → extrude → loop cut → bevel → Subdivision Surface, each step undone and redone, saved and reloaded | 342 |
 
 Before each step we write a behaviour spec in [`reference/`](reference/README.md) from
 Maxon's public manual, in our own words (clean-room).
@@ -231,7 +231,7 @@ Maxon's public manual, in our own words (clean-room).
   window state, so it was restored afterwards. Reducing the large smooth gradients
   to a 256-colour palette produced bands, so the manual's images are now dithered.
 
-*Step 4.8 — problems and solutions:*
+*Step 4.8 — problems and solutions:* (see also the bugs list above)
 - **Where to look for targets.** The first version looked around the position the
   moved element would have without snapping. On screen the result was confusing: the
   target was highlighted somewhere between the gizmo and the cursor. The reference
@@ -253,6 +253,32 @@ Maxon's public manual, in our own words (clean-room).
   enough, so these captures move the real cursor over the window for a moment
   (and put it back). Posted right-clicks do not open menus at all, so the snap
   button's menu is checked by a headless test instead.
+
+## Phase 5 — Interchange (2026-10-20 – )
+
+| Step | Built | Tests |
+|------|-------|-------|
+| 5.1 | glTF 2.0 import (`.gltf` + `.bin`, embedded buffers, `.glb`): hierarchy, transforms, meshes (welded, with UVs), base colours, cameras, lights; Open makes a new document, File ▸ Merge (Ctrl+Shift+O) and drag and drop add to the current one (one undo step); Merge also takes `.g4d` files | 354 |
+
+*Problems and solutions:*
+- **The `gltf` crate's default features decode textures** (they pull in an image
+  library). We use it only to parse the file. Buffers are loaded by our own code:
+  the `.glb` binary chunk, `data:` URIs (a small base64 decoder) and files next to
+  the glTF, by relative path only, so a file cannot make Grid4D read anything else.
+- **Exporters split vertices** at every normal or UV seam, so a glTF cube has 24
+  vertices. Imported as they are, the faces would not be connected and modelling
+  tools or the Subdivision Surface would tear them apart (the reference's manual
+  suggests running Optimize afterwards). Identical positions are now merged on
+  import; the UVs live per corner, so the seams survive.
+- **Merging must be one undo step**, but each new object needs its parent's id,
+  which exists only after the parent is inserted. The objects are inserted one by one
+  and the inverses recorded as a single step. If one insert fails, the earlier ones
+  are taken back.
+- **A broken file must never hang or crash the app.** Node graphs with cycles are cut
+  (each node read once). Short buffers, out-of-range indices, non-finite numbers
+  and absolute or remote URIs are errors, shown in an alert. Tests feed such files.
+- **Display scaling bit us again on screen.** An earlier panel resize had left the
+  right panel 10 px narrower; it was dragged back to its original width.
 
 ---
 

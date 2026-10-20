@@ -43,6 +43,8 @@
 //! current version.
 
 mod common;
+mod gltf_import;
+mod import;
 mod v1;
 mod v2;
 mod v3;
@@ -56,6 +58,10 @@ use grid4d_scene::Document;
 use serde::Deserialize;
 
 use crate::common::Archive;
+pub use crate::{
+    gltf_import::import_gltf,
+    import::{IMPORT_EXTENSIONS, Imported, ImportedNode, import, is_importable},
+};
 
 /// File extension, without the dot.
 pub const EXTENSION: &str = "g4d";

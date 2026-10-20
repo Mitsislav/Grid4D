@@ -433,7 +433,7 @@ every step and reloading the saved archive.
 
 | Step | Size | Work |
 |------|------|------|
-| 5.1 | M | glTF 2.0 import (`gltf` crate): hierarchy, TRS → HPB, meshes → `Polygon`, cameras, `KHR_lights_punctual`; unit conversion (glTF metres → cm ×100) and Y-up already match |
+| 5.1 ✅ | M | glTF 2.0 import (`gltf` crate): hierarchy, TRS → HPB, meshes → `Polygon`, cameras, `KHR_lights_punctual`; unit conversion (glTF metres → cm ×100) and Y-up already match — done 2026-10-20 per [`reference/interchange-gltf.md`](reference/interchange-gltf.md) (new spec): `grid4d-io::import` (`Imported { nodes }` in pre-order with parent indices, `from_document` / `into_document`) and `gltf_import` (the `gltf` crate without its image/import features; `.glb` chunk, base64 data URIs and relative files read by us; triangles, strips and fans merged per mesh with identical positions welded, `TEXCOORD_0` per corner, base colour → display colour, shared meshes, cameras, lights, empty nodes → Nulls, matrices decomposed, cycles cut, non-finite data rejected). UI: File ▸ Open accepts glTF (a new untitled document named after the file), File ▸ Merge… (Ctrl+Shift+O, verified in Maxon's list) and dropped glTF files add the objects as one undo step (`file::merge`), `.g4d` files merge too; dialog filters for both formats. Checked on screen with a generated scene (open, merge of the `.glb`). **Later:** an import dialog (scale, toggles), materials/textures, animation, skins, Draco |
 | 5.2 | M | glTF 2.0 export (`.gltf`/`.glb`): primitives exported via their generated meshes; generators exported evaluated |
 | 5.3 | S | OBJ import/export (`tobj` for import; writer by hand) |
 | 5.4 | S | Later in Phase 6: materials (PBR metallic-roughness) and animation tracks in glTF |

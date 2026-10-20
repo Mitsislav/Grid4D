@@ -67,6 +67,10 @@ pub enum EditorCommand {
     /// Opens this document: File ▸ Open Recent, or a file dropped on the window
     /// (asks to save unsaved changes first).
     OpenFile(std::path::PathBuf),
+    /// Asks for a glTF file or Grid4D document and adds its objects (File ▸ Merge).
+    Merge,
+    /// Adds the objects of this file (a dropped glTF file). One undo step.
+    MergeFile(std::path::PathBuf),
     /// Saves to the current file, asking for a path if there is none yet.
     Save,
     /// Asks for a path and saves there.
@@ -241,6 +245,17 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::NewDocument => file::request(FileAction::New, doc, editor, viewport),
         EditorCommand::Open => file::request(FileAction::Open, doc, editor, viewport),
         EditorCommand::OpenFile(path) => file::request(FileAction::OpenPath(path), doc, editor, viewport),
+        EditorCommand::Merge => {
+            let directory = editor
+                .file
+                .path()
+                .and_then(std::path::Path::parent)
+                .map(std::path::Path::to_path_buf);
+            if let Some(path) = editor.file.dialogs.pick_merge(directory.as_deref()) {
+                file::merge(&path, doc, editor, viewport);
+            }
+        }
+        EditorCommand::MergeFile(path) => file::merge(&path, doc, editor, viewport),
         EditorCommand::Save => {
             file::save(doc, editor, false);
         }

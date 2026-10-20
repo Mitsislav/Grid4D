@@ -55,6 +55,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 # .g4d archives (format version 3+): only deflate, with the pure-Rust zlib backend.
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# glTF 2.0 reading; images are not decoded (no `import` feature), buffers are loaded by grid4d-io.
+gltf = { version = "1.4.1", default-features = false, features = ["utils", "names", "KHR_lights_punctual"] }
 
 # Diagnostics
 log = "0.4"

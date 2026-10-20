@@ -1,0 +1,90 @@
+# glTF 2.0 import (and File ▸ Merge)
+
+> Sources (read 2026-10-20): Khronos [glTF 2.0 specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html)
+> (units, axes, node transforms, meshes and accessors, cameras, `.glb` container) and
+> [`KHR_lights_punctual`](https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_lights_punctual);
+> Cinema 4D 2026/2027 manual — [glTF Import settings](https://help.maxon.net/c4d/2026/en-us/Content/html/FGLTFIMPORTER.html)
+> (a Scale factor with a unit, toggles for cameras, geometry and materials; the tip
+> to run Optimize on objects that arrive as separate polygons),
+> [Import/Export preferences](https://help.maxon.net/c4d/r21/us/html/FC4D-C4DIMPORTFILTER_GROUP.html)
+> (*Merge on Drag & Drop*; Shift reverses it),
+> [Keyboard Shortcuts](https://help.maxon.net/c4d/2025/en-us/Content/html/Shortcuts.html)
+> (*Merge Project* = Shift+Ctrl+O). Written in our own words.
+>
+> Covers implementation-plan step **5.1**. Export is step 5.2.
+
+## Purpose
+
+Bring models from other applications into Grid4D: open a `.gltf` or `.glb` file as
+a new document, or merge it (or another Grid4D document) into the current one.
+
+## Parameters
+
+None yet (an import dialog with Scale and toggles is *later*). Fixed choices:
+
+| What | Value | Why |
+|------|-------|-----|
+| Scale | × 100 | glTF lengths are metres, Grid4D's centimetres |
+| Axes | unchanged | both are right-handed and Y-up; cameras look along −Z in both |
+| Welding | identical positions merged | glTF repeats a vertex for each normal/UV seam; merged, the mesh is connected (so modelling tools and Subdivision Surface work) and the seams live on in the per-corner UVs |
+
+## Behaviour
+
+- **File ▸ Open…** also accepts `.gltf` and `.glb`. The model becomes a new,
+  untitled document named after the file ("Save changes?" first, as for any open);
+  saving asks for a `.g4d` path.
+- **File ▸ Merge…** (Shift+Ctrl+O) adds the objects of a `.gltf`, `.glb` or `.g4d`
+  file to the current document, at the top level, as **one undo step**; the merged
+  top-level objects become the selection.
+- **Drag and drop:** a dropped `.g4d` opens (as before); a dropped `.gltf`/`.glb`
+  is merged (the reference's *Merge on Drag & Drop*). Other files: an alert.
+- **What is read** (the file's default scene, or its first):
+  - the node hierarchy, names, and TRS transforms (matrices are decomposed);
+    translations × 100, rotations converted to HPB, scales kept;
+  - each mesh → one **polygon object** (all its triangle primitives merged; strips
+    and fans become triangles; points and lines are skipped); positions × 100,
+    identical positions welded, `TEXCOORD_0` as per-corner UVs (origin top-left, as
+    in glTF), degenerate triangles dropped. Normals are not kept: Grid4D smooths by
+    angle. A mesh used by several nodes is shared;
+  - the base colour factor of a primitive's material → the object's display colour;
+  - perspective cameras → Camera objects (vertical field of view); orthographic ones
+    become cameras with the default field of view;
+  - `KHR_lights_punctual` point, spot and directional lights → Light objects (colour,
+    intensity as given);
+  - a node with a mesh *and* a camera or light keeps the mesh; the other becomes a
+    child at the same place;
+  - a node without content → a Null; empty names → the kind's label.
+- **Not read (later):** materials and textures, animation, skins, morph targets,
+  Draco/meshopt compression, sparse accessors beyond what the reader supports.
+- **Errors** leave the document untouched and show an alert: unreadable JSON or
+  binary, a buffer shorter than declared, a missing external `.bin`, non-finite
+  numbers, an external URI that is absolute or not a file.
+- **Safety:** external buffers are read only from paths relative to the glTF file;
+  `data:` URIs are decoded (base64); cycles in a broken node graph are cut.
+
+## Grid4D mapping
+
+| Piece | Where |
+|-------|-------|
+| `Imported { nodes: Vec<ImportedNode { parent, data }> }` (pre-order), `import(path)`, `import_gltf(bytes, base)`, `Imported::from_document` / `into_document`, `IMPORT_EXTENSIONS` | `grid4d-io` (`import.rs`, `gltf_import.rs`; the `gltf` crate without its image/import features, base64 decoded by us) |
+| Merge as one undo step | `ui/file.rs::merge`: the nodes inserted in order with `SceneEdit::Insert`, their inverses recorded as one history step "Merge" |
+| `EditorCommand::Merge` (dialog) / `MergeFile(path)` (drop), File ▸ Merge…, Shift+Ctrl+O | `commands.rs`, `menu_bar.rs`, `shortcuts.rs` |
+| Open accepting glTF | `file::open_path` (by extension) and the dialog's filters |
+
+## Acceptance criteria
+
+- [x] A minimal triangle and a cube (embedded base64 buffer, external `.bin` and
+      `.glb`) import with the right points, faces, UVs and ×100 scale.
+- [x] Node hierarchy, names, TRS and matrix transforms arrive as in the file.
+- [x] Split vertices are welded: a glTF cube with 24 vertices becomes 8 points and
+      6·2 triangles, closed.
+- [x] Cameras, lights and Nulls become the right kinds; base colour → display colour.
+- [x] Broken files (bad JSON, short buffer, missing `.bin`, absolute URI, NaN) give
+      errors, never panics.
+- [x] Merge adds the objects as one undo step (undo removes them all, redo brings
+      the same ones back) and selects them; Open makes a new untitled document.
+- [x] A dropped glTF merges; a dropped `.g4d` still opens.
+
+The phase's acceptance also names the Khronos sample models (Box, Duck, …). They
+are not in the repository (downloading them needs a decision on test assets);
+the generated scenes in the tests cover the same features.

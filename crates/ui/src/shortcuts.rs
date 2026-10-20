@@ -214,7 +214,11 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
             if i.key_pressed(Key::N) {
                 editor.commands.push(EditorCommand::NewDocument);
             } else if i.key_pressed(Key::O) {
-                editor.commands.push(EditorCommand::Open);
+                editor.commands.push(if i.modifiers.shift {
+                    EditorCommand::Merge
+                } else {
+                    EditorCommand::Open
+                });
             } else if i.key_pressed(Key::S) {
                 editor.commands.push(if i.modifiers.shift {
                     EditorCommand::SaveAs
@@ -286,6 +290,7 @@ mod tests {
         let ctrl = Modifiers::COMMAND;
         assert_eq!(press(Key::N, ctrl, false), [EditorCommand::NewDocument]);
         assert_eq!(press(Key::O, ctrl, false), [EditorCommand::Open]);
+        assert_eq!(press(Key::O, ctrl | Modifiers::SHIFT, false), [EditorCommand::Merge]);
         assert_eq!(press(Key::S, ctrl, false), [EditorCommand::Save]);
         assert_eq!(press(Key::S, ctrl | Modifiers::SHIFT, false), [EditorCommand::SaveAs]);
         assert!(press(Key::S, Modifiers::NONE, false).is_empty());

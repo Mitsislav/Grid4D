@@ -12,11 +12,11 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             command(ui, editor, "New", "Ctrl+N", EditorCommand::NewDocument);
             command(ui, editor, "Open…", "Ctrl+O", EditorCommand::Open);
             ui.menu_button("Open Recent", |ui| recent_menu(ui, editor));
+            command(ui, editor, "Merge…", "Ctrl+Shift+O", EditorCommand::Merge);
             ui.separator();
             command(ui, editor, "Save", "Ctrl+S", EditorCommand::Save);
             command(ui, editor, "Save As…", "Ctrl+Shift+S", EditorCommand::SaveAs);
             ui.separator();
-            planned(ui, "Import…", "");
             planned(ui, "Export…", "");
             ui.separator();
             // Asks to save unsaved changes before the window closes.

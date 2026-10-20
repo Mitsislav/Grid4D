@@ -195,13 +195,15 @@ tool's options. Its **Mode** menu switches between *Objects* and *Tool* by hand.
 | Command | Shortcut | Notes |
 |---------|----------|-------|
 | File ▸ New | Ctrl+N | An empty document. |
-| File ▸ Open… | Ctrl+O | Opens `.g4d` documents (and older `.oc4d` ones). |
-| File ▸ Open Recent | | The last ten documents. |
+| File ▸ Open… | Ctrl+O | Opens `.g4d` documents (and older `.oc4d` ones), and glTF models (`.gltf`, `.glb`) as new documents. |
+| File ▸ Open Recent | | The last ten files. |
+| File ▸ Merge… | Ctrl+Shift+O | Adds the objects of a `.g4d`, `.gltf` or `.glb` file to the current document. |
 | File ▸ Save | Ctrl+S | Asks for a name the first time. |
 | File ▸ Save As… | Ctrl+Shift+S | |
 | File ▸ Quit | | |
 
-- **Drag a `.g4d` file onto the window** to open it.
+- **Drag a `.g4d` file onto the window** to open it; **drag a `.gltf` or `.glb`
+  file** onto it to merge the model into the current document.
 - The window title shows the document name and an asterisk (`*`) while there are
   unsaved changes. Undoing back to the saved state clears it again.
 - Before anything would discard unsaved changes (New, Open, Quit, closing the
@@ -211,6 +213,36 @@ tool's options. Its **Mode** menu switches between *Objects* and *Tool* by hand.
 - `.g4d` files keep everything in the document: objects, hierarchy, parameters, the
   meshes of polygon objects, and their selected and hidden points, edges and
   polygons. Editor state (tool, mode, camera) is not saved.
+
+![The File menu](images/manual/menu_file.png)
+
+### 9.1 glTF models
+
+glTF 2.0 is the common format for exchanging 3D models (`.gltf` with its `.bin`
+file, or a single `.glb`). Most 3D applications can export it.
+
+- **Open** a glTF file to start a new document from it. The document is named after
+  the file; **Save** then asks where to put the `.g4d`.
+- **Merge** one (File ▸ Merge… or drag and drop) to add it to the scene you are
+  working on. The merged objects are added at the top of the hierarchy and selected,
+  and one **Undo** removes all of them.
+
+![A glTF scene opened in Grid4D: its hierarchy, meshes, camera and light](images/manual/gltf_open.png)
+
+What comes in:
+
+| glTF | Grid4D |
+|------|--------|
+| Node hierarchy, names, position / rotation / scale | The same hierarchy of objects. Metres become centimetres (× 100). |
+| Meshes | Polygon objects, ready for modelling. Points that the file repeats at seams are merged, so the mesh is connected. Texture coordinates are kept. |
+| Material base colour | The object's display colour. |
+| Cameras | Camera objects (field of view). |
+| Lights (`KHR_lights_punctual`) | Light objects (colour, intensity). |
+| Empty nodes | Nulls. |
+
+Not yet: materials and textures, animation, skinning, morph targets and compressed
+meshes (Draco). Shading comes from Grid4D's own smoothing, not from the file's
+normals.
 
 ## 10. Timeline and playback
 
@@ -593,6 +625,7 @@ Esc cancels a chord.
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) | Undo / redo |
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New / open / save / save as |
+| Ctrl+Shift+O | Merge a file into the document |
 | F8 / F6 / F7 | Play / play backwards / stop |
 | F / G | Previous / next frame |
 
@@ -615,8 +648,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Animation**: keyframes, F-curves, the Coordinate and Material managers.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.
-- **Interchange and rendering**: glTF/OBJ import and export, the offline renderer
-  (the Render menu is disabled).
+- **Interchange and rendering**: glTF export, OBJ import and export, glTF materials
+  and animation, the offline renderer (the Render menu is disabled).
 - The Takes, Layers and Filter panels are placeholders.
 
 See [`progress.md`](progress.md) for what changed in each step.

@@ -33,19 +33,27 @@ pub fn show(ctx: &egui::Context) {
 fn hover_label<'a>(paths: impl Iterator<Item = Option<&'a std::path::Path>>) -> Option<String> {
     let mut any = false;
     let mut any_path = false;
+    // A document wins over a glTF file anywhere in the same drop.
+    let mut merge: Option<String> = None;
     for path in paths {
         any = true;
         let Some(path) = path else { continue };
         any_path = true;
+        let name = || path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
         if file::is_document(path) {
-            let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
-            return Some(format!("Drop to open {name}"));
+            return Some(format!("Drop to open {}", name()));
+        }
+        if merge.is_none() && grid4d_io::is_importable(path) {
+            merge = Some(format!("Drop to merge {}", name()));
         }
     }
-    match (any, any_path) {
-        (false, _) => None,
-        (true, true) => Some("Only Grid4D documents (.g4d) can be opened".to_owned()),
-        (true, false) => Some("Drop a Grid4D document (.g4d) to open it".to_owned()),
+    match (any, any_path, merge) {
+        (false, _, _) => None,
+        (true, true, Some(merge)) => Some(merge),
+        (true, true, None) => {
+            Some("Only Grid4D documents (.g4d) and glTF files (.gltf, .glb) can be dropped".to_owned())
+        }
+        (true, false, _) => Some("Drop a .g4d document to open it, or a glTF file to merge it".to_owned()),
     }
 }
 
@@ -64,11 +72,20 @@ mod tests {
         );
         assert_eq!(
             hover_label([Some(Path::new("notes.txt"))].into_iter()).as_deref(),
-            Some("Only Grid4D documents (.g4d) can be opened")
+            Some("Only Grid4D documents (.g4d) and glTF files (.gltf, .glb) can be dropped")
         );
         assert_eq!(
             hover_label([None].into_iter()).as_deref(),
-            Some("Drop a Grid4D document (.g4d) to open it")
+            Some("Drop a .g4d document to open it, or a glTF file to merge it")
+        );
+        assert_eq!(
+            hover_label([Some(Path::new("duck.glb")), Some(Path::new("shot.g4d"))].into_iter()).as_deref(),
+            Some("Drop to open shot.g4d"),
+            "a document wins"
+        );
+        assert_eq!(
+            hover_label([Some(Path::new("notes.txt")), Some(Path::new("duck.GLB"))].into_iter()).as_deref(),
+            Some("Drop to merge duck.GLB")
         );
     }
 }
