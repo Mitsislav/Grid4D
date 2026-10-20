@@ -481,6 +481,14 @@ impl CurveSelection {
     }
 }
 
+/// What the lower right manager shows (its tabs; Shift+F5 / Shift+F7).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ManagerTab {
+    #[default]
+    Attributes,
+    Coordinates,
+}
+
 /// What the bottom panel shows (its tabs; Tab switches over it).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BottomPanel {
@@ -681,6 +689,8 @@ pub struct EditorState {
     pub curves: CurveSelection,
     /// The bottom panel's tab.
     pub bottom: BottomPanel,
+    /// The lower right manager's tab.
+    pub managers: ManagerTab,
     /// The pointer is over the bottom panel (last frame): Tab switches its tab.
     pub bottom_hovered: bool,
     /// The frame temporary values were last checked against (see
@@ -734,6 +744,7 @@ impl Default for EditorState {
             keys: KeySelection::default(),
             curves: CurveSelection::default(),
             bottom: BottomPanel::default(),
+            managers: ManagerTab::default(),
             bottom_hovered: false,
             seen_frame: None,
             commands: CommandQueue::default(),

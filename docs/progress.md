@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 6 — Tags, animation, materials, managers (v0.6) |
-| Last step done | 6.4 — The F-Curve editor (2026-10-20) |
-| Next step | 6.5 — The Coordinate Manager |
-| Tests | 415, all passing; clippy and rustfmt clean |
+| Last step done | 6.5 — The Coordinate Manager (2026-10-20) |
+| Next step | 6.6 — Materials |
+| Tests | 421, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -331,7 +331,8 @@ Maxon's public manual, in our own words (clean-room).
 | 6.1 (`becd43a`) | Tags on objects (saved, undoable): Phong (smoothing angle, in the viewport and in exports), Protection (no gizmo, read-only Coordinates for protected channels), Target (turns the object's −Z towards another object, children follow); icons in the Object Manager, the tag view in the Attribute Manager, Tags menu, Delete removes a selected tag | 378 |
 | 6.2 (`2e1086a`) | Animation data: tracks of keys per object (position, rotation, scale), Spline / Linear / Step with clamped auto or manual tangents, evaluated at the current frame (children follow, the document untouched), saved in `.g4d` | 386 |
 | 6.3 (`09acb58`) | Recording keys: Record Active Objects (F9), Autokeying (Ctrl+F9, red view frame), key buttons in the Coord. tab, temporary (unrecorded) changes, the timeline's key strip (select, move, delete, Ctrl+click records), previous / next key (Ctrl+F / Ctrl+G); the gizmo and the Coordinates work at the current frame | 403 |
-| 6.4 | The F-Curve editor, a tab beside the Timeline (Tab switches): track list, curves with keys, selecting (click, Ctrl, box, curve), moving keys (Shift constrains), tangent handles (Shift breaks), Ctrl+click adds a key, interpolation and tangent presets, zoom, pan, H / S framing, the selected key's frame and value | 415 |
+| 6.4 (`4724314`) | The F-Curve editor, a tab beside the Timeline (Tab switches): track list, curves with keys, selecting (click, Ctrl, box, curve), moving keys (Shift constrains), tangent handles (Shift breaks), Ctrl+click adds a key, interpolation and tangent presets, zoom, pan, H / S framing, the selected key's frame and value | 415 |
+| 6.5 | The Coordinate Manager, a tab beside the Attribute Manager (Shift+F7 / Shift+F5): position, scale / size / size+ and rotation of the active object in object or world space, or of the selected points, edges or polygons (centre, size, relative rotation); Apply | 421 |
 
 *Problems and solutions:*
 - **Where tags live.** Tags sit in `NodeData`, the unit of attribute edits. Adding,
@@ -446,6 +447,29 @@ Maxon's public manual, in our own words (clean-room).
   and dragged its handle with the real cursor: the curve took the new shape. The
   rest (Ctrl+click, boxes, Shift, menus, which posted input cannot reach) is
   covered by headless tests of the real panel.
+
+*Step 6.5 — problems and solutions:*
+- **World values do not round-trip exactly.** Converting a world position or
+  rotation to the parent's space and back changes the last digits, so writing the
+  fields as shown would have changed the object (and, with Autokeying, keyed every
+  channel). Only the columns the user changed are written; entering the values
+  shown changes nothing, which a test checks for every mode.
+- **A size is not a parameter of every object.** Sizes are reached through the
+  object's scale (a new size multiplies the scale by new ÷ old), so it works the
+  same for primitives, polygon objects and generators' cages. Objects without
+  extent (Nulls) show no size; Size+ measures the children in the object's own
+  space.
+- **Component rotations are relative.** The fields read 0; an edit turns the
+  selection from the mesh as it was when the interaction began, so a drag never
+  accumulates rounding, and the field reads 0 again afterwards.
+- **The panel did not fit** the default 1280 × 800 window: the mode lists were cut
+  off at the bottom. The heading went and the fields scroll when the manager is
+  short.
+- **On-screen testing:** the fields, the mode lists and a typed value were checked
+  in the app; the Box inside the Group showed its world position (the Group's plus
+  its own) and its 80 cm size. Typing through posted key messages doubles
+  characters (the same happens in the Attribute Manager), so typed values are
+  checked by the tests instead.
 
 ---
 

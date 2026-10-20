@@ -341,6 +341,19 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             command(ui, editor, "Frame Selected Objects", "O", EditorCommand::FrameSelected);
             command(ui, editor, "Reset View", "", EditorCommand::ResetView);
             ui.separator();
+            for (tab, label, shortcut) in [
+                (crate::ManagerTab::Attributes, "Attribute Manager", "Shift+F5"),
+                (crate::ManagerTab::Coordinates, "Coordinate Manager", "Shift+F7"),
+            ] {
+                let item = Button::new(label)
+                    .shortcut_text(shortcut)
+                    .selected(editor.managers == tab);
+                if ui.add(item).clicked() {
+                    editor.managers = tab;
+                    ui.close();
+                }
+            }
+            ui.separator();
             planned(ui, "Customize Layout…", "");
         });
 

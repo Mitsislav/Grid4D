@@ -33,9 +33,10 @@ pub mod window;
 pub use commands::{CommandQueue, EditorCommand, SelectMode};
 pub use editor::{
     AnimationSettings, BottomPanel, CurveKey, CurveSelection, EditMode, EditorState, FrameCurves, KeySelection,
-    ModelingSettings, Selection, SelectionSettings, SnapSettings, SnapType, TagRef, Tool, TransformSettings,
+    ManagerTab, ModelingSettings, Selection, SelectionSettings, SnapSettings, SnapType, TagRef, Tool,
+    TransformSettings,
 };
 pub use file::{DocumentFile, FileAction, FileDialogs, NativeDialogs, UnsavedChoice};
 pub use history::{History, UndoGroup};
-pub use panels::{AttributesPanel, FCurvePanel, OutlinerPanel, TimelinePanel, ViewportPanel};
+pub use panels::{AttributesPanel, CoordinatesPanel, FCurvePanel, OutlinerPanel, TimelinePanel, ViewportPanel};
 pub use recent::RecentFiles;

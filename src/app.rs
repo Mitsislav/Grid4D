@@ -4,8 +4,8 @@
 use egui::{CentralPanel, Margin, Panel};
 use grid4d_scene::Document;
 use grid4d_ui::{
-    AttributesPanel, BottomPanel, EditorCommand, EditorState, FCurvePanel, OutlinerPanel, RecentFiles, TimelinePanel,
-    ViewportPanel, commands, file,
+    AttributesPanel, BottomPanel, CoordinatesPanel, EditorCommand, EditorState, FCurvePanel, ManagerTab, OutlinerPanel,
+    RecentFiles, TimelinePanel, ViewportPanel, commands, file,
     panels::{about, alert, drop_overlay, menu_bar, mode_palette, optimize, status_bar, toolbar, unsaved_changes},
     recent, shortcuts,
     theme::{self, metrics},
@@ -21,6 +21,7 @@ pub struct Grid4DApp {
     viewport: ViewportPanel,
     outliner: OutlinerPanel,
     attributes: AttributesPanel,
+    coordinates: CoordinatesPanel,
     timeline: TimelinePanel,
     fcurve: FCurvePanel,
     /// Time of the previous playback tick (egui clock, seconds).
@@ -68,6 +69,7 @@ impl Grid4DApp {
             viewport,
             outliner: OutlinerPanel::default(),
             attributes: AttributesPanel::default(),
+            coordinates: CoordinatesPanel::default(),
             timeline: TimelinePanel::default(),
             fcurve: FCurvePanel::default(),
             last_tick: None,
@@ -142,7 +144,10 @@ impl eframe::App for Grid4DApp {
                     .default_size(330.0)
                     .size_range(140.0..=max_outliner_height)
                     .show(ui, |ui| self.outliner.show(ui, &mut self.doc, &mut self.editor));
-                CentralPanel::no_frame().show(ui, |ui| self.attributes.show(ui, &mut self.doc, &mut self.editor));
+                CentralPanel::no_frame().show(ui, |ui| match self.editor.managers {
+                    ManagerTab::Attributes => self.attributes.show(ui, &mut self.doc, &mut self.editor),
+                    ManagerTab::Coordinates => self.coordinates.show(ui, &mut self.doc, &mut self.editor),
+                });
             });
 
         Panel::left("grid4d.mode_palette")

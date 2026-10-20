@@ -184,6 +184,38 @@ the frame range.
 Extrude, Inset, Bevel, Bridge, Loop/Path Cut, Line Cut), the Attribute Manager switches to that
 tool's options. Its **Mode** menu switches between *Objects* and *Tool* by hand.
 
+### 7.1 The Coordinate Manager
+
+The **Coordinates** tab beside **Attributes** (**Shift+F7**; **Shift+F5** goes back
+to the Attribute Manager; both are also in the Window menu) is for typing exact
+positions, sizes and rotations.
+
+![The Coordinate Manager: the Box inside the Group, in world space, with its size](images/manual/coordinates.png)
+
+- Three columns: **Position**, the middle column, and **Rotation** (H, P, B in
+  degrees).
+- The list under the fields on the left chooses how values are read:
+  - **Object**: in the object's parent, the same values as the Coord. tab.
+  - **World**: in the world. Typing a world position puts the object there,
+    wherever its parent is.
+- The list in the middle chooses the middle column:
+  - **Scale**: the object's scale (in World mode, including its parents').
+  - **Size**: the object's extent along its own axes, in cm. Typing a size scales
+    the object to it.
+  - **Size+**: the same, with its children included.
+- Drag a value or type one and press Enter: the object changes at once, and each
+  change is one undo step. **Apply** writes all the fields as shown.
+- **In Points, Edges or Polygons mode** the manager works on the selection:
+  Position is the centre of the selected elements, Size the extent of their
+  bounding box. Changing them moves or scales the selection around its centre.
+  Rotation always shows 0: a value turns the selection by that much around its
+  centre, then the field returns to 0.
+- Values are those at the current frame. Changing an animated value follows the
+  same rules as the gizmo: a temporary value, or a key with Autokeying
+  ([§10.2](#102-recording-keys)).
+- Channels locked by a Protection tag are greyed out. With several objects selected,
+  the manager shows and changes the active one.
+
 ## 8. Undo and redo
 
 - **Ctrl+Z** undoes, **Ctrl+Y** or **Ctrl+Shift+Z** redoes. The arrows at the left
@@ -866,6 +898,7 @@ Esc cancels a chord.
 | Ctrl+F / Ctrl+G | Previous / next key |
 | F9 | Record Active Objects |
 | Ctrl+F9 | Autokeying on / off |
+| Shift+F5 / Shift+F7 | Attribute Manager / Coordinate Manager |
 | Tab (pointer over the timeline) | Timeline / F-Curve tab |
 | H / S (pointer over the F-Curve graph) | Frame all curves / the selected keys |
 
@@ -890,7 +923,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's
   angle or length while dragging it (Ctrl / Alt), normalised curves, copying and
   pasting keys, animating object parameters such as a cube's size, Frame
-  Scene/Selected following the animation; the Coordinate and Material managers.
+  Scene/Selected following the animation; the Material Manager.
+- **Coordinate Manager**: frozen coordinates (Object Abs), changing primitives'
+  size parameters rather than their scale, editing several objects at once.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.
 - **Interchange and rendering**: materials and textures, animation in glTF, import

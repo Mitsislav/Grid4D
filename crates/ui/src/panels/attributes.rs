@@ -21,7 +21,7 @@ use crate::{
     keys::Keying,
     live_edit::{LiveEdit, interaction_ongoing},
     theme::palette as p,
-    widgets::{attr_label, manager_tabs, section_heading},
+    widgets::{attr_label, manager_area_tabs, section_heading},
 };
 
 const LABEL_WIDTH: f32 = 128.0;
@@ -84,7 +84,7 @@ impl AttributesPanel {
             self.seen_active = editor.selection.active();
         }
 
-        let _ = manager_tabs(ui, &["Attributes", "Layers"], 0);
+        manager_area_tabs(ui, editor);
         egui::Frame::new().inner_margin(Margin::symmetric(4, 1)).show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("Mode", |ui| {

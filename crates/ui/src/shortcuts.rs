@@ -23,6 +23,7 @@
 //! | `Tab` (over the bottom panel) | Timeline / F-Curve ([`take_tab`]) |
 //! | `H` / `S` (over the F-Curve graph) | Frame all / selected keys |
 //! | `Ctrl+F9`      | Autokeying on / off        |
+//! | `Shift+F5` / `Shift+F7` | Attribute / Coordinate Manager |
 //!
 //! Two-key chords (press the first key, then the second) are listed in
 //! [`Chord::complete`]: `U~L` Loop Selection, `K~L` Loop/Path Cut, `M~M` Connect, …
@@ -30,7 +31,7 @@
 use egui::{Event, Key};
 use grid4d_scene::Document;
 
-use crate::{BottomPanel, EditorCommand, EditorState, FrameCurves, Tool};
+use crate::{BottomPanel, EditorCommand, EditorState, FrameCurves, ManagerTab, Tool};
 
 /// The first key of a two-key shortcut, Cinema 4D style (`U~L`: U, then L).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -256,6 +257,12 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         }
         if i.modifiers.shift_only() && i.key_pressed(Key::S) {
             editor.snap.enabled = !editor.snap.enabled;
+        }
+        if i.modifiers.shift_only() && i.key_pressed(Key::F5) {
+            editor.managers = ManagerTab::Attributes;
+        }
+        if i.modifiers.shift_only() && i.key_pressed(Key::F7) {
+            editor.managers = ManagerTab::Coordinates;
         }
         let ctrl_only = i.modifiers.command && !i.modifiers.shift && !i.modifiers.alt;
         if ctrl_only && i.key_pressed(Key::F9) {

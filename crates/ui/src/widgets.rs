@@ -165,6 +165,21 @@ pub(crate) fn bottom_tabs(ui: &mut Ui, editor: &mut crate::EditorState) -> Rect 
     rect
 }
 
+/// The lower right manager's tabs (Attributes | Coordinates | Layers): a click
+/// switches `editor.managers` (Layers is a placeholder).
+pub(crate) fn manager_area_tabs(ui: &mut Ui, editor: &mut crate::EditorState) {
+    use crate::ManagerTab;
+    let active = match editor.managers {
+        ManagerTab::Attributes => 0,
+        ManagerTab::Coordinates => 1,
+    };
+    match manager_tabs(ui, &["Attributes", "Coordinates", "Layers"], active) {
+        Some(0) => editor.managers = ManagerTab::Attributes,
+        Some(1) => editor.managers = ManagerTab::Coordinates,
+        Some(_) | None => {}
+    }
+}
+
 /// Attribute label with Cinema 4D's dotted leader: `Name . . . . . .`
 pub(crate) fn attr_label(ui: &mut Ui, text: &str, width: f32) {
     let (rect, _) = ui.allocate_exact_size(vec2(width, metrics::ROW_HEIGHT - 2.0), Sense::hover());
