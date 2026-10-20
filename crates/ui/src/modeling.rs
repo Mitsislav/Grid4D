@@ -17,7 +17,9 @@ use crate::{ModelingSettings, Tool};
 pub(crate) const fn works_in(tool: Tool, component: Component) -> bool {
     matches!(
         (tool, component),
-        (Tool::Extrude, Component::Polygon | Component::Edge) | (Tool::Inset, Component::Polygon)
+        (Tool::Extrude, Component::Polygon | Component::Edge)
+            | (Tool::Inset, Component::Polygon)
+            | (Tool::Bevel, Component::Point | Component::Edge)
     )
 }
 
@@ -26,6 +28,7 @@ pub(crate) fn offset_mut(tool: Tool, settings: &mut ModelingSettings) -> Option<
     match tool {
         Tool::Extrude => Some(&mut settings.extrude.offset),
         Tool::Inset => Some(&mut settings.inset.offset),
+        Tool::Bevel => Some(&mut settings.bevel.offset),
         Tool::LiveSelection
         | Tool::RectangleSelection
         | Tool::LoopSelection
@@ -34,14 +37,32 @@ pub(crate) fn offset_mut(tool: Tool, settings: &mut ModelingSettings) -> Option<
         | Tool::Scale
         | Tool::Rotate
         | Tool::LoopCut
-        | Tool::LineCut => None,
+        | Tool::LineCut
+        | Tool::Bridge
+        | Tool::Weld => None,
+    }
+}
+
+/// What the new parts of a rebuilt mesh become in the selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Fresh {
+    Unselected,
+    /// The operation's new edges replace the edge selection.
+    EdgesSelected,
+    /// The new polygons replace the polygon selection.
+    PolygonsSelected,
+}
+
+impl Fresh {
+    pub(crate) const fn edges_if(select: bool) -> Self {
+        if select { Self::EdgesSelected } else { Self::Unselected }
     }
 }
 
 /// `data` (a polygon object) with the mesh `rebuilt` from it: its selection and
-/// hidden flags carried across; with `select_cuts` the new edges become the edge
-/// selection. `None` if the mesh did not change.
-pub(crate) fn rebuilt_data(data: &NodeData, rebuilt: Rebuilt, select_cuts: bool) -> Option<NodeData> {
+/// hidden flags carried across, the new parts selected as `fresh` says. `None` if
+/// the mesh did not change.
+pub(crate) fn rebuilt_data(data: &NodeData, rebuilt: Rebuilt, fresh: Fresh) -> Option<NodeData> {
     let ObjectKind::Polygon { mesh, components } = &data.kind else {
         return None;
     };
@@ -53,8 +74,17 @@ pub(crate) fn rebuilt_data(data: &NodeData, rebuilt: Rebuilt, select_cuts: bool)
         selected: rebuilt.carry(components.selected(), topology),
         hidden: rebuilt.carry(components.hidden(), topology),
     };
-    if select_cuts && !rebuilt.new_edges.is_empty() {
-        state.selected.edges = rebuilt.new_edge_corners();
+    match fresh {
+        Fresh::EdgesSelected if !rebuilt.new_edges.is_empty() => state.selected.edges = rebuilt.new_edge_corners(),
+        Fresh::PolygonsSelected => {
+            let new: BitSet = (0..rebuilt.mesh.face_count())
+                .filter(|&f| rebuilt.face_origin[f] == ops::NEW)
+                .collect();
+            if !new.is_empty() {
+                state.selected.polygons = new;
+            }
+        }
+        Fresh::EdgesSelected | Fresh::Unselected => {}
     }
     let mut data = data.clone();
     data.kind = ObjectKind::Polygon {
@@ -130,6 +160,27 @@ pub(crate) fn apply(
                 selected.insert(usize::try_from(corner).ok()?);
             }
             extrusion.mesh
+        }
+        (Tool::Bevel, Component::Edge | Component::Point) => {
+            let edges = if component == Component::Edge {
+                selection::edges_from_corners(&state.selected.edges, topology)
+            } else {
+                BitSet::new()
+            };
+            let points = if component == Component::Point {
+                state.selected.points.clone()
+            } else {
+                BitSet::new()
+            };
+            if edges.is_empty() && points.is_empty() {
+                return None; // nothing selected: nothing to bevel
+            }
+            let options = ops::BevelOptions {
+                offset,
+                ..settings.bevel
+            };
+            let rebuilt = ops::bevel(source, topology, &edges, &points, &options).ok()?;
+            return rebuilt_data(data, rebuilt, Fresh::edges_if(component == Component::Edge));
         }
         _ => return None,
     };

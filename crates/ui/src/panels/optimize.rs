@@ -1,0 +1,52 @@
+//! Mesh ▸ Optimize… dialog: the options, then OK runs the command.
+
+use egui::{DragValue, Grid, Id, Modal, RichText};
+
+use crate::{EditorCommand, EditorState, theme::palette as p};
+
+pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
+    if !editor.show_optimize {
+        return;
+    }
+    let mut run = false;
+    let response = Modal::new(Id::unique("grid4d.optimize")).show(ctx, |ui| {
+        ui.set_width(320.0);
+        ui.label(RichText::new("Optimize").size(16.0).strong().color(p::TEXT_STRONG));
+        ui.label(
+            RichText::new("Merges points that lie together and removes unused ones (the selection's points, or the whole object).")
+                .color(p::TEXT_DIM),
+        );
+        ui.add_space(6.0);
+        let options = &mut editor.modeling_settings.optimize;
+        Grid::new("grid4d.optimize.options").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+            ui.label("Points");
+            ui.checkbox(&mut options.merge_points, "Merge points closer than the tolerance");
+            ui.end_row();
+            ui.label("Tolerance");
+            ui.add_enabled(
+                options.merge_points,
+                DragValue::new(&mut options.tolerance)
+                    .speed(0.01)
+                    .range(0.0..=1000.0)
+                    .max_decimals(3)
+                    .suffix(" cm"),
+            );
+            ui.end_row();
+            ui.label("Unused Points");
+            ui.checkbox(&mut options.unused_points, "Remove points no polygon uses");
+            ui.end_row();
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            run = ui.button("OK").clicked();
+            run || ui.button("Cancel").clicked()
+        })
+        .inner
+    });
+    if run {
+        editor.commands.push(EditorCommand::Optimize);
+    }
+    if response.inner || response.should_close() {
+        editor.show_optimize = false;
+    }
+}

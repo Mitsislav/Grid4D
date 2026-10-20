@@ -42,6 +42,8 @@ pub enum Chord {
 enum Action {
     Tool(Tool),
     Command(EditorCommand),
+    /// Open the Optimize dialog.
+    Optimize,
 }
 
 impl Chord {
@@ -58,9 +60,13 @@ impl Chord {
     #[must_use]
     pub const fn hint(self) -> &'static str {
         match self {
-            Self::U => "U…  L Loop · B Ring · W Connected · Y Grow · K Shrink · I Invert · Z Melt · Esc cancels",
+            Self::U => {
+                "U…  L Loop · B Ring · W Connected · Y Grow · K Shrink · I Invert · Z Melt · O Optimize · Esc cancels"
+            }
             Self::K => "K…  L Loop/Path Cut · K Line Cut · Esc cancels",
-            Self::M => "M…  M Connect · N Dissolve · T Extrude · W Inset · L Loop/Path Cut · K Line Cut · Esc cancels",
+            Self::M => {
+                "M…  M Connect · N Dissolve · T Extrude · W Inset · S Bevel · B Bridge · L Loop/Path Cut · K Line Cut · Esc cancels"
+            }
         }
     }
 
@@ -75,12 +81,15 @@ impl Chord {
             (Self::U, Key::K) => Command(EditorCommand::ShrinkSelection),
             (Self::U, Key::I) => Command(EditorCommand::InvertSelection),
             (Self::U, Key::Z) => Command(EditorCommand::MeltSelected),
+            (Self::U, Key::O) => Action::Optimize,
             (Self::K | Self::M, Key::L) => Pick(Tool::LoopCut),
             (Self::K | Self::M, Key::K) => Pick(Tool::LineCut),
             (Self::M, Key::M) => Command(EditorCommand::ConnectSelected),
             (Self::M, Key::N) => Command(EditorCommand::DissolveSelected),
             (Self::M, Key::T) => Pick(Tool::Extrude),
             (Self::M, Key::W) => Pick(Tool::Inset),
+            (Self::M, Key::S) => Pick(Tool::Bevel),
+            (Self::M, Key::B) => Pick(Tool::Bridge),
             _ => return None,
         })
     }
@@ -116,6 +125,7 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                     match chord.complete(*key) {
                         Some(Action::Tool(tool)) => editor.tool = tool,
                         Some(Action::Command(command)) => editor.commands.push(command),
+                        Some(Action::Optimize) => editor.show_optimize = true,
                         None => {}
                     }
                 }
@@ -142,6 +152,7 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                 (Key::Num0, Tool::RectangleSelection),
                 (Key::D, Tool::Extrude),
                 (Key::I, Tool::Inset),
+                (Key::B, Tool::Bridge),
             ] {
                 if i.key_pressed(key) {
                     editor.tool = tool;
@@ -379,6 +390,16 @@ mod tests {
             keys(&[(Key::Backspace, Modifiers::NONE)]).1,
             [EditorCommand::DeleteSelected]
         );
+    }
+
+    #[test]
+    fn bevel_bridge_and_optimize_keys() {
+        let none = Modifiers::NONE;
+        assert_eq!(keys(&[(Key::M, none), (Key::S, none)]).0.tool, Tool::Bevel);
+        assert_eq!(keys(&[(Key::M, none), (Key::B, none)]).0.tool, Tool::Bridge);
+        assert_eq!(keys(&[(Key::B, none)]).0.tool, Tool::Bridge);
+        let (editor, commands) = keys(&[(Key::U, none), (Key::O, none)]);
+        assert!(editor.show_optimize && commands.is_empty(), "U~O opens the dialog");
     }
 
     #[test]

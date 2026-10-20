@@ -39,7 +39,10 @@ impl ViewportPanel {
             | Tool::Scale
             | Tool::Rotate
             | Tool::Extrude
-            | Tool::Inset => {
+            | Tool::Inset
+            | Tool::Bevel
+            | Tool::Bridge
+            | Tool::Weld => {
                 self.loop_preview = None;
                 false
             }

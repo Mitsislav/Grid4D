@@ -6,7 +6,7 @@ use grid4d_scene::Document;
 use grid4d_ui::{
     AttributesPanel, EditorCommand, EditorState, OutlinerPanel, RecentFiles, TimelinePanel, ViewportPanel, commands,
     file,
-    panels::{about, alert, drop_overlay, menu_bar, mode_palette, status_bar, toolbar, unsaved_changes},
+    panels::{about, alert, drop_overlay, menu_bar, mode_palette, optimize, status_bar, toolbar, unsaved_changes},
     recent, shortcuts,
     theme::{self, metrics},
     window::WindowFit,
@@ -152,6 +152,7 @@ impl eframe::App for Grid4DApp {
         CentralPanel::no_frame().show(ui, |ui| self.viewport.show(ui, &mut self.doc, &mut self.editor));
 
         about::show(&ctx, &mut self.editor);
+        optimize::show(&ctx, &mut self.editor);
         unsaved_changes::show(&ctx, &self.doc, &mut self.editor);
         alert::show(&ctx, &mut self.editor);
         drop_overlay::show(&ctx);

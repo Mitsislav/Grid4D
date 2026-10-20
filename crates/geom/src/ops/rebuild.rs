@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use glam::Vec3;
+
 use super::{Builder, Corner, Rebuilt, corner_faces, next_corner};
 use crate::{BitSet, Component, MeshError, PolyMesh, Topology, u32_index, us};
 
@@ -297,6 +299,128 @@ impl Regions {
     }
 }
 
+/// Optimize options (see `docs/reference/modeling-tools.md`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OptimizeOptions {
+    /// Merge points closer than `tolerance`.
+    pub merge_points: bool,
+    pub tolerance: f32,
+    /// Remove points no face uses.
+    pub unused_points: bool,
+}
+
+/// Welds `points` into one point at `to` (the lowest index keeps its place in the
+/// mesh). Faces that collapse are removed.
+pub fn weld(mesh: &PolyMesh, points: &BitSet, to: Vec3) -> Result<Rebuilt, MeshError> {
+    let Some(target) = points.iter().find(|&p| p < mesh.point_count()) else {
+        return keep_all(mesh);
+    };
+    let mut onto: Vec<u32> = (0..mesh.point_count()).map(u32_index).collect();
+    for p in points.iter().filter(|&p| p < mesh.point_count()) {
+        onto[p] = u32_index(target);
+    }
+    merge(mesh, &onto, &[(target, to)], &BitSet::new())
+}
+
+/// Merges points closer than the tolerance and removes unused points, among
+/// `scope` (point indices; every point when `None`). Faces that collapse are
+/// removed. Each group of close points becomes its lowest-index point.
+pub fn optimize(mesh: &PolyMesh, scope: Option<&BitSet>, options: &OptimizeOptions) -> Result<Rebuilt, MeshError> {
+    let in_scope = |p: usize| scope.is_none_or(|s| s.contains(p));
+    let mut onto: Vec<u32> = (0..mesh.point_count()).map(u32_index).collect();
+    if options.merge_points && options.tolerance >= 0.0 {
+        let cell = options.tolerance.max(1e-6);
+        let key = |p: Vec3| (p / cell).floor().as_ivec3();
+        let mut grid: HashMap<glam::IVec3, Vec<usize>> = HashMap::new();
+        let mut parent: Vec<usize> = (0..mesh.point_count()).collect();
+        let find = |parent: &[usize], mut p: usize| {
+            while parent[p] != p {
+                p = parent[p];
+            }
+            p
+        };
+        for p in (0..mesh.point_count()).filter(|&p| in_scope(p)) {
+            let position = mesh.points()[p];
+            let k = key(position);
+            for dz in -1..=1 {
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let Some(others) = grid.get(&(k + glam::IVec3::new(dx, dy, dz))) else {
+                            continue;
+                        };
+                        for &q in others {
+                            if mesh.points()[q].distance(position) <= options.tolerance {
+                                let (a, b) = (find(&parent, p), find(&parent, q));
+                                // The lower index stays.
+                                parent[a.max(b)] = a.min(b);
+                            }
+                        }
+                    }
+                }
+            }
+            grid.entry(k).or_default().push(p);
+        }
+        for (p, slot) in onto.iter_mut().enumerate() {
+            *slot = u32_index(find(&parent, p));
+        }
+    }
+    let unused = if options.unused_points {
+        let mut used = BitSet::new();
+        for &p in mesh.corner_points() {
+            used.insert(us(p));
+        }
+        (0..mesh.point_count())
+            .filter(|&p| in_scope(p) && !used.contains(p))
+            .collect()
+    } else {
+        BitSet::new()
+    };
+    merge(mesh, &onto, &[], &unused)
+}
+
+/// Rebuilds `mesh` with every point `p` replaced by `onto[p]` (moved to a new place
+/// where `moves` says so); faces left with fewer than three distinct points, or
+/// with a point twice, are removed; `removed` points go too.
+fn merge(mesh: &PolyMesh, onto: &[u32], moves: &[(usize, Vec3)], removed: &BitSet) -> Result<Rebuilt, MeshError> {
+    let mut builder = Builder::new(mesh);
+    for &(p, to) in moves {
+        builder.points[p] = to;
+    }
+    let mut corners: Vec<Corner> = Vec::new();
+    let mut seen: Vec<u32> = Vec::new();
+    for f in 0..mesh.face_count() {
+        corners.clear();
+        for c in mesh.corner_range(f) {
+            let p = onto[us(mesh.corner_points()[c])];
+            // Consecutive corners that became one point collapse into one.
+            if corners.last().is_some_and(|&last| builder.point(last) == p) {
+                continue;
+            }
+            corners.push(Corner::Point(p, builder.uv(c)));
+        }
+        while corners.len() > 1 && builder.point(corners[0]) == builder.point(corners[corners.len() - 1]) {
+            corners.pop();
+        }
+        seen.clear();
+        seen.extend(corners.iter().map(|&c| builder.point(c)));
+        seen.sort_unstable();
+        let pinched = seen.windows(2).any(|w| w[0] == w[1]);
+        if corners.len() >= 3 && !pinched {
+            builder.push(&corners, f);
+        }
+    }
+    builder.removed = removed.clone();
+    builder.finish()
+}
+
+fn keep_all(mesh: &PolyMesh) -> Result<Rebuilt, MeshError> {
+    let mut builder = Builder::new(mesh);
+    for f in 0..mesh.face_count() {
+        builder.keep(f);
+    }
+    builder.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use glam::Vec3;
@@ -415,6 +539,108 @@ mod tests {
         let quad = shapes::grid(1, 1);
         let out = melt(&quad, &Topology::build(&quad), Component::Point, &set(&[0])).unwrap();
         assert_eq!((out.mesh.point_count(), out.mesh.face_count()), (3, 1));
+    }
+
+    #[test]
+    fn welding_points_merges_them_and_removes_collapsed_faces() {
+        let plane = shapes::grid(2, 1);
+        // Points 0 (0,0), 1 (1,0), 3 (0,1), 4 (1,1): the first quad, welded at its centre.
+        let centre = Vec3::new(0.5, 0.0, 0.5);
+        let out = weld(&plane, &set(&[0, 1, 3, 4]), centre).unwrap();
+        assert_eq!(
+            (out.mesh.point_count(), out.mesh.face_count()),
+            (3, 1),
+            "the second quad became a triangle"
+        );
+        assert_eq!(out.mesh.face(0).len(), 3);
+        assert!(out.mesh.points().contains(&centre));
+        assert_clean(&out.mesh);
+        // Onto a chosen point: its position is kept.
+        let onto = plane.points()[1];
+        let out = weld(&plane, &set(&[1, 4]), onto).unwrap();
+        assert_eq!(out.mesh.face_count(), 2);
+        assert!(out.mesh.points().contains(&onto));
+        assert!(!out.mesh.points().contains(&plane.points()[4]));
+    }
+
+    #[test]
+    fn optimize_closes_separate_caps_and_respects_the_tolerance() {
+        // Two quads that share an edge only by position (points 4, 5 duplicate 1, 2).
+        let points = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 1.0),
+            Vec3::new(2.0, 0.0, 1.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(9.0, 9.0, 9.0), // unused
+        ];
+        let mesh = PolyMesh::from_faces(points, [[0u32, 3, 2, 1], [4, 5, 6, 7]]).unwrap();
+        let options = OptimizeOptions {
+            merge_points: true,
+            tolerance: 0.01,
+            unused_points: true,
+        };
+        let out = optimize(&mesh, None, &options).unwrap();
+        assert_eq!((out.mesh.point_count(), out.mesh.face_count()), (6, 2));
+        let topology = assert_clean(&out.mesh);
+        assert_eq!(topology.edge_count(), 7, "the two quads now share an edge");
+        let keep = optimize(
+            &mesh,
+            None,
+            &OptimizeOptions {
+                unused_points: false,
+                ..options
+            },
+        )
+        .unwrap();
+        assert_eq!(keep.mesh.point_count(), 7, "the unused point stays");
+        let far = optimize(
+            &mesh,
+            None,
+            &OptimizeOptions {
+                tolerance: -1.0,
+                ..options
+            },
+        )
+        .unwrap();
+        assert_eq!(far.mesh.point_count(), 8, "nothing merges, the unused point goes");
+        // Only within the scope.
+        let scoped = optimize(&mesh, Some(&set(&[1, 4])), &options).unwrap();
+        assert_eq!(
+            scoped.mesh.point_count(),
+            8,
+            "1 and 4 merge; 2 and 5 are not in scope; 8 is not either"
+        );
+    }
+
+    #[test]
+    fn optimize_merges_a_cylinders_separate_cap_rims() {
+        // The side of an 8-sided cylinder, with caps on their own copies of the rims
+        // (as Make Editable builds them).
+        let shared = shapes::cylinder(8);
+        let mut points = shared.points().to_vec();
+        points.extend_from_slice(shared.points());
+        let mut faces: Vec<Vec<u32>> = shared.faces().take(8).map(<[u32]>::to_vec).collect();
+        faces.extend(
+            shared
+                .faces()
+                .skip(8)
+                .map(|cap| cap.iter().map(|&p| p + 16).collect::<Vec<u32>>()),
+        );
+        let separate = PolyMesh::from_faces(points, faces).unwrap();
+        assert!(!Topology::build(&separate).is_closed());
+        let options = OptimizeOptions {
+            merge_points: true,
+            tolerance: 0.001,
+            unused_points: true,
+        };
+        let out = optimize(&separate, None, &options).unwrap();
+        assert_eq!(out.mesh.point_count(), 16, "two rings of 8");
+        let after = assert_clean(&out.mesh);
+        assert!(after.is_closed());
     }
 
     #[test]

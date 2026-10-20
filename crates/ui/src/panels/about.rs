@@ -4,7 +4,7 @@ use egui::{Grid, Id, Modal, RichText, ScrollArea};
 
 use crate::{EditorState, theme::palette as p};
 
-const SHORTCUTS: [(&str, &str); 23] = [
+const SHORTCUTS: [(&str, &str); 25] = [
     ("Alt + Left drag", "Orbit"),
     ("Alt + Middle drag / Middle drag", "Pan"),
     ("Alt + Right drag / Wheel", "Zoom"),
@@ -17,6 +17,8 @@ const SHORTCUTS: [(&str, &str); 23] = [
     ("D / I", "Extrude / Inset tool (drag left or right)"),
     ("K~L / K~K", "Loop/Path Cut / Line Cut tool"),
     ("M~M / M~N / U~Z", "Connect / Dissolve / Melt"),
+    ("M~S / B (M~B)", "Bevel / Bridge tool"),
+    ("U~O", "Optimize…"),
     ("Click / Shift / Ctrl", "Select / add / toggle"),
     ("Delete / Backspace", "Delete selection (objects or components)"),
     ("Ctrl+Backspace / Alt+Backspace", "Dissolve / Melt"),

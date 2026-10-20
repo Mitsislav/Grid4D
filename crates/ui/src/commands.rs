@@ -105,6 +105,27 @@ pub enum EditorCommand {
         from: Vec3,
         to: Vec3,
     },
+    /// Bridge on polygon object `node` from component `from` to `to` (faces, or
+    /// unique edges in Edges mode) with the Bridge tool's options. One undo step.
+    Bridge {
+        node: NodeId,
+        component: Component,
+        from: u32,
+        to: u32,
+    },
+    /// Bridges the two selected polygons or edges of the active object (the
+    /// Bridge tool's Apply). One undo step.
+    BridgeSelected,
+    /// Welds the active object's selected points (those of the selected edges or
+    /// polygons) into one: onto point `onto` if it is one of them, else at their
+    /// centre. One undo step.
+    Weld {
+        node: NodeId,
+        onto: Option<u32>,
+    },
+    /// Optimize with its options: the active polygon object, limited to the
+    /// selection's points in a component mode. One undo step.
+    Optimize,
     /// Runs the current modelling tool (Extrude, Inset) once with its options on
     /// the active polygon object's selection in the current mode (its Apply
     /// button). One undo step if anything changed.
@@ -253,7 +274,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     return None;
                 };
                 let rebuilt = crate::modeling::loop_cut(mesh, idx(edge), &fractions)?;
-                crate::modeling::rebuilt_data(&n.data, rebuilt, select_cuts)
+                crate::modeling::rebuilt_data(&n.data, rebuilt, crate::modeling::Fresh::edges_if(select_cuts))
             });
             if let Some(data) = data {
                 commit(
@@ -291,7 +312,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     }
                 };
                 let rebuilt = ops::line_cut(mesh.mesh(), mesh.topology(), &cut, visible).ok()?;
-                crate::modeling::rebuilt_data(&n.data, rebuilt, settings.select_cuts)
+                crate::modeling::rebuilt_data(&n.data, rebuilt, crate::modeling::Fresh::edges_if(settings.select_cuts))
             });
             if let Some(data) = data {
                 commit(
@@ -344,6 +365,114 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     doc,
                     editor,
                     tool.label(),
+                    vec![SceneEdit::SetData { id, data }],
+                    |_, _| {},
+                );
+            }
+        }
+        EditorCommand::Bridge {
+            node,
+            component,
+            from,
+            to,
+        } => {
+            let options = editor.modeling_settings.bridge;
+            let data = doc.scene.get(node).and_then(|n| {
+                let ObjectKind::Polygon { mesh, .. } = &n.data.kind else {
+                    return None;
+                };
+                bridge(mesh, component, idx(from), idx(to), &options).and_then(|rebuilt| {
+                    crate::modeling::rebuilt_data(&n.data, rebuilt, crate::modeling::Fresh::PolygonsSelected)
+                })
+            });
+            if let Some(data) = data {
+                commit(
+                    doc,
+                    editor,
+                    "Bridge",
+                    vec![SceneEdit::SetData { id: node, data }],
+                    |_, _| {},
+                );
+            }
+        }
+        EditorCommand::BridgeSelected => {
+            let options = editor.modeling_settings.bridge;
+            let target = component_target(doc, editor);
+            let data = target.and_then(|(id, component)| {
+                let n = doc.scene.get(id)?;
+                let ObjectKind::Polygon { mesh, components } = &n.data.kind else {
+                    return None;
+                };
+                let pair: Vec<usize> = match component {
+                    Component::Polygon => components.selected().polygons.iter().collect(),
+                    Component::Edge => edges_from_corners(&components.selected().edges, mesh.topology())
+                        .iter()
+                        .collect(),
+                    Component::Point => Vec::new(),
+                };
+                let &[from, to] = pair.as_slice() else { return None };
+                let rebuilt = bridge(mesh, component, from, to, &options)?;
+                crate::modeling::rebuilt_data(&n.data, rebuilt, crate::modeling::Fresh::PolygonsSelected)
+                    .map(|d| (id, d))
+            });
+            if let Some((id, data)) = data {
+                commit(doc, editor, "Bridge", vec![SceneEdit::SetData { id, data }], |_, _| {});
+            }
+        }
+        EditorCommand::Weld { node, onto } => {
+            let component = editor.mode.component();
+            let data = doc.scene.get(node).zip(component).and_then(|(n, component)| {
+                let ObjectKind::Polygon { mesh, components } = &n.data.kind else {
+                    return None;
+                };
+                let points = selection::points_of(mesh.mesh(), components.selected().get(component), component);
+                if points.len() < 2 {
+                    return None;
+                }
+                let at = |p: usize| mesh.mesh().points()[p];
+                let to = match onto.map(idx).filter(|&p| points.contains(p)) {
+                    Some(p) => at(p),
+                    None => {
+                        // The middle of the selection's bounding box.
+                        let (min, max) = points
+                            .iter()
+                            .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| (lo.min(at(p)), hi.max(at(p))));
+                        (min + max) * 0.5
+                    }
+                };
+                let rebuilt = ops::weld(mesh.mesh(), &points, to).ok()?;
+                crate::modeling::rebuilt_data(&n.data, rebuilt, crate::modeling::Fresh::Unselected)
+            });
+            if let Some(data) = data {
+                commit(
+                    doc,
+                    editor,
+                    "Weld",
+                    vec![SceneEdit::SetData { id: node, data }],
+                    |_, _| {},
+                );
+            }
+        }
+        EditorCommand::Optimize => {
+            let options = editor.modeling_settings.optimize;
+            let component = editor.mode.component();
+            let data = editor.selection.active().and_then(|id| {
+                let n = doc.scene.get(id)?;
+                let ObjectKind::Polygon { mesh, components } = &n.data.kind else {
+                    return None;
+                };
+                // In a component mode, only the selection's points (all if none).
+                let scope = component
+                    .map(|c| selection::points_of(mesh.mesh(), components.selected().get(c), c))
+                    .filter(|points| !points.is_empty());
+                let rebuilt = ops::optimize(mesh.mesh(), scope.as_ref(), &options).ok()?;
+                crate::modeling::rebuilt_data(&n.data, rebuilt, crate::modeling::Fresh::Unselected).map(|d| (id, d))
+            });
+            if let Some((id, data)) = data {
+                commit(
+                    doc,
+                    editor,
+                    "Optimize",
                     vec![SceneEdit::SetData { id, data }],
                     |_, _| {},
                 );
@@ -607,10 +736,25 @@ fn rebuild_selection(
             return None;
         }
         let rebuilt = operation(mesh.mesh(), topology, component, &selected).ok()?;
-        crate::modeling::rebuilt_data(&n.data, rebuilt, select_cuts)
+        crate::modeling::rebuilt_data(&n.data, rebuilt, crate::modeling::Fresh::edges_if(select_cuts))
     });
     if let Some(data) = data {
         commit(doc, editor, label, vec![SceneEdit::SetData { id, data }], |_, _| {});
+    }
+}
+
+/// A Bridge between two faces (Polygons) or two unique edges (Edges) of `mesh`.
+fn bridge(
+    mesh: &MeshHandle,
+    component: Component,
+    from: usize,
+    to: usize,
+    options: &ops::BridgeOptions,
+) -> Option<ops::Rebuilt> {
+    match component {
+        Component::Polygon => ops::bridge_polygons(mesh.mesh(), from, to, options).ok(),
+        Component::Edge => ops::bridge_edges(mesh.mesh(), mesh.topology(), from, to, options).ok(),
+        Component::Point => None,
     }
 }
 
@@ -1043,6 +1187,117 @@ mod tests {
         editor.modeling_settings.line_cut.visible_only = false;
         run(&mut doc, &mut editor, &mut vp, &[line]);
         assert_eq!(mesh_of(&doc, id).mesh().face_count(), 6 + 4, "all the way round");
+    }
+
+    /// A polygon object made from a cube with 3 segments per side (54 quads).
+    fn segmented_cube(mode: EditMode) -> (Document, EditorState, ViewportPanel, NodeId) {
+        let mesh = grid4d_geom::primitives::cube(Vec3::splat(300.0), [3, 3, 3]);
+        let mut doc = Document::new("segmented");
+        let id = doc
+            .scene
+            .insert(Node::new("Cube", ObjectKind::polygon(MeshHandle::new(mesh))));
+        let mut editor = EditorState {
+            mode,
+            ..EditorState::default()
+        };
+        editor.selection.set_single(id);
+        (doc, editor, viewport(), id)
+    }
+
+    /// The face of `id` with `normal` whose centre lies on the axis through it.
+    fn centre_face(doc: &Document, id: NodeId, normal: Vec3) -> u32 {
+        let mesh = mesh_of(doc, id);
+        let f = (0..mesh.mesh().face_count())
+            .find(|&f| {
+                let c = mesh.mesh().face_center(f) * (Vec3::ONE - normal.abs());
+                mesh.mesh().face_normal(f).abs_diff_eq(normal, 1e-4) && c.length() < 1e-3
+            })
+            .unwrap();
+        u32::try_from(f).unwrap()
+    }
+
+    #[test]
+    fn bevel_bridge_weld_and_optimize_are_one_step_each() {
+        // Bevel: Apply on one selected edge.
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Edges);
+        editor.tool = crate::Tool::Bevel;
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ApplyMeshTool]);
+        assert_eq!(
+            mesh_of(&doc, id).mesh().face_count(),
+            6,
+            "nothing selected: nothing to bevel"
+        );
+        select_in(&mut doc, &mut editor, &mut vp, id, Component::Edge, vec![0]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ApplyMeshTool]);
+        assert_eq!(mesh_of(&doc, id).mesh().face_count(), 7);
+        assert_eq!(editor.history.undo_label(), Some("Bevel"));
+        assert_eq!(
+            selected(&doc, id, Component::Edge).len(),
+            4,
+            "the strip's two long edges, from both sides"
+        );
+
+        // Bridge: the middles of top and bottom, through the cube.
+        let (mut doc, mut editor, mut vp, id) = segmented_cube(EditMode::Polygons);
+        let (top, bottom) = (centre_face(&doc, id, Vec3::Y), centre_face(&doc, id, -Vec3::Y));
+        let bridge = EditorCommand::Bridge {
+            node: id,
+            component: Component::Polygon,
+            from: top,
+            to: bottom,
+        };
+        run(&mut doc, &mut editor, &mut vp, &[bridge]);
+        let mesh = mesh_of(&doc, id);
+        assert_eq!(mesh.mesh().face_count(), 54 - 2 + 4);
+        assert!(mesh.topology().is_closed());
+        assert_eq!(editor.history.undo_label(), Some("Bridge"));
+        assert_eq!(
+            selected(&doc, id, Component::Polygon).len(),
+            4,
+            "the new walls are selected"
+        );
+        // The same through Apply on the two selected polygons.
+        let (mut doc, mut editor, mut vp, id) = segmented_cube(EditMode::Polygons);
+        let pair = vec![centre_face(&doc, id, Vec3::Y), centre_face(&doc, id, -Vec3::Y)];
+        select_in(&mut doc, &mut editor, &mut vp, id, Component::Polygon, pair);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::BridgeSelected]);
+        assert_eq!(mesh_of(&doc, id).mesh().face_count(), 56);
+
+        // Weld two points of one edge onto the first: the cube loses a point.
+        let (mut doc, mut editor, mut vp, id) = polygon_cube(EditMode::Points);
+        let [a, b] = mesh_of(&doc, id).topology().edges()[0];
+        select_in(&mut doc, &mut editor, &mut vp, id, Component::Point, vec![a, b]);
+        let kept = mesh_of(&doc, id).mesh().points()[usize::try_from(a).unwrap()];
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Weld {
+                node: id,
+                onto: Some(a),
+            }],
+        );
+        let welded = mesh_of(&doc, id);
+        assert_eq!(welded.mesh().point_count(), 7);
+        assert!(welded.mesh().points().contains(&kept), "onto the clicked point");
+        assert_eq!(editor.history.undo_label(), Some("Weld"));
+
+        // Optimize closes an editable cylinder's separate caps.
+        let mut doc = Document::new("cylinder");
+        let id = doc
+            .scene
+            .insert(Node::new("Cylinder", ObjectKindTag::Cylinder.default_kind()));
+        let mut editor = EditorState::default();
+        let mut vp = viewport();
+        editor.selection.set_single(id);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let before = mesh_of(&doc, id).mesh().point_count();
+        assert!(!mesh_of(&doc, id).topology().is_closed(), "separate caps");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Optimize]);
+        let after = mesh_of(&doc, id);
+        assert!(after.mesh().point_count() < before);
+        assert!(after.topology().is_closed());
+        assert_eq!(editor.history.undo_label(), Some("Optimize"));
     }
 
     #[test]

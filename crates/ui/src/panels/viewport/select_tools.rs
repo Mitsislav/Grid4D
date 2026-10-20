@@ -60,6 +60,14 @@ pub(super) enum Gesture {
         start: Pos2,
         end: Pos2,
     },
+    /// A Bridge dragged from component `from` (a face, or an edge in Edges mode).
+    Bridge {
+        node: NodeId,
+        component: Component,
+        from: u32,
+        start: Pos2,
+        end: Pos2,
+    },
     /// Esc cancelled the gesture: ignore the pointer until it is released.
     Cancelled,
 }

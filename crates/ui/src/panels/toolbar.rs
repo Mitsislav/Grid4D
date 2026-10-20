@@ -168,7 +168,9 @@ const fn tool_icon(tool: Tool) -> Icon {
         Tool::Scale => Icon::Scale,
         Tool::Rotate => Icon::Rotate,
         // Not on the toolbar (Mesh menu and shortcuts); a plain arrow if ever shown.
-        Tool::Extrude | Tool::Inset | Tool::LoopCut | Tool::LineCut => Icon::Move,
+        Tool::Extrude | Tool::Inset | Tool::LoopCut | Tool::LineCut | Tool::Bevel | Tool::Bridge | Tool::Weld => {
+            Icon::Move
+        }
     }
 }
 
@@ -185,6 +187,9 @@ const fn tool_tooltip(tool: Tool) -> &'static str {
         Tool::Inset => "Inset (I)",
         Tool::LoopCut => "Loop/Path Cut (K~L)",
         Tool::LineCut => "Line Cut (K~K)",
+        Tool::Bevel => "Bevel (M~S)",
+        Tool::Bridge => "Bridge (B)",
+        Tool::Weld => "Weld",
     }
 }
 

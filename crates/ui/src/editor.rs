@@ -4,7 +4,7 @@
 use grid4d_geom::{
     Component,
     loops::WalkOptions,
-    ops::{ExtrudeOptions, InsetOptions},
+    ops::{BevelOptions, BridgeOptions, ExtrudeOptions, InsetOptions, OptimizeOptions},
 };
 use grid4d_scene::{NodeId, Scene};
 use slotmap::SecondaryMap;
@@ -29,6 +29,12 @@ pub enum Tool {
     LoopCut,
     /// Mesh ▸ Line Cut (K~K), the knife: drag a line across the object.
     LineCut,
+    /// Mesh ▸ Bevel (M~S): drag to bevel the selected edges or points.
+    Bevel,
+    /// Mesh ▸ Bridge (B): drag from one polygon or border edge to another.
+    Bridge,
+    /// Mesh ▸ Weld: click to weld the selected points into one.
+    Weld,
 }
 
 impl Tool {
@@ -57,6 +63,9 @@ impl Tool {
             Self::Inset => "Inset",
             Self::LoopCut => "Loop/Path Cut",
             Self::LineCut => "Line Cut",
+            Self::Bevel => "Bevel",
+            Self::Bridge => "Bridge",
+            Self::Weld => "Weld",
         }
     }
 
@@ -71,6 +80,9 @@ impl Tool {
             Self::RingSelection => "U~B",
             Self::LoopCut => "K~L",
             Self::LineCut => "K~K",
+            Self::Bevel => "M~S",
+            Self::Bridge => "B",
+            Self::Weld => "",
             Self::Move => "E",
             Self::Scale => "T",
             Self::Rotate => "R",
@@ -96,6 +108,9 @@ impl Tool {
             Self::Inset => "Inset works on the polygons of a polygon object (Polygons mode)",
             Self::LoopCut => "Loop/Path Cut: in a component mode, hover an edge of a polygon object and click to cut",
             Self::LineCut => "Line Cut: in a component mode, drag a line across a polygon object",
+            Self::Bevel => "Bevel works on the selected edges or points of a polygon object",
+            Self::Bridge => "Bridge: in Polygons or Edges mode, drag from one polygon or border edge to another",
+            Self::Weld => "Weld: select points, then click one of them (or anywhere else for their centre)",
         }
     }
 
@@ -116,7 +131,13 @@ impl Tool {
     /// The Mesh menu's modelling tools: drag in the viewport, or Apply.
     #[must_use]
     pub const fn is_mesh_tool(self) -> bool {
-        matches!(self, Self::Extrude | Self::Inset)
+        matches!(self, Self::Extrude | Self::Inset | Self::Bevel)
+    }
+
+    /// The tools that join components: Bridge (drag between two) and Weld (click).
+    #[must_use]
+    pub const fn is_join_tool(self) -> bool {
+        matches!(self, Self::Bridge | Self::Weld)
     }
 
     /// The cutting tools: Loop/Path Cut (click) and Line Cut (drag).
@@ -128,7 +149,7 @@ impl Tool {
     /// The tool's options are worth showing in the Attribute Manager as it is picked.
     #[must_use]
     pub const fn shows_options(self) -> bool {
-        self.is_selection_tool() || self.is_mesh_tool() || self.is_cut_tool()
+        self.is_selection_tool() || self.is_mesh_tool() || self.is_cut_tool() || self.is_join_tool()
     }
 }
 
@@ -167,6 +188,9 @@ pub struct ModelingSettings {
     pub inset: InsetOptions,
     pub loop_cut: LoopCutSettings,
     pub line_cut: LineCutSettings,
+    pub bevel: BevelOptions,
+    pub bridge: BridgeOptions,
+    pub optimize: OptimizeOptions,
 }
 
 /// Loop/Path Cut options.
@@ -237,6 +261,22 @@ impl Default for ModelingSettings {
                 infinite: false,
                 connect: true,
                 select_cuts: true,
+            },
+            bevel: BevelOptions {
+                offset: 10.0,
+                subdivision: 0,
+                depth: 1.0,
+                limit: true,
+            },
+            bridge: BridgeOptions {
+                subdivision: 0,
+                spin: 0,
+                delete_originals: true,
+            },
+            optimize: OptimizeOptions {
+                merge_points: true,
+                tolerance: 0.01,
+                unused_points: true,
             },
         }
     }
@@ -424,6 +464,8 @@ pub struct EditorState {
     /// Graphics adapter description shown in the status bar.
     pub renderer_info: String,
     pub show_about: bool,
+    /// Mesh ▸ Optimize… dialog is open.
+    pub show_optimize: bool,
 }
 
 impl Default for EditorState {
@@ -445,6 +487,7 @@ impl Default for EditorState {
             status_hint: None,
             renderer_info: String::new(),
             show_about: false,
+            show_optimize: false,
         }
     }
 }

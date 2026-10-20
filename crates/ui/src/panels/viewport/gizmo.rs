@@ -189,7 +189,10 @@ impl GizmoGeometry {
                 | Tool::Extrude
                 | Tool::Inset
                 | Tool::LoopCut
-                | Tool::LineCut => {}
+                | Tool::LineCut
+                | Tool::Bevel
+                | Tool::Bridge
+                | Tool::Weld => {}
             }
         }
         painter.circle_filled(self.origin_px, 3.5, p::TEXT_STRONG);
@@ -263,7 +266,10 @@ impl PointEdit {
             | Tool::Extrude
             | Tool::Inset
             | Tool::LoopCut
-            | Tool::LineCut => Mat4::from_translation(self.moved),
+            | Tool::LineCut
+            | Tool::Bevel
+            | Tool::Bridge
+            | Tool::Weld => Mat4::from_translation(self.moved),
         }
     }
 
@@ -478,7 +484,10 @@ fn apply_component_drag(geo: &GizmoGeometry, drag: &mut Drag, pointer: Pos2, sce
         | Tool::Extrude
         | Tool::Inset
         | Tool::LoopCut
-        | Tool::LineCut => return,
+        | Tool::LineCut
+        | Tool::Bevel
+        | Tool::Bridge
+        | Tool::Weld => return,
     }
     edit.apply(edit.delta(geo.tool, geo.axes[axis]), scene, drag.node);
 }
@@ -517,7 +526,10 @@ fn apply_drag(geo: &GizmoGeometry, drag: &Drag, pointer: Pos2, scene: &mut Scene
         | Tool::Extrude
         | Tool::Inset
         | Tool::LoopCut
-        | Tool::LineCut => {}
+        | Tool::LineCut
+        | Tool::Bevel
+        | Tool::Bridge
+        | Tool::Weld => {}
     }
 }
 

@@ -157,11 +157,22 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             });
             ui.separator();
             let polygon_object = crate::commands::component_target(doc, editor).is_some();
-            for tool in [Tool::Extrude, Tool::Inset, Tool::LoopCut, Tool::LineCut] {
-                let how = if tool.is_cut_tool() {
-                    "Then hover an edge and click (Loop/Path Cut) or drag a line (Line Cut) in the viewport"
-                } else {
-                    "Then drag left or right in the viewport, or Apply in the Attribute Manager"
+            for tool in [
+                Tool::Extrude,
+                Tool::Inset,
+                Tool::Bevel,
+                Tool::Bridge,
+                Tool::Weld,
+                Tool::LoopCut,
+                Tool::LineCut,
+            ] {
+                let how = match tool {
+                    Tool::LoopCut | Tool::LineCut => {
+                        "Then hover an edge and click (Loop/Path Cut) or drag a line (Line Cut) in the viewport"
+                    }
+                    Tool::Bridge => "Then drag from one polygon or border edge to another",
+                    Tool::Weld => "Then click a selected point, or anywhere else for the centre",
+                    _ => "Then drag left or right in the viewport, or Apply in the Attribute Manager",
                 };
                 let item = ui
                     .add_enabled(polygon_object, Button::new(tool.label()).shortcut_text(tool.shortcut()))
@@ -187,10 +198,21 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     ui.close();
                 }
             }
-            ui.separator();
-            for name in ["Bevel", "Subdivide"] {
-                planned(ui, name, "");
+            let active_polygon = editor
+                .selection
+                .active()
+                .and_then(|id| doc.scene.get(id))
+                .is_some_and(|n| matches!(n.data.kind, grid4d_scene::ObjectKind::Polygon { .. }));
+            if ui
+                .add_enabled(active_polygon, Button::new("Optimize…").shortcut_text("U~O"))
+                .on_disabled_hover_text("Select a polygon object")
+                .clicked()
+            {
+                editor.show_optimize = true;
+                ui.close();
             }
+            ui.separator();
+            planned(ui, "Subdivide", "");
         });
 
         ui.menu_button("Animate", |ui| {

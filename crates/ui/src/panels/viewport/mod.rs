@@ -4,6 +4,7 @@
 mod cut_tools;
 mod gizmo;
 mod gpu_view;
+mod join_tools;
 mod mesh_tools;
 mod overlay;
 mod select_tools;
@@ -154,6 +155,7 @@ impl ViewportPanel {
             self.evaluated.update(&doc.scene);
             if !self.mesh_tools(ui, &response, rect, doc, editor)
                 && !self.cut_tools(ui, &response, rect, editor)
+                && !self.join_tools(ui, &response, rect, editor)
                 && !self.selection_tools(ui, &response, rect, doc, editor)
             {
                 self.pick_on_click(ui, &response, rect, editor);
@@ -208,7 +210,9 @@ impl ViewportPanel {
         }
         match &self.gesture {
             Gesture::Frame { start, end } => overlay::marquee(&painter, Rect::from_two_pos(*start, *end)),
-            Gesture::LineCut { start, end, .. } => overlay::cut_line(&painter, *start, *end),
+            Gesture::LineCut { start, end, .. } | Gesture::Bridge { start, end, .. } => {
+                overlay::cut_line(&painter, *start, *end);
+            }
             Gesture::None | Gesture::Stroke(_) | Gesture::Tweak { .. } | Gesture::MeshTool(_) | Gesture::Cancelled => {}
         }
         if let Some(preview) = &self.loop_preview {
@@ -270,6 +274,13 @@ impl ViewportPanel {
             // The brush circle shows what Live Selection will paint; the cut
             // tools draw their own preview.
             Tool::LiveSelection | Tool::LoopCut | Tool::LineCut => {}
+            // A click with Bevel/Bridge/Weld still selects; show what it would pick.
+            Tool::Bevel | Tool::Bridge | Tool::Weld => {
+                let view = self.screen_view(rect);
+                let radius = metrics::COMPONENT_PICK_RADIUS;
+                self.hover
+                    .extend(pick_component(&self.evaluated, node, component, &view, cursor, radius));
+            }
             // Mesh tools: a click still selects, a drag runs the tool.
             Tool::RectangleSelection | Tool::Move | Tool::Scale | Tool::Rotate | Tool::Extrude | Tool::Inset => {
                 let view = self.screen_view(rect);
@@ -529,6 +540,22 @@ const fn component_hint(component: Component, tool: Tool, active: bool) -> &'sta
             return "Loop/Path Cut: hover an edge to see the loop · click cuts it there · Number of Cuts spaces them evenly";
         }
         Tool::LineCut => return "Line Cut: drag a line across the object · release cuts · Esc cancels",
+        Tool::Bevel => {
+            return match component {
+                Component::Edge | Component::Point => {
+                    "Bevel: drag left/right to bevel the selection · Apply in the Attribute Manager · Esc cancels"
+                }
+                Component::Polygon => "Bevel works on edges or points: switch to Edges or Points mode",
+            };
+        }
+        Tool::Bridge => {
+            return match component {
+                Component::Polygon => "Bridge: drag from one polygon to another · Apply bridges the two selected",
+                Component::Edge => "Bridge: drag from one border edge to another · Apply bridges the two selected",
+                Component::Point => "Bridge works in Polygons or Edges mode",
+            };
+        }
+        Tool::Weld => return "Weld: click a selected point to weld onto it, or anywhere else to weld at the centre",
         Tool::Move | Tool::Scale | Tool::Rotate => {}
     }
     match component {
@@ -1161,6 +1188,57 @@ mod tests {
         );
         assert_eq!(h.editor.history.undo_label(), Some("Line Cut"));
         assert!(!h.selected(cube, Component::Edge).is_empty(), "the cuts are selected");
+    }
+
+    #[test]
+    fn bevel_drag_bridge_drag_and_weld_click() {
+        // Bevel: drag with one edge selected, like Extrude.
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Edges, Tool::Bevel);
+        h.select(cube, Component::Edge, vec![0]);
+        let centre = h.viewport.view_rect.center();
+        h.drag(centre, centre + vec2(40.0, 0.0));
+        assert_eq!(h.mesh(cube).mesh().face_count(), 7);
+        assert_eq!(h.editor.history.undo_label(), Some("Bevel"));
+
+        // Bridge: drag from the front face's middle polygon to the top's.
+        let mut h = Harness::new();
+        let cube = h.doc.scene.iter().find(|(_, n)| n.data.name == "Cube").unwrap().0;
+        h.doc.scene.get_mut(cube).unwrap().data.kind = grid4d_scene::ObjectKind::Cube {
+            size: Vec3::splat(200.0),
+            segments: [3, 3, 3],
+        };
+        let cube = h.edit("Cube", EditMode::Polygons, Tool::Bridge);
+        let mesh = h.mesh(cube);
+        let world = h.doc.scene.world_matrix(cube);
+        let rect = h.viewport.view_rect;
+        let view_proj = h.viewport.camera.view_projection(rect.aspect_ratio());
+        let middle_of = |normal: Vec3| {
+            let f = (0..mesh.mesh().face_count())
+                .find(|&f| {
+                    let c = mesh.mesh().face_center(f) * (Vec3::ONE - normal.abs());
+                    mesh.mesh().face_normal(f).abs_diff_eq(normal, 1e-4) && c.length() < 1e-3
+                })
+                .unwrap();
+            project(&view_proj, rect, world.transform_point3(mesh.mesh().face_center(f))).unwrap()
+        };
+        let (front, top) = (middle_of(Vec3::Z), middle_of(Vec3::Y));
+        h.drag(front, top);
+        assert_eq!(h.mesh(cube).mesh().face_count(), 54 - 2 + 4);
+        assert_eq!(h.editor.history.undo_label(), Some("Bridge"));
+
+        // Weld: select two points, click empty space: they meet in the middle.
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Points, Tool::Weld);
+        let [a, b] = h.mesh(cube).topology().edges()[0];
+        h.select(cube, Component::Point, vec![a, b]);
+        let corner = h.viewport.view_rect.left_top() + vec2(20.0, 20.0);
+        h.frame(vec![Event::PointerMoved(corner)]);
+        h.frame(vec![Harness::button(corner, true)]);
+        h.frame(vec![Harness::button(corner, false)]);
+        h.frame(vec![]);
+        assert_eq!(h.mesh(cube).mesh().point_count(), 7);
+        assert_eq!(h.editor.history.undo_label(), Some("Weld"));
     }
 
     #[test]

@@ -496,6 +496,42 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 count_row(ui, "Number of Cuts", &mut m.cuts, 1);
                 check_row(ui, "Select Cuts", &mut m.select_cuts);
             }
+            Tool::Bevel => {
+                let m = &mut editor.modeling_settings.bevel;
+                offset_row(ui, "Offset", &mut m.offset);
+                count_row(ui, "Subdivision", &mut m.subdivision, 0);
+                attr_label(ui, "Depth", LABEL_WIDTH);
+                let mut percent = m.depth * 100.0;
+                if ui
+                    .add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut percent)
+                            .speed(1.0)
+                            .range(-100.0..=100.0)
+                            .suffix(" %"),
+                    )
+                    .changed()
+                {
+                    m.depth = percent / 100.0;
+                }
+                ui.end_row();
+                check_row(ui, "Limit", &mut m.limit);
+            }
+            Tool::Bridge => {
+                let m = &mut editor.modeling_settings.bridge;
+                count_row(ui, "Subdivision", &mut m.subdivision, 0);
+                attr_label(ui, "Spin Steps", LABEL_WIDTH);
+                ui.add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    DragValue::new(&mut m.spin).speed(0.05).range(-64..=64),
+                );
+                ui.end_row();
+                check_row(ui, "Delete Original Polygons", &mut m.delete_originals);
+            }
+            Tool::Weld => {
+                ui.label(RichText::new("No options").color(p::TEXT_DIM));
+                ui.end_row();
+            }
             Tool::LineCut => {
                 let m = &mut editor.modeling_settings.line_cut;
                 check_row(ui, "Visible Only", &mut m.visible_only);
@@ -504,6 +540,27 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 check_row(ui, "Select Cuts", &mut m.select_cuts);
             }
         });
+    if tool == Tool::Bridge {
+        ui.add_space(6.0);
+        let target = crate::commands::component_target(doc, editor)
+            .is_some_and(|(_, c)| matches!(c, grid4d_geom::Component::Polygon | grid4d_geom::Component::Edge));
+        if ui
+            .add_enabled(target, Button::new("Apply"))
+            .on_hover_text("Bridge the two selected polygons or border edges")
+            .on_disabled_hover_text(tool.hint())
+            .clicked()
+        {
+            editor.commands.push(EditorCommand::BridgeSelected);
+        }
+        ui.label(RichText::new("Or drag from one polygon or border edge to another").color(p::TEXT_DIM));
+    }
+    if tool == Tool::Weld {
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new("Click one of the selected points to weld onto it, anywhere else for their centre")
+                .color(p::TEXT_DIM),
+        );
+    }
     if tool.is_cut_tool() {
         ui.add_space(6.0);
         let how = match tool {

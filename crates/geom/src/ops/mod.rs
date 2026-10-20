@@ -9,6 +9,8 @@
 //!   that records where each point and face came from; [`Rebuilt::carry`] moves a
 //!   selection (or hidden flags) across.
 
+mod bevel;
+mod bridge;
 mod cut;
 mod extrude;
 mod rebuild;
@@ -17,11 +19,13 @@ use std::collections::HashSet;
 
 use glam::{Vec2, Vec3};
 
+pub use bevel::{BevelOptions, bevel};
+pub use bridge::{BridgeOptions, bridge_edges, bridge_polygons};
 pub use cut::{LineCut, connect, line_cut, loop_cut};
 pub use extrude::{
     EdgeExtrudeOptions, EdgeExtrusion, ExtrudeOptions, InsetOptions, extrude_edges, extrude_polygons, inset, pieces,
 };
-pub use rebuild::{delete, dissolve, melt};
+pub use rebuild::{OptimizeOptions, delete, dissolve, melt, optimize, weld};
 
 use crate::{BitSet, ComponentSet, MeshError, PolyMesh, Topology, selection, u32_index, us};
 
@@ -186,6 +190,14 @@ impl<'a> Builder<'a> {
         }
         self.starts.push(self.corners.len());
         self.origins.push(u32_index(origin));
+    }
+
+    /// A face the operation adds (its origin is [`NEW`]).
+    fn push_new(&mut self, corners: &[Corner]) {
+        self.push(corners, 0);
+        if let Some(origin) = self.origins.last_mut() {
+            *origin = NEW;
+        }
     }
 
     /// Source face `face`, unchanged.

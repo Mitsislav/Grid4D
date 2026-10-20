@@ -170,7 +170,7 @@ from one drag or one typing session is one undo step.
 the frame range.
 
 **Tool mode:** when you pick a tool that has options (the selection tools,
-Extrude, Inset, Loop/Path Cut, Line Cut), the Attribute Manager switches to that
+Extrude, Inset, Bevel, Bridge, Loop/Path Cut, Line Cut), the Attribute Manager switches to that
 tool's options. Its **Mode** menu switches between *Objects* and *Tool* by hand.
 
 ## 8. Undo and redo
@@ -380,6 +380,63 @@ shortcuts). Each is one undo step.
 - Points that no polygon uses any more are removed automatically.
 - In Model mode, Delete removes the selected objects instead.
 
+### 11.8 Bevel, Bridge, Weld and Optimize
+
+![Results: a cube with every edge bevelled and rounded, a hole bridged through a cube, a cube with one edge welded into a wedge](images/manual/bevel-bridge-weld.png)
+
+**Bevel** (**M~S**) rounds or chamfers the selected **edges** (Edges mode), or cuts
+off the selected **points** (Points mode):
+
+1. Select the edges or points to bevel.
+2. Press M, then S (or Mesh ▸ Bevel).
+3. Drag left or right in the viewport (Esc cancels), or click **Apply** in the
+   Attribute Manager.
+
+![Bevel options](images/manual/bevel.png)
+
+| Option | Meaning |
+|--------|---------|
+| Offset | Width of the bevel. A drag writes it here. |
+| Subdivision | 0 gives a flat chamfer; more gives rows across the bevel, along a rounded profile. |
+| Depth | How round the profile is: 100 % round, 0 % flat, negative hollow. |
+| Limit | Keeps the new points from passing each other (no overlapping polygons). |
+
+- Where three bevelled edges meet (a cube's corner) a small polygon closes the
+  corner.
+- Border edges (edges with a single polygon) are not bevelled.
+- The long edges of the new strips become the selection, so another bevel can round
+  them further.
+
+**Bridge** (**B**, or M~B) joins two components with new polygons:
+
+- **Polygons mode**: drag from one polygon to another. A band of polygons joins
+  their outlines, and the two polygons are removed, so the bridge opens through them
+  (a hole through an object, a handle between two parts). They need the same number
+  of points.
+- **Edges mode**: drag from one border edge to another. One polygon fills the gap.
+- Or select the two polygons or edges and click **Apply**.
+- Options: **Subdivision** (rows along the bridge), **Spin Steps** (turns the band
+  if it comes out twisted), **Delete Original Polygons**.
+
+**Weld** (Mesh ▸ Weld) merges points:
+
+1. Select the points (in Edges or Polygons mode, the points of the selection count).
+2. With the Weld tool, **click one of the selected points** to weld everything onto
+   it, or **click anywhere else** to weld at their centre.
+
+Polygons that collapse are removed.
+
+**Optimize** (**U~O**, Mesh ▸ Optimize…) cleans up a mesh:
+
+![The Optimize dialog](images/manual/optimize.png)
+
+- **Points** merges points closer than **Tolerance**. Use it after modelling steps
+  that leave points on top of each other, or to close an editable cylinder's
+  separate caps.
+- **Unused Points** removes points that no polygon uses.
+- It works on the selected points (or those of the selected edges or polygons), or
+  on the whole object when nothing is selected.
+
 ## 12. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
@@ -398,9 +455,12 @@ Esc cancels a chord.
 | D / I | Extrude / Inset tool |
 | M~T / M~W | Extrude / Inset tool (alternatives) |
 | K~L (M~L) / K~K (M~K) | Loop/Path Cut / Line Cut tool |
+| M~S | Bevel tool |
+| B (M~B) | Bridge tool |
 | M~M | Connect Points/Edges |
 | M~N or Ctrl+Backspace | Dissolve |
 | U~Z or Alt+Backspace | Melt |
+| U~O | Optimize… |
 | Delete / Backspace | Delete (objects in Model mode, components otherwise) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) | Undo / redo |
@@ -416,8 +476,9 @@ Esc cancels a chord.
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
-- **Modelling**: Bevel, Bridge, Weld, Optimize; Subdivision Surface; snapping (the
-  toggle exists, without effect); Extrude on points; Path mode for Loop/Path Cut.
+- **Modelling**: Subdivision Surface; snapping (the toggle exists, without effect);
+  Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
+  Solid, Proportional and Radial modes; Bridge point by point.
 - **Animation**: keyframes, F-curves, the Coordinate and Material managers.
 - **Viewport**: scene cameras, the 4-view layout, wireframe and other display modes;
   lights do not light the viewport yet.

@@ -12,14 +12,19 @@
 > [Line Cut](https://help.maxon.net/c4d/s22/us/html/TOOLKNIFELINE-MDATA_MAINGROUP.html),
 > [Dissolve](https://help.maxon.net/c4d/r23/en-us/Content/html/15945.html),
 > [Connect Points/Edges](https://help.maxon.net/c4d/r23/en-us/Content/html/15943.html),
-> [Edges](https://help.maxon.net/c4d/s22/us/html/5492.html) (Delete in Edges mode), [Hide Selected](https://help.maxon.net/c4d/s22/us/html/5651.html) /
+> [Edges](https://help.maxon.net/c4d/s22/us/html/5492.html) (Delete in Edges mode), [Bevel](https://help.maxon.net/c4d/s22/us/html/XBEVELTOOL.html)
+> and its [options](https://help.maxon.net/c4d/s22/us/html/XBEVELTOOL-MDATA_BEVEL_GROUP_OPTION.html),
+> [Bridge](https://help.maxon.net/c4d/r23/en-us/Content/html/TOOLBRIDGE.html) and its
+> [options](https://help.maxon.net/c4d/s22/us/html/TOOLBRIDGE-MDATA_MAINGROUP.html),
+> [Weld](https://help.maxon.net/c4d/s22/us/html/TOOLPOINTWELD.html),
+> [Optimize](https://help.maxon.net/c4d/2025/en-us/Content/html/5674.html), [Hide Selected](https://help.maxon.net/c4d/s22/us/html/5651.html) /
 > Mesh menu (hidden elements are left alone); parameter IDs from the
 > [Python SDK resource pages](https://developers.maxon.net/docs/py/2026_3_0/cinema_resource/tool/toolextrude.html)
 > (`MDATA_EXTRUDE_*`, `MDATA_EXTRUDEINNER_*`). Written in our own words — no copied
 > text or images.
 >
-> Covers implementation-plan steps **4.4** (Extrude, Inset) and **4.5** (Delete, Melt,
-> Dissolve, Connect, Loop/Path Cut, Line Cut). Bevel, Bridge, Weld (4.6) will be added here.
+> Covers implementation-plan steps **4.4** (Extrude, Inset), **4.5** (Delete, Melt,
+> Dissolve, Connect, Loop/Path Cut, Line Cut) and **4.6** (Bevel, Bridge, Weld, Optimize).
 
 ## Purpose
 
@@ -139,7 +144,8 @@ Dissolve, **Alt+Backspace** Melt. **Chords**: press the first key, then the seco
 | U Y | Grow Selection | M N | Dissolve |
 | U K | Shrink Selection | M T | Extrude |
 | U I | Invert | M W | Inset |
-| U Z | Melt | | |
+| U Z | Melt | M S | Bevel |
+| U O | Optimize | M B (or B) | Bridge |
 
 ## Delete, Melt, Dissolve (components)
 
@@ -208,6 +214,81 @@ follow their components.
   point uses that point). Every polygon crossed twice is split between the two
   crossings; with more crossings they are paired along the line.
 
+## Bevel
+
+| Name | Type / range | Default | Effect |
+|------|--------------|---------|--------|
+| Offset | length | 10 cm (1) | Width of the bevel: how far the new points move from the original edge or point along the surface. A drag in the viewport sets it. |
+| Subdivision | integer ≥ 0 | 0 | 0: a flat chamfer. More: rows across the bevel, along a rounded profile. |
+| Depth | -100 … 100 % | 100 % | The profile's bulge with Subdivision: 100 % round, 0 % flat, negative hollow. |
+| Limit | bool | on | Clamps the Offset so that new points never pass each other (no overlapping polygons). |
+| Bevel Mode (Solid), Offset Mode (Proportional, Radial), Shaping, Topology options, Polygons mode | - | - | **later** |
+
+(1) Our default: the manual states none.
+
+- **Interaction**: like Extrude. Pick Edges or Points mode, drag left/right anywhere
+  in the viewport (the model follows live, release = one undo step, Esc cancels), or
+  *Apply* with the shown options. With nothing selected, nothing happens (a bevel of
+  every edge is rarely wanted).
+- **Edges**: every selected edge between two polygons becomes a strip of
+  Subdivision + 1 quads.
+  - *Endpoints*: each endpoint of a bevelled edge is replaced by new points. Where a
+    polygon's corner has one bevelled edge, its point slides the Offset along the
+    other edge; where both of its edges are bevelled, the point moves into the
+    polygon, the Offset away from both.
+  - *Corners*: the hole left at each replaced point is filled by one polygon (a
+    triangle where three bevelled edges meet, as on a cube's corner).
+  - *Border edges* (one polygon) are not bevelled.
+- **Points**: every selected point is cut off. Its polygons lose the corner, and a new
+  polygon joins the points placed the Offset along each of its edges.
+- **Selection afterwards**: the long edges of the new strips are selected (Edges
+  mode).
+- The rounded profile runs from one side of the strip to the other through a
+  control point pulled towards the original edge (Depth). Corner polygons stay flat
+  n-gons.
+
+## Bridge
+
+| Name | Type | Default | Effect |
+|------|------|---------|--------|
+| Subdivision | integer ≥ 0 | 0 | Rows of polygons along the bridge. |
+| Spin Steps | integer | 0 | Turns which point of the second element each point of the first joins (fixes or makes a twist). |
+| Delete Original Polygons | bool | on | Polygons mode: the two bridged polygons are removed, so the bridge opens through them. |
+| Points mode (polygons point by point), chaining | - | - | **later** |
+
+- **Polygons**: drag from one polygon to another (or select two and *Apply*). Their
+  outlines are joined by a band of quads: the points pair up in opposite order, and
+  the pairing with the shortest total distance is chosen (Spin Steps turns it). They
+  need the same number of points and no shared point.
+- **Edges**: drag from one border edge to another (or select two and *Apply*): one
+  new polygon (a quad, or a triangle when the edges share a point) continues both
+  neighbours' winding.
+- One undo step; the new polygons are selected in Polygons mode.
+
+## Weld
+
+- Select points, then with the Weld tool **click one of them** to weld all selected
+  points onto it, or **click anywhere else** to weld them at the centre of the
+  selection. In Edges and Polygons modes the selection's points are welded.
+- Polygons that collapse (fewer than three distinct points) are deleted; a point
+  repeated elsewhere in a polygon removes that polygon. One undo step.
+- Shift / Ctrl clicks on unselected points: **later**.
+
+## Optimize
+
+| Name | Type | Default | Effect |
+|------|------|---------|--------|
+| Points | bool | on | Merges points closer than Tolerance. |
+| Tolerance | length | 0.01 cm | The merge distance. |
+| Unused Points | bool | on | Removes points no polygon uses. |
+
+- Works on the selected points; on the points of the selected edges or polygons;
+  with nothing selected, on the whole object. It opens a small dialog with the options
+  (Mesh menu, U~O); *OK* runs it as one undo step.
+- Polygons that collapse while merging are deleted (one- and two-point polygons cannot
+  exist in Grid4D, so the reference's *Polygons* option is always on).
+- Merging closes a cylinder's separate caps into a rounded rim (the manual's caution).
+
 ## Grid4D mapping
 
 | Piece | Where |
@@ -219,6 +300,7 @@ follow their components.
 | Apply | `EditorCommand::ApplyMeshTool` → `commit` with one `SetData` |
 | Menu / keys | Mesh menu *Extrude* (D), *Inset* (I), *Loop/Path Cut*, *Line Cut*, *Connect*, *Melt*, *Dissolve*; `shortcuts.rs` (single keys and chords), Help ▸ About |
 | 4.5 algorithms | `grid4d_geom::ops` — `delete`, `melt`, `dissolve`, `connect`, `loop_cut`, `line_cut`, returning a `Rebuilt` mesh with the origin of every point and polygon; `selection::remap` carries selections and hidden flags across |
+| 4.6 | `ops::{bevel, bridge_polygons, bridge_edges, weld, optimize}`; tools `Tool::Bevel` (drag + Apply, like Extrude), `Tool::Bridge` (drag between components + Apply), `Tool::Weld` (click); Optimize dialog (`panels/optimize.rs`) → `EditorCommand::Optimize` |
 | 4.5 commands | `EditorCommand::{DeleteSelected (component modes), MeltSelected, DissolveSelected, ConnectSelected, LoopCut, LineCut}`; tools `Tool::LoopCut`, `Tool::LineCut` |
 
 ## Acceptance criteria
@@ -259,3 +341,15 @@ follow their components.
       cut across a closed cube leaves its back side whole.
 - [ ] Chords: U then L picks Loop Selection; U then an unbound key does nothing and
       clears the chord.
+- [ ] Bevelling one edge of a cube (Offset 20 on a 200 cube) gives 8 + 2 points, 7
+      polygons, still closed; with Subdivision 2 the strip has 3 quads and its middle
+      points lie outside the flat chamfer.
+- [ ] Bevelling the three edges at a cube corner leaves a triangle at the corner.
+- [ ] Bevelling a cube's corner point gives a triangle there and 3 cut polygons.
+- [ ] Bridging two opposite faces of a cube with Delete Original Polygons makes a hole
+      through it: 8 points, 4 + 4 polygons, closed (a torus-like genus 1).
+- [ ] Bridging two border edges of two separate quads adds one quad.
+- [ ] Welding the four points of a quad's top edge pair into their centre removes
+      the collapsed polygon; Weld onto a chosen point keeps that point's position.
+- [ ] Optimize on a cylinder with separate caps merges the rims (16 points left of
+      32) and leaves a closed mesh; points farther apart than Tolerance stay.

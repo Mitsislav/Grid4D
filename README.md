@@ -9,7 +9,7 @@ workflow and layout inspired by Cinema 4D.
 
 **Status: v0.4 in progress — polygon modelling.** The workspace, scene graph, GPU
 viewport, undo/redo and `.g4d` files work, and polygon objects can be modelled with
-component selection, Extrude, Inset, cuts and more; Bevel, Subdivision Surface,
+component selection, Extrude, Inset, Bevel, Bridge, cuts and more; Subdivision Surface,
 keyframes, glTF and rendering are on the roadmap (see
 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)).
 
@@ -47,8 +47,9 @@ the [progress log](docs/progress.md).
   N-gons, Caps. Loop/Path Cut (`K~L`: hover an edge to preview the loop, click to cut,
   several evenly spaced cuts), Line Cut (`K~K`: drag a line across the object, visible
   only or through), Connect Points/Edges (`M~M`), Melt (`U~Z`), Dissolve (`M~N`) and
-  Delete in every component mode. Each operation is one undo step, and selections
-  follow their components.
+  Delete in every component mode; Bevel (`M~S`, edges and points, with a rounded
+  profile), Bridge (`B`, between polygons or border edges), Weld and Optimize (`U~O`).
+  Each operation is one undo step, and selections follow their components.
 - **Cinema 4D shortcuts**, including two-key chords such as `U~L` (Loop Selection) and
   `M~N` (Dissolve); the status bar shows a pending first key.
 - **wgpu viewport**: renders into its own offscreen target (4× MSAA, depth) shown as

@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 4 — Polygon modelling & Subdivision Surface (v0.4) |
-| Last step done | 4.5 — Delete, Melt, Dissolve, Connect, Loop/Path Cut, Line Cut, chords (2026-10-20) |
-| Next step | 4.6 — Bevel, Bridge, Weld, Optimize |
-| Tests | 292, all passing; clippy and rustfmt clean |
+| Last step done | 4.6 — Bevel, Bridge, Weld, Optimize (2026-10-20) |
+| Next step | 4.7 — Generator framework + Subdivision Surface |
+| Tests | 308, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -131,6 +131,8 @@ The starting point, `64d00bf`:
 | 4.3 (`15aba27`) | The gizmo moves, scales and rotates components; Tweak mode | 246 |
 | 4.4 (`93d0ffb`) | Extrude and Inset (drag or Apply); fixes from testing the app | 269 |
 | 4.5 (`781e547`) | Delete, Melt, Dissolve, Connect, Loop/Path Cut, Line Cut; two-key shortcuts | 292 |
+| docs (`163ac7c`) | The user manual and this progress log; the shortcuts dialog fits small windows again | 292 |
+| 4.6 | Bevel (edges and points, rounded profile), Bridge (polygons, border edges), Weld, Optimize (dialog) | 308 |
 
 Before each step we write a behaviour spec in [`reference/`](reference/README.md) from
 Maxon's public manual, in our own words (clean-room).
@@ -175,6 +177,30 @@ Maxon's public manual, in our own words (clean-room).
   scrolls inside the dialog, and the key is written "Backspace".
 - **Open question settled (4.5):** Delete in Edges mode removes the edges' polygons,
   as the manual says. Melt and Dissolve keep them.
+
+*Step 4.6 — problems and solutions:*
+- **Filling the holes a bevel leaves** at corners, at the ends of a bevelled edge
+  inside a surface and at the border needed one general rule rather than a case per
+  shape. After the strips are built, the edges among the new points of each replaced
+  point that no polygon has from the other side form the hole's outline. Each closed
+  outline becomes one polygon; an open one (at the border) needs none.
+- **A rounded bevel ending at a flat side** leaves a thin region between the curved
+  end and the side's straight edge. It becomes its own polygon, in the side's plane,
+  so it looks seamless (merging it into the side is a possible refinement).
+- **Bridging polygons whose points are already joined** (the top and bottom of a
+  1-segment cube) puts the new walls on the existing vertical edges, four polygons per
+  edge. The spec's example was wrong and now uses the middle polygons of a segmented
+  cube.
+- **With "Delete Original Polygons" off**, the band must run the other way round,
+  because it sits next to the two polygons instead of replacing them. A test caught
+  this bug.
+- **Optimize's "Polygons" option** (removing one- and two-point polygons) is always on
+  in Grid4D, which cannot store such polygons.
+- **On-screen testing**: Shift cannot be sent as posted input (winit reads the real
+  keyboard state), and posted mouse-wheel scrolling was unreliable this time. The
+  tools' results were therefore checked by opening documents built with the real
+  algorithms, and the interaction by the headless tests, which run the real viewport
+  code.
 
 ---
 

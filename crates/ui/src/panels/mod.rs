@@ -16,6 +16,7 @@ pub mod attributes;
 pub mod drop_overlay;
 pub mod menu_bar;
 pub mod mode_palette;
+pub mod optimize;
 pub mod outliner;
 pub mod status_bar;
 pub mod timeline;
