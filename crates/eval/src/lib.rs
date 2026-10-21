@@ -27,6 +27,6 @@ mod generator;
 mod key;
 
 pub use drawable::{Drawable, Shading, Surface, drawable, editable_mesh};
-pub use evaluated::{EvaluatedLight, EvaluatedNode, EvaluatedScene, PickShape};
+pub use evaluated::{EvaluatedLight, EvaluatedNode, EvaluatedScene, PickShape, Purpose};
 pub use generator::generator_mesh;
 pub use key::{MeshKey, Ratio};

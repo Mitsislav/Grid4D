@@ -12,10 +12,10 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 7 — Viewport: cameras, lights, 4-view, shading (v0.7) |
-| Last step done | 7.6 — Shadows and SSAO in the viewport (2026-10-21); Phase 7 complete |
-| Next step | 8 — Offline renderer (see the plan's Phase 8) |
-| Tests | 469, all passing; clippy and rustfmt clean |
+| Current phase | 8 — Offline renderer (v0.8) |
+| Last step done | 8.1 — The path tracer core (2026-10-21) |
+| Next step | 8.2 — Render Settings in the document |
+| Tests | 485, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -516,7 +516,7 @@ write animation yet (planned).
 | 7.3 (`96cc183`) | Display modes per view (Display menu, N~ chords): Gouraud, Quick and Constant Shading, each also with lines, Hidden Line and Lines; Wireframe (polygon edges) or Box (each object as its bounding box); selected objects' lines in orange | 452 |
 | 7.4 (`6a7846c`) | Lights light the viewport: Omni, Spot (cone with inner and outer angle) and Infinite lights with falloff, the default light when there are none, Quick Shading always with it; materials' roughness, metallic and luminance shade the surfaces; spot cones and infinite arrows in the view | 459 |
 | 7.5 (`88e2579`) | The Filter menu per view: Polygon, Generator, Subdivision Surface, Camera and Light objects, World Grid, World Axis and HUD on or off; All, None, Ctrl+click keeps one; hidden types are neither drawn nor picked or snapped to | 464 |
-| 7.6 | Shadows and SSAO per view (Options menu): the key light — the first with a Shadow, soft or hard — casts shadows (Spot, Infinite, Omni); ambient occlusion darkens contact areas and corners; the light's Shadow setting | 469 |
+| 7.6 (`6e2c2d2`) | Shadows and SSAO per view (Options menu): the key light — the first with a Shadow, soft or hard — casts shadows (Spot, Infinite, Omni); ambient occlusion darkens contact areas and corners; the light's Shadow setting | 469 |
 
 *Problems and solutions:*
 - **The view camera had no bank.** The turntable camera kept world Y up, so a banked
@@ -681,6 +681,47 @@ write animation yet (planned).
   darkened the bases of the spheres and the cube; with four views, the Top view
   (orthographic) showed both effects while the Right and Front views, without
   them, stayed plain.
+
+Phase 7 is complete.
+
+## Phase 8 — Offline renderer (2026-10-21 – )
+
+| Step | Built | Tests |
+|------|-------|-------|
+| 8.1 | The path tracer core: a new crate `grid4d-raytrace` that renders the scene (render visibility and levels) through a camera — every light with its Shadow setting, diffuse and glossy/metal materials, luminance, two bounces, the automatic light, a transparent background — repeatably and in parallel; an example renders documents to PNG; a reference-image test | 485 |
+
+*Problems and solutions:*
+- **What the renderer sees.** The evaluation was built for the viewport (editor
+  visibility, viewport levels). It now has a purpose: `EvaluatedScene::for_render`
+  takes the objects visible in the renderer and builds Subdivision Surfaces at
+  their render level, through the same code and caches.
+- **One BVH for the whole scene.** Picking keeps a BVH per mesh in object space;
+  a path tracer wants one over everything in world space. The renderer bakes
+  every triangle into world space as its own face of a single `PolyMesh` and
+  reuses `grid4d-geom`'s tested BVH; the polygon a ray hits is then the
+  triangle, whose barycentric weights interpolate the smoothed normals.
+- **The same brightness as the viewport.** A light of strength 1 on a white
+  matte surface facing it shows 1 in both: the renderer's reflection carries the
+  factor π that makes its physically based material match the viewport's
+  simpler one, and colours are linear until the sRGB conversion at the end.
+- **Repeatable in parallel.** Each pixel sample draws from its own random
+  stream seeded by the pixel, the sample number and the render's seed, so the
+  picture is identical whether one thread or sixteen render the rows (a test
+  renders both ways).
+- **Fireflies.** Bounces that landed on the sharp highlight of a glossy or
+  metal sphere left bright specks on the floor. Light picked up after a bounce
+  is now capped, which removes them at the cost of a little caustic light.
+- **Reference images across machines.** Floating-point details differ slightly
+  between processors, so the reference test compares within a tolerance (a
+  mean difference of at most 2 of 255, at most 1 % of values off by more than
+  32) rather than exactly; `GRID4D_UPDATE_REFERENCE=1` rewrites the picture
+  after an intended change.
+- **Checking the result:** the example rendered the demo scene through its
+  camera (lit by its light, without shadows, as its Shadow is None) and the
+  test scenes: soft spot-light shadows, hard Omni shadows in every direction,
+  the chrome sphere reflecting the floor and the other spheres, the glossy red
+  highlight, the glowing cube, a transparent background. 960 × 540 at 64
+  samples took under half a second on 16 threads for these small scenes.
 
 ---
 

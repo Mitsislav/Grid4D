@@ -9,7 +9,7 @@ use grid4d_scene::{
 
 use crate::{
     Drawable, MeshKey, Shading, Surface, drawable,
-    generator::{self, Input, viewport_options},
+    generator::{self, Input},
 };
 
 /// How picking tests a ray against a node, in its object space.
@@ -39,6 +39,29 @@ pub struct EvaluatedNode {
     /// What to draw; `None` for objects without geometry.
     pub drawable: Option<Drawable>,
     pub pick: PickShape,
+}
+
+/// What an evaluation is for: what is visible, and at what detail.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Purpose {
+    /// The viewport: objects visible in the editor, generators at their viewport
+    /// levels.
+    #[default]
+    Editor,
+    /// The final render: objects visible in the renderer, generators at their
+    /// render levels.
+    Render,
+}
+
+impl Purpose {
+    /// Whether `data`'s object (and so its subtree) is visible for this purpose.
+    #[must_use]
+    pub const fn shows(self, data: &grid4d_scene::NodeData) -> bool {
+        match self {
+            Self::Editor => data.visible_in_editor,
+            Self::Render => data.visible_in_render,
+        }
+    }
 }
 
 /// A light object as viewers see it this frame (animation and Target tags applied).
@@ -106,12 +129,29 @@ pub struct EvaluatedScene {
     material_stack: Vec<(u32, Option<MaterialId>)>,
     /// [`Scene::revision`] of the scene `nodes` were built from.
     revision: Option<u64>,
+    /// The viewport, or the final render.
+    purpose: Purpose,
 }
 
 impl EvaluatedScene {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// An evaluation for the final render: objects visible in the renderer,
+    /// generators at their render levels.
+    #[must_use]
+    pub fn for_render() -> Self {
+        Self {
+            purpose: Purpose::Render,
+            ..Self::default()
+        }
+    }
+
+    #[must_use]
+    pub const fn purpose(&self) -> Purpose {
+        self.purpose
     }
 
     /// Sets the frame animation is evaluated at; the next [`update`](Self::update)
@@ -144,6 +184,7 @@ impl EvaluatedScene {
         self.meshes.clear();
         self.polygons.clear();
         let revision = scene.revision();
+        let purpose = self.purpose;
         let (nodes, meshes, polygons, shown) = (&mut self.nodes, &mut self.meshes, &mut self.polygons, &mut self.shown);
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
         let material_stack = &mut self.material_stack;
@@ -157,9 +198,9 @@ impl EvaluatedScene {
                 cage_depth = None;
             }
             let data = &node.data;
-            let generator = viewport_options(&data.kind);
+            let generator = generator::options(&data.kind, purpose);
             // A disabled generator is a plain group: its children show as they are.
-            if !data.visible_in_editor || (!data.enabled && generator.is_none()) {
+            if !purpose.shows(data) || (!data.enabled && generator.is_none()) {
                 return false;
             }
             if next_cage == Some(id) {
@@ -202,7 +243,9 @@ impl EvaluatedScene {
             }
             let mut bounds = data.kind.local_bounds();
             if let Some(options) = generator.filter(|_| data.enabled) {
-                if let Some(result) = generated_mesh(generated, inputs, cage_stack, scene, id, options, revision) {
+                if let Some(result) =
+                    generated_mesh(generated, inputs, cage_stack, scene, id, options, revision, purpose)
+                {
                     let mesh = &result.mesh;
                     if mesh.mesh().face_count() > 0 {
                         meshes.insert(mesh.id(), mesh.clone());
@@ -425,6 +468,7 @@ struct Generated {
 
 /// Generator `id`'s cached result, rebuilt if its options or inputs changed.
 /// `None` when it has no cage.
+#[expect(clippy::too_many_arguments, reason = "the evaluation's scratch space, passed apart")]
 fn generated_mesh<'a>(
     generated: &'a mut HashMap<NodeId, Generated>,
     inputs: &mut Vec<Input>,
@@ -433,8 +477,9 @@ fn generated_mesh<'a>(
     id: NodeId,
     options: SubdivisionOptions,
     revision: u64,
+    purpose: Purpose,
 ) -> Option<&'a Generated> {
-    let colour = generator::gather(scene, id, stack, inputs)?;
+    let colour = generator::gather(scene, id, purpose, stack, inputs)?;
     let fresh = generated
         .get(&id)
         .is_some_and(|entry| entry.options == options && entry.inputs == *inputs);
@@ -910,6 +955,31 @@ mod tests {
             .insert_child(sds, Node::new("Sphere", ObjectKindTag::Sphere.default_kind()))
             .unwrap();
         (doc, sds, cage, sphere)
+    }
+
+    #[test]
+    fn a_render_evaluation_uses_render_visibility_and_levels() {
+        let (mut doc, sds, _, sphere) = generator_scene();
+        // Default levels: 2 in the viewport, 3 for the renderer.
+        let mut editor = EvaluatedScene::new();
+        editor.update(&doc.scene);
+        let mut render = EvaluatedScene::for_render();
+        render.update(&doc.scene);
+        assert_eq!(render.purpose(), Purpose::Render);
+        let faces = |eval: &EvaluatedScene| result_of(eval, sds).mesh().face_count();
+        assert_eq!(faces(&render), faces(&editor) * 4, "one more level");
+
+        // Hidden in the renderer only: gone from the render, still in the editor.
+        doc.scene.get_mut(sphere).unwrap().data.visible_in_render = false;
+        let mut cube = Node::new("Cube", ObjectKindTag::Cube.default_kind());
+        cube.data.visible_in_render = false;
+        let cube = doc.scene.insert(cube);
+        editor.update(&doc.scene);
+        render.update(&doc.scene);
+        for id in [cube, sphere] {
+            assert!(editor.nodes().iter().any(|n| n.id == id));
+            assert!(!render.nodes().iter().any(|n| n.id == id));
+        }
     }
 
     fn node(eval: &EvaluatedScene, id: NodeId) -> &EvaluatedNode {

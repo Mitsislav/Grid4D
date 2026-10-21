@@ -523,6 +523,14 @@ Phase 7 is complete (2026-10-21).
 **Acceptance:** render the demo scene to PNG; reference-image tests with a
 tolerance (small resolution, fixed seed) in CI.
 
+| Step | Size | Work |
+|------|------|------|
+| 8.1 ✅ | L | The path tracer core — done 2026-10-21 per [`reference/render-engine.md`](reference/render-engine.md) (new spec): `grid4d-eval::Purpose` (`EvaluatedScene::for_render`: render visibility, Subdivision Renderer levels); new crate `grid4d-raytrace`: `RenderScene` (every visible surface as world-space triangles — primitives and polygon objects triangulated with their Phong smoothing — in one `grid4d-geom` BVH, barycentric shading normals, materials, lights), `RenderCamera` (a world placement, perspective or parallel; `framing`), `RenderOptions` (size, samples, bounces, seed), `render` → `Image` (linear, premultiplied; `to_rgba8` sRGB with straight alpha); paths with direct light from every light at each hit (types, cones, falloff; shadow rays per the light's Shadow: none, hard, soft over a 5 cm ball / half a degree), a diffuse + GGX material (metallic, roughness ≥ 0.05), emission, two bounces by default (lobe chosen by Fresnel/diffuse weight, light after a bounce capped against fireflies), the automatic light without lights, a transparent background; rows in parallel with `rayon`, one seeded random stream per pixel sample (identical with one thread or many); `examples/render.rs` renders a `.g4d` or the demo scene to PNG (`png`), a reference-image test (`tests/reference.rs`, `GRID4D_UPDATE_REFERENCE=1` to rewrite). Checked by rendering the demo and the test scenes. **Later:** environment/sky, textures, transparency, depth of field, motion blur, a faster BVH (SAH), tiles for progressive display |
+| 8.2 | M | Render Settings (`Ctrl+B`): resolution, samples, bounces, output path, frame range → `RenderSettings` in the document (`.g4d`) |
+| 8.3 | M | Picture Viewer (`Shift+R`): render on a worker thread (progressive, cancellable), history, zoom, save PNG |
+| 8.4 | M | Render View (`Ctrl+R`): progressive render into the active viewport |
+| 8.5 | S | Rendering frame ranges (animation) to numbered files; EXR output |
+
 ---
 
 ## Phase 9+ — Splines, generators, deformers, MoGraph, extensibility

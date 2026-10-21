@@ -5,6 +5,8 @@
 #
 #      grid4d-geom ◀── grid4d-scene ◀── grid4d-eval ◀── grid4d-render ◀── grid4d-ui ◀── grid4d (binary)
 #      (geometry)      (data)           (evaluation)    (wgpu)            (egui)        (composition root)
+#                                            ▲
+#                                            └── grid4d-raytrace  (CPU path tracer: the final render)
 #                            ▲                                                │
 #                            └─────────────────  grid4d-io  ◀─────────────────┘   (.g4d files)
 #
@@ -13,7 +15,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/geom", "crates/scene", "crates/eval", "crates/render", "crates/io", "crates/ui"]
+members = ["crates/geom", "crates/scene", "crates/eval", "crates/render", "crates/raytrace", "crates/io", "crates/ui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -28,6 +30,7 @@ grid4d-geom = { path = "crates/geom" }
 grid4d-scene = { path = "crates/scene" }
 grid4d-eval = { path = "crates/eval" }
 grid4d-render = { path = "crates/render" }
+grid4d-raytrace = { path = "crates/raytrace" }
 grid4d-io = { path = "crates/io" }
 grid4d-ui = { path = "crates/ui" }
 
@@ -59,6 +62,10 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2-zli
 gltf = { version = "1.4.1", default-features = false, features = ["utils", "names", "KHR_lights_punctual"] }
 # Wavefront OBJ reading (std HashMap instead of the default ahash).
 tobj = { version = "4.0.5", default-features = false }
+
+# Final rendering: tiles in parallel (grid4d-raytrace); PNG for its example and tests.
+rayon = "1.10"
+png = "0.18"
 
 # Diagnostics
 log = "0.4"

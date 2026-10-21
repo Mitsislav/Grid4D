@@ -9,7 +9,7 @@ use grid4d_geom::{
 };
 use grid4d_scene::{MeshHandle, NodeId, ObjectKind, Scene};
 
-use crate::editable_mesh;
+use crate::{Purpose, editable_mesh};
 
 /// One mesh of a cage, in the generator's space: what decides the result, so an
 /// unchanged list means an unchanged result (a selection change in the cage, or
@@ -29,16 +29,20 @@ enum Source {
     Primitive(ObjectKind),
 }
 
-/// The generator's options for the viewport, `None` if `kind` is not a generator.
-pub(crate) fn viewport_options(kind: &ObjectKind) -> Option<SubdivisionOptions> {
+/// The generator's options for `purpose` (its viewport or render levels),
+/// `None` if `kind` is not a generator.
+pub(crate) fn options(kind: &ObjectKind, purpose: Purpose) -> Option<SubdivisionOptions> {
     match *kind {
         ObjectKind::SubdivisionSurface {
             viewport_levels,
+            render_levels,
             linear_pre,
             boundary,
-            ..
         } => Some(SubdivisionOptions {
-            levels: viewport_levels,
+            levels: match purpose {
+                Purpose::Editor => viewport_levels,
+                Purpose::Render => render_levels,
+            },
             linear_pre,
             boundary,
         }),
@@ -49,7 +53,13 @@ pub(crate) fn viewport_options(kind: &ObjectKind) -> Option<SubdivisionOptions> 
 /// Fills `inputs` with the cage of generator `id` (its first child and that
 /// child's visible, enabled descendants that have geometry), and returns the
 /// cage's display colour. `stack` is scratch space.
-pub(crate) fn gather(scene: &Scene, id: NodeId, stack: &mut Vec<NodeId>, inputs: &mut Vec<Input>) -> Option<[f32; 3]> {
+pub(crate) fn gather(
+    scene: &Scene,
+    id: NodeId,
+    purpose: Purpose,
+    stack: &mut Vec<NodeId>,
+    inputs: &mut Vec<Input>,
+) -> Option<[f32; 3]> {
     inputs.clear();
     stack.clear();
     let &cage = scene.children(id).first()?;
@@ -59,7 +69,7 @@ pub(crate) fn gather(scene: &Scene, id: NodeId, stack: &mut Vec<NodeId>, inputs:
     while let Some(node_id) = stack.pop() {
         let Some(node) = scene.get(node_id) else { continue };
         let data = &node.data;
-        if !data.visible_in_editor || !data.enabled || data.kind.is_generator() {
+        if !purpose.shows(data) || !data.enabled || data.kind.is_generator() {
             continue; // hidden parts are left out; nested generators are not merged
         }
         let source = match &data.kind {
@@ -116,9 +126,9 @@ pub(crate) fn build(inputs: &[Input], options: &SubdivisionOptions) -> PolyMesh 
 /// the generator's space; `None` if `id` is not a generator or has no cage.
 #[must_use]
 pub fn generator_mesh(scene: &Scene, id: NodeId) -> Option<PolyMesh> {
-    let options = viewport_options(&scene.get(id)?.data.kind)?;
+    let options = options(&scene.get(id)?.data.kind, Purpose::Editor)?;
     let mut inputs = Vec::new();
-    gather(scene, id, &mut Vec::new(), &mut inputs)?;
+    gather(scene, id, Purpose::Editor, &mut Vec::new(), &mut inputs)?;
     Some(build(&inputs, &options))
 }
 

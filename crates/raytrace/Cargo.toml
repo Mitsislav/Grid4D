@@ -1,0 +1,22 @@
+[package]
+name = "grid4d-raytrace"
+description = "Grid4D final renderer: a CPU path tracer over the evaluated scene. No GPU, no UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+grid4d-scene.workspace = true
+grid4d-geom.workspace = true
+grid4d-eval.workspace = true
+glam.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+grid4d-io.workspace = true
+png.workspace = true
+
+[lints]
+workspace = true

@@ -964,7 +964,7 @@ Select the generator and open **Attribute Manager ▸ Object**:
 |-----------|---------|
 | Type | **Catmull-Clark (N-Gons)**: every polygon with *n* corners becomes *n* quads, then the surface is smoothed. It is the only type for now. |
 | Subdivision Viewport | How many times the viewport subdivides (0 shows the cage itself, 6 at most). Each level multiplies the polygons by about four, so keep it low (2) while modelling. |
-| Subdivision Renderer | The level for final renders. It will be used by the offline renderer (*planned*). |
+| Subdivision Renderer | The level for final renders (the renderer reaches the application soon; *planned*). |
 | Linear Pre-Subdivision | Splits the cage this many times *without* smoothing before the smoothing levels, which keeps the result closer to the cage. |
 | Boundary Interpolation | How open borders (the edge of a plane) are smoothed. **Edge and Corner** keeps a border's corners in place; **Edge** rounds them off as well. |
 
@@ -1232,8 +1232,10 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Lights**: the Square Spot, Area, Parallel and IES types, visible light, and
   the per-light switches (no illumination, ambient, diffuse or specular only).
 - **Interchange and rendering**: textures, animation in glTF, import
-  and export dialogs (scale, axis flips, visible or selected objects only), the
-  offline renderer (the Render menu is disabled).
+  and export dialogs (scale, axis flips, visible or selected objects only); the
+  final renderer exists but is not in the application yet — the Render menu,
+  Render Settings, the Picture Viewer and the Render View are next (the Render
+  menu is disabled until then).
 - The Takes, Layers and Filter panels are placeholders.
 
 See [`progress.md`](progress.md) for what changed in each step.
