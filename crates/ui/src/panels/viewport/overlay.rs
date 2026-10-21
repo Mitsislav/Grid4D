@@ -3,19 +3,21 @@
 use egui::{Align2, CornerRadius, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
 use glam::{Mat4, Vec3};
 use grid4d_eval::EvaluatedScene;
-use grid4d_render::OrbitCamera;
+use grid4d_render::{OrbitCamera, ViewFilter};
 use grid4d_scene::LightType;
 
 use super::project;
 use crate::{Selection, theme::palette as p};
 
-/// Cinema 4D-style corner brackets on the bounding box of each selected object.
+/// Cinema 4D-style corner brackets on the bounding box of each selected object
+/// whose type the view shows.
 pub(super) fn selection_brackets(
     painter: &Painter,
     rect: Rect,
     view_proj: &Mat4,
     scene: &EvaluatedScene,
     selection: &Selection,
+    shown: ViewFilter,
 ) {
     if selection.is_empty() {
         return;
@@ -24,6 +26,7 @@ pub(super) fn selection_brackets(
     for node in scene.nodes() {
         let world = node.world;
         if selection.contains(node.id)
+            && shown.shows_object(node.kind)
             && let Some(b) = node.bounds
         {
             let corner = |i: u8| {

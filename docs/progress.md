@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 7 — Viewport: cameras, lights, 4-view, shading (v0.7) |
-| Last step done | 7.4 — Lights in the viewport, shading from materials (2026-10-21) |
-| Next step | 7.5 — Filter menu (object types, grid, HUD per view) |
-| Tests | 459, all passing; clippy and rustfmt clean |
+| Last step done | 7.5 — The Filter menu (2026-10-21) |
+| Next step | 7.6 — Optional: shadow map for the key light, SSAO (per-view toggle) |
+| Tests | 464, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -514,7 +514,8 @@ write animation yet (planned).
 | 7.1 (`ed7102e`) | Scene cameras: look through a camera (Cameras ▸ Use Camera, a double-click on its icon) or any object, with its position, bank and field of view; navigation moves it (one undo step per gesture, Autokeying, Protection); wire pyramids for the other cameras; new cameras clone the view | 441 |
 | 7.2 (`ebbf93b`) | Four views (Perspective, Top, Right, Front) with orthographic projections: Panel menu arrangements, F1–F4 / F5, middle click shows a view alone; every view has its own camera, projection (Cameras menu) and Options; the active view takes input and a click elsewhere activates and acts; the grid lies in the view's plane | 448 |
 | 7.3 (`96cc183`) | Display modes per view (Display menu, N~ chords): Gouraud, Quick and Constant Shading, each also with lines, Hidden Line and Lines; Wireframe (polygon edges) or Box (each object as its bounding box); selected objects' lines in orange | 452 |
-| 7.4 | Lights light the viewport: Omni, Spot (cone with inner and outer angle) and Infinite lights with falloff, the default light when there are none, Quick Shading always with it; materials' roughness, metallic and luminance shade the surfaces; spot cones and infinite arrows in the view | 459 |
+| 7.4 (`6a7846c`) | Lights light the viewport: Omni, Spot (cone with inner and outer angle) and Infinite lights with falloff, the default light when there are none, Quick Shading always with it; materials' roughness, metallic and luminance shade the surfaces; spot cones and infinite arrows in the view | 459 |
+| 7.5 | The Filter menu per view: Polygon, Generator, Subdivision Surface, Camera and Light objects, World Grid, World Axis and HUD on or off; All, None, Ctrl+click keeps one; hidden types are neither drawn nor picked or snapped to | 464 |
 
 *Problems and solutions:*
 - **The view camera had no bank.** The turntable camera kept world Y up, so a banked
@@ -631,6 +632,19 @@ write animation yet (planned).
   with the default light; the demo scene is now lit by its light. The Spot's
   Type, Use Inner, angles and Falloff showed in the Attribute Manager, and the
   document stayed unmodified.
+- **One filter for drawing, picking and snapping.** The evaluated nodes now carry
+  their object kind, and a small bit set per view (`ViewFilter`) says which kinds
+  and elements it shows. The same value goes to the frame extraction, picking,
+  rectangle selection, snapping and the overlays, so a hidden type can never be
+  clicked or snapped to in the view that hides it, and the views stay
+  independent. The grid, triad and HUD toggles became entries of the same filter
+  (Cinema 4D keeps them in Filter too), so All and None cover them.
+- **On-screen testing:** the Filter menu listed the entries with their checks;
+  turning Camera off removed the camera pyramid, World Grid the grid, None
+  everything but the selected cube's gizmo. With four views, Generator off in
+  the Top view removed the primitives there only, while its light marker and the
+  other views stayed. (A menu closes after each choice, so each toggle is one
+  click on the menu.)
 
 ---
 

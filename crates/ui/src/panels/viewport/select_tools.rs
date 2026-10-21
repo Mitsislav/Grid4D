@@ -333,6 +333,7 @@ impl ViewportPanel {
             rect,
             cache: &mut self.snap_cache,
             grid_spacing: camera.grid_spacing(),
+            shown: self.filter,
             hit: None,
         };
         let Gesture::Tweak {
@@ -456,6 +457,7 @@ impl ViewportPanel {
             }
             for node in self.evaluated.nodes() {
                 if node.pick != PickShape::None
+                    && self.filter.shows_object(node.kind)
                     && project(&view_proj, rect, node.world.w_axis.truncate()).is_some_and(|p| frame.contains(p))
                 {
                     let mode = if mode == SelectMode::Remove {

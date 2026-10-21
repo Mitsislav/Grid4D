@@ -4,7 +4,7 @@ use glam::{Mat4, Vec3};
 use grid4d_geom::{BitSet, subdivision::SubdivisionOptions};
 use grid4d_scene::{
     Aabb, Components, LIGHT_MARKER_RADIUS, LightDetails, LightType, MaterialId, MeshHandle, MeshId, NodeId, ObjectKind,
-    Scene, TagKind, Tags, WalkItem,
+    ObjectKindTag, Scene, TagKind, Tags, WalkItem,
 };
 
 use crate::{
@@ -29,6 +29,8 @@ pub enum PickShape {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EvaluatedNode {
     pub id: NodeId,
+    /// What kind of object it is (views filter by it).
+    pub kind: ObjectKindTag,
     /// Hierarchy depth (0 for top-level objects).
     pub depth: u32,
     pub world: Mat4,
@@ -237,6 +239,7 @@ impl EvaluatedScene {
             }
             nodes.push(EvaluatedNode {
                 id,
+                kind: data.kind.tag(),
                 depth,
                 world: *world,
                 bounds,
@@ -800,7 +803,7 @@ mod tests {
     }
 
     fn polygon_cube() -> ObjectKind {
-        let mesh = crate::editable_mesh(&grid4d_scene::ObjectKindTag::Cube.default_kind()).unwrap();
+        let mesh = crate::editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap();
         ObjectKind::polygon(MeshHandle::new(mesh))
     }
 
@@ -895,15 +898,12 @@ mod tests {
         let mut doc = Document::new("sds");
         let sds = doc.scene.insert(Node::new(
             "Subdivision Surface",
-            grid4d_scene::ObjectKindTag::SubdivisionSurface.default_kind(),
+            ObjectKindTag::SubdivisionSurface.default_kind(),
         ));
         let cage = doc.scene.insert_child(sds, Node::new("Cage", polygon_cube())).unwrap();
         let sphere = doc
             .scene
-            .insert_child(
-                sds,
-                Node::new("Sphere", grid4d_scene::ObjectKindTag::Sphere.default_kind()),
-            )
+            .insert_child(sds, Node::new("Sphere", ObjectKindTag::Sphere.default_kind()))
             .unwrap();
         (doc, sds, cage, sphere)
     }
@@ -1028,7 +1028,7 @@ mod tests {
             "the cage's child is part of the cage"
         );
 
-        doc.scene.get_mut(cage).unwrap().data.kind = grid4d_scene::ObjectKindTag::Cube.default_kind();
+        doc.scene.get_mut(cage).unwrap().data.kind = ObjectKindTag::Cube.default_kind();
         eval.update(&doc.scene);
         assert_eq!(
             result_of(&eval, sds).mesh().face_count(),

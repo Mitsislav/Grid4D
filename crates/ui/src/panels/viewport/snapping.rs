@@ -7,7 +7,7 @@ use egui::{Pos2, Rect};
 use glam::{Vec2 as GVec2, Vec3};
 use grid4d_eval::EvaluatedScene;
 use grid4d_geom::BitSet;
-use grid4d_render::{ScreenView, SnapCache, SnapHit, SnapQuery, find_snap, snapped_position};
+use grid4d_render::{ScreenView, SnapCache, SnapHit, SnapQuery, ViewFilter, find_snap, snapped_position};
 use grid4d_scene::{Node, NodeId, Scene};
 
 use crate::SnapSettings;
@@ -21,6 +21,8 @@ pub(super) struct Snapper<'a> {
     pub cache: &'a mut SnapCache,
     /// The floor grid's current spacing.
     pub grid_spacing: f32,
+    /// The object types the view shows: hidden ones offer no targets.
+    pub shown: ViewFilter,
     /// The target of the last snap, for the viewport to show.
     pub hit: Option<SnapHit>,
 }
@@ -49,6 +51,7 @@ impl Snapper<'_> {
             grid_spacing: self.grid_spacing,
             skip,
             moving,
+            shown: self.shown,
         };
         let Some(hit) = find_snap(self.scene, &self.view, self.cache, &query) else {
             return wanted;

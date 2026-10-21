@@ -2,19 +2,22 @@ use glam::Vec3;
 use grid4d_eval::{EvaluatedScene, PickShape};
 use grid4d_scene::NodeId;
 
-use crate::Ray;
+use crate::{Ray, ViewFilter};
 
-/// Returns the closest visible object hit by `ray`.
+/// Returns the closest visible object hit by `ray`, among the types `shown`.
 ///
 /// Tests in each object's local space, using its [`PickShape`]: exact for
 /// spheres and polygon objects (a BVH per mesh, built on its first pick),
 /// oriented bounding boxes for everything else (Nulls are skipped).
 /// Allocation-free once each mesh's BVH exists.
 #[must_use]
-pub fn pick(scene: &EvaluatedScene, ray: Ray) -> Option<NodeId> {
+pub fn pick(scene: &EvaluatedScene, ray: Ray, shown: ViewFilter) -> Option<NodeId> {
     let mut best: Option<(f32, NodeId)> = None;
     for node in scene.nodes() {
-        if node.pick == PickShape::None || node.world.determinant().abs() <= f32::EPSILON {
+        if node.pick == PickShape::None
+            || !shown.shows_object(node.kind)
+            || node.world.determinant().abs() <= f32::EPSILON
+        {
             continue;
         }
         let inv = node.world.inverse();
@@ -74,7 +77,7 @@ mod tests {
         let doc = Document::with_demo_scene();
         let cam = OrbitCamera::default();
         let ray = cam.ray_from_ndc(Vec2::ZERO, 1.6);
-        let id = pick(&evaluated(&doc), ray).expect("should hit something");
+        let id = pick(&evaluated(&doc), ray, ViewFilter::ALL).expect("should hit something");
         assert_eq!(doc.scene.get(id).unwrap().data.name, "Cube");
     }
 
@@ -85,7 +88,7 @@ mod tests {
             origin: Vec3::new(0.0, 5000.0, 0.0),
             dir: Vec3::Y,
         };
-        assert_eq!(pick(&evaluated(&doc), ray), None);
+        assert_eq!(pick(&evaluated(&doc), ray, ViewFilter::ALL), None);
     }
 
     #[test]
@@ -98,12 +101,12 @@ mod tests {
             origin: center + Vec3::new(75.0, 75.0, -1000.0),
             dir: Vec3::Z,
         };
-        assert_ne!(pick(&evaluated(&doc), corner), Some(sphere.0));
+        assert_ne!(pick(&evaluated(&doc), corner, ViewFilter::ALL), Some(sphere.0));
         let through = Ray {
             origin: center + Vec3::new(0.0, 0.0, -1000.0),
             dir: Vec3::Z,
         };
-        assert_eq!(pick(&evaluated(&doc), through), Some(sphere.0));
+        assert_eq!(pick(&evaluated(&doc), through, ViewFilter::ALL), Some(sphere.0));
     }
 
     #[test]
@@ -120,12 +123,33 @@ mod tests {
             dir: -Vec3::Y,
         };
         // Ring radius 200, pipe radius 50: the tube spans x = 150…250.
-        assert_eq!(pick(&eval, down(200.0)), Some(id));
+        assert_eq!(pick(&eval, down(200.0), ViewFilter::ALL), Some(id));
         assert_eq!(
-            pick(&eval, down(0.0)),
+            pick(&eval, down(0.0), ViewFilter::ALL),
             None,
             "the hole is inside the box but not the mesh"
         );
-        assert_eq!(pick(&eval, down(400.0)), None);
+        assert_eq!(pick(&eval, down(400.0), ViewFilter::ALL), None);
+    }
+
+    #[test]
+    fn hidden_types_let_the_ray_through() {
+        let mut doc = Document::new("filter");
+        let mesh = grid4d_eval::editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap();
+        let behind = doc
+            .scene
+            .insert(Node::new("Behind", ObjectKind::polygon(MeshHandle::new(mesh))));
+        let front = doc
+            .scene
+            .insert(Node::new("Front", ObjectKindTag::Cube.default_kind()).with_position(Vec3::new(0.0, 0.0, 400.0)));
+        let eval = evaluated(&doc);
+        let ray = Ray {
+            origin: Vec3::new(0.0, 0.0, 1000.0),
+            dir: -Vec3::Z,
+        };
+        assert_eq!(pick(&eval, ray, ViewFilter::ALL), Some(front));
+        let polygons_only = ViewFilter::only(crate::FilterItem::Polygon);
+        assert_eq!(pick(&eval, ray, polygons_only), Some(behind));
+        assert_eq!(pick(&eval, ray, ViewFilter::NONE), None);
     }
 }

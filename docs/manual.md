@@ -82,9 +82,9 @@ managers to make them wider.
 | Frame the selected objects | **O** | View ▸ Frame Selected Objects |
 | Back to the default view | | View ▸ Reset View |
 
-- **Options** (viewport header) turns the grid, the axis triad (bottom left) and the
-  HUD on or off. The HUD shows the grid spacing, which adapts to the zoom (1, 10,
-  100 cm …).
+- **Filter** (viewport header) turns the grid, the axis triad (bottom left), the
+  HUD and kinds of objects on or off ([§3.4](#34-the-filter-menu)). The HUD shows
+  the grid spacing, which adapts to the zoom (1, 10, 100 cm …).
 - Units are centimetres; Y points up.
 
 ### 3.1 Looking through a camera
@@ -173,8 +173,8 @@ sizes and distances can be compared directly (a cube is a square):
   Left and Right, the ground (XZ) in Top and Bottom. Its axis lines keep their
   colours (X red, Y green, Z blue). Grid snapping uses that plane too.
 
-Every view keeps **its own camera and Options** (grid, axis triad, HUD), and shows
-its projection — or the name of the camera it looks through — at the top left.
+Every view keeps **its own camera, display mode and Filter** (objects, grid, axis
+triad, HUD), and shows its projection — or the name of the camera it looks through — at the top left.
 When a view is too narrow for its menus and navigation icons, the icons are left
 out; the mouse navigation works as always.
 
@@ -220,6 +220,29 @@ status bar lists the choices while it waits). The menu changes the view it
 belongs to.
 
 ![Four views, each with its own mode: Gouraud Shading, Lines (Top), Gouraud Shading (Lines) (Right) and Hidden Line (Front)](images/manual/display_per_view.png)
+
+### 3.4 The Filter menu
+
+Each view's **Filter** menu chooses what that view shows — for example, no
+cameras and lights while you model, or no grid and HUD for a clean picture.
+Everything is shown in a new view.
+
+![The Filter menu](images/manual/filter_menu.png)
+
+- **Object types**: *Polygon* (polygon objects), *Generator* (the parametric
+  objects: Cube, Sphere, …), *Subdivision Surface*, *Camera* and *Light*. A hidden
+  type is neither drawn nor clickable in that view: clicks, rectangle selections
+  and snapping go through it. Only the objects of that type are hidden, not their
+  children. Hidden lights still light the view.
+- **Elements**: *World Grid* (the grid), *World Axis* (the axis triad in the lower
+  left corner) and *HUD* (the grid spacing in the lower right corner).
+- Click an entry to turn it off or on. **Ctrl+click** shows only that entry and
+  hides all the others. **All** shows everything again, **None** hides everything.
+- An object you select in the Object Manager while its type is hidden still shows
+  its gizmo, so you can move, scale or rotate it; in a component mode its points,
+  edges and polygons still show.
+
+![Generator hidden in the Top view only: its primitives are gone there, the other views still show them](images/manual/filter_views.png)
 
 ## 4. Creating objects
 
@@ -1171,6 +1194,10 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   the document, and only View 1 can look through a camera; no shadows; no render
   resolution (camera pyramids use the view's proportions) and no depth-of-field
   handles.
+- **Filter**: entries for kinds of objects Grid4D does not have yet (splines,
+  deformers, …) and for the axes, handles, guides, SDS cage, n-gon lines and
+  horizon; Default, Geometry Only and presets; the filter is not saved with the
+  document.
 - **Lights**: the Square Spot, Area, Parallel and IES types, shadows, visible
   light, and the per-light switches (no illumination, ambient, diffuse or specular
   only).

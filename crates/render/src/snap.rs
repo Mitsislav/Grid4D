@@ -16,7 +16,7 @@ use grid4d_geom::BitSet;
 use grid4d_scene::{MeshHandle, NodeId};
 
 use crate::{
-    GridPlane,
+    GridPlane, ViewFilter,
     components::{ScreenView, edge_distance},
 };
 
@@ -150,6 +150,8 @@ pub struct SnapQuery<'a> {
     /// (even inside a skipped subtree) without those points and the edges and
     /// polygons that use them.
     pub moving: Option<(NodeId, &'a BitSet)>,
+    /// The object types the view shows: hidden ones offer no targets.
+    pub shown: ViewFilter,
 }
 
 /// A snap target.
@@ -265,6 +267,9 @@ pub fn find_snap(
                 skip_depth = Some(node.depth);
                 continue;
             }
+        }
+        if moving.is_none() && !query.shown.shows_object(node.kind) {
+            continue;
         }
         if targets.axis {
             point(&mut best, SnapKind::Axis, node.world.w_axis.truncate());
@@ -535,6 +540,7 @@ mod tests {
             grid_spacing: 100.0,
             skip: &[],
             moving: None,
+            shown: ViewFilter::ALL,
         }
     }
 
@@ -574,6 +580,21 @@ mod tests {
         )
         .unwrap();
         assert!(line.position.z.abs() < 1e-2, "in the XY plane: {}", line.position);
+    }
+
+    #[test]
+    fn hidden_types_offer_no_targets() {
+        let f = fixture();
+        let v = view();
+        // A corner of the 200 cm primitive cube at x = 400.
+        let corner = Vec3::new(500.0, 100.0, 100.0);
+        let q = query(screen(&v, corner), only(&[SnapKind::Vertex]));
+        assert!(find(&f, &q).is_some_and(|hit| hit.position.abs_diff_eq(corner, 1e-3)));
+        let hidden = SnapQuery {
+            shown: ViewFilter::only(crate::FilterItem::Polygon),
+            ..q
+        };
+        assert!(find(&f, &hidden).is_none_or(|hit| !hit.position.abs_diff_eq(corner, 1e-3)));
     }
 
     #[test]

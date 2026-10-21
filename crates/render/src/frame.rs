@@ -6,7 +6,7 @@ use grid4d_eval::{EvaluatedLight, EvaluatedScene, MeshKey, Shading};
 use grid4d_geom::Component;
 use grid4d_scene::{Falloff, LightType, MeshHandle, NodeId};
 
-use crate::{ComponentHit, ComponentStyle, DisplayMode, OrbitCamera, components::ComponentOverlay};
+use crate::{ComponentHit, ComponentStyle, DisplayMode, OrbitCamera, ViewFilter, components::ComponentOverlay};
 
 /// Per-instance GPU data. Layout must match `InstanceIn` in `shaders/mesh.wgsl`.
 #[repr(C)]
@@ -149,6 +149,8 @@ pub struct FrameData {
     pub parallel: bool,
     /// How objects are drawn: the view's shading and display style.
     pub display: DisplayMode,
+    /// The object types the view shows (its Filter menu).
+    pub filter: ViewFilter,
     /// Colours and sizes of the component overlay.
     pub component_style: ComponentStyle,
     /// The scene's visible lights; refilled (capacity kept) every frame.
@@ -180,6 +182,7 @@ impl FrameData {
             grid_plane: GridPlane::XZ,
             parallel: false,
             display: DisplayMode::default(),
+            filter: ViewFilter::ALL,
             component_style: ComponentStyle::default(),
             lights: Vec::with_capacity(8),
             components: ComponentOverlay::default(),
@@ -250,7 +253,9 @@ impl FrameData {
         self.lights.clear();
         self.lights.extend(scene.lights().iter().map(LightRaw::new));
         for node in scene.nodes() {
-            let Some(draw) = node.drawable else { continue };
+            let Some(draw) = node.drawable.filter(|_| self.filter.shows_object(node.kind)) else {
+                continue;
+            };
             let model = node.world * Mat4::from_scale(draw.scale);
             // Unit marker meshes fit in the unit sphere.
             if draw.marker && model.inverse().transform_point3(self.eye).length() <= 1.0 {
@@ -368,6 +373,21 @@ mod tests {
         assert_eq!(frame.grid_plane, GridPlane::ZY, "right");
         frame.set_camera(&side(0.0, std::f32::consts::FRAC_PI_2), 1.5);
         assert_eq!(frame.grid_plane, GridPlane::XZ, "top");
+    }
+
+    #[test]
+    fn filtered_types_are_not_drawn_but_lights_still_light() {
+        let doc = Document::with_demo_scene();
+        let eval = evaluated(&doc);
+        let mut frame = FrameData::new();
+        frame.extract(&eval, |_| false);
+        let all = frame.instance_count();
+        frame.filter.set(crate::FilterItem::Generator, false);
+        frame.filter.set(crate::FilterItem::Light, false);
+        frame.extract(&eval, |_| false);
+        // Left: the camera marker (the demo's objects are all primitives).
+        assert_eq!(frame.instance_count(), 1, "of {all}");
+        assert_eq!(frame.lights().len(), 1, "a hidden light still lights");
     }
 
     #[test]

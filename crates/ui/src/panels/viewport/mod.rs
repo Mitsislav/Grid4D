@@ -15,8 +15,8 @@ use glam::{Mat4, Vec2 as GVec2, Vec3};
 use grid4d_eval::EvaluatedScene;
 use grid4d_geom::Component;
 use grid4d_render::{
-    ComponentHit, ComponentStyle, DisplayMode, DisplayStyle, FrameData, OrbitCamera, Projection, ScreenView,
-    ShadingMode, SnapCache, SnapHit, pick, pick_component,
+    ComponentHit, ComponentStyle, DisplayMode, DisplayStyle, FilterItem, FrameData, OrbitCamera, Projection,
+    ScreenView, ShadingMode, SnapCache, SnapHit, ViewFilter, pick, pick_component,
 };
 use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, Tags, Transform, WalkItem};
 
@@ -145,15 +145,28 @@ const STYLE_MENU: [(DisplayStyle, &str, &str); 2] = [
     (DisplayStyle::Box, "Box", "N~K"),
 ];
 
+/// The Filter menu: object types, then elements of the view.
+const FILTER_OBJECTS: [(FilterItem, &str); 5] = [
+    (FilterItem::Polygon, "Polygon"),
+    (FilterItem::Generator, "Generator"),
+    (FilterItem::SubdivisionSurface, "Subdivision Surface"),
+    (FilterItem::Camera, "Camera"),
+    (FilterItem::Light, "Light"),
+];
+const FILTER_ELEMENTS: [(FilterItem, &str); 3] = [
+    (FilterItem::Grid, "World Grid"),
+    (FilterItem::WorldAxis, "World Axis"),
+    (FilterItem::Hud, "HUD"),
+];
+
 /// One view's own settings (the active view's live in the panel's fields).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ViewState {
     camera: OrbitCamera,
     kind: ViewKind,
     display: DisplayMode,
-    show_grid: bool,
-    show_axis_triad: bool,
-    show_hud: bool,
+    /// What the view shows (Filter menu).
+    filter: ViewFilter,
     rect: Rect,
 }
 
@@ -191,9 +204,8 @@ pub struct ViewportPanel {
     hover: Vec<ComponentHit>,
     /// A Live Selection stroke or Rectangle Selection frame in progress.
     gesture: Gesture,
-    show_grid: bool,
-    show_axis_triad: bool,
-    show_hud: bool,
+    /// What the view shows (Filter menu).
+    filter: ViewFilter,
     /// The 3D area last frame (the header's pan handle needs its height).
     view_rect: Rect,
     /// Loop/Path Cut: the loop a click would cut.
@@ -225,9 +237,7 @@ impl ViewportPanel {
             camera: kind.aim(OrbitCamera::default()),
             kind,
             display: DisplayMode::default(),
-            show_grid: true,
-            show_axis_triad: true,
-            show_hud: true,
+            filter: ViewFilter::ALL,
             rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0)),
         };
         Self {
@@ -246,9 +256,7 @@ impl ViewportPanel {
             gizmo: GizmoState::default(),
             hover: Vec::new(),
             gesture: Gesture::None,
-            show_grid: true,
-            show_axis_triad: true,
-            show_hud: true,
+            filter: ViewFilter::ALL,
             view_rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0)),
             loop_preview: None,
             snap_cache: SnapCache::default(),
@@ -355,9 +363,7 @@ impl ViewportPanel {
             camera: self.camera,
             kind: self.kind,
             display: self.display,
-            show_grid: self.show_grid,
-            show_axis_triad: self.show_axis_triad,
-            show_hud: self.show_hud,
+            filter: self.filter,
             rect: self.view_rect,
         }
     }
@@ -366,9 +372,7 @@ impl ViewportPanel {
         self.camera = view.camera;
         self.kind = view.kind;
         self.display = view.display;
-        self.show_grid = view.show_grid;
-        self.show_axis_triad = view.show_axis_triad;
-        self.show_hud = view.show_hud;
+        self.filter = view.filter;
         self.view_rect = view.rect;
     }
 
@@ -539,6 +543,7 @@ impl ViewportPanel {
                 rect,
                 cache: &mut self.snap_cache,
                 grid_spacing: self.camera.grid_spacing(),
+                shown: self.filter,
                 hit: None,
             };
             let interaction = self.gizmo.interact(
@@ -630,8 +635,9 @@ impl ViewportPanel {
         let interactive = index == self.active;
         if let Some(gpu) = &mut self.gpu {
             self.frame.set_camera(&self.camera, rect.aspect_ratio());
-            self.frame.show_grid = self.show_grid;
+            self.frame.show_grid = self.filter.shows(FilterItem::Grid);
             self.frame.display = self.display;
+            self.frame.filter = self.filter;
             self.frame.extract(&self.evaluated, |id| editor.selection.contains(id));
             self.frame.component_style = component_style(ui.ctx().pixels_per_point());
             // What a click would select shows where the pointer is.
@@ -664,17 +670,28 @@ impl ViewportPanel {
             overlay::autokey_frame(painter, rect);
         }
         let view_proj = self.camera.view_projection(rect.aspect_ratio());
-        overlay::camera_frustums(
+        if self.filter.shows(FilterItem::Camera) {
+            overlay::camera_frustums(
+                painter,
+                rect,
+                &view_proj,
+                &self.evaluated,
+                &doc.scene,
+                &editor.selection,
+                linked,
+            );
+        }
+        if self.filter.shows(FilterItem::Light) {
+            overlay::light_shapes(painter, rect, &view_proj, &self.evaluated, &editor.selection);
+        }
+        overlay::selection_brackets(
             painter,
             rect,
             &view_proj,
             &self.evaluated,
-            &doc.scene,
             &editor.selection,
-            linked,
+            self.filter,
         );
-        overlay::light_shapes(painter, rect, &view_proj, &self.evaluated, &editor.selection);
-        overlay::selection_brackets(painter, rect, &view_proj, &self.evaluated, &editor.selection);
         let own;
         let gizmo = match gizmo {
             Some(geo) => Some(geo),
@@ -687,10 +704,10 @@ impl ViewportPanel {
         if let Some(geo) = gizmo {
             geo.paint(painter, if interactive { self.gizmo.hot_axis() } else { None });
         }
-        if self.show_axis_triad {
+        if self.filter.shows(FilterItem::WorldAxis) {
             overlay::axis_triad(painter, rect, &self.camera);
         }
-        if self.show_hud {
+        if self.filter.shows(FilterItem::Hud) {
             overlay::hud(painter, rect, &self.camera);
         }
     }
@@ -907,13 +924,17 @@ impl ViewportPanel {
                             }
                         });
                         ui.menu_button("Options", |ui| {
-                            ui.checkbox(&mut self.show_grid, "Grid");
-                            ui.checkbox(&mut self.show_axis_triad, "Axis Triad");
-                            ui.checkbox(&mut self.show_hud, "HUD");
+                            for planned in ["Backface Culling", "X-Ray", "Shadows"] {
+                                ui.add_enabled(false, egui::Button::new(planned))
+                                    .on_disabled_hover_text("Planned");
+                            }
+                            ui.label(
+                                egui::RichText::new("Grid, World Axis and HUD: Filter menu")
+                                    .color(p::TEXT_DIM)
+                                    .size(11.0),
+                            );
                         });
-                        ui.menu_button("Filter", |ui| {
-                            ui.add_enabled(false, egui::Button::new("Object filters — planned"));
-                        });
+                        ui.menu_button("Filter", |ui| self.filter_menu(ui));
                         ui.menu_button("Panel", |ui| {
                             for arrangement in Arrangement::ALL {
                                 let current = self.arrangement == arrangement && self.solo.is_none();
@@ -988,6 +1009,39 @@ impl ViewportPanel {
             });
     }
 
+    /// The view's Filter menu: object types and elements on or off; Ctrl + click
+    /// keeps only that one.
+    fn filter_menu(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            if ui.button("All").clicked() {
+                self.filter = ViewFilter::ALL;
+            }
+            if ui.button("None").clicked() {
+                self.filter = ViewFilter::NONE;
+            }
+        });
+        ui.separator();
+        let only = ui.input(|i| i.modifiers.command);
+        for (index, (item, label)) in FILTER_OBJECTS.into_iter().chain(FILTER_ELEMENTS).enumerate() {
+            if index == FILTER_OBJECTS.len() {
+                ui.separator();
+            }
+            let mut shown = self.filter.shows(item);
+            if ui.checkbox(&mut shown, label).clicked() {
+                if only {
+                    self.filter = ViewFilter::only(item);
+                } else {
+                    self.filter.set(item, shown);
+                }
+            }
+        }
+        ui.label(
+            egui::RichText::new("Ctrl+click: show only this")
+                .color(p::TEXT_DIM)
+                .size(11.0),
+        );
+    }
+
     /// Cinema 4D navigation. Returns `true` while the camera is being moved.
     /// With a `brush` (Live Selection), a plain middle drag sizes it instead of panning.
     fn navigate(&mut self, ui: &Ui, response: &Response, rect: Rect, brush: Option<&mut f32>) -> bool {
@@ -1051,7 +1105,7 @@ impl ViewportPanel {
         }
         let ray = self.camera.ray_from_ndc(to_ndc(pointer, rect), rect.aspect_ratio());
         let mode = SelectMode::from_modifiers(modifiers);
-        match pick(&self.evaluated, ray) {
+        match pick(&self.evaluated, ray, self.filter) {
             Some(id) => editor.commands.push(EditorCommand::Select { id, mode }),
             None if mode == SelectMode::Replace => editor.commands.push(EditorCommand::DeselectAll),
             None => {}
@@ -1070,7 +1124,7 @@ impl ViewportPanel {
             return;
         }
         let ray = self.camera.ray_from_ndc(to_ndc(pointer, rect), rect.aspect_ratio());
-        if let Some(id) = pick(&self.evaluated, ray) {
+        if let Some(id) = pick(&self.evaluated, ray, self.filter) {
             editor.commands.push(EditorCommand::AssignMaterial {
                 material: drag.material,
                 nodes: vec![id],
@@ -2460,6 +2514,47 @@ mod tests {
         h.frame(vec![]);
         h.frame(vec![]);
         assert_eq!(h.viewport.display(), lines_box, "View 1 kept its mode");
+    }
+
+    #[test]
+    fn a_view_neither_shows_nor_picks_the_types_its_filter_hides() {
+        let mut h = Harness::new();
+        h.frame(vec![]);
+        let cube = h.doc.scene.roots()[0];
+        let click_cube = |h: &mut Harness| {
+            for _ in 0..30 {
+                h.frame(vec![]); // past the double-click delay
+            }
+            let rect = h.viewport.view_rect;
+            let view_proj = h.viewport.camera.view_projection(rect.aspect_ratio());
+            let at = project(&view_proj, rect, h.doc.scene.world_matrix(cube).w_axis.truncate()).unwrap();
+            h.frame(vec![Event::PointerMoved(at)]);
+            h.frame(vec![Harness::button(at, true)]);
+            h.frame(vec![Harness::button(at, false)]);
+            h.frame(vec![]);
+        };
+        h.viewport.filter.set(FilterItem::Generator, false);
+        h.editor.selection.clear();
+        click_cube(&mut h);
+        assert!(
+            h.editor.selection.is_empty(),
+            "primitives are hidden: the click goes through"
+        );
+
+        // Another view keeps its own filter.
+        h.editor.commands.push(EditorCommand::ShowView(Some(1)));
+        h.frame(vec![]);
+        assert_eq!(h.viewport.filter, ViewFilter::ALL);
+        h.editor.commands.push(EditorCommand::ShowView(Some(0)));
+        h.frame(vec![]);
+        assert!(!h.viewport.filter.shows(FilterItem::Generator));
+
+        h.viewport.filter = ViewFilter::ALL;
+        h.editor.commands.push(EditorCommand::ShowView(None));
+        h.editor.commands.push(EditorCommand::ShowView(Some(0)));
+        h.frame(vec![]);
+        click_cube(&mut h);
+        assert_eq!(h.editor.selection.as_slice(), &[cube]);
     }
 
     #[test]
