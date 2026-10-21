@@ -33,6 +33,46 @@ impl LightType {
     }
 }
 
+/// The shadow a light casts (the reference's General tab).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum LightShadow {
+    /// No shadow.
+    #[default]
+    None,
+    /// Soft-edged.
+    ShadowMaps,
+    /// Sharp-edged.
+    Raytraced,
+    /// Soft, from the light's area (the viewport shows it like Shadow Maps).
+    Area,
+}
+
+impl LightShadow {
+    pub const ALL: [Self; 4] = [Self::None, Self::ShadowMaps, Self::Raytraced, Self::Area];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::ShadowMaps => "Shadow Maps (Soft)",
+            Self::Raytraced => "Raytraced (Hard)",
+            Self::Area => "Area",
+        }
+    }
+
+    /// Whether the light casts a shadow at all.
+    #[must_use]
+    pub const fn casts(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    /// Whether its edge is sharp (else soft) in the viewport.
+    #[must_use]
+    pub const fn is_hard(self) -> bool {
+        matches!(self, Self::Raytraced)
+    }
+}
+
 /// How a light's brightness changes with distance.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Falloff {

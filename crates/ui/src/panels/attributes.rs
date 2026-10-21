@@ -11,8 +11,8 @@ use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdi
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_scene::{
-    Axis, Document, Falloff, KeyState, LightDetails, LightType, Material, MaterialId, NodeData, NodeId, ObjectKind,
-    Param, Scene, SceneEdit, Tag, TagKind, TimeSettings,
+    Axis, Document, Falloff, KeyState, LightDetails, LightShadow, LightType, Material, MaterialId, NodeData, NodeId,
+    ObjectKind, Param, Scene, SceneEdit, Tag, TagKind, TimeSettings,
 };
 
 use crate::{
@@ -613,6 +613,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 intensity,
                 light_type,
                 details,
+                shadow,
             } => {
                 attr_label(ui, "Color", LABEL_WIDTH);
                 colour_button(ui, color);
@@ -638,6 +639,15 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                     .show_ui(ui, |ui| {
                         for option in LightType::ALL {
                             ui.selectable_value(light_type, option, option.label());
+                        }
+                    });
+                ui.end_row();
+                attr_label(ui, "Shadow", LABEL_WIDTH);
+                egui::ComboBox::from_id_salt("grid4d.attr.light.shadow")
+                    .selected_text(shadow.label())
+                    .show_ui(ui, |ui| {
+                        for option in LightShadow::ALL {
+                            ui.selectable_value(shadow, option, option.label());
                         }
                     });
                 ui.end_row();
@@ -1200,6 +1210,7 @@ mod tests {
                             falloff,
                             ..LightDetails::default()
                         },
+                        shadow: LightShadow::ShadowMaps,
                     },
                 );
                 let before = data.clone();

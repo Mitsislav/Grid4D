@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use glam::{Mat4, Vec3};
 use grid4d_geom::{BitSet, subdivision::SubdivisionOptions};
 use grid4d_scene::{
-    Aabb, Components, LIGHT_MARKER_RADIUS, LightDetails, LightType, MaterialId, MeshHandle, MeshId, NodeId, ObjectKind,
-    ObjectKindTag, Scene, TagKind, Tags, WalkItem,
+    Aabb, Components, LIGHT_MARKER_RADIUS, LightDetails, LightShadow, LightType, MaterialId, MeshHandle, MeshId,
+    NodeId, ObjectKind, ObjectKindTag, Scene, TagKind, Tags, WalkItem,
 };
 
 use crate::{
@@ -53,6 +53,7 @@ pub struct EvaluatedLight {
     /// Colour × intensity, linear RGB.
     pub color: [f32; 3],
     pub details: LightDetails,
+    pub shadow: LightShadow,
 }
 
 /// The document as viewers see it: every node that is visible in the editor and
@@ -270,6 +271,7 @@ impl EvaluatedScene {
                 intensity,
                 light_type,
                 details,
+                shadow,
             }) = scene.get(node.id).map(|n| &n.data.kind)
             else {
                 continue;
@@ -281,6 +283,7 @@ impl EvaluatedScene {
                 direction: node.world.transform_vector3(Vec3::NEG_Z).normalize_or(Vec3::NEG_Z),
                 color: color.map(|c| c * intensity),
                 details,
+                shadow,
             });
         }
         // Objects gone, hidden or with nothing hidden any more.
@@ -731,6 +734,7 @@ mod tests {
                 intensity: 2.0,
                 light_type: LightType::Spot,
                 details: LightDetails::default(),
+                shadow: LightShadow::None,
             },
         )
         .with_transform(Transform::from_position(Vec3::new(0.0, 300.0, 0.0)));

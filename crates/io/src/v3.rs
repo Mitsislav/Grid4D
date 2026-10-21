@@ -23,8 +23,9 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
 };
 use grid4d_scene::{
-    Axis, ComponentState, Components, Curve, Document, Falloff, Interpolation, Key, LightDetails, LightType, Material,
-    MaterialId, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, Param, Tag, Tangents, TimeSettings, Track, Transform,
+    Axis, ComponentState, Components, Curve, Document, Falloff, Interpolation, Key, LightDetails, LightShadow,
+    LightType, Material, MaterialId, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, Param, Tag, Tangents,
+    TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -445,6 +446,9 @@ enum KindDto {
         /// The defaults when absent (added in step 7.4).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         details: Option<LightDetailsDto>,
+        /// None when absent (added in step 7.6).
+        #[serde(default, skip_serializing_if = "LightShadowDto::is_none")]
+        shadow: LightShadowDto,
     },
     /// `mesh` indexes the file's `meshes`; objects sharing a mesh share an index.
     /// `selected` / `hidden` flag components (optional, added in step 4.1).
@@ -499,6 +503,48 @@ impl From<LightTypeDto> for LightType {
             LightTypeDto::Omni => Self::Omni,
             LightTypeDto::Spot => Self::Spot,
             LightTypeDto::Infinite => Self::Infinite,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum LightShadowDto {
+    #[default]
+    None,
+    ShadowMaps,
+    Raytraced,
+    Area,
+}
+
+impl LightShadowDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_none(&self) -> bool {
+        *self == Self::None
+    }
+}
+
+impl From<LightShadow> for LightShadowDto {
+    fn from(shadow: LightShadow) -> Self {
+        match shadow {
+            LightShadow::None => Self::None,
+            LightShadow::ShadowMaps => Self::ShadowMaps,
+            LightShadow::Raytraced => Self::Raytraced,
+            LightShadow::Area => Self::Area,
+        }
+    }
+}
+
+impl From<LightShadowDto> for LightShadow {
+    fn from(shadow: LightShadowDto) -> Self {
+        match shadow {
+            LightShadowDto::None => Self::None,
+            LightShadowDto::ShadowMaps => Self::ShadowMaps,
+            LightShadowDto::Raytraced => Self::Raytraced,
+            LightShadowDto::Area => Self::Area,
         }
     }
 }
@@ -985,11 +1031,13 @@ impl KindDto {
                 intensity,
                 light_type,
                 details,
+                shadow,
             } => Self::Light {
                 color,
                 intensity,
                 light_type: light_type.into(),
                 details: LightDetailsDto::new(details),
+                shadow: shadow.into(),
             },
             ObjectKind::Polygon {
                 ref mesh,
@@ -1097,11 +1145,13 @@ impl KindDto {
                 intensity,
                 light_type,
                 details,
+                shadow,
             } => ObjectKind::Light {
                 color,
                 intensity,
                 light_type: light_type.into(),
                 details: details.map_or_else(LightDetails::default, LightDetailsDto::details),
+                shadow: shadow.into(),
             },
             Self::Polygon { mesh, selected, hidden } => {
                 let mesh = meshes.get(mesh).cloned().ok_or_else(|| {
@@ -1579,12 +1629,14 @@ mod tests {
                 falloff: Falloff::InverseSquare,
                 radius: 250.0,
             },
+            shadow: LightShadow::Raytraced,
         };
         let sun = ObjectKind::Light {
             color: [1.0; 3],
             intensity: 1.0,
             light_type: LightType::Infinite,
             details: LightDetails::default(),
+            shadow: LightShadow::Area,
         };
         for (name, kind) in [("Spot", spot), ("Sun", sun), ("Bulb", ObjectKind::light([1.0; 3], 1.0))] {
             doc.scene.insert(Node::new(name, kind));

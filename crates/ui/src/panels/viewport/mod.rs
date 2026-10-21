@@ -16,7 +16,7 @@ use grid4d_eval::EvaluatedScene;
 use grid4d_geom::Component;
 use grid4d_render::{
     ComponentHit, ComponentStyle, DisplayMode, DisplayStyle, FilterItem, FrameData, OrbitCamera, Projection,
-    ScreenView, ShadingMode, SnapCache, SnapHit, ViewFilter, pick, pick_component,
+    ScreenView, ShadingMode, SnapCache, SnapHit, ViewEffects, ViewFilter, pick, pick_component,
 };
 use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, Tags, Transform, WalkItem};
 
@@ -167,6 +167,8 @@ struct ViewState {
     display: DisplayMode,
     /// What the view shows (Filter menu).
     filter: ViewFilter,
+    /// Shadows and ambient occlusion (Options menu).
+    effects: ViewEffects,
     rect: Rect,
 }
 
@@ -206,6 +208,8 @@ pub struct ViewportPanel {
     gesture: Gesture,
     /// What the view shows (Filter menu).
     filter: ViewFilter,
+    /// Shadows and ambient occlusion (Options menu).
+    effects: ViewEffects,
     /// The 3D area last frame (the header's pan handle needs its height).
     view_rect: Rect,
     /// Loop/Path Cut: the loop a click would cut.
@@ -238,6 +242,7 @@ impl ViewportPanel {
             kind,
             display: DisplayMode::default(),
             filter: ViewFilter::ALL,
+            effects: ViewEffects::default(),
             rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0)),
         };
         Self {
@@ -257,6 +262,7 @@ impl ViewportPanel {
             hover: Vec::new(),
             gesture: Gesture::None,
             filter: ViewFilter::ALL,
+            effects: ViewEffects::default(),
             view_rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0)),
             loop_preview: None,
             snap_cache: SnapCache::default(),
@@ -364,6 +370,7 @@ impl ViewportPanel {
             kind: self.kind,
             display: self.display,
             filter: self.filter,
+            effects: self.effects,
             rect: self.view_rect,
         }
     }
@@ -373,6 +380,7 @@ impl ViewportPanel {
         self.kind = view.kind;
         self.display = view.display;
         self.filter = view.filter;
+        self.effects = view.effects;
         self.view_rect = view.rect;
     }
 
@@ -638,6 +646,7 @@ impl ViewportPanel {
             self.frame.show_grid = self.filter.shows(FilterItem::Grid);
             self.frame.display = self.display;
             self.frame.filter = self.filter;
+            self.frame.effects = self.effects;
             self.frame.extract(&self.evaluated, |id| editor.selection.contains(id));
             self.frame.component_style = component_style(ui.ctx().pixels_per_point());
             // What a click would select shows where the pointer is.
@@ -924,7 +933,13 @@ impl ViewportPanel {
                             }
                         });
                         ui.menu_button("Options", |ui| {
-                            for planned in ["Backface Culling", "X-Ray", "Shadows"] {
+                            ui.checkbox(&mut self.effects.shadows, "Shadows").on_hover_text(
+                                "The key light's shadow (Gouraud Shading): the first light whose Shadow is not None",
+                            );
+                            ui.checkbox(&mut self.effects.ssao, "SSAO")
+                                .on_hover_text("Ambient occlusion: darkens corners, creases and contact areas");
+                            ui.separator();
+                            for planned in ["Backface Culling", "X-Ray"] {
                                 ui.add_enabled(false, egui::Button::new(planned))
                                     .on_disabled_hover_text("Planned");
                             }
@@ -2555,6 +2570,26 @@ mod tests {
         h.frame(vec![]);
         click_cube(&mut h);
         assert_eq!(h.editor.selection.as_slice(), &[cube]);
+    }
+
+    #[test]
+    fn each_view_keeps_its_own_effects() {
+        let mut h = Harness::new();
+        h.frame(vec![]);
+        h.viewport.effects.shadows = true;
+        h.editor.commands.push(EditorCommand::ShowView(Some(1)));
+        h.frame(vec![]);
+        assert_eq!(h.viewport.effects, ViewEffects::default(), "View 2: off by default");
+        h.viewport.effects.ssao = true;
+        h.editor.commands.push(EditorCommand::ShowView(Some(0)));
+        h.frame(vec![]);
+        assert_eq!(
+            h.viewport.effects,
+            ViewEffects {
+                shadows: true,
+                ssao: false
+            }
+        );
     }
 
     #[test]

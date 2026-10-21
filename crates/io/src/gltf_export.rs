@@ -155,11 +155,13 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
                 node.insert("camera".into(), json!(cameras.len()));
                 cameras.push(json!({ "type": "perspective", "perspective": { "yfov": yfov, "znear": 0.01 } }));
             }
+            // glTF lights have no shadow setting.
             ObjectKind::Light {
                 color,
                 intensity,
                 light_type,
                 details,
+                ..
             } => {
                 if !finite(color) || !intensity.is_finite() {
                     return Err(invalid(format!("light \"{}\" has a non-finite colour", data.name)));
@@ -640,6 +642,7 @@ mod tests {
             intensity: 1.5,
             light_type,
             details,
+            shadow: grid4d_scene::LightShadow::None,
         };
         let soft = LightDetails {
             inner_angle_deg: 20.0,

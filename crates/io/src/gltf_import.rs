@@ -308,6 +308,8 @@ fn camera_or_light(node: &gltf::Node<'_>) -> Option<ObjectKind> {
         intensity: if finite { intensity } else { 1.0 },
         light_type,
         details,
+        // glTF lights have no shadow setting.
+        shadow: grid4d_scene::LightShadow::None,
     })
 }
 

@@ -6,7 +6,10 @@
 //! passes need — wireframe overlays with their own depth, several viewports with
 //! different settings, post effects.
 
-use crate::GpuTargetConfig;
+use crate::{
+    GpuTargetConfig,
+    effects::{SsaoLayouts, SsaoTextures},
+};
 
 /// Textures of one viewport, sized in physical pixels.
 #[derive(Debug)]
@@ -18,6 +21,8 @@ pub struct ViewportTarget {
     /// Multisampled colour, `None` without MSAA (then the pass draws into `resolve_view`).
     msaa_view: Option<wgpu::TextureView>,
     depth_view: wgpu::TextureView,
+    /// Ambient-occlusion textures, made when the view first draws SSAO.
+    ssao: Option<SsaoTextures>,
 }
 
 impl ViewportTarget {
@@ -90,7 +95,19 @@ impl ViewportTarget {
             resolve_view,
             msaa_view,
             depth_view,
+            ssao: None,
         }
+    }
+
+    /// Makes the ambient-occlusion textures if the target has none yet.
+    pub(crate) fn prepare_ssao(&mut self, device: &wgpu::Device, layouts: &SsaoLayouts) {
+        if self.ssao.is_none() {
+            self.ssao = Some(SsaoTextures::new(device, self.size, layouts));
+        }
+    }
+
+    pub(crate) fn ssao_textures(&self) -> Option<&SsaoTextures> {
+        self.ssao.as_ref()
     }
 
     /// Recreates the textures if `size` (clamped) differs from the current one.

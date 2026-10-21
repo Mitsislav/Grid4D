@@ -21,7 +21,8 @@ struct Camera {
     hover: vec4<f32>,
     sizes: vec4<f32>,
     alphas: vec4<f32>,
-    // x: scene lights to use (0: the default light), y: ambient with scene lights.
+    // x: scene lights to use (0: the default light), y: ambient with scene lights,
+    // z: 1 to darken the ambient light by the view's occlusion.
     lighting: vec4<f32>,
 };
 
@@ -40,6 +41,24 @@ struct Light {
 };
 
 @group(0) @binding(1) var<storage, read> lights: array<Light>;
+
+// Must match `ShadowUniform` in effects.rs.
+struct Shadow {
+    // One view-projection per face (+X, −X, +Y, −Y, +Z, −Z for an Omni light).
+    faces: array<mat4x4<f32>, 6>,
+    // x: the casting light's index, y: faces (0: no shadow), z: map size, w: normal offset
+    params: vec4<f32>,
+    // x: filter radius in texels, y: depth bias
+    blur: vec4<f32>,
+};
+
+@group(0) @binding(2) var<uniform> shadow: Shadow;
+@group(0) @binding(3) var shadow_map: texture_depth_2d_array;
+@group(0) @binding(4) var shadow_sampler: sampler_comparison;
+
+// The view's ambient occlusion (1: open), read where `lighting.z` says so.
+@group(1) @binding(0) var ao_map: texture_2d<f32>;
+@group(1) @binding(1) var ao_sampler: sampler;
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
@@ -97,6 +116,8 @@ fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
 const SELECTION_RIM: vec3<f32> = vec3<f32>(1.0, 0.42, 0.06);
 // The default light's strength.
 const DEFAULT_LIGHT: f32 = 0.62;
+// How much the ambient occlusion darkens the lights' direct light.
+const AO_ON_DIRECT: f32 = 0.6;
 
 // What one light reflects towards the viewer: diffuse, and a highlight whose size
 // follows the roughness (Blinn-Phong with a normalised exponent, Schlick Fresnel).
@@ -144,6 +165,48 @@ fn incoming(light: Light, p: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(l, amount);
 }
 
+// How much of the shadow-casting light reaches `p` (normal `n`): 1 lit, 0 in
+// shadow; a filtered compare against the shadow map, softer for soft shadows.
+fn lit_by_key_light(p: vec3<f32>, n: vec3<f32>, light_position: vec3<f32>) -> f32 {
+    let faces = u32(shadow.params.y + 0.5);
+    if (faces == 0u) {
+        return 1.0;
+    }
+    var face = 0u;
+    if (faces == 6u) {
+        let d = p - light_position;
+        let a = abs(d);
+        if (a.x >= a.y && a.x >= a.z) {
+            face = select(1u, 0u, d.x > 0.0);
+        } else if (a.y >= a.z) {
+            face = select(3u, 2u, d.y > 0.0);
+        } else {
+            face = select(5u, 4u, d.z > 0.0);
+        }
+    }
+    // Lifted off the surface by about a texel, against self-shadowing.
+    let lifted = p + n * shadow.params.w;
+    let clip = shadow.faces[face] * vec4<f32>(lifted, 1.0);
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+    let ndc = clip.xyz / clip.w;
+    if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || ndc.z > 1.0) {
+        return 1.0;
+    }
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let step = shadow.blur.x * 0.5 / shadow.params.z;
+    let depth = ndc.z - shadow.blur.y;
+    var lit = 0.0;
+    for (var y = -2; y <= 2; y = y + 1) {
+        for (var x = -2; x <= 2; x = x + 1) {
+            let at = uv + vec2<f32>(f32(x), f32(y)) * step;
+            lit = lit + textureSampleCompareLevel(shadow_map, shadow_sampler, at, face, depth);
+        }
+    }
+    return lit / 25.0;
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let view_dir = normalize(camera.eye.xyz - in.world_position);
@@ -169,22 +232,37 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let mirrored = reflect(-view_dir, n);
     let studio = f0 * (0.16 + 0.34 * (0.5 + 0.5 * mirrored.y)) * (1.0 - 0.5 * roughness);
 
-    var lit = studio;
+    // The view's ambient occlusion darkens the soft light, and the lights' own
+    // light in part, so it shows in scenes lit mostly by their lights.
+    var open = 1.0;
+    if (camera.lighting.z > 0.5) {
+        open = textureSampleLevel(ao_map, ao_sampler, in.clip_position.xy / camera.viewport.xy, 0.0).r;
+    }
+    let direct_open = mix(1.0, open, AO_ON_DIRECT);
+
+    var soft = studio + ambient;
+    var direct = vec3<f32>(0.0);
     let count = u32(camera.lighting.x + 0.5);
     if (count == 0u) {
         // The default light, from over the viewer's shoulder.
         let light = normalize(camera.light_dir.xyz);
-        lit = lit + ambient + reflected(n, view_dir, light, vec3<f32>(DEFAULT_LIGHT), diffuse, f0, shininess);
+        direct = reflected(n, view_dir, light, vec3<f32>(DEFAULT_LIGHT), diffuse, f0, shininess);
     } else {
-        lit = lit + ambient * camera.lighting.y;
+        soft = studio + ambient * camera.lighting.y;
+        let caster = u32(shadow.params.x + 0.5);
         for (var i = 0u; i < count; i = i + 1u) {
             let light = lights[i];
             let arriving = incoming(light, in.world_position);
-            if (arriving.w > 0.0) {
-                lit = lit + reflected(n, view_dir, arriving.xyz, light.color.rgb * arriving.w, diffuse, f0, shininess);
+            var amount = arriving.w;
+            if (amount > 0.0 && i == caster) {
+                amount = amount * lit_by_key_light(in.world_position, n, light.position.xyz);
+            }
+            if (amount > 0.0) {
+                direct = direct + reflected(n, view_dir, arriving.xyz, light.color.rgb * amount, diffuse, f0, shininess);
             }
         }
     }
+    var lit = soft * open + direct * direct_open;
     if (u32(camera.viewport.z + 0.5) == 2u) {
         // Constant Shading: the colour itself.
         lit = base;

@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use crate::{Aabb, Components, LightDetails, LightType, MeshHandle, Transform};
+use crate::{Aabb, Components, LightDetails, LightShadow, LightType, MeshHandle, Transform};
 
 slotmap::new_key_type! {
     /// Stable, generational handle to a node in a [`Scene`](crate::Scene).
@@ -87,6 +87,7 @@ pub enum ObjectKind {
         light_type: LightType,
         /// Cone (spots) and falloff.
         details: LightDetails,
+        shadow: LightShadow,
     },
     /// An editable mesh (C4D's "Polygon Object"), in object space, with its
     /// selected and hidden components (they live in the object, like C4D's, so
@@ -253,6 +254,7 @@ impl ObjectKind {
             intensity,
             light_type: LightType::Omni,
             details: LightDetails::default(),
+            shadow: LightShadow::None,
         }
     }
 

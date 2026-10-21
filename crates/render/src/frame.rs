@@ -6,7 +6,9 @@ use grid4d_eval::{EvaluatedLight, EvaluatedScene, MeshKey, Shading};
 use grid4d_geom::Component;
 use grid4d_scene::{Falloff, LightType, MeshHandle, NodeId};
 
-use crate::{ComponentHit, ComponentStyle, DisplayMode, OrbitCamera, ViewFilter, components::ComponentOverlay};
+use crate::{
+    ComponentHit, ComponentStyle, DisplayMode, OrbitCamera, ViewEffects, ViewFilter, components::ComponentOverlay,
+};
 
 /// Per-instance GPU data. Layout must match `InstanceIn` in `shaders/mesh.wgsl`.
 #[repr(C)]
@@ -19,7 +21,8 @@ pub struct InstanceRaw {
     pub color: [f32; 4],
     /// `x`: selected (0/1), `y`: unlit (0/1), `z`: roughness, `w`: metallic.
     pub params: [f32; 4],
-    /// Linear RGB the surface gives off (its material's luminance); `w` unused.
+    /// Linear RGB the surface gives off (its material's luminance); `w`: 1 for
+    /// markers (cameras, lights), which cast no shadow and occlude nothing.
     pub emission: [f32; 4],
 }
 
@@ -136,6 +139,9 @@ impl GridPlane {
 #[derive(Debug)]
 pub struct FrameData {
     pub view_proj: Mat4,
+    /// The camera's view and projection (`view_proj` = `proj` × `view`).
+    pub view: Mat4,
+    pub proj: Mat4,
     pub eye: Vec3,
     /// Direction *towards* the key light, world space.
     pub light_dir: Vec3,
@@ -151,6 +157,14 @@ pub struct FrameData {
     pub display: DisplayMode,
     /// The object types the view shows (its Filter menu).
     pub filter: ViewFilter,
+    /// Shadows and ambient occlusion (its Options menu).
+    pub effects: ViewEffects,
+    /// World bounds (min, max) of the drawn objects, markers left out: what the
+    /// key light's shadow map covers.
+    pub(crate) bounds: Option<(Vec3, Vec3)>,
+    /// The key light: the first light that casts a shadow (its index in
+    /// `lights`), and whether its shadow is hard.
+    pub(crate) shadow_light: Option<(usize, bool)>,
     /// Colours and sizes of the component overlay.
     pub component_style: ComponentStyle,
     /// The scene's visible lights; refilled (capacity kept) every frame.
@@ -174,6 +188,8 @@ impl FrameData {
     pub fn new() -> Self {
         Self {
             view_proj: Mat4::IDENTITY,
+            view: Mat4::IDENTITY,
+            proj: Mat4::IDENTITY,
             eye: Vec3::ZERO,
             light_dir: Vec3::new(-0.45, 0.8, 0.4).normalize(),
             grid_spacing: 100.0,
@@ -183,6 +199,9 @@ impl FrameData {
             parallel: false,
             display: DisplayMode::default(),
             filter: ViewFilter::ALL,
+            effects: ViewEffects::default(),
+            bounds: None,
+            shadow_light: None,
             component_style: ComponentStyle::default(),
             lights: Vec::with_capacity(8),
             components: ComponentOverlay::default(),
@@ -223,7 +242,9 @@ impl FrameData {
     }
 
     pub fn set_camera(&mut self, camera: &OrbitCamera, aspect: f32) {
-        self.view_proj = camera.view_projection(aspect);
+        self.view = camera.view();
+        self.proj = camera.projection(aspect);
+        self.view_proj = self.proj * self.view;
         self.eye = camera.eye();
         self.grid_spacing = camera.grid_spacing();
         self.parallel = camera.is_parallel();
@@ -252,11 +273,30 @@ impl FrameData {
         }
         self.lights.clear();
         self.lights.extend(scene.lights().iter().map(LightRaw::new));
+        self.shadow_light = scene
+            .lights()
+            .iter()
+            .position(|l| l.shadow.casts())
+            .map(|index| (index, scene.lights()[index].shadow.is_hard()));
+        let mut bounds: Option<(Vec3, Vec3)> = None;
         for node in scene.nodes() {
             let Some(draw) = node.drawable.filter(|_| self.filter.shows_object(node.kind)) else {
                 continue;
             };
             let model = node.world * Mat4::from_scale(draw.scale);
+            if !draw.marker
+                && let Some(b) = node.bounds
+            {
+                for i in 0..8u8 {
+                    let corner = Vec3::new(
+                        if i & 1 == 0 { b.min.x } else { b.max.x },
+                        if i & 2 == 0 { b.min.y } else { b.max.y },
+                        if i & 4 == 0 { b.min.z } else { b.max.z },
+                    );
+                    let p = node.world.transform_point3(corner);
+                    bounds = Some(bounds.map_or((p, p), |(min, max)| (min.min(p), max.max(p))));
+                }
+            }
             // Unit marker meshes fit in the unit sphere.
             if draw.marker && model.inverse().transform_point3(self.eye).length() <= 1.0 {
                 continue;
@@ -291,9 +331,15 @@ impl FrameData {
                     surface.roughness,
                     surface.metallic,
                 ],
-                emission: [surface.emission[0], surface.emission[1], surface.emission[2], 0.0],
+                emission: [
+                    surface.emission[0],
+                    surface.emission[1],
+                    surface.emission[2],
+                    f32::from(u8::from(draw.marker)),
+                ],
             });
         }
+        self.bounds = bounds;
         // A polygon object's mesh changes id on every edit (each frame of a
         // drag): its old batches go at once, so they never pile up.
         let gone = |b: &Batch| matches!(b.key, MeshKey::Polygon(_)) && b.last_used != frame;
@@ -391,6 +437,30 @@ mod tests {
     }
 
     #[test]
+    fn the_key_light_is_the_first_that_casts_a_shadow() {
+        use grid4d_scene::LightShadow;
+        let mut doc = Document::new("shadows");
+        let light = |shadow| ObjectKind::Light {
+            color: [1.0; 3],
+            intensity: 1.0,
+            light_type: LightType::Omni,
+            details: grid4d_scene::LightDetails::default(),
+            shadow,
+        };
+        for (name, shadow) in [
+            ("Fill", LightShadow::None),
+            ("Key", LightShadow::Raytraced),
+            ("Rim", LightShadow::ShadowMaps),
+        ] {
+            doc.scene.insert(Node::new(name, light(shadow)));
+        }
+        let mut frame = FrameData::new();
+        frame.extract(&evaluated(&doc), |_| false);
+        assert_eq!(frame.shadow_light, Some((1, true)), "the second light, hard");
+        assert_eq!(frame.bounds, None, "only markers: nothing to cover");
+    }
+
+    #[test]
     fn instance_layout_is_160_bytes() {
         assert_eq!(size_of::<InstanceRaw>(), 160);
     }
@@ -415,6 +485,7 @@ mod tests {
                 radius: 300.0,
                 ..LightDetails::default()
             },
+            shadow: grid4d_scene::LightShadow::None,
         };
         // Turned 90° about X: its −Z axis points down.
         doc.scene.insert(Node::new("Spot", spot).with_transform(
@@ -453,6 +524,12 @@ mod tests {
         let instance = cube.unwrap().2[0];
         assert_eq!(instance.params[2..], [0.2, 1.0]);
         assert_eq!(instance.emission, [0.5, 0.0, 0.0, 0.0]);
+        let (min, max) = frame.bounds.unwrap();
+        assert!(
+            min.abs_diff_eq(Vec3::splat(-100.0), 1e-3) && max.abs_diff_eq(Vec3::splat(100.0), 1e-3),
+            "the cube only, not the light's marker: {min} {max}"
+        );
+        assert_eq!(frame.shadow_light, None, "no light casts a shadow");
     }
 
     #[test]

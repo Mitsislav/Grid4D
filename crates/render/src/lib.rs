@@ -19,6 +19,7 @@
 mod camera;
 mod components;
 mod display;
+mod effects;
 mod filter;
 mod frame;
 mod gpu;
@@ -33,6 +34,7 @@ pub use components::{
     paint_brush, pick_component,
 };
 pub use display::{DisplayMode, DisplayStyle, ShadingMode};
+pub use effects::ViewEffects;
 pub use filter::{FilterItem, ViewFilter};
 pub use frame::{FrameData, GridPlane, InstanceRaw, LightRaw};
 pub use gpu::{GpuTargetConfig, ViewportRenderer};
@@ -46,4 +48,6 @@ pub mod shaders {
     pub const MESH: &str = include_str!("shaders/mesh.wgsl");
     pub const GRID: &str = include_str!("shaders/grid.wgsl");
     pub const OVERLAY: &str = include_str!("shaders/overlay.wgsl");
+    pub const SHADOW: &str = include_str!("shaders/shadow.wgsl");
+    pub const SSAO: &str = include_str!("shaders/ssao.wgsl");
 }

@@ -244,6 +244,35 @@ Everything is shown in a new view.
 
 ![Generator hidden in the Top view only: its primitives are gone there, the other views still show them](images/manual/filter_views.png)
 
+### 3.5 Shadows and ambient occlusion
+
+Each view's **Options** menu has two effects that help judge how objects sit in
+the scene. Both are off in a new view and switched per view.
+
+![The Options menu](images/manual/options_menu.png)
+
+**Shadows** — the scene's key light casts shadows: the first light in the
+Object Manager whose **Shadow** setting is not *None* ([§4.1](#41-lights)). Set
+*Shadow Maps (Soft)* or *Area* for a soft edge, *Raytraced (Hard)* for a sharp
+one.
+
+- Every light type casts: a Spot within its cone, an Infinite light over the
+  whole scene, an Omni light in every direction.
+- Shadows show in **Gouraud Shading** (with or without lines) — the mode lit by
+  the scene's lights. Other lights light without shadows; light and camera
+  markers cast none.
+
+![Shadows off and on: a soft spot-light shadow behind each sphere](images/manual/shadows.png)
+
+**SSAO** (ambient occlusion) — darkens the shading where surfaces come close:
+where objects meet the floor, in inner corners and creases. It works in Gouraud
+and Quick Shading. The grid does not count as a surface.
+
+![An Omni light's hard shadows, without and with SSAO: the bases of the objects darken](images/manual/ssao.png)
+
+Both cost some speed in big scenes; switch them on in one view and keep the
+others plain.
+
 ## 4. Creating objects
 
 Click a button on the right side of the command palette, or use **Create ▸ Object**:
@@ -289,6 +318,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
 | Color, Intensity | The light's colour and strength (100 % is normal; up to 10 000 %). |
 | Type | **Omni**: shines in every direction, like a bulb. **Spot**: shines in a cone. **Infinite**: shines in one direction everywhere, like the sun — only its rotation matters, not its position. |
 | Use Inner, Inner Angle, Outer Angle (Spot) | The **Outer Angle** is the cone's opening (default 30°). Inside the **Inner Angle** the light is at full strength; it fades out towards the outer angle. With **Use Inner** off, the whole cone is at full strength and its edge is sharp. |
+| Shadow | **None** (the default): no shadow. **Shadow Maps (Soft)** and **Area**: a soft-edged shadow; **Raytraced (Hard)**: a sharp one. The viewport shows the shadow of one light, the first with a shadow, when Options ▸ Shadows is on ([§3.5](#35-shadows-and-ambient-occlusion)). |
 | Falloff, Radius/Decay (Omni, Spot) | **None**: as strong at any distance (the default). **Linear**: fades out to nothing at the Radius/Decay distance. **Inverse Square**: exactly the set intensity at Radius/Decay, stronger nearer and weaker farther, like real light. |
 
 - Spot and Infinite lights shine along their **−Z axis**, like cameras look. Turn
@@ -1191,16 +1221,16 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   settings for selected objects, backface culling, X-Ray and textures; lines are
   one pixel wide; three-view and the other four-view arrangements; the parallel
   and axonometric projections; the views and their arrangement are not saved with
-  the document, and only View 1 can look through a camera; no shadows; no render
-  resolution (camera pyramids use the view's proportions) and no depth-of-field
-  handles.
+  the document, and only View 1 can look through a camera; shadows from one light
+  only, without settings (map size, attenuation, transparency); fixed SSAO
+  settings; no render resolution (camera pyramids use the view's proportions) and
+  no depth-of-field handles.
 - **Filter**: entries for kinds of objects Grid4D does not have yet (splines,
   deformers, …) and for the axes, handles, guides, SDS cage, n-gon lines and
   horizon; Default, Geometry Only and presets; the filter is not saved with the
   document.
-- **Lights**: the Square Spot, Area, Parallel and IES types, shadows, visible
-  light, and the per-light switches (no illumination, ambient, diffuse or specular
-  only).
+- **Lights**: the Square Spot, Area, Parallel and IES types, visible light, and
+  the per-light switches (no illumination, ambient, diffuse or specular only).
 - **Interchange and rendering**: textures, animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only), the
   offline renderer (the Render menu is disabled).

@@ -74,3 +74,4 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 7.3 | [`viewport-display.md`](viewport-display.md) — display modes: shading, lines, Box | implemented 2026-10-21 |
 | 7.4 | [`object-light.md`](object-light.md) — light types, viewport lighting, shading from materials | implemented 2026-10-21 |
 | 7.5 | [`viewport-filter.md`](viewport-filter.md) — the Filter menu per view | implemented 2026-10-21 |
+| 7.6 | [`viewport-effects.md`](viewport-effects.md) — shadows and SSAO in the viewport, the light's Shadow | implemented 2026-10-21 |

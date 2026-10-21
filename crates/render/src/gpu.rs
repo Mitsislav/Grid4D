@@ -10,6 +10,7 @@ use crate::{
     DisplayStyle, FrameData, InstanceRaw, LightRaw, Vertex, ViewportTarget,
     components::{ComponentOverlay, EdgeInstance, FaceVertex, PointInstance},
     display::{Fill, bounding_box, edge_lines},
+    effects::{ShadowMaps, ShadowUniform, Ssao, SsaoUniform, shadow_view},
     mesh::{TessellationScratch, tessellate},
     shaders,
 };
@@ -43,7 +44,7 @@ struct CameraUniform {
     /// Selected face, hovered face and context edge opacity.
     alphas: [f32; 4],
     /// x: scene lights to use (0: the default light), y: ambient light with
-    /// scene lights.
+    /// scene lights, z: 1 to darken the ambient light by the view's occlusion.
     lighting: [f32; 4],
 }
 
@@ -219,6 +220,12 @@ const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array
     10 => Float32x4,                                                // params
     11 => Float32x4,                                                // emission
 ];
+/// The instances ([`InstanceRaw`]) as vertex buffer 1 of every object pass.
+pub(crate) const INSTANCE_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
+    array_stride: INSTANCE_STRIDE,
+    step_mode: wgpu::VertexStepMode::Instance,
+    attributes: &INSTANCE_ATTRIBUTES,
+};
 
 /// Owns every GPU resource of the 3D viewport and records its draw commands.
 ///
@@ -243,6 +250,13 @@ pub struct ViewportRenderer {
     light_capacity: usize,
     camera_layout: wgpu::BindGroupLayout,
     camera_bind_group: wgpu::BindGroup,
+    /// The key light's shadow map and its pass.
+    shadows: ShadowMaps,
+    /// The ambient-occlusion passes.
+    ssao: Ssao,
+    /// This frame's shadow faces to draw (0: no shadow) and whether it draws SSAO.
+    shadow_faces: u32,
+    ssao_on: bool,
     meshes: HashMap<DrawKey, GpuMesh>,
     /// Reused while generating meshes for new keys.
     tessellation: TessellationScratch,
@@ -293,13 +307,43 @@ impl ViewportRenderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(size_of::<ShadowUniform>() as u64),
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
             ],
         });
         let light_buffer = create_light_buffer(device, INITIAL_LIGHT_CAPACITY);
-        let camera_bind_group = create_camera_bind_group(device, &camera_layout, &camera_buffer, &light_buffer);
+        let shadows = ShadowMaps::new(device);
+        let ssao = Ssao::new(device);
+        let camera_bind_group =
+            create_camera_bind_group(device, &camera_layout, &camera_buffer, &light_buffer, &shadows);
+        // Group 0: camera, lights and shadow; group 1: the view's ambient occlusion.
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("grid4d.viewport.layout"),
-            bind_group_layouts: &[Some(&camera_layout)],
+            bind_group_layouts: &[Some(&camera_layout), Some(&ssao.layouts.ao)],
             immediate_size: 0,
         });
 
@@ -385,6 +429,10 @@ impl ViewportRenderer {
             light_capacity: INITIAL_LIGHT_CAPACITY,
             camera_layout,
             camera_bind_group,
+            shadows,
+            ssao,
+            shadow_faces: 0,
+            ssao_on: false,
             meshes: HashMap::new(),
             tessellation: TessellationScratch::default(),
             vertex_scratch: Vec::new(),
@@ -413,6 +461,7 @@ impl ViewportRenderer {
         let display = frame.display;
         self.fill = display.shading.fill();
         self.draw_lines = display.shading.lines();
+        self.ssao_on = frame.effects.ssao && matches!(self.fill, Fill::Lit | Fill::Quick);
         let style = &frame.component_style;
         let px = |n: u32| f32::from(u16::try_from(n).unwrap_or(u16::MAX));
         let uniform = CameraUniform {
@@ -453,20 +502,50 @@ impl ViewportRenderer {
                     to_f32(frame.lights.len())
                 },
                 SCENE_AMBIENT,
-                0.0,
+                f32::from(u8::from(self.ssao_on)),
                 0.0,
             ],
         };
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
 
+        let mut rebind = false;
         if frame.lights.len() > self.light_capacity {
             self.light_capacity = frame.lights.len().next_power_of_two();
             self.light_buffer = create_light_buffer(device, self.light_capacity);
-            self.camera_bind_group =
-                create_camera_bind_group(device, &self.camera_layout, &self.camera_buffer, &self.light_buffer);
+            rebind = true;
         }
         if !frame.lights.is_empty() {
             queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&frame.lights));
+        }
+        // The key light's shadow, in the modes lit by the scene's lights.
+        self.shadow_faces = 0;
+        let mut shadow = ShadowUniform::none();
+        if frame.effects.shadows
+            && self.fill == Fill::Lit
+            && let (Some((index, hard)), Some((min, max))) = (frame.shadow_light, frame.bounds)
+            && let Some(light) = frame.lights.get(index)
+        {
+            let view = shadow_view(light, min, max);
+            rebind |= self.shadows.ensure(device, view.count);
+            self.shadows.write_faces(queue, &view);
+            shadow = ShadowUniform::new(&view, u16::try_from(index).unwrap_or(u16::MAX), hard);
+            self.shadow_faces = view.count;
+        }
+        queue.write_buffer(&self.shadows.uniform, 0, bytemuck::bytes_of(&shadow));
+        if rebind {
+            self.camera_bind_group = create_camera_bind_group(
+                device,
+                &self.camera_layout,
+                &self.camera_buffer,
+                &self.light_buffer,
+                &self.shadows,
+            );
+        }
+        if self.ssao_on {
+            self.ssao.write(
+                queue,
+                &SsaoUniform::new(frame.view, frame.proj, viewport, frame.parallel),
+            );
         }
 
         let total = frame.instance_count();
@@ -570,13 +649,38 @@ impl ViewportRenderer {
     }
 
     /// Draws `frame` into `target` and submits the work: [`prepare`](Self::prepare),
-    /// then one render pass with [`paint`](Self::paint). The renderer must have been
-    /// created for `target.config()`.
-    pub fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FrameData, target: &ViewportTarget) {
+    /// the effects' passes (the key light's shadow map, the ambient occlusion),
+    /// then the view's own pass ([`paint`](Self::paint)). The renderer must have
+    /// been created for `target.config()`.
+    pub fn render(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &FrameData,
+        target: &mut ViewportTarget,
+    ) {
         self.prepare(device, queue, frame, target.size());
+        if self.ssao_on {
+            target.prepare_ssao(device, &self.ssao.layouts);
+        }
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("grid4d.viewport.encoder"),
         });
+        for face in 0..self.shadow_faces {
+            let mut pass = self.shadows.begin_face(&mut encoder, face);
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            self.draw_parts(&mut pass, |mesh| mesh.faces.get());
+        }
+        let ao = match target.ssao_textures() {
+            Some(textures) if self.ssao_on => {
+                self.ssao.record(&mut encoder, textures, |pass| {
+                    pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                    self.draw_parts(pass, |mesh| mesh.faces.get());
+                });
+                &textures.ao
+            }
+            _ => &self.ssao.unused,
+        };
         {
             let (color, depth) = target.attachments();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -585,14 +689,16 @@ impl ViewportRenderer {
                 depth_stencil_attachment: Some(depth),
                 ..Default::default()
             });
-            self.paint(&mut pass);
+            self.paint(&mut pass, ao);
         }
         queue.submit([encoder.finish()]);
     }
 
-    /// Records the viewport draw calls into an open render pass.
-    pub fn paint(&self, pass: &mut wgpu::RenderPass<'_>) {
+    /// Records the view's draw calls into an open render pass; `ao` is the
+    /// view's ambient occlusion (bind group 1).
+    fn paint(&self, pass: &mut wgpu::RenderPass<'_>, ao: &wgpu::BindGroup) {
         pass.set_bind_group(0, &self.camera_bind_group, &[]);
+        pass.set_bind_group(1, ao, &[]);
 
         let surfaces = match self.fill {
             Fill::Lit | Fill::Quick | Fill::Constant => Some(&self.mesh_pipeline),
@@ -702,6 +808,7 @@ fn create_camera_bind_group(
     layout: &wgpu::BindGroupLayout,
     camera: &wgpu::Buffer,
     lights: &wgpu::Buffer,
+    shadows: &ShadowMaps,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("grid4d.camera.bind_group"),
@@ -714,6 +821,18 @@ fn create_camera_bind_group(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: lights.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: shadows.uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(shadows.array_view()),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::Sampler(&shadows.sampler),
             },
         ],
     })
@@ -780,11 +899,7 @@ fn create_object_pipeline(
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: pass.attributes,
                 }),
-                Some(wgpu::VertexBufferLayout {
-                    array_stride: INSTANCE_STRIDE,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &INSTANCE_ATTRIBUTES,
-                }),
+                Some(INSTANCE_LAYOUT),
             ],
         },
         primitive: wgpu::PrimitiveState {
@@ -918,6 +1033,8 @@ mod tests {
             ("mesh.wgsl", shaders::MESH),
             ("grid.wgsl", shaders::GRID),
             ("overlay.wgsl", shaders::OVERLAY),
+            ("shadow.wgsl", shaders::SHADOW),
+            ("ssao.wgsl", shaders::SSAO),
         ] {
             let module =
                 naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(source)));

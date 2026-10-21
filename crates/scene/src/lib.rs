@@ -38,7 +38,7 @@ pub use anim::{
 pub use bounds::Aabb;
 pub use document::Document;
 pub use edit::SceneEdit;
-pub use light::{Falloff, LightDetails, LightType};
+pub use light::{Falloff, LightDetails, LightShadow, LightType};
 pub use material::{Material, MaterialId, Materials};
 pub use mesh::{ComponentState, Components, MeshHandle, MeshId};
 pub use node::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, Node, NodeData, NodeId, ObjectKind, ObjectKindTag};

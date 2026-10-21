@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 7 — Viewport: cameras, lights, 4-view, shading (v0.7) |
-| Last step done | 7.5 — The Filter menu (2026-10-21) |
-| Next step | 7.6 — Optional: shadow map for the key light, SSAO (per-view toggle) |
-| Tests | 464, all passing; clippy and rustfmt clean |
+| Last step done | 7.6 — Shadows and SSAO in the viewport (2026-10-21); Phase 7 complete |
+| Next step | 8 — Offline renderer (see the plan's Phase 8) |
+| Tests | 469, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -515,7 +515,8 @@ write animation yet (planned).
 | 7.2 (`ebbf93b`) | Four views (Perspective, Top, Right, Front) with orthographic projections: Panel menu arrangements, F1–F4 / F5, middle click shows a view alone; every view has its own camera, projection (Cameras menu) and Options; the active view takes input and a click elsewhere activates and acts; the grid lies in the view's plane | 448 |
 | 7.3 (`96cc183`) | Display modes per view (Display menu, N~ chords): Gouraud, Quick and Constant Shading, each also with lines, Hidden Line and Lines; Wireframe (polygon edges) or Box (each object as its bounding box); selected objects' lines in orange | 452 |
 | 7.4 (`6a7846c`) | Lights light the viewport: Omni, Spot (cone with inner and outer angle) and Infinite lights with falloff, the default light when there are none, Quick Shading always with it; materials' roughness, metallic and luminance shade the surfaces; spot cones and infinite arrows in the view | 459 |
-| 7.5 | The Filter menu per view: Polygon, Generator, Subdivision Surface, Camera and Light objects, World Grid, World Axis and HUD on or off; All, None, Ctrl+click keeps one; hidden types are neither drawn nor picked or snapped to | 464 |
+| 7.5 (`88e2579`) | The Filter menu per view: Polygon, Generator, Subdivision Surface, Camera and Light objects, World Grid, World Axis and HUD on or off; All, None, Ctrl+click keeps one; hidden types are neither drawn nor picked or snapped to | 464 |
+| 7.6 | Shadows and SSAO per view (Options menu): the key light — the first with a Shadow, soft or hard — casts shadows (Spot, Infinite, Omni); ambient occlusion darkens contact areas and corners; the light's Shadow setting | 469 |
 
 *Problems and solutions:*
 - **The view camera had no bank.** The turntable camera kept world Y up, so a banked
@@ -645,6 +646,41 @@ write animation yet (planned).
   the Top view removed the primitives there only, while its light marker and the
   other views stayed. (A menu closes after each choice, so each toggle is one
   click on the menu.)
+- **Shadows without a fixed scene size.** A shadow map only works if it covers
+  the scene tightly. The frame now gathers the world bounds of what it draws
+  (markers left out), and the key light's views are fitted to them: an
+  orthographic box along an Infinite light, a perspective view through a spot's
+  cone, six views for an Omni light — slightly wider than 90° each, so filtering
+  near a face's edge stays on that face. The main pass picks the face by the
+  dominant axis, so one depth array texture serves every light type.
+- **Acne and gaps.** Surfaces shadowing themselves are avoided by a slope-scaled
+  depth bias in the shadow pass plus an offset along the normal of 1.5 shadow
+  texels (computed at the scene's centre), which keeps contact shadows where
+  objects meet the floor.
+- **Markers cast nothing.** A light's own marker sphere would have put the whole
+  scene in its shadow. Instances now flag markers, and the shadow and SSAO
+  passes clip them.
+- **SSAO needs depth and normals the main pass does not keep.** The main pass is
+  multisampled and discards its depth, so a single-sample pre-pass writes
+  view-space normals and depth; the occlusion and blur passes run on that, at
+  the view's size. Their textures belong to each view's target (made the first
+  time SSAO is on), so four views of different sizes never thrash shared
+  textures. Parallel views reconstruct positions with their orthographic
+  projection.
+- **SSAO that shows.** Darkening only the soft light was correct but nearly
+  invisible in scenes lit by their own lights (the soft light is weak there).
+  It now also darkens the direct light by 60 %, closer to how the reference
+  shows it.
+- **Bug found on screen: the app did not start.** wgpu rejected the placeholder
+  occlusion texture, made without the usage flag that lets shaders read it. The
+  GPU passes are only checked by wgpu when the app runs; the WGSL is validated
+  by the tests.
+- **On-screen testing:** with Shadows on, a spot light with soft shadows put a
+  soft shadow behind each sphere; an Omni light with hard shadows cast sharp
+  shadows in every direction (below, beside and behind the objects); SSAO
+  darkened the bases of the spheres and the cube; with four views, the Top view
+  (orthographic) showed both effects while the Right and Front views, without
+  them, stayed plain.
 
 ---
 
