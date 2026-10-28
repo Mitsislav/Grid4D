@@ -16,7 +16,7 @@ use grid4d_eval::EvaluatedScene;
 use grid4d_geom::Component;
 use grid4d_render::{
     ComponentHit, ComponentStyle, DisplayMode, DisplayStyle, FilterItem, FrameData, OrbitCamera, Projection,
-    ScreenView, ShadingMode, SnapCache, SnapHit, ViewEffects, ViewFilter, pick, pick_component,
+    ScreenView, ShadingMode, SnapCache, SnapHit, ViewEffects, ViewFilter, pick, pick_component, pick_curve,
 };
 use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, Tags, Transform, WalkItem};
 
@@ -146,10 +146,11 @@ const STYLE_MENU: [(DisplayStyle, &str, &str); 2] = [
 ];
 
 /// The Filter menu: object types, then elements of the view.
-const FILTER_OBJECTS: [(FilterItem, &str); 5] = [
+const FILTER_OBJECTS: [(FilterItem, &str); 6] = [
     (FilterItem::Polygon, "Polygon"),
     (FilterItem::Generator, "Generator"),
     (FilterItem::SubdivisionSurface, "Subdivision Surface"),
+    (FilterItem::Spline, "Spline"),
     (FilterItem::Camera, "Camera"),
     (FilterItem::Light, "Light"),
 ];
@@ -1234,7 +1235,16 @@ impl ViewportPanel {
         }
         let ray = self.camera.ray_from_ndc(to_ndc(pointer, rect), rect.aspect_ratio());
         let mode = SelectMode::from_modifiers(modifiers);
-        match pick(&self.evaluated, ray, self.filter) {
+        // A spline right under the pointer wins over the surface behind it.
+        let near = pointer - rect.min;
+        let curve = pick_curve(
+            &self.evaluated,
+            &self.screen_view(rect),
+            GVec2::new(near.x, near.y),
+            metrics::COMPONENT_PICK_RADIUS,
+            self.filter,
+        );
+        match curve.or_else(|| pick(&self.evaluated, ray, self.filter)) {
             Some(id) => editor.commands.push(EditorCommand::Select { id, mode }),
             None if mode == SelectMode::Replace => editor.commands.push(EditorCommand::DeselectAll),
             None => {}
@@ -2934,5 +2944,37 @@ mod tests {
         h.editor.commands.push(EditorCommand::ShowView(None));
         h.frame(Vec::new());
         gone(&mut h, "four views (another size)");
+    }
+
+    #[test]
+    fn a_click_near_a_spline_selects_it() {
+        let mut h = Harness::new();
+        h.editor
+            .commands
+            .push(EditorCommand::CreateObject(ObjectKindTag::Circle));
+        h.frame(Vec::new());
+        let circle = h.doc.scene.iter().find(|(_, n)| n.data.name == "Circle").unwrap().0;
+        assert!(h.editor.selection.contains(circle), "a new object is selected");
+        h.editor.selection.clear();
+        h.frame(Vec::new());
+
+        // Project the circle's rightmost point into the view.
+        let rect = h.viewport.view_rect;
+        let view = h.viewport.screen_view(rect);
+        let p = view.view_proj * Vec3::new(200.0, 0.0, 0.0).extend(1.0);
+        let ndc = p.truncate().truncate() / p.w;
+        let at = Pos2::new(
+            rect.left() + (ndc.x * 0.5 + 0.5) * rect.width(),
+            rect.top() + (0.5 - ndc.y * 0.5) * rect.height(),
+        );
+        let click = |pressed| Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        h.frame(vec![Event::PointerMoved(at), click(true)]);
+        h.frame(vec![click(false)]);
+        assert!(h.editor.selection.contains(circle), "picked by its line");
     }
 }

@@ -1,4 +1,7 @@
+use std::f32::consts::{FRAC_PI_2, PI};
+
 use glam::Vec3;
+use grid4d_geom::spline::{ArcType, SplinePrimitive, SplineShape};
 
 use crate::{Aabb, Components, LightDetails, LightShadow, LightType, MeshHandle, Transform};
 
@@ -107,6 +110,9 @@ pub enum ObjectKind {
         linear_pre: u32,
         boundary: grid4d_geom::subdivision::Boundary,
     },
+    /// A parametric spline (Circle, Rectangle, Arc, n-Side, Star, Helix,
+    /// Flower): a curve, drawn as lines, not rendered.
+    SplinePrimitive(SplinePrimitive),
 }
 
 /// Field-less discriminant of [`ObjectKind`] — for icons, menus and dispatch tables.
@@ -125,10 +131,17 @@ pub enum ObjectKindTag {
     Light,
     Polygon,
     SubdivisionSurface,
+    Circle,
+    Rectangle,
+    Arc,
+    NSide,
+    Star,
+    Helix,
+    Flower,
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 20] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -142,6 +155,24 @@ impl ObjectKindTag {
         Self::Light,
         Self::Polygon,
         Self::SubdivisionSurface,
+        Self::Circle,
+        Self::Rectangle,
+        Self::Arc,
+        Self::NSide,
+        Self::Star,
+        Self::Helix,
+        Self::Flower,
+    ];
+
+    /// Spline primitives (the "Create ▸ Spline" family).
+    pub const SPLINES: [Self; 7] = [
+        Self::Circle,
+        Self::Rectangle,
+        Self::Arc,
+        Self::NSide,
+        Self::Star,
+        Self::Helix,
+        Self::Flower,
     ];
 
     /// Generators: objects that build their geometry from their children.
@@ -175,6 +206,13 @@ impl ObjectKindTag {
             Self::Light => "Light",
             Self::Polygon => "Polygon",
             Self::SubdivisionSurface => "Subdivision Surface",
+            Self::Circle => "Circle",
+            Self::Rectangle => "Rectangle",
+            Self::Arc => "Arc",
+            Self::NSide => "n-Side",
+            Self::Star => "Star",
+            Self::Helix => "Helix",
+            Self::Flower => "Flower",
         }
     }
 
@@ -241,8 +279,66 @@ impl ObjectKindTag {
                 linear_pre: 0,
                 boundary: grid4d_geom::subdivision::Boundary::EdgeAndCorner,
             },
+            // The manual states no defaults: these are ours (docs/reference/object-spline.md).
+            Self::Circle => spline(SplineShape::Circle {
+                radius: 200.0,
+                ellipse: None,
+                ring: None,
+            }),
+            Self::Rectangle => spline(SplineShape::Rectangle {
+                width: 400.0,
+                height: 400.0,
+                rounding: None,
+            }),
+            Self::Arc => spline(SplineShape::Arc {
+                kind: ArcType::Arc,
+                radius: 200.0,
+                inner_radius: 100.0,
+                start: 0.0,
+                end: FRAC_PI_2,
+            }),
+            Self::NSide => spline(SplineShape::NSide {
+                radius: 200.0,
+                sides: 6,
+                rounding: None,
+            }),
+            Self::Star => spline(SplineShape::Star {
+                inner_radius: 100.0,
+                outer_radius: 200.0,
+                twist: 0.0,
+                points: 8,
+            }),
+            Self::Helix => spline(SplineShape::Helix {
+                start_radius: 200.0,
+                start_angle: 0.0,
+                end_radius: 200.0,
+                end_angle: 4.0 * PI,
+                radial_bias: 0.5,
+                height: 200.0,
+                height_bias: 0.5,
+                subdivision: 100,
+            }),
+            Self::Flower => spline(SplineShape::Flower {
+                inner_radius: 100.0,
+                outer_radius: 200.0,
+                petals: 6,
+            }),
         }
     }
+
+    /// A spline primitive (see [`ObjectKindTag::SPLINES`]).
+    #[must_use]
+    pub const fn is_spline(self) -> bool {
+        matches!(
+            self,
+            Self::Circle | Self::Rectangle | Self::Arc | Self::NSide | Self::Star | Self::Helix | Self::Flower
+        )
+    }
+}
+
+/// A spline primitive of `shape` with the default plane and sampling.
+fn spline(shape: SplineShape) -> ObjectKind {
+    ObjectKind::SplinePrimitive(SplinePrimitive::new(shape))
 }
 
 impl ObjectKind {
@@ -283,7 +379,22 @@ impl ObjectKind {
             Self::Light { .. } => ObjectKindTag::Light,
             Self::Polygon { .. } => ObjectKindTag::Polygon,
             Self::SubdivisionSurface { .. } => ObjectKindTag::SubdivisionSurface,
+            Self::SplinePrimitive(primitive) => match primitive.shape {
+                SplineShape::Circle { .. } => ObjectKindTag::Circle,
+                SplineShape::Rectangle { .. } => ObjectKindTag::Rectangle,
+                SplineShape::Arc { .. } => ObjectKindTag::Arc,
+                SplineShape::NSide { .. } => ObjectKindTag::NSide,
+                SplineShape::Star { .. } => ObjectKindTag::Star,
+                SplineShape::Helix { .. } => ObjectKindTag::Helix,
+                SplineShape::Flower { .. } => ObjectKindTag::Flower,
+            },
         }
+    }
+
+    /// A curve rather than a surface (drawn as lines, not rendered).
+    #[must_use]
+    pub const fn is_spline(&self) -> bool {
+        matches!(self, Self::SplinePrimitive(_))
     }
 
     /// Builds its geometry from its children (see [`ObjectKindTag::GENERATORS`]).
@@ -333,6 +444,14 @@ impl ObjectKind {
             Self::Light { .. } => Vec3::splat(LIGHT_MARKER_RADIUS),
             // Exact and not centred: the mesh's own (cached) bounds.
             Self::Polygon { ref mesh, .. } => return mesh.bounds(),
+            // The curve's, half a centimetre thicker so flat ones can be hit.
+            Self::SplinePrimitive(ref primitive) => {
+                let (min, max) = primitive.polyline().bounds()?;
+                return Some(Aabb {
+                    min: min - Vec3::splat(0.5),
+                    max: max + Vec3::splat(0.5),
+                });
+            }
         };
         Some(Aabb::from_half_extents(half.abs()))
     }

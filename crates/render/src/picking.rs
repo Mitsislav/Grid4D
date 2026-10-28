@@ -1,8 +1,8 @@
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 use grid4d_eval::{EvaluatedScene, PickShape};
 use grid4d_scene::NodeId;
 
-use crate::{Ray, ViewFilter};
+use crate::{Ray, ScreenView, ViewFilter};
 
 /// Returns the closest visible object hit by `ray`, among the types `shown`.
 ///
@@ -24,7 +24,8 @@ pub fn pick(scene: &EvaluatedScene, ray: Ray, shown: ViewFilter) -> Option<NodeI
         let origin = inv.transform_point3(ray.origin);
         let dir = inv.transform_vector3(ray.dir);
         let hit = match node.pick {
-            PickShape::None => None,
+            // Curves are picked on screen (`pick_curve`).
+            PickShape::None | PickShape::Curve(_) => None,
             PickShape::Sphere { radius } => ray_sphere(origin, dir, radius),
             PickShape::Bounds => node.bounds.and_then(|b| b.ray_intersect(origin, dir)),
             // The box first: most rays miss most objects.
@@ -43,6 +44,68 @@ pub fn pick(scene: &EvaluatedScene, ray: Ray, shown: ViewFilter) -> Option<NodeI
         }
     }
     best.map(|(_, id)| id)
+}
+
+/// The spline whose curve passes nearest `pointer` (in `view`'s screen
+/// coordinates), if within `radius`; among the types `shown`. Splines are thin,
+/// so they are picked by their distance on screen, not by a ray.
+/// Allocation-free.
+#[must_use]
+pub fn pick_curve(
+    scene: &EvaluatedScene,
+    view: &ScreenView,
+    pointer: Vec2,
+    radius: f32,
+    shown: ViewFilter,
+) -> Option<NodeId> {
+    let mut best: Option<(f32, NodeId)> = None;
+    for node in scene.nodes() {
+        let PickShape::Curve(id) = node.pick else { continue };
+        if !shown.shows_object(node.kind) {
+            continue;
+        }
+        let Some(curve) = scene.curve(id) else { continue };
+        let screen = |p: Vec3| {
+            let clip = view.view_proj * node.world.transform_point3(p).extend(1.0);
+            (clip.w > 1e-6 && clip.z >= 0.0).then(|| view.to_screen(clip))
+        };
+        let mut consider = |distance: f32| {
+            if distance <= radius && best.is_none_or(|(d, _)| distance < d) {
+                best = Some((distance, node.id));
+            }
+        };
+        for (run, closed) in curve.polyline().runs() {
+            if let [single] = run {
+                if let Some(p) = screen(*single) {
+                    consider(p.distance(pointer));
+                }
+                continue;
+            }
+            let pairs = if closed && run.len() > 2 {
+                run.len()
+            } else {
+                run.len().saturating_sub(1)
+            };
+            for i in 0..pairs {
+                let (Some(a), Some(b)) = (screen(run[i]), screen(run[(i + 1) % run.len()])) else {
+                    continue;
+                };
+                consider(distance_to_segment(pointer, a, b));
+            }
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// Distance from `p` to the segment `a`–`b`.
+fn distance_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let ab = b - a;
+    let t = if ab.length_squared() > 0.0 {
+        ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    p.distance(a + ab * t)
 }
 
 fn ray_sphere(origin: Vec3, dir: Vec3, radius: f32) -> Option<f32> {
@@ -151,5 +214,42 @@ mod tests {
         let polygons_only = ViewFilter::only(crate::FilterItem::Polygon);
         assert_eq!(pick(&eval, ray, polygons_only), Some(behind));
         assert_eq!(pick(&eval, ray, ViewFilter::NONE), None);
+    }
+
+    #[test]
+    fn splines_are_picked_near_their_line_on_screen() {
+        let mut doc = Document::new("t");
+        let circle = doc
+            .scene
+            .insert(Node::new("Circle", ObjectKindTag::Circle.default_kind()));
+        let eval = evaluated(&doc);
+        // Looking at the XY plane straight on: the circle of radius 200 around the centre.
+        let mut camera = OrbitCamera::default();
+        (camera.yaw, camera.pitch, camera.target, camera.distance) = (0.0, 0.0, Vec3::ZERO, 1000.0);
+        let view = ScreenView::new(&camera, Vec2::new(800.0, 600.0));
+        let on_line = view.to_screen(view.view_proj * Vec3::new(200.0, 0.0, 0.0).extend(1.0));
+        assert_eq!(pick_curve(&eval, &view, on_line, 6.0, ViewFilter::ALL), Some(circle));
+        assert_eq!(
+            pick_curve(&eval, &view, on_line + Vec2::new(4.0, 0.0), 6.0, ViewFilter::ALL),
+            Some(circle),
+            "a few pixels off"
+        );
+        let centre = Vec2::new(400.0, 300.0);
+        assert_eq!(
+            pick_curve(&eval, &view, centre, 6.0, ViewFilter::ALL),
+            None,
+            "inside: nothing"
+        );
+        let hidden = ViewFilter::NONE;
+        assert_eq!(pick_curve(&eval, &view, on_line, 6.0, hidden), None, "filtered out");
+        // A ray never picks a curve.
+        assert_eq!(
+            pick(
+                &eval,
+                camera.ray_from_ndc(Vec2::new(0.5, 0.0), 800.0 / 600.0),
+                ViewFilter::ALL
+            ),
+            None
+        );
     }
 }

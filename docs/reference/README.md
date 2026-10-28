@@ -80,3 +80,4 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 8.3 | [`render-picture-viewer.md`](render-picture-viewer.md) — the Picture Viewer: background renders, history, zoom, saving | implemented 2026-10-28 |
 | 8.4 | [`render-view.md`](render-view.md) — the Render View: rendering the active view in place | implemented 2026-10-28 |
 | 8.5 | [`render-animation.md`](render-animation.md) — rendering frame ranges to numbered files, OpenEXR | implemented 2026-10-29 |
+| 9.1–9.3 | [`object-spline.md`](object-spline.md) — spline objects: types, intermediate points, primitives (9.1 implemented 2026-10-29) | in progress |

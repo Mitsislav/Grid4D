@@ -70,15 +70,17 @@ pub enum MeshKey {
     /// A polygon object's mesh, as is (scale 1); the geometry lives in its
     /// [`MeshHandle`](grid4d_scene::MeshHandle), see [`EvaluatedScene::mesh`](crate::EvaluatedScene::mesh).
     Polygon(MeshId),
+    /// A spline's curve, drawn as lines only; see [`EvaluatedScene::curve`](crate::EvaluatedScene::curve).
+    Curve(crate::CurveId),
 }
 
 impl MeshKey {
     /// The unit geometry for a primitive's key; `None` for a polygon object,
-    /// whose geometry is not generated but stored.
+    /// whose geometry is not generated but stored, and for a curve.
     #[must_use]
     pub fn build(self) -> Option<PolyMesh> {
         Some(match self {
-            Self::Polygon(_) => return None,
+            Self::Polygon(_) | Self::Curve(_) => return None,
             Self::Cube { segments } => primitives::cube(Vec3::ONE, segments),
             Self::Sphere { segments } => primitives::sphere(1.0, segments),
             Self::Cylinder { rotation, height } => primitives::cylinder(1.0, 1.0, rotation, height),

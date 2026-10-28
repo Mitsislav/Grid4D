@@ -79,6 +79,19 @@ mod tests {
         assert_idle_frames_leave_the_document_alone(doc, editor);
     }
 
+    /// Splines draw without writing anything.
+    #[test]
+    fn idle_frames_with_splines_do_not_touch_the_document() {
+        let mut doc = Document::with_demo_scene();
+        for tag in grid4d_scene::ObjectKindTag::SPLINES {
+            doc.scene
+                .insert(grid4d_scene::Node::new(tag.label(), tag.default_kind()));
+        }
+        let mut editor = EditorState::default();
+        editor.selection.set_single(*doc.scene.roots().last().unwrap());
+        assert_idle_frames_leave_the_document_alone(doc, editor);
+    }
+
     /// Looking through a scene camera writes nothing while nothing moves.
     #[test]
     fn idle_frames_through_a_scene_camera_do_not_touch_the_document() {

@@ -410,6 +410,75 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
                 c.line((0.5 + co * 0.29, 0.5 + s * 0.29), (0.5 + co * 0.44, 0.5 + s * 0.44));
             }
         }
+        // Splines: the curve, with dots on its control points.
+        ObjectKindTag::Circle => {
+            c.circle((0.5, 0.5), 0.36);
+            for p in [(0.86, 0.5), (0.5, 0.14), (0.14, 0.5), (0.5, 0.86)] {
+                c.disc(p, 0.065);
+            }
+        }
+        ObjectKindTag::Rectangle => {
+            let corners = [(0.14, 0.24), (0.86, 0.24), (0.86, 0.76), (0.14, 0.76)];
+            c.polyline(&corners, true);
+            for p in corners {
+                c.disc(p, 0.065);
+            }
+        }
+        ObjectKindTag::Arc => {
+            let arc: Vec<P> = (0..=16)
+                .map(|i| {
+                    let a = PI * (0.1 + 0.8 * i as f32 / 16.0);
+                    (0.5 + 0.38 * a.cos(), 0.72 - 0.38 * a.sin())
+                })
+                .collect();
+            c.polyline(&arc, false);
+            if let (Some(&first), Some(&last)) = (arc.first(), arc.last()) {
+                c.disc(first, 0.065);
+                c.disc(last, 0.065);
+            }
+        }
+        ObjectKindTag::NSide => {
+            let hexagon: Vec<P> = (0..6)
+                .map(|i| {
+                    let a = PI / 2.0 + TAU * i as f32 / 6.0;
+                    (0.5 + 0.38 * a.cos(), 0.5 - 0.38 * a.sin())
+                })
+                .collect();
+            c.polyline(&hexagon, true);
+        }
+        ObjectKindTag::Star => {
+            let star: Vec<P> = (0..10)
+                .map(|i| {
+                    let a = PI / 2.0 + PI * i as f32 / 5.0;
+                    let r = if i % 2 == 0 { 0.42 } else { 0.18 };
+                    (0.5 + r * a.cos(), 0.54 - r * a.sin())
+                })
+                .collect();
+            c.polyline(&star, true);
+        }
+        ObjectKindTag::Helix => {
+            // A coil seen from the side.
+            let coil: Vec<P> = (0..=48)
+                .map(|i| {
+                    let t = i as f32 / 48.0;
+                    (
+                        0.5 + 0.3 * (t * TAU * 3.0).cos(),
+                        0.86 - 0.72 * t + 0.07 * (t * TAU * 3.0).sin(),
+                    )
+                })
+                .collect();
+            c.polyline(&coil, false);
+        }
+        ObjectKindTag::Flower => {
+            let flower: Vec<P> = (0..=60)
+                .map(|i| {
+                    let a = TAU * i as f32 / 60.0;
+                    let r = 0.2 + 0.22 * (3.0 * a).cos().abs();
+                    (0.5 + r * a.cos(), 0.5 - r * a.sin())
+                })
+                .collect();
+            c.polyline(&flower, true);
+        }
     }
 }
 

@@ -1244,6 +1244,14 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
             data.transform.position = Vec3::new(0.0, 400.0, 0.0);
             data.display_color = [1.0, 0.95, 0.85];
         }
+        // Light lines show on the dark viewport.
+        ObjectKindTag::Circle
+        | ObjectKindTag::Rectangle
+        | ObjectKindTag::Arc
+        | ObjectKindTag::NSide
+        | ObjectKindTag::Star
+        | ObjectKindTag::Helix
+        | ObjectKindTag::Flower => data.display_color = [0.9, 0.9, 0.92],
         ObjectKindTag::Null
         | ObjectKindTag::Cube
         | ObjectKindTag::Sphere
@@ -1295,6 +1303,13 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         ObjectKindTag::Camera => palette::ICON_CAMERA,
         ObjectKindTag::Light => palette::ICON_LIGHT,
         ObjectKindTag::SubdivisionSurface => palette::ICON_GENERATOR,
+        ObjectKindTag::Circle
+        | ObjectKindTag::Rectangle
+        | ObjectKindTag::Arc
+        | ObjectKindTag::NSide
+        | ObjectKindTag::Star
+        | ObjectKindTag::Helix
+        | ObjectKindTag::Flower => palette::ICON_SPLINE,
         ObjectKindTag::Cube
         | ObjectKindTag::Sphere
         | ObjectKindTag::Cylinder

@@ -581,4 +581,12 @@ mod tests {
         assert_eq!(progressive.samples(), 0);
         assert_eq!(control.progress(), 0, "no row was rendered");
     }
+
+    #[test]
+    fn splines_are_not_rendered() {
+        let mut doc = Document::new("t");
+        doc.scene
+            .insert(Node::new("Circle", ObjectKindTag::Circle.default_kind()));
+        assert_eq!(scene_of(&doc).triangle_count(), 0, "a curve has no surface");
+    }
 }

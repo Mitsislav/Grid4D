@@ -8,7 +8,9 @@ use grid4d_scene::{
 };
 
 use crate::{
-    Drawable, MeshKey, Shading, Surface, drawable,
+    CurveHandle, CurveId, Drawable, MeshKey, Shading, Surface,
+    curve::CachedCurve,
+    drawable,
     generator::{self, Input},
 };
 
@@ -23,6 +25,9 @@ pub enum PickShape {
     Sphere { radius: f32 },
     /// A polygon object's shown mesh, exactly (see [`EvaluatedScene::mesh`]).
     Mesh(MeshId),
+    /// A spline's curve: picked a few pixels around its line (see
+    /// [`EvaluatedScene::curve`]).
+    Curve(CurveId),
 }
 
 /// One visible node, as viewers see it this frame.
@@ -109,6 +114,10 @@ pub struct EvaluatedScene {
     shown: HashMap<NodeId, Shown>,
     /// Each enabled generator's result, rebuilt only when its inputs change.
     generated: HashMap<NodeId, Generated>,
+    /// The visible splines' sampled curves, by id (drawing and picking).
+    curves: HashMap<CurveId, CurveHandle>,
+    /// Each spline's curve, sampled again only when the spline changes.
+    curve_cache: HashMap<NodeId, CachedCurve>,
     /// Scratch space for gathering a generator's inputs.
     inputs: Vec<Input>,
     cage_stack: Vec<NodeId>,
@@ -183,9 +192,11 @@ impl EvaluatedScene {
         self.nodes.clear();
         self.meshes.clear();
         self.polygons.clear();
+        self.curves.clear();
         let revision = scene.revision();
         let purpose = self.purpose;
         let (nodes, meshes, polygons, shown) = (&mut self.nodes, &mut self.meshes, &mut self.polygons, &mut self.shown);
+        let (curves, curve_cache) = (&mut self.curves, &mut self.curve_cache);
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
         let material_stack = &mut self.material_stack;
         material_stack.clear();
@@ -240,6 +251,25 @@ impl EvaluatedScene {
                     key: MeshKey::Polygon(mesh.id()),
                     ..d
                 });
+            }
+            if let ObjectKind::SplinePrimitive(primitive) = &data.kind {
+                let cached = curve_cache
+                    .entry(id)
+                    .and_modify(|c| c.refresh(primitive, revision))
+                    .or_insert_with(|| CachedCurve::new(*primitive, revision));
+                let handle = cached.handle.clone();
+                pick = PickShape::Curve(handle.id());
+                // Lines in the display colour: a curve has no surface or material.
+                drawable = (!handle.polyline().points.is_empty()).then_some(Drawable {
+                    key: MeshKey::Curve(handle.id()),
+                    shading: Shading::default(),
+                    scale: Vec3::ONE,
+                    color: data.display_color,
+                    surface: Surface::default(),
+                    unlit: true,
+                    marker: false,
+                });
+                curves.insert(handle.id(), handle);
             }
             let mut bounds = data.kind.local_bounds();
             if let Some(options) = generator.filter(|_| data.enabled) {
@@ -332,6 +362,7 @@ impl EvaluatedScene {
         // Objects gone, hidden or with nothing hidden any more.
         self.shown.retain(|_, entry| self.meshes.contains_key(&entry.mesh.id()));
         self.generated.retain(|_, entry| entry.seen == revision);
+        self.curve_cache.retain(|_, entry| entry.seen == revision);
         self.revision = Some(scene.revision());
         true
     }
@@ -353,6 +384,13 @@ impl EvaluatedScene {
     #[must_use]
     pub fn mesh(&self, id: MeshId) -> Option<&MeshHandle> {
         self.meshes.get(&id)
+    }
+
+    /// A visible spline's sampled curve, by the id its drawable and pick shape
+    /// carry.
+    #[must_use]
+    pub fn curve(&self, id: CurveId) -> Option<&CurveHandle> {
+        self.curves.get(&id)
     }
 
     /// A visible polygon object's node, own mesh (hidden polygons included: the
@@ -544,8 +582,8 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Disc { .. }
         | ObjectKind::Capsule { .. }
         | ObjectKind::Camera { .. } => PickShape::Bounds,
-        // Picked by its result (set during evaluation).
-        ObjectKind::SubdivisionSurface { .. } => PickShape::None,
+        // Picked by its result, or its curve (set during evaluation).
+        ObjectKind::SubdivisionSurface { .. } | ObjectKind::SplinePrimitive(_) => PickShape::None,
     }
 }
 
@@ -1180,5 +1218,48 @@ mod tests {
         assert_eq!(node("Sphere").pick, PickShape::Sphere { radius: 80.0 });
         assert_eq!(node("Cube").pick, PickShape::Bounds);
         assert!(node("Cube").drawable.is_some());
+    }
+
+    #[test]
+    fn splines_are_curves_sampled_once_per_change() {
+        let mut doc = Document::new("t");
+        let circle = doc
+            .scene
+            .insert(Node::new("Circle", ObjectKindTag::Circle.default_kind()));
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let node = eval.nodes()[0];
+        let Some(Drawable {
+            key: MeshKey::Curve(id),
+            unlit: true,
+            ..
+        }) = node.drawable
+        else {
+            panic!("a curve drawable: {:?}", node.drawable)
+        };
+        assert_eq!(node.pick, PickShape::Curve(id));
+        assert_eq!(node.kind, ObjectKindTag::Circle);
+        let points = eval.curve(id).unwrap().polyline().points.len();
+        assert!(points >= 72, "adaptive at 5°: {points}");
+
+        // A move keeps the curve; a new radius samples it again.
+        doc.scene.get_mut(circle).unwrap().data.transform.position.x = 50.0;
+        eval.update(&doc.scene);
+        assert_eq!(eval.nodes()[0].pick, PickShape::Curve(id), "the same curve");
+        if let ObjectKind::SplinePrimitive(p) = &mut doc.scene.get_mut(circle).unwrap().data.kind {
+            p.shape = grid4d_geom::spline::SplineShape::Circle {
+                radius: 10.0,
+                ellipse: None,
+                ring: None,
+            };
+        }
+        eval.update(&doc.scene);
+        let PickShape::Curve(new) = eval.nodes()[0].pick else {
+            panic!()
+        };
+        assert_ne!(new, id, "a changed spline is a new curve");
+        assert!(eval.curve(id).is_none(), "the old one is gone");
+        let (min, max) = eval.curve(new).unwrap().polyline().bounds().unwrap();
+        assert!((max.x - 10.0).abs() < 0.01 && (min.x + 10.0).abs() < 0.01);
     }
 }

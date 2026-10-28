@@ -12,10 +12,10 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 8 — Offline renderer (v0.8) |
-| Last step done | 8.5 — Frame ranges and OpenEXR (2026-10-29); Phase 8 complete |
-| Next step | Phase 9 — plan it in detail (splines, generators, deformers, …) |
-| Tests | 521, all passing; clippy and rustfmt clean |
+| Current phase | 9 — Splines & spline generators (v0.9) |
+| Last step done | 9.1 — Spline primitives (2026-10-29) |
+| Next step | 9.2 — Editable splines: Make Editable, Points mode on splines |
+| Tests | 540, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -887,7 +887,55 @@ Phase 8 is complete.
 
 ---
 
-## How this file is kept
+## Phase 9 — Splines & spline generators (2026-10-29 – )
+
+| Step | Built | Tests |
+|------|-------|-------|
+| — | Phase 9 planned in detail: splines, point editing and the Pen, Extrude / Lathe / Sweep / Loft, Text (`IMPLEMENTATION_PLAN.md`) | 521 |
+| 9.1 | Spline primitives: Circle, Rectangle, Arc, n-Side, Star, Helix and Flower — curves with a plane, Reverse and intermediate points; drawn as lines in every display mode, picked near their line, framed, filtered, undone and saved | 540 |
+
+**9.1 — Spline primitives**
+
+*Problems and solutions:*
+- **Five curve types, one sampler.** Linear, Cubic (Catmull-Rom), Akima, B-Spline
+  and Bezier splines are all turned into chains of cubic Bezier spans — Hermite
+  tangents become Bezier controls, a B-spline span's four points convert
+  exactly — so the intermediate-point modes (Natural, Uniform, Adaptive,
+  Subdivided) are written once. Natural and Uniform give the reference's
+  documented point counts; Adaptive measures how far each span turns and cuts
+  it into just enough even pieces (a circle at 5° gets 72), rather than halving
+  pieces, which would give powers of two.
+- **Primitives that stay editable.** Each primitive builds a real control
+  spline — a circle is four Bezier points with tangents, rounded corners are
+  Bezier quarter arcs between straight sides — so Make Editable (9.2) can keep
+  it as a spline instead of a polyline. A general corner rounder serves the
+  Rectangle and the n-Side, clamping the radius so neighbouring roundings never
+  overlap.
+- **Seven kinds, one variant.** Adding seven object kinds would have meant
+  seven new arms in a dozen exhaustive matches. Splines are one
+  `ObjectKind::SplinePrimitive` holding a shape, while `ObjectKindTag` keeps a
+  tag per shape for names, icons and menus.
+- **Lines in every mode.** The renderer already drew polygon edges with an
+  instanced line pipeline; curves reuse it, with a line list built once per
+  sampled curve (named by a `CurveId`, like a polygon object's `MeshId`), drawn
+  even in shaded modes and in the object's own colour (the shader's unlit
+  flag), never filled, never in shadows, ambient occlusion or the path tracer.
+- **Picking thin things.** A ray almost never hits a curve, so splines are
+  picked on screen: the pointer's distance to the projected polyline, within
+  the same few pixels as component picking. A spline under the pointer wins
+  over the surface behind it.
+- **Files.** The spline kind is additive in version 3; plane, Reverse and the
+  intermediate points are left out while default, angles are radians like
+  rotations, and counts (sides, points, subdivision) are clamped on loading.
+- **On-screen testing:** a document with all seven primitives (made with
+  Python's zipfile, since typing letters into the app is unreliable with the
+  Greek layout) showed every curve, their icons in the Object Manager, the Star
+  in the selection colour with its gizmo and its parameters, and the toolbar's
+  spline list.
+
+---
+
+## How this file is kept## How this file is kept
 
 After every step (and every fix worth noting) this file gets the new step in its
 phase's table, its problems and solutions, and an updated Status block. The manual is

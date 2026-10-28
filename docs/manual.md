@@ -22,12 +22,13 @@ screenshots come from the application itself.
 10. [Timeline and playback](#10-timeline-and-playback)
 11. [Polygon modelling](#11-polygon-modelling)
 12. [Generators: Subdivision Surface](#12-generators-subdivision-surface)
-13. [Snapping](#13-snapping)
-14. [Tags](#14-tags)
-15. [Materials](#15-materials)
-16. [Rendering](#16-rendering)
-17. [Keyboard shortcuts](#17-keyboard-shortcuts)
-18. [Limitations and what is planned](#18-limitations-and-what-is-planned)
+13. [Splines](#13-splines)
+14. [Snapping](#14-snapping)
+15. [Tags](#15-tags)
+16. [Materials](#16-materials)
+17. [Rendering](#17-rendering)
+18. [Keyboard shortcuts](#18-keyboard-shortcuts)
+19. [Limitations and what is planned](#19-limitations-and-what-is-planned)
 
 ---
 
@@ -58,7 +59,7 @@ sessions.
 |---|------|----------------|
 | 1 | **Menu bar** | Every command: File, Edit, Create, Modes, Select, Tools, Mesh, Animate, Window, Help. |
 | 2 | **Command palette** | Undo/redo, the selection tools, Move/Scale/Rotate, axis locks, World/Object coordinates, render buttons (*planned*) and buttons that create objects. |
-| 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§13](#13-snapping)). |
+| 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§14](#14-snapping)). |
 | 4 | **Viewport** | The 3D view of the scene, or up to four views ([§3.2](#32-several-views-top-front-and-side)). Each view's header has the View, Cameras, Display, Options, Filter and Panel menus and three navigation icons. |
 | 5 | **Object Manager** | The scene's objects as a hierarchy. |
 | 6 | **Attribute Manager** | The parameters of the selected object, or the options of the current tool. |
@@ -301,6 +302,9 @@ any time. To edit their points and polygons, make them editable
 command palette) build their shape from their children. The Subdivision Surface
 smooths a polygon mesh ([§12](#12-generators-subdivision-surface)).
 
+**Splines** (Create ▸ Spline, or the circle button) are curves: Circle,
+Rectangle, Arc, n-Side, Star, Helix and Flower ([§13](#13-splines)).
+
 ### 4.1 Lights
 
 Light objects light the viewport in **Gouraud Shading** — where they are, which
@@ -324,7 +328,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
 
 - Spot and Infinite lights shine along their **−Z axis**, like cameras look. Turn
   them with the Rotate tool or the Coordinates, or give them a **Target tag** to
-  point them at an object ([§14.3](#143-target)). *Cameras ▸ Selected Object as
+  point them at an object ([§15.3](#153-target)). *Cameras ▸ Selected Object as
   Camera* shows what a light points at.
 - In the viewport a **Spot** shows its cone and an **Infinite** light an arrow
   along its direction (orange when selected).
@@ -332,7 +336,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
   light the viewport.
 - Sides that no light reaches keep a little soft light, so shapes stay readable.
 
-**Materials** show in the lit viewport too ([§15](#15-materials)): roughness sets
+**Materials** show in the lit viewport too ([§16](#16-materials)): roughness sets
 how sharp the highlights are, metals reflect in their own colour, and luminance
 makes a surface glow whatever the light.
 
@@ -364,7 +368,7 @@ then drag a handle of the gizmo.
 - **Alt + drag** always navigates, even over the gizmo.
 - For exact values, type them in the Attribute Manager ([§7](#7-the-attribute-manager)).
 - To place objects exactly on other objects or on the grid, turn on snapping
-  (**Shift+S**, [§13](#13-snapping)).
+  (**Shift+S**, [§14](#14-snapping)).
 
 Every drag is one undo step.
 
@@ -382,7 +386,7 @@ Every drag is one undo step.
 - **Re-parent**: drag a row onto another row. The object keeps its position in the
   world. Right-click ▸ *Move to Top Level* takes it out of its group.
 - **Search**: type in the search field to show only matching objects.
-- **Tags** appear as icons after the name; click one to edit it ([§14](#14-tags)).
+- **Tags** appear as icons after the name; click one to edit it ([§15](#15-tags)).
 - Right-click a row for Rename, Frame Object, Move to Top Level, Add Tag and Delete.
 
 ## 7. The Attribute Manager
@@ -965,7 +969,7 @@ Select the generator and open **Attribute Manager ▸ Object**:
 |-----------|---------|
 | Type | **Catmull-Clark (N-Gons)**: every polygon with *n* corners becomes *n* quads, then the surface is smoothed. It is the only type for now. |
 | Subdivision Viewport | How many times the viewport subdivides (0 shows the cage itself, 6 at most). Each level multiplies the polygons by about four, so keep it low (2) while modelling. |
-| Subdivision Renderer | The level for final renders ([§16](#16-rendering)). |
+| Subdivision Renderer | The level for final renders ([§17](#17-rendering)). |
 | Linear Pre-Subdivision | Splits the cage this many times *without* smoothing before the smoothing levels, which keeps the result closer to the cage. |
 | Boundary Interpolation | How open borders (the edge of a plane) are smoothed. **Edge and Corner** keeps a border's corners in place; **Edge** rounds them off as well. |
 
@@ -982,7 +986,50 @@ Select the generator and open **Attribute Manager ▸ Object**:
   the smooth mesh, at the **Subdivision Viewport** level. The cage is removed. One
   undo step brings both back. A generator that is switched off is left as it is.
 
-## 13. Snapping
+## 13. Splines
+
+A **spline** is a curve: an outline, a path or a profile. Splines are drawn as
+lines in every display mode and are not visible in a render; in later versions
+generators (Extrude, Lathe, Sweep, Loft) will turn them into surfaces.
+
+![The seven spline primitives, the Star selected; the toolbar's spline button opened](images/manual/splines.png)
+
+**Creating**: **Create ▸ Spline ▸ …**, or the spline button in the command
+palette (the circle after the Light button), which opens the list of splines.
+A new spline lies in the **XY plane** — facing the front view — at the origin,
+and is selected.
+
+| Spline | Parameters (Attribute Manager ▸ Object) |
+|--------|-------------------------------------------|
+| Circle | Radius; **Ellipse** (a second radius, along Y); **Ring** (an inner circle, Inner Radius) |
+| Rectangle | Width, Height; **Rounding** with its Radius |
+| Arc | **Type**: Arc (the open curve), Sector (closed through the centre), Segment (closed by a straight line), Ring (the band between Radius and Inner Radius); Start and End Angle (0° points along +X) |
+| n-Side | Radius, Sides; Rounding with its Radius |
+| Star | Inner and Outer Radius, Twist (turns the inner points), Points |
+| Helix | Start and End Radius, Start and End Angle (the difference sets the turns: 720° = two), Radial Bias and Height Bias (50 % = even), Height, Subdivision (points along the coil) |
+| Flower | Inner and Outer Radius, Petals |
+
+Every spline also has:
+
+- **Plane**: XY (facing the front), ZY (facing the side) or XZ (lying on the
+  floor). A helix rises along the plane's normal.
+- **Reverse**: runs the curve the other way (it looks the same; generators use
+  the direction).
+- **Intermediate Points**: how the curve is cut into straight pieces —
+  **Adaptive** (the default: a new piece where the curve turns by more than
+  Angle, 5°), **Natural** and **Uniform** (Number points between each pair of the
+  spline's points: at even steps, or evenly spaced along the curve),
+  **Subdivided** (Adaptive, and no piece longer than Maximum Length) or **None**
+  (only the spline's own points). Smaller angles and larger numbers give
+  smoother curves.
+
+**Selecting**: click on or near the line (a few pixels away is enough); a click
+inside a closed spline selects what is behind it. A selected spline is drawn in
+the selection colour, with the gizmo at its axis. Splines can be moved, rotated
+and scaled, framed (H, O), hidden from a view with **Filter ▸ Spline**, undone
+and saved like every other object.
+
+## 14. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
 the floor grid, so you can place things exactly: an object's axis level with a
@@ -1029,7 +1076,7 @@ Move tool and look at the **Snap** group in the Attribute Manager's Tool mode
 Within the radius, points win over edges and grid lines, which win over surfaces,
 so a corner can be caught right next to its edges.
 
-## 14. Tags
+## 15. Tags
 
 Tags add a property or a behaviour to an object without changing what kind of
 object it is. They show as small icons to the right of the object's name in the
@@ -1050,7 +1097,7 @@ change can be undone and is saved with the document.
 **Removing:** click the tag icon, then press **Delete** (or right-click the icon ▸
 *Delete Tag*). With a tag selected, Delete removes only the tag, not its object.
 
-### 14.1 Phong
+### 15.1 Phong
 
 Controls how smooth the object looks.
 
@@ -1063,7 +1110,7 @@ Controls how smooth the object looks.
 
 ![A sphere with a Phong tag at 0°: flat shading](images/manual/tags_flat.png)
 
-### 14.2 Protection
+### 15.2 Protection
 
 Guards an object against accidental changes. Tick **Position**, **Scale** and/or
 **Rotation**. A protected channel cannot be changed with the gizmo (the Move, Scale
@@ -1071,7 +1118,7 @@ or Rotate gizmo does not appear for the object) or in the Coordinates fields of 
 Attribute Manager, which turn grey. The object's points, edges and polygons can still
 be edited in the component modes.
 
-### 14.3 Target
+### 15.3 Target
 
 Turns the object to face another object.
 
@@ -1087,11 +1134,11 @@ Turns the object to face another object.
 
 ![The Target tag's settings](images/manual/tags_target.png)
 
-### 14.4 Material
+### 15.4 Material
 
-Links a material to the object; see [§15](#15-materials).
+Links a material to the object; see [§16](#16-materials).
 
-## 15. Materials
+## 16. Materials
 
 A **material** gives objects their surface. Materials live in the **Material
 Manager**, the **Materials** tab at the bottom (beside Timeline and F-Curve;
@@ -1145,7 +1192,7 @@ their objects show their display colour again; undo brings everything back.
 Every change is one undo step. Materials are saved with the document, travel with
 glTF and OBJ files ([§9](#9-files)), and come along when you merge a document.
 
-## 16. Rendering
+## 17. Rendering
 
 A **render** is the finished picture of the scene: materials and lights as
 they look for real — soft shadows, light bouncing between surfaces, reflections —
@@ -1153,7 +1200,7 @@ where the viewport only approximates them. **Render Settings** say how the
 document is rendered; the **Picture Viewer** renders it and shows the result;
 the **Render View** renders the view you work in, in place.
 
-### 16.1 Render Settings
+### 17.1 Render Settings
 
 **Render ▸ Edit Render Settings…**, **Ctrl+B** or the gear button in the
 toolbar opens the **Render Settings** window. It stays open while you work;
@@ -1175,7 +1222,7 @@ left: **Output**, **Save**, **Sampling** or **Options**.
 | Frames | how many pictures the range gives |
 
 **Render to Picture Viewer** renders every frame of the range at the Frame
-Step and saves each as its own numbered file ([§16.2](#162-the-picture-viewer));
+Step and saves each as its own numbered file ([§17.2](#172-the-picture-viewer));
 the Render View always shows the current frame.
 
 ![The Save page: renders go to renders/shot.png next to the document, with transparency](images/manual/render-settings-save.png)
@@ -1210,7 +1257,7 @@ how many frames and the first file's name.
 
 Every change is one undo step, and the settings are saved with the document.
 
-### 16.2 The Picture Viewer
+### 17.2 The Picture Viewer
 
 **Render ▸ Render to Picture Viewer**, **Shift+R** or the toolbar button next to
 the gear renders the scene and opens the **Picture Viewer**. It renders:
@@ -1258,7 +1305,7 @@ pixel per screen pixel, **−** and **+** halve and double. The **mouse wheel**
 zooms about the pointer and **dragging** moves the picture. A picture with
 transparency shows over a grey checkerboard.
 
-### 16.3 The Render View
+### 17.3 The Render View
 
 **Render ▸ Render View**, **Ctrl+R** or the leftmost render button in the
 toolbar renders the **active view** right where it is: at the view's own size,
@@ -1277,7 +1324,7 @@ overlays stay on top, so you can carry on working. **Ctrl+R** again renders
 afresh. The Render View is never saved and does not appear in the Picture
 Viewer's history; use **Shift+R** for a picture to keep.
 
-## 17. Keyboard shortcuts
+## 18. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -1332,7 +1379,7 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 18. Limitations and what is planned
+## 19. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
@@ -1344,6 +1391,10 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Generators**: only the Subdivision Surface, with one type (Catmull-Clark) and
   without edge weights (creases) or UV options. Extrude, Lathe, Loft, Sweep and
   Cloner are planned.
+- **Splines**: editing a spline's points (Make Editable), the Pen, spline
+  commands and Text come next; the Cissoid, Cogwheel, Cycloid, Formula, Profile,
+  4-Side and Spiral primitives; splines in glTF and OBJ files; drawing splines in
+  renders.
 - **Tags**: Protection limits, Phong edge breaks, copying tags between objects.
 - **Materials**: one Material tag per object (no layering), projection settings,
   textures, rendered previews; the viewport shows only the colour.

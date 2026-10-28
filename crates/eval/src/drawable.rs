@@ -100,7 +100,8 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
         })
     };
     match *kind {
-        ObjectKind::Null => None,
+        // A spline's curve is sampled and named during evaluation.
+        ObjectKind::Null | ObjectKind::SplinePrimitive(_) => None,
         ObjectKind::Cube { size, segments } => shaded(MeshKey::Cube { segments }, size),
         ObjectKind::Sphere { radius, segments } => shaded(MeshKey::Sphere { segments }, Vec3::splat(radius)),
         ObjectKind::Cylinder {
@@ -266,7 +267,9 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
         | ObjectKind::Camera { .. }
         | ObjectKind::Light { .. }
         | ObjectKind::Polygon { .. }
-        | ObjectKind::SubdivisionSurface { .. } => None,
+        | ObjectKind::SubdivisionSurface { .. }
+        // A curve, not a surface (made editable as a spline, step 9.2).
+        | ObjectKind::SplinePrimitive(_) => None,
     }
 }
 
@@ -296,11 +299,12 @@ mod tests {
     fn every_kind_is_drawable_except_nulls_and_empty_shapes() {
         for tag in ObjectKindTag::ALL {
             let style = drawable(&tag.default_kind(), [1.0; 3]);
-            // The default polygon object is empty; a generator draws its result.
+            // The default polygon object is empty; a generator draws its result; a
+            // spline's curve is named during evaluation.
             let expected = !matches!(
                 tag,
                 ObjectKindTag::Null | ObjectKindTag::Polygon | ObjectKindTag::SubdivisionSurface
-            );
+            ) && !tag.is_spline();
             assert_eq!(style.is_some(), expected, "{tag:?}");
         }
         let flat_cone = ObjectKind::Cone {

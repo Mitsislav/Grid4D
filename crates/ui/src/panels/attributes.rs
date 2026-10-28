@@ -10,6 +10,7 @@
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
+use grid4d_geom::spline::{ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape};
 use grid4d_scene::{
     Axis, Document, Falloff, KeyState, LightDetails, LightShadow, LightType, Material, MaterialId, NodeData, NodeId,
     ObjectKind, Param, Scene, SceneEdit, Tag, TagKind, TimeSettings,
@@ -695,6 +696,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 ui.label(RichText::new("Smooths its first child (the cage)").color(p::TEXT_DIM));
                 ui.end_row();
             }
+            ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, primitive),
             ObjectKind::Polygon { mesh, .. } => {
                 // The geometry is edited in the viewport (Points / Edges / Polygons).
                 let mesh = mesh.mesh();
@@ -1034,6 +1036,205 @@ fn angle_row(ui: &mut Ui, label: &str, radians: &mut f32, degrees: std::ops::Ran
         .changed()
     {
         *radians = value.to_radians();
+    }
+    ui.end_row();
+}
+
+/// A spline primitive's shape, then its plane, direction and intermediate points.
+fn spline_rows(ui: &mut Ui, primitive: &mut SplinePrimitive) {
+    match &mut primitive.shape {
+        SplineShape::Circle { radius, ellipse, ring } => {
+            length_row(ui, "Radius", radius);
+            let r = *radius;
+            optional_length_row(ui, "Ellipse", "Radius Y", ellipse, r);
+            optional_length_row(ui, "Ring", "Inner Radius", ring, r * 0.5);
+        }
+        SplineShape::Rectangle {
+            width,
+            height,
+            rounding,
+        } => {
+            length_row(ui, "Width", width);
+            length_row(ui, "Height", height);
+            optional_length_row(ui, "Rounding", "Radius", rounding, 50.0);
+        }
+        SplineShape::Arc {
+            kind,
+            radius,
+            inner_radius,
+            start,
+            end,
+        } => {
+            attr_label(ui, "Type", LABEL_WIDTH);
+            egui::ComboBox::from_id_salt("grid4d.attr.arc.type")
+                .selected_text(kind.label())
+                .show_ui(ui, |ui| {
+                    for option in ArcType::ALL {
+                        ui.selectable_value(kind, option, option.label());
+                    }
+                });
+            ui.end_row();
+            length_row(ui, "Radius", radius);
+            if *kind == ArcType::Ring {
+                length_row(ui, "Inner Radius", inner_radius);
+            }
+            angle_row(ui, "Start Angle", start, -360.0..=360.0);
+            angle_row(ui, "End Angle", end, -360.0..=360.0);
+        }
+        SplineShape::NSide {
+            radius,
+            sides,
+            rounding,
+        } => {
+            length_row(ui, "Radius", radius);
+            bounded_count_row(ui, "Sides", sides, 3, SplineShape::MAX_SIDES);
+            optional_length_row(ui, "Rounding", "Radius", rounding, 50.0);
+        }
+        SplineShape::Star {
+            inner_radius,
+            outer_radius,
+            twist,
+            points,
+        } => {
+            length_row(ui, "Inner Radius", inner_radius);
+            length_row(ui, "Outer Radius", outer_radius);
+            angle_row(ui, "Twist", twist, -360.0..=360.0);
+            bounded_count_row(ui, "Points", points, 3, SplineShape::MAX_SIDES);
+        }
+        SplineShape::Helix {
+            start_radius,
+            start_angle,
+            end_radius,
+            end_angle,
+            radial_bias,
+            height,
+            height_bias,
+            subdivision,
+        } => {
+            length_row(ui, "Start Radius", start_radius);
+            angle_row(ui, "Start Angle", start_angle, -36_000.0..=36_000.0);
+            length_row(ui, "End Radius", end_radius);
+            angle_row(ui, "End Angle", end_angle, -36_000.0..=36_000.0);
+            percent_row(ui, "Radial Bias", radial_bias);
+            length_row(ui, "Height", height);
+            percent_row(ui, "Height Bias", height_bias);
+            bounded_count_row(ui, "Subdivision", subdivision, 3, SplineShape::MAX_SUBDIVISION);
+        }
+        SplineShape::Flower {
+            inner_radius,
+            outer_radius,
+            petals,
+        } => {
+            length_row(ui, "Inner Radius", inner_radius);
+            length_row(ui, "Outer Radius", outer_radius);
+            bounded_count_row(ui, "Petals", petals, 1, SplineShape::MAX_SIDES);
+        }
+    }
+    attr_label(ui, "Plane", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.spline.plane")
+        .selected_text(primitive.plane.label())
+        .show_ui(ui, |ui| {
+            for plane in SplinePlane::ALL {
+                ui.selectable_value(&mut primitive.plane, plane, plane.label());
+            }
+        });
+    ui.end_row();
+    check_row(ui, "Reverse", &mut primitive.reverse);
+    interpolation_rows(ui, &mut primitive.interpolation);
+}
+
+/// Intermediate Points and the value its mode uses.
+fn interpolation_rows(ui: &mut Ui, interpolation: &mut Interpolation) {
+    const MODES: [&str; 5] = ["None", "Natural", "Uniform", "Adaptive", "Subdivided"];
+    let current = match interpolation {
+        Interpolation::None => 0,
+        Interpolation::Natural { .. } => 1,
+        Interpolation::Uniform { .. } => 2,
+        Interpolation::Adaptive { .. } => 3,
+        Interpolation::Subdivided { .. } => 4,
+    };
+    let (number, angle, length) = match *interpolation {
+        Interpolation::Natural { number } | Interpolation::Uniform { number } => (number, 5f32.to_radians(), 5.0),
+        Interpolation::Adaptive { angle } => (8, angle, 5.0),
+        Interpolation::Subdivided { angle, max_length } => (8, angle, max_length),
+        Interpolation::None => (8, 5f32.to_radians(), 5.0),
+    };
+    attr_label(ui, "Intermediate Points", LABEL_WIDTH);
+    let mut chosen = current;
+    egui::ComboBox::from_id_salt("grid4d.attr.spline.points")
+        .selected_text(MODES[current])
+        .show_ui(ui, |ui| {
+            for (index, label) in MODES.into_iter().enumerate() {
+                ui.selectable_value(&mut chosen, index, label);
+            }
+        });
+    ui.end_row();
+    if chosen != current {
+        *interpolation = match chosen {
+            0 => Interpolation::None,
+            1 => Interpolation::Natural { number },
+            2 => Interpolation::Uniform { number },
+            3 => Interpolation::Adaptive { angle },
+            _ => Interpolation::Subdivided {
+                angle,
+                max_length: length,
+            },
+        };
+    }
+    match interpolation {
+        Interpolation::None => {}
+        Interpolation::Natural { number } | Interpolation::Uniform { number } => {
+            bounded_count_row(ui, "Number", number, 0, Interpolation::MAX_NUMBER);
+        }
+        Interpolation::Adaptive { angle } => angle_row(ui, "Angle", angle, 0.1..=90.0),
+        Interpolation::Subdivided { angle, max_length } => {
+            angle_row(ui, "Angle", angle, 0.1..=90.0);
+            attr_label(ui, "Maximum Length", LABEL_WIDTH);
+            ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(max_length)
+                    .speed(0.5)
+                    .range(Interpolation::MIN_LENGTH..=1_000_000.0)
+                    .suffix(" cm")
+                    .max_decimals(2),
+            );
+            ui.end_row();
+        }
+    }
+}
+
+/// A checkbox turning an optional length on (at `fallback`) or off, and the
+/// length's own row while on.
+fn optional_length_row(ui: &mut Ui, label: &str, length_label: &str, value: &mut Option<f32>, fallback: f32) {
+    let mut on = value.is_some();
+    attr_label(ui, label, LABEL_WIDTH);
+    if ui.checkbox(&mut on, "").changed() {
+        *value = on.then_some(fallback);
+    }
+    ui.end_row();
+    if let Some(length) = value {
+        length_row(ui, length_label, length);
+    }
+}
+
+fn bounded_count_row(ui: &mut Ui, label: &str, value: &mut u32, min: u32, max: u32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    ui.add_sized([FIELD_WIDTH, 19.0], DragValue::new(value).speed(0.1).range(min..=max));
+    ui.end_row();
+}
+
+/// A 0…1 value shown as 0…100 %.
+fn percent_row(ui: &mut Ui, label: &str, value: &mut f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let mut percent = *value * 100.0;
+    if ui
+        .add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut percent).speed(0.5).range(0.0..=100.0).suffix(" %"),
+        )
+        .changed()
+    {
+        *value = percent / 100.0;
     }
     ui.end_row();
 }

@@ -39,7 +39,7 @@ pub use filter::{FilterItem, ViewFilter};
 pub use frame::{FrameData, GridPlane, InstanceRaw, LightRaw};
 pub use gpu::{GpuTargetConfig, ViewportRenderer};
 pub use mesh::{TessellationScratch, Vertex, tessellate};
-pub use picking::pick;
+pub use picking::{pick, pick_curve};
 pub use snap::{SnapCache, SnapHit, SnapKind, SnapQuery, SnapTargets, find_snap, snapped_position};
 pub use target::ViewportTarget;
 

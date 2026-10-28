@@ -1,6 +1,6 @@
 //! How a view draws objects: the shading and line style of its Display menu.
 
-use grid4d_geom::{PolyMesh, Topology, primitives};
+use grid4d_geom::{PolyMesh, Topology, primitives, spline::Polyline};
 
 /// The shading modes. The "(Lines)" ones draw the line style's lines over the
 /// shaded surfaces; Hidden Line and Lines always draw lines.
@@ -111,6 +111,25 @@ pub(crate) fn bounding_box(mesh: &PolyMesh) -> Option<PolyMesh> {
     Some(cuboid)
 }
 
+/// The points and pieces (pairs of point indices) of a sampled curve, for a
+/// line list: each segment's points in order, a closed one back to its first.
+/// Both vectors are cleared first.
+pub(crate) fn curve_lines(polyline: &Polyline, points: &mut Vec<[f32; 3]>, indices: &mut Vec<u32>) {
+    points.clear();
+    indices.clear();
+    for (run, closed) in polyline.runs() {
+        let Ok(first) = u32::try_from(points.len()) else { return };
+        points.extend(run.iter().map(|p| p.to_array()));
+        let Ok(count) = u32::try_from(run.len()) else { return };
+        for i in 1..count {
+            indices.extend([first + i - 1, first + i]);
+        }
+        if closed && count > 2 {
+            indices.extend([first + count - 1, first]);
+        }
+    }
+}
+
 /// The points and edges (pairs of point indices) of `mesh`'s polygons, for a
 /// line list. Both vectors are cleared first.
 pub(crate) fn edge_lines(mesh: &PolyMesh, points: &mut Vec<[f32; 3]>, indices: &mut Vec<u32>) {
@@ -185,5 +204,24 @@ mod tests {
         assert!(max.y - min.y > 0.0 && max.y - min.y < 0.01, "{min} {max}");
         assert!(thin.faces().enumerate().all(|(f, _)| thin.face_area(f) > 0.0));
         assert!(bounding_box(&PolyMesh::new()).is_none());
+    }
+
+    #[test]
+    fn curves_become_line_lists_closed_back_to_their_start() {
+        use grid4d_geom::spline::Segment;
+        let polyline = Polyline {
+            points: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z, Vec3::ONE],
+            segments: vec![
+                Segment { count: 3, closed: true },
+                Segment {
+                    count: 2,
+                    closed: false,
+                },
+            ],
+        };
+        let (mut points, mut indices) = (Vec::new(), Vec::new());
+        curve_lines(&polyline, &mut points, &mut indices);
+        assert_eq!(points.len(), 5);
+        assert_eq!(indices, [0, 1, 1, 2, 2, 0, 3, 4]);
     }
 }

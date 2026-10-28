@@ -27,6 +27,7 @@ mod normals;
 pub mod ops;
 pub mod primitives;
 pub mod selection;
+pub mod spline;
 pub mod subdivision;
 mod topology;
 mod triangulate;

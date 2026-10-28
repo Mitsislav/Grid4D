@@ -9,6 +9,8 @@ pub enum FilterItem {
     /// Parametric objects: the primitives.
     Generator,
     SubdivisionSurface,
+    /// Splines (curves).
+    Spline,
     Camera,
     Light,
     /// The grid.
@@ -19,10 +21,11 @@ pub enum FilterItem {
 }
 
 impl FilterItem {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Polygon,
         Self::Generator,
         Self::SubdivisionSurface,
+        Self::Spline,
         Self::Camera,
         Self::Light,
         Self::Grid,
@@ -48,6 +51,13 @@ impl FilterItem {
             ObjectKindTag::SubdivisionSurface => Some(Self::SubdivisionSurface),
             ObjectKindTag::Camera => Some(Self::Camera),
             ObjectKindTag::Light => Some(Self::Light),
+            ObjectKindTag::Circle
+            | ObjectKindTag::Rectangle
+            | ObjectKindTag::Arc
+            | ObjectKindTag::NSide
+            | ObjectKindTag::Star
+            | ObjectKindTag::Helix
+            | ObjectKindTag::Flower => Some(Self::Spline),
         }
     }
 
@@ -61,6 +71,7 @@ impl FilterItem {
             Self::Grid => 1 << 5,
             Self::WorldAxis => 1 << 6,
             Self::Hud => 1 << 7,
+            Self::Spline => 1 << 8,
         }
     }
 }
@@ -75,7 +86,7 @@ impl ViewFilter {
     /// Everything shown.
     pub const ALL: Self = Self { hidden: 0 };
     /// Everything hidden.
-    pub const NONE: Self = Self { hidden: 0xFF };
+    pub const NONE: Self = Self { hidden: 0x1FF };
 
     #[must_use]
     pub const fn shows(self, item: FilterItem) -> bool {
@@ -130,8 +141,10 @@ mod tests {
                 .iter()
                 .all(|&i| only.shows(i) == (i == FilterItem::Polygon))
         );
-        // Every primitive is a generator.
+        // Every primitive is a generator; splines have their own entry.
         assert!(!only.shows_object(ObjectKindTag::Torus));
+        assert!(!only.shows_object(ObjectKindTag::Circle));
+        assert!(ViewFilter::only(FilterItem::Spline).shows_object(ObjectKindTag::Helix));
         assert!(only.shows_object(ObjectKindTag::Polygon));
     }
 }

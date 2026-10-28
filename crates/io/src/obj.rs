@@ -236,7 +236,8 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
             | ObjectKind::Capsule { .. }
             | ObjectKind::Camera { .. }
             | ObjectKind::Light { .. }
-            | ObjectKind::SubdivisionSurface { .. } => continue,
+            | ObjectKind::SubdivisionSurface { .. }
+            | ObjectKind::SplinePrimitive(_) => continue,
         };
         let mesh = mesh.mesh();
         if !finite(&world.to_cols_array()) {

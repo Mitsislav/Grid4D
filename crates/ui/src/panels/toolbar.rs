@@ -84,6 +84,26 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
                 editor.commands.push(EditorCommand::CreateObject(tag));
             }
         }
+        // One button for the splines, opening their list.
+        let style = IconStyle {
+            tint: Some(tag_color(ObjectKindTag::Circle)),
+            ..IconStyle::default()
+        };
+        let splines = icon_button(
+            ui,
+            Icon::Object(ObjectKindTag::Circle),
+            style,
+            "Add Spline (Circle, Rectangle, …)",
+        );
+        egui::Popup::menu(&splines).show(|ui| {
+            for tag in ObjectKindTag::SPLINES {
+                let label = format!("Add {}", tag.label());
+                if ui.button(label).clicked() {
+                    editor.commands.push(EditorCommand::CreateObject(tag));
+                    ui.close();
+                }
+            }
+        });
         group_gap(ui);
         for tag in ObjectKindTag::GENERATORS {
             let style = IconStyle {
@@ -231,5 +251,12 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Light => "Add Light",
         ObjectKindTag::Polygon => "Add Polygon Object",
         ObjectKindTag::SubdivisionSurface => "Add Subdivision Surface (Alt: around the selected object)",
+        ObjectKindTag::Circle => "Add Circle",
+        ObjectKindTag::Rectangle => "Add Rectangle",
+        ObjectKindTag::Arc => "Add Arc",
+        ObjectKindTag::NSide => "Add n-Side",
+        ObjectKindTag::Star => "Add Star",
+        ObjectKindTag::Helix => "Add Helix",
+        ObjectKindTag::Flower => "Add Flower",
     }
 }

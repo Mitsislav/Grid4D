@@ -206,7 +206,9 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
             | ObjectKind::Torus { .. }
             | ObjectKind::Disc { .. }
             | ObjectKind::Capsule { .. }
-            | ObjectKind::SubdivisionSurface { .. } => {}
+            | ObjectKind::SubdivisionSurface { .. }
+            // Curves have no surface: the node keeps its place, nothing more.
+            | ObjectKind::SplinePrimitive(_) => {}
         }
         nodes.push(node);
     }

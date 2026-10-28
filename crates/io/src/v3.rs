@@ -20,6 +20,7 @@ use std::{
 use glam::{Vec2, Vec3};
 use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
+    spline::{ArcType, Interpolation as SplineInterpolation, SplinePlane, SplinePrimitive, SplineShape},
     subdivision::{Boundary, MAX_LEVEL},
 };
 use grid4d_scene::{
@@ -617,6 +618,366 @@ enum KindDto {
         linear_pre: u32,
         boundary: BoundaryDto,
     },
+    /// A spline primitive (added in step 9.1). Angles in radians.
+    Spline {
+        spline: SplineShapeDto,
+        #[serde(default, skip_serializing_if = "SplinePlaneDto::is_xy")]
+        plane: SplinePlaneDto,
+        #[serde(default, skip_serializing_if = "is_false")]
+        reverse: bool,
+        /// Adaptive at 5° when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intermediate_points: Option<SplinePointsDto>,
+    },
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// A spline primitive's shape; optional parts (an ellipse's second radius, a
+/// ring, rounding) are absent when off.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(tag = "shape", rename_all = "snake_case")]
+enum SplineShapeDto {
+    Circle {
+        radius: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ellipse: Option<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ring: Option<f32>,
+    },
+    Rectangle {
+        width: f32,
+        height: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rounding: Option<f32>,
+    },
+    Arc {
+        arc_type: ArcTypeDto,
+        radius: f32,
+        inner_radius: f32,
+        start: f32,
+        end: f32,
+    },
+    NSide {
+        radius: f32,
+        sides: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rounding: Option<f32>,
+    },
+    Star {
+        inner_radius: f32,
+        outer_radius: f32,
+        twist: f32,
+        points: u32,
+    },
+    Helix {
+        start_radius: f32,
+        start_angle: f32,
+        end_radius: f32,
+        end_angle: f32,
+        radial_bias: f32,
+        height: f32,
+        height_bias: f32,
+        subdivision: u32,
+    },
+    Flower {
+        inner_radius: f32,
+        outer_radius: f32,
+        petals: u32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ArcTypeDto {
+    Arc,
+    Sector,
+    Segment,
+    Ring,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SplinePlaneDto {
+    #[default]
+    Xy,
+    Zy,
+    Xz,
+}
+
+impl SplinePlaneDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_xy(&self) -> bool {
+        *self == Self::Xy
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+enum SplinePointsDto {
+    None,
+    Natural { number: u32 },
+    Uniform { number: u32 },
+    Adaptive { angle: f32 },
+    Subdivided { angle: f32, max_length: f32 },
+}
+
+impl SplineShapeDto {
+    fn new(shape: SplineShape) -> Self {
+        match shape {
+            SplineShape::Circle { radius, ellipse, ring } => Self::Circle { radius, ellipse, ring },
+            SplineShape::Rectangle {
+                width,
+                height,
+                rounding,
+            } => Self::Rectangle {
+                width,
+                height,
+                rounding,
+            },
+            SplineShape::Arc {
+                kind,
+                radius,
+                inner_radius,
+                start,
+                end,
+            } => Self::Arc {
+                arc_type: match kind {
+                    ArcType::Arc => ArcTypeDto::Arc,
+                    ArcType::Sector => ArcTypeDto::Sector,
+                    ArcType::Segment => ArcTypeDto::Segment,
+                    ArcType::Ring => ArcTypeDto::Ring,
+                },
+                radius,
+                inner_radius,
+                start,
+                end,
+            },
+            SplineShape::NSide {
+                radius,
+                sides,
+                rounding,
+            } => Self::NSide {
+                radius,
+                sides,
+                rounding,
+            },
+            SplineShape::Star {
+                inner_radius,
+                outer_radius,
+                twist,
+                points,
+            } => Self::Star {
+                inner_radius,
+                outer_radius,
+                twist,
+                points,
+            },
+            SplineShape::Helix {
+                start_radius,
+                start_angle,
+                end_radius,
+                end_angle,
+                radial_bias,
+                height,
+                height_bias,
+                subdivision,
+            } => Self::Helix {
+                start_radius,
+                start_angle,
+                end_radius,
+                end_angle,
+                radial_bias,
+                height,
+                height_bias,
+                subdivision,
+            },
+            SplineShape::Flower {
+                inner_radius,
+                outer_radius,
+                petals,
+            } => Self::Flower {
+                inner_radius,
+                outer_radius,
+                petals,
+            },
+        }
+    }
+
+    /// The shape, counts kept in their ranges (never trust a count a file claims).
+    fn into_shape(self) -> SplineShape {
+        let sides = |n: u32| n.clamp(3, SplineShape::MAX_SIDES);
+        match self {
+            Self::Circle { radius, ellipse, ring } => SplineShape::Circle { radius, ellipse, ring },
+            Self::Rectangle {
+                width,
+                height,
+                rounding,
+            } => SplineShape::Rectangle {
+                width,
+                height,
+                rounding,
+            },
+            Self::Arc {
+                arc_type,
+                radius,
+                inner_radius,
+                start,
+                end,
+            } => SplineShape::Arc {
+                kind: match arc_type {
+                    ArcTypeDto::Arc => ArcType::Arc,
+                    ArcTypeDto::Sector => ArcType::Sector,
+                    ArcTypeDto::Segment => ArcType::Segment,
+                    ArcTypeDto::Ring => ArcType::Ring,
+                },
+                radius,
+                inner_radius,
+                start,
+                end,
+            },
+            Self::NSide {
+                radius,
+                sides: n,
+                rounding,
+            } => SplineShape::NSide {
+                radius,
+                sides: sides(n),
+                rounding,
+            },
+            Self::Star {
+                inner_radius,
+                outer_radius,
+                twist,
+                points,
+            } => SplineShape::Star {
+                inner_radius,
+                outer_radius,
+                twist,
+                points: sides(points),
+            },
+            Self::Helix {
+                start_radius,
+                start_angle,
+                end_radius,
+                end_angle,
+                radial_bias,
+                height,
+                height_bias,
+                subdivision,
+            } => SplineShape::Helix {
+                start_radius,
+                start_angle,
+                end_radius,
+                end_angle,
+                radial_bias: radial_bias.clamp(0.0, 1.0),
+                height,
+                height_bias: height_bias.clamp(0.0, 1.0),
+                subdivision: subdivision.clamp(3, SplineShape::MAX_SUBDIVISION),
+            },
+            Self::Flower {
+                inner_radius,
+                outer_radius,
+                petals,
+            } => SplineShape::Flower {
+                inner_radius,
+                outer_radius,
+                petals: petals.clamp(1, SplineShape::MAX_SIDES),
+            },
+        }
+    }
+
+    fn parameters(self) -> Vec<f32> {
+        match self {
+            Self::Circle { radius, ellipse, ring } => [Some(radius), ellipse, ring].into_iter().flatten().collect(),
+            Self::Rectangle {
+                width,
+                height,
+                rounding,
+            } => [Some(width), Some(height), rounding].into_iter().flatten().collect(),
+            Self::Arc {
+                radius,
+                inner_radius,
+                start,
+                end,
+                ..
+            } => vec![radius, inner_radius, start, end],
+            Self::NSide { radius, rounding, .. } => [Some(radius), rounding].into_iter().flatten().collect(),
+            Self::Star {
+                inner_radius,
+                outer_radius,
+                twist,
+                ..
+            } => vec![inner_radius, outer_radius, twist],
+            Self::Helix {
+                start_radius,
+                start_angle,
+                end_radius,
+                end_angle,
+                radial_bias,
+                height,
+                height_bias,
+                ..
+            } => vec![
+                start_radius,
+                start_angle,
+                end_radius,
+                end_angle,
+                radial_bias,
+                height,
+                height_bias,
+            ],
+            Self::Flower {
+                inner_radius,
+                outer_radius,
+                ..
+            } => vec![inner_radius, outer_radius],
+        }
+    }
+}
+
+impl SplinePointsDto {
+    /// `None` for the default (Adaptive, 5°), which files leave out.
+    fn new(interpolation: SplineInterpolation) -> Option<Self> {
+        if interpolation == SplineInterpolation::default() {
+            return None;
+        }
+        Some(match interpolation {
+            SplineInterpolation::None => Self::None,
+            SplineInterpolation::Natural { number } => Self::Natural { number },
+            SplineInterpolation::Uniform { number } => Self::Uniform { number },
+            SplineInterpolation::Adaptive { angle } => Self::Adaptive { angle },
+            SplineInterpolation::Subdivided { angle, max_length } => Self::Subdivided { angle, max_length },
+        })
+    }
+
+    fn into_interpolation(self) -> SplineInterpolation {
+        match self {
+            Self::None => SplineInterpolation::None,
+            Self::Natural { number } => SplineInterpolation::Natural { number },
+            Self::Uniform { number } => SplineInterpolation::Uniform { number },
+            Self::Adaptive { angle } => SplineInterpolation::Adaptive { angle },
+            Self::Subdivided { angle, max_length } => SplineInterpolation::Subdivided { angle, max_length },
+        }
+        .validated()
+    }
+
+    fn parameters(self) -> Vec<f32> {
+        match self {
+            Self::None | Self::Natural { .. } | Self::Uniform { .. } => Vec::new(),
+            Self::Adaptive { angle } => vec![angle],
+            Self::Subdivided { angle, max_length } => vec![angle, max_length],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1212,6 +1573,16 @@ impl KindDto {
                 linear_pre,
                 boundary: boundary.into(),
             },
+            ObjectKind::SplinePrimitive(primitive) => Self::Spline {
+                spline: SplineShapeDto::new(primitive.shape),
+                plane: match primitive.plane {
+                    SplinePlane::XY => SplinePlaneDto::Xy,
+                    SplinePlane::ZY => SplinePlaneDto::Zy,
+                    SplinePlane::XZ => SplinePlaneDto::Xz,
+                },
+                reverse: primitive.reverse,
+                intermediate_points: SplinePointsDto::new(primitive.interpolation),
+            },
         }
     }
 
@@ -1335,6 +1706,22 @@ impl KindDto {
                 linear_pre: linear_pre.min(MAX_LEVEL),
                 boundary: boundary.into(),
             },
+            Self::Spline {
+                spline,
+                plane,
+                reverse,
+                intermediate_points,
+            } => ObjectKind::SplinePrimitive(SplinePrimitive {
+                shape: spline.into_shape(),
+                plane: match plane {
+                    SplinePlaneDto::Xy => SplinePlane::XY,
+                    SplinePlaneDto::Zy => SplinePlane::ZY,
+                    SplinePlaneDto::Xz => SplinePlane::XZ,
+                },
+                reverse,
+                interpolation: intermediate_points
+                    .map_or_else(SplineInterpolation::default, SplinePointsDto::into_interpolation),
+            }),
         })
     }
 
@@ -1342,6 +1729,15 @@ impl KindDto {
     fn parameters(&self) -> Vec<f32> {
         match *self {
             Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } => Vec::new(),
+            Self::Spline {
+                spline,
+                intermediate_points,
+                ..
+            } => {
+                let mut numbers = spline.parameters();
+                numbers.extend(intermediate_points.map(SplinePointsDto::parameters).unwrap_or_default());
+                numbers
+            }
             Self::Cube { size, .. } => size.to_vec(),
             Self::Sphere { radius, .. } => vec![radius],
             Self::Cylinder { radius, height, .. } | Self::Capsule { radius, height, .. } => vec![radius, height],
@@ -2108,5 +2504,102 @@ mod tests {
         let loaded = from_bytes(&archive(&[(DOCUMENT_ENTRY, json.as_bytes())])).unwrap();
         assert_eq!(loaded.render.samples, 1);
         assert_eq!(loaded.render.width, RenderSettings::MAX_SIZE);
+    }
+
+    #[test]
+    fn spline_primitives_round_trip_and_leave_defaults_out() {
+        use grid4d_geom::spline::{ArcType, Interpolation as Points, SplinePlane, SplinePrimitive, SplineShape};
+        let shapes = [
+            SplineShape::Circle {
+                radius: 150.0,
+                ellipse: Some(80.0),
+                ring: Some(40.0),
+            },
+            SplineShape::Rectangle {
+                width: 300.0,
+                height: 120.0,
+                rounding: Some(20.0),
+            },
+            SplineShape::Arc {
+                kind: ArcType::Ring,
+                radius: 200.0,
+                inner_radius: 90.0,
+                start: -0.5,
+                end: 2.0,
+            },
+            SplineShape::NSide {
+                radius: 100.0,
+                sides: 7,
+                rounding: None,
+            },
+            SplineShape::Star {
+                inner_radius: 30.0,
+                outer_radius: 90.0,
+                twist: 0.3,
+                points: 5,
+            },
+            SplineShape::Helix {
+                start_radius: 100.0,
+                start_angle: 0.0,
+                end_radius: 50.0,
+                end_angle: 12.0,
+                radial_bias: 0.3,
+                height: 400.0,
+                height_bias: 0.7,
+                subdivision: 64,
+            },
+            SplineShape::Flower {
+                inner_radius: 60.0,
+                outer_radius: 120.0,
+                petals: 9,
+            },
+        ];
+        let mut doc = Document::new("t");
+        for (i, shape) in shapes.into_iter().enumerate() {
+            let primitive = SplinePrimitive {
+                shape,
+                plane: [SplinePlane::XY, SplinePlane::ZY, SplinePlane::XZ][i % 3],
+                reverse: i % 2 == 1,
+                interpolation: [
+                    Points::default(),
+                    Points::Natural { number: 3 },
+                    Points::Uniform { number: 12 },
+                    Points::Subdivided {
+                        angle: 0.1,
+                        max_length: 7.5,
+                    },
+                    Points::None,
+                ][i % 5],
+            };
+            doc.scene
+                .insert(Node::new(format!("s{i}"), ObjectKind::SplinePrimitive(primitive)));
+        }
+        let loaded = round_trip(&doc);
+        let kinds = |d: &Document| d.scene.iter().map(|(_, n)| n.data.kind.clone()).collect::<Vec<_>>();
+        assert_eq!(kinds(&loaded), kinds(&doc));
+
+        let mut plain = Document::new("t");
+        plain
+            .scene
+            .insert(Node::new("Circle", ObjectKindTag::Circle.default_kind()));
+        let json = document_json(&plain);
+        assert!(json.contains("\"type\": \"spline\"") && json.contains("\"shape\": \"circle\""));
+        assert!(!json.contains("plane") && !json.contains("reverse") && !json.contains("intermediate_points"));
+        assert_eq!(kinds(&round_trip(&plain)), kinds(&plain));
+    }
+
+    #[test]
+    fn spline_counts_are_clamped_on_load() {
+        let mut doc = Document::new("t");
+        doc.scene.insert(Node::new("Star", ObjectKindTag::Star.default_kind()));
+        let json = document_json(&doc).replacen("\"points\": 8", "\"points\": 4000000000", 1);
+        let loaded = from_bytes(&archive(&[(DOCUMENT_ENTRY, json.as_bytes())])).unwrap();
+        let ObjectKind::SplinePrimitive(star) = &loaded.scene.iter().next().unwrap().1.data.kind else {
+            panic!()
+        };
+        let SplineShape::Star { points, .. } = star.shape else {
+            panic!()
+        };
+        assert_eq!(points, SplineShape::MAX_SIDES);
     }
 }

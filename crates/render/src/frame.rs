@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
-use grid4d_eval::{EvaluatedLight, EvaluatedScene, MeshKey, Shading};
+use grid4d_eval::{CurveHandle, EvaluatedLight, EvaluatedScene, MeshKey, Shading};
 use grid4d_geom::Component;
 use grid4d_scene::{Falloff, LightType, MeshHandle, NodeId};
 
@@ -83,8 +83,18 @@ struct Batch {
     shading: Shading,
     /// The geometry of a [`MeshKey::Polygon`], for the renderer to upload.
     mesh: Option<MeshHandle>,
+    /// The curve of a [`MeshKey::Curve`].
+    curve: Option<CurveHandle>,
     instances: Vec<InstanceRaw>,
     last_used: u64,
+}
+
+/// The stored geometry of a batch: a polygon object's mesh or a spline's curve
+/// (primitives' meshes are generated from their key).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Geometry<'a> {
+    pub mesh: Option<&'a MeshHandle>,
+    pub curve: Option<&'a CurveHandle>,
 }
 
 /// The plane the grid lies in: the ground in perspective views and looking down
@@ -221,13 +231,14 @@ impl FrameData {
     }
 
     /// [`batches`](Self::batches) with each batch's shading (what the renderer uploads by).
-    pub(crate) fn draw_batches(
-        &self,
-    ) -> impl Iterator<Item = (MeshKey, Shading, Option<&MeshHandle>, &[InstanceRaw])> + '_ {
-        self.batches
-            .iter()
-            .filter(|b| !b.instances.is_empty())
-            .map(|b| (b.key, b.shading, b.mesh.as_ref(), b.instances.as_slice()))
+    pub(crate) fn draw_batches(&self) -> impl Iterator<Item = (MeshKey, Shading, Geometry<'_>, &[InstanceRaw])> + '_ {
+        self.batches.iter().filter(|b| !b.instances.is_empty()).map(|b| {
+            let geometry = Geometry {
+                mesh: b.mesh.as_ref(),
+                curve: b.curve.as_ref(),
+            };
+            (b.key, b.shading, geometry, b.instances.as_slice())
+        })
     }
 
     #[must_use]
@@ -309,10 +320,15 @@ impl FrameData {
                     MeshKey::Polygon(id) => scene.mesh(id).cloned(),
                     _ => None,
                 };
+                let curve = match draw.key {
+                    MeshKey::Curve(id) => scene.curve(id).cloned(),
+                    _ => None,
+                };
                 batches.push(Batch {
                     key: draw.key,
                     shading: draw.shading,
                     mesh,
+                    curve,
                     instances: Vec::new(),
                     last_used: frame,
                 });
@@ -342,7 +358,7 @@ impl FrameData {
         self.bounds = bounds;
         // A polygon object's mesh changes id on every edit (each frame of a
         // drag): its old batches go at once, so they never pile up.
-        let gone = |b: &Batch| matches!(b.key, MeshKey::Polygon(_)) && b.last_used != frame;
+        let gone = |b: &Batch| matches!(b.key, MeshKey::Polygon(_) | MeshKey::Curve(_)) && b.last_used != frame;
         if frame.is_multiple_of(BATCH_TTL_FRAMES) || self.batches.iter().any(gone) {
             self.drop_stale_batches();
         }
@@ -366,7 +382,7 @@ impl FrameData {
     fn drop_stale_batches(&mut self) {
         let frame = self.frame;
         self.batches.retain(|b| match b.key {
-            MeshKey::Polygon(_) => b.last_used == frame,
+            MeshKey::Polygon(_) | MeshKey::Curve(_) => b.last_used == frame,
             _ => b.last_used + BATCH_TTL_FRAMES > frame,
         });
         self.batch_index.clear();

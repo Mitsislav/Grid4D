@@ -3,13 +3,13 @@ use std::{collections::HashMap, ops::Range};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt as _;
 
-use grid4d_eval::{MeshKey, Shading};
+use grid4d_eval::{CurveHandle, MeshKey, Shading};
 use grid4d_scene::MeshHandle;
 
 use crate::{
     DisplayStyle, FrameData, InstanceRaw, LightRaw, Vertex, ViewportTarget,
     components::{ComponentOverlay, EdgeInstance, FaceVertex, PointInstance},
-    display::{Fill, bounding_box, edge_lines},
+    display::{Fill, bounding_box, curve_lines, edge_lines},
     effects::{ShadowMaps, ShadowUniform, Ssao, SsaoUniform, shadow_view},
     mesh::{TessellationScratch, tessellate},
     shaders,
@@ -193,6 +193,8 @@ struct DrawKey {
 struct Draw {
     key: DrawKey,
     instances: Range<u32>,
+    /// A spline's curve: its lines show in every display mode.
+    curve: bool,
 }
 
 const INSTANCE_STRIDE: u64 = size_of::<InstanceRaw>() as u64;
@@ -558,13 +560,20 @@ impl ViewportRenderer {
         let mut offset = 0usize;
         let boxed = display.style == DisplayStyle::Box;
         let (faces, lines) = (self.fill != Fill::None, self.draw_lines);
-        for (mesh_key, shading, mesh, instances) in frame.draw_batches() {
+        for (mesh_key, shading, geometry, instances) in frame.draw_batches() {
+            let curve = matches!(mesh_key, MeshKey::Curve(_));
             let key = DrawKey {
                 mesh: mesh_key,
                 shading,
-                boxed,
+                // A curve is a curve in every style.
+                boxed: boxed && !curve,
             };
-            if !self.ensure_mesh(device, key, mesh, faces, lines) {
+            let ready = if curve {
+                self.ensure_curve(device, key, geometry.curve)
+            } else {
+                self.ensure_mesh(device, key, geometry.mesh, faces, lines)
+            };
+            if !ready {
                 continue; // nothing to draw for this shape
             }
             queue.write_buffer(
@@ -576,6 +585,7 @@ impl ViewportRenderer {
             self.draws.push(Draw {
                 key,
                 instances: to_u32(offset)..to_u32(end),
+                curve,
             });
             offset = end;
         }
@@ -586,11 +596,29 @@ impl ViewportRenderer {
         let frame_now = self.frame;
         let periodic = self.frame.is_multiple_of(EVICTION_INTERVAL);
         self.meshes.retain(|key, mesh| match key.mesh {
-            MeshKey::Polygon(_) => mesh.last_used + POLYGON_TTL_FRAMES > frame_now,
+            MeshKey::Polygon(_) | MeshKey::Curve(_) => mesh.last_used + POLYGON_TTL_FRAMES > frame_now,
             _ => !periodic || mesh.last_used + MESH_TTL_FRAMES > frame_now,
         });
         self.draw_grid = frame.show_grid;
         self.overlay.sync(device, queue, &frame.components);
+    }
+
+    /// Makes sure a curve's lines are on the GPU (curves have no surface).
+    /// `false` if there is nothing to draw.
+    fn ensure_curve(&mut self, device: &wgpu::Device, key: DrawKey, curve: Option<&CurveHandle>) -> bool {
+        let mesh = self.meshes.entry(key).or_default();
+        mesh.last_used = self.frame;
+        if matches!(mesh.lines, Part::NotBuilt) {
+            mesh.lines = match curve {
+                Some(curve) => {
+                    curve_lines(curve.polyline(), &mut self.line_scratch, &mut self.index_scratch);
+                    upload(device, "grid4d.curve", &self.line_scratch, &self.index_scratch)
+                }
+                None => Part::Empty,
+            };
+            mesh.faces = Part::Empty;
+        }
+        mesh.lines.get().is_some()
     }
 
     /// Makes sure the parts of `key`'s mesh this frame draws — its surface
@@ -717,11 +745,13 @@ impl ViewportRenderer {
             pass.draw(0..6, 0..1);
         }
 
-        // Lines over the surfaces (pulled slightly towards the viewer in the shader).
-        if self.draw_lines {
+        // Lines over the surfaces (pulled slightly towards the viewer in the
+        // shader): every object's in a lines mode, else the splines' alone.
+        if self.draws.iter().any(|d| self.draw_lines || d.curve) {
             pass.set_pipeline(&self.line_pipeline);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            self.draw_parts(pass, |mesh| mesh.lines.get());
+            let all = self.draw_lines;
+            self.draw_parts_where(pass, |draw| all || draw.curve, |mesh| mesh.lines.get());
         }
 
         // Component overlay on top: tinted polygons, edges, points, then the
@@ -753,7 +783,17 @@ impl ViewportRenderer {
 impl ViewportRenderer {
     /// One instanced draw per batch, of the part of its mesh that `part` picks.
     fn draw_parts(&self, pass: &mut wgpu::RenderPass<'_>, part: impl Fn(&GpuMesh) -> Option<&GpuGeometry>) {
-        for draw in &self.draws {
+        self.draw_parts_where(pass, |_| true, part);
+    }
+
+    /// [`draw_parts`](Self::draw_parts) for the batches `which` picks.
+    fn draw_parts_where(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        which: impl Fn(&Draw) -> bool,
+        part: impl Fn(&GpuMesh) -> Option<&GpuGeometry>,
+    ) {
+        for draw in self.draws.iter().filter(|d| which(d)) {
             let Some(geometry) = self.meshes.get(&draw.key).and_then(&part) else {
                 continue;
             };

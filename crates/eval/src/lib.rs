@@ -21,11 +21,13 @@
 //! [`EvaluatedScene::update`] is on the per-frame hot path: it skips all work
 //! when the scene's revision is unchanged and allocates nothing in steady state.
 
+mod curve;
 mod drawable;
 mod evaluated;
 mod generator;
 mod key;
 
+pub use curve::{CurveHandle, CurveId};
 pub use drawable::{Drawable, Shading, Surface, drawable, editable_mesh};
 pub use evaluated::{EvaluatedLight, EvaluatedNode, EvaluatedScene, PickShape, Purpose};
 pub use generator::generator_mesh;

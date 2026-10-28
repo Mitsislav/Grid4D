@@ -301,9 +301,10 @@ fn vs_line(@location(0) position: vec3<f32>, instance: InstanceIn) -> LineOut {
 
     var out: LineOut;
     out.clip_position = camera.view_proj * vec4<f32>(q, 1.0);
-    // Over surfaces a dark shade of the object's colour; alone, the colour itself.
+    // Over surfaces a dark shade of the object's colour; alone, the colour
+    // itself — as for a spline's curve (params.y: unlit), which has no surface.
     var color = instance.color.rgb * 0.22;
-    if (camera.viewport.w > 0.5) {
+    if (camera.viewport.w > 0.5 || instance.params.y > 0.5) {
         color = instance.color.rgb;
     }
     if (instance.params.x > 0.5) {

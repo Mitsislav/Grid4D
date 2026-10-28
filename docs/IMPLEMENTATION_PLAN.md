@@ -31,9 +31,10 @@ references, no `unsafe`, no `unwrap`, exhaustive `match`, and
 10. [Phase 6 — Animation, tags, materials, managers](#phase-6--animation-tags-materials-managers-v06)
 11. [Phase 7 — Viewport: cameras, lights, 4-view, shading](#phase-7--viewport-cameras-lights-4-view-shading-v07)
 12. [Phase 8 — Offline renderer](#phase-8--offline-renderer-v08)
-13. [Phase 9+ — Splines, generators, deformers, MoGraph, extensibility](#phase-9--splines-generators-deformers-mograph-extensibility)
-14. [Cross-cutting: testing, performance, CI, docs](#cross-cutting-testing-performance-ci-docs)
-15. [Risks & open decisions](#risks--open-decisions)
+13. [Phase 9 — Splines & spline generators](#phase-9--splines--spline-generators-v09)
+14. [Phase 10+ — Deformers, MoGraph, simulation, workspace, extensibility](#phase-10--deformers-mograph-simulation-workspace-extensibility)
+15. [Cross-cutting: testing, performance, CI, docs](#cross-cutting-testing-performance-ci-docs)
+16. [Risks & open decisions](#risks--open-decisions)
 
 Size legend for steps: **S** ≈ one small PR (< 300 lines), **M** ≈ one focused PR
 (300–1000 lines), **L** ≈ several PRs.
@@ -140,6 +141,7 @@ Two architectural moves carry most of the later phases:
 | v0.6 | Animation & look | 6 | Keyframes, F-curves, tags, materials, Coordinate & Material managers |
 | v0.7 | Viewport | 7 | Scene cameras, 4-view, shading modes, real lights, snapping |
 | v0.8 | Rendering | 8 | Render View + Picture Viewer, CPU path tracer, PNG/EXR output |
+| v0.9 | Splines | 9 | Spline objects and primitives, point editing and the Pen, Extrude / Lathe / Sweep / Loft, Text |
 | v1.0 | Stabilisation | — | File format frozen (with migrations), docs, packaging, perf budget met |
 
 Phases 1 and 2 are independent and can run in parallel. Phase 5 needs Phase 3;
@@ -253,7 +255,7 @@ interaction end**:
 | 1.2 ✅ | M | `SceneEdit` + `Document::apply` returning inverse; property test: random edit sequences, apply + inverse ⇒ document equals original — done 2026-10-18: variants `Insert/Detach/Attach/Move/SetData/SetTime/SetName`, atomic `apply_all`, `TimeSettings`, `Scene::transform_keeping_world`; seeded test checks every intermediate undo and redo state | `scene/edit.rs`, `scene/time.rs` |
 | 1.3 ✅ | M | `History` + `UndoGroup`; `EditorCommand::{Undo, Redo, CommitData}`; translate existing commands; `NewDocument` clears history and purges — done 2026-10-18: create/delete/reparent are one step each, detached nodes are purged once no step can restore them (redo discarded, limit, clear), `History::state_id` ready for the dirty flag | `ui/{history,commands,editor}.rs` |
 | 1.4 ✅ | M | Gizmo commit-on-release; Attribute Manager `track_edit`; Object Manager rename/visibility via commands — done 2026-10-18: generic `EditorCommand::{Edit, CommitLive}` (replacing `CommitData`), `LiveEdit` tracker (interaction = pointer held or text focus), also covers project settings, the timeline's range/fps/loop and the Animate ▸ Loop toggle; headless egui test drags the gizmo | `ui/{live_edit,commands}.rs`, `ui/panels/{viewport/gizmo,attributes,outliner,timeline,menu_bar}.rs` |
-| 1.5 ✅ | S | Toolbar Undo/Redo enabled state + tooltip with label ("Undo Move"); Edit menu entries; shortcuts `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`; history limit preference (default 100) — done 2026-10-18; shortcuts are ignored while a mouse button is held (a drag commits its own step). The limit is `History::DEFAULT_LIMIT` = 100; its UI waits for the preferences window (Phase 9) | `ui/panels/{toolbar,menu_bar,about}.rs`, `ui/shortcuts.rs` |
+| 1.5 ✅ | S | Toolbar Undo/Redo enabled state + tooltip with label ("Undo Move"); Edit menu entries; shortcuts `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`; history limit preference (default 100) — done 2026-10-18; shortcuts are ignored while a mouse button is held (a drag commits its own step). The limit is `History::DEFAULT_LIMIT` = 100; its UI waits for the preferences window (Phase 10+) | `ui/panels/{toolbar,menu_bar,about}.rs`, `ui/shortcuts.rs` |
 
 **Acceptance:** create → move (gizmo) → rename → reparent → delete, then undo ×5
 returns the exact original document and selection; redo ×5 reproduces it;
@@ -533,14 +535,85 @@ tolerance (small resolution, fixed seed) in CI.
 
 ---
 
-## Phase 9+ — Splines, generators, deformers, MoGraph, extensibility
+## Phase 9 — Splines & spline generators (v0.9)
 
-Lower resolution on purpose — plan in detail when v0.8 lands.
+**Goal:** curves as first-class objects — drawn, edited point by point and drawn
+with a pen — and the classic generators that turn them into surfaces: Extrude,
+Lathe, Sweep, Loft.
 
-* **Splines** (`grid4d-geom::spline`): Linear, Cubic, Bezier; primitives Circle,
-  Rectangle, Helix, Text (font outlines via `ttf-parser`); Pen tool.
-* **Spline generators:** Extrude, Lathe, Loft, Sweep (all via the Phase 4
-  generator framework).
+**Behaviour specs** (written per step before implementing, as before):
+`reference/object-spline.md` (9.1–9.3), `reference/generator-extrude.md`,
+`generator-lathe.md`, `generator-sweep.md`, `generator-loft.md` (9.4–9.7),
+`object-text.md` (9.8).
+
+### Design
+
+* **Spline data** in `grid4d-geom::spline` (glam only, like meshes): a `Spline`
+  holds control points, two tangents per point (used by Bezier), a type
+  (`Linear`, `Cubic`, `Akima`, `BSpline`, `Bezier`), and one or more
+  **segments**, each open or closed (a rectangle with a hole, the letters of a
+  text). `Interpolation` (`None`, `Natural(n)`, `Uniform(n)`, `Adaptive(angle)`
+  — the default, 5° —, `Subdivided(max_length)`) samples it into a `Polyline`
+  (points per segment, which samples are control points, closed flags), with
+  tests on hand-built curves like `shapes.rs`.
+* **Spline primitives** produce real control splines (a Circle is four Bezier
+  points with tangents), so Make Editable keeps them editable: Circle,
+  Rectangle (optional rounding), Arc, n-Side, Star, Helix, Flower; each with
+  its plane (XY default, ZY, XZ), Reverse and the intermediate points.
+  `ObjectKind::Spline { spline: SplineHandle, components }` is the editable
+  spline — a shared, immutable handle with a unique id like `MeshHandle`, the
+  selected points next to it like polygon objects.
+* **Evaluation and drawing:** `grid4d-eval` samples each spline once per
+  (source, interpolation) and caches the polyline; the evaluated node carries a
+  `CurveKey` the way meshes carry a `MeshKey`. `grid4d-render` builds a line
+  list once per key and draws it with the existing instanced line pipeline
+  (display colour; selected and active colours like objects), never in the
+  path tracer (splines are guides, not surfaces). Picking measures the screen
+  distance to the polyline; framing and snapping use its points. A new
+  `FilterItem::Spline`.
+* **Editing** (Points mode on an editable spline): the same selection tools,
+  gizmo and `CommitLive` steps as polygon points, through a shared
+  "editable points" seam (`MeshHandle::with_points` ↔ `SplineHandle::with_points`);
+  Bezier tangents are drawn as handles and dragged (Shift breaks them).
+  Spline commands (Close/Open, Reverse Sequence, Set First Point, Hard/Soft
+  Interpolation, Delete points) are pure functions returning a new spline.
+* **Spline generators** extend `generator.rs`: inputs may be splines (sampled
+  in the generator's space) as well as meshes. Extrude and Lathe take their
+  first child spline; Sweep takes a profile (first child) and a path (second);
+  Loft takes all child splines in order. Caps need polygons with holes, so
+  `grid4d-geom::triangulate` gains outline-with-holes triangulation (hole
+  bridging + ear clipping) with even-odd nesting of segments. Results are
+  cached like the Subdivision Surface's and baked by Make Editable.
+* **File format:** `.g4d` v3 grows additively — spline kinds in `KindDto`, an
+  editable spline's arrays inline (points, tangents, segments).
+* **Not in Phase 9:** splines in glTF/OBJ, the path tracer drawing curves
+  (hair/sketch), spline masks/booleans, the Spline Smooth and Spline Pen's
+  sketch modes, Formula and Profile primitives.
+
+### Steps
+
+| Step | Size | Work |
+|------|------|------|
+| 9.1 ✅ | L | Spline data, primitives and drawing — done 2026-10-29 per [`reference/object-spline.md`](reference/object-spline.md) (new spec): `geom::spline` — `Spline` (points, Bezier tangents, segments open/closed), `SplineType` (Linear, Cubic, Akima, B-Spline, Bezier — every type turned into cubic Bezier spans), `Interpolation` (None, Natural, Uniform, Adaptive — default 5° —, Subdivided) → `Polyline`, `SplinePrimitive` (`SplineShape` Circle/Ellipse/Ring, Rectangle with rounding, Arc/Sector/Segment/Ring, n-Side, Star, Helix with biases, Flower; `SplinePlane` XY/ZY/XZ; Reverse) giving real control splines; `ObjectKind::SplinePrimitive` (one variant, `ObjectKindTag` per shape, `SPLINES`); `grid4d-eval` samples each spline once per change (`CurveHandle`/`CurveId`, `MeshKey::Curve`, `PickShape::Curve`); `grid4d-render` draws curves with the instanced line pipeline in every display mode in their own colour (selected: the selection colour), `pick_curve` by screen distance, `FilterItem::Spline`; the path tracer skips them; `.g4d` v3 `spline` kind (additive; plane, Reverse, intermediate points omitted while default; counts clamped on load); glTF/OBJ keep the node only; UI: icons, Create ▸ Spline, a toolbar spline button with its list, Attribute Manager parameters, a click near the line selects. **Moved to 9.2:** the editable `Spline` kind (only Make Editable creates it) |
+| 9.2 | M | Editable splines: Make Editable on spline primitives; Points mode on splines — click / rectangle / live selection, the gizmo on selected points, Bezier tangent handles (Shift breaks them), Delete; undo |
+| 9.3 | M | Spline commands and the Pen tool: Close/Open, Reverse Sequence, Set First Point, Hard/Soft Interpolation; the Pen tool draws Linear or Bezier splines in the view's plane (click adds, drag pulls tangents, click the first point closes, Esc/Enter finishes) and adds points to the active spline |
+| 9.4 | M | Extrude generator: the first child spline pushed along an offset with subdivision; start/end caps (outlines with holes triangulated), hierarchical (all child splines); spline inputs in `generator.rs` |
+| 9.5 | S | Lathe generator: the child spline revolved around the generator's Y axis — angle, subdivision, movement (a screw), scaling; caps on open angles |
+| 9.6 | M | Sweep generator: a profile spline along a path spline — end scale and rotation, start/end growth, banking, caps; a parallel-transport frame along the path |
+| 9.7 | M | Loft generator: a skin through child splines in order — subdivisions along and across, loop, linear or organic; caps |
+| 9.8 | M | Text spline: font outlines via `ttf-parser` and a bundled open (OFL) font; text, height, alignment, spacing; segments with holes, so Extrude makes solid letters |
+
+**Acceptance:** a Circle, Rectangle or Text spline extruded into a capped solid,
+a profile lathed into a vase and swept along a helix, two circles lofted into a
+tube; splines edited point by point and drawn with the Pen; everything undoable
+and saved, and the generators' results rendered by the path tracer.
+
+---
+
+## Phase 10+ — Deformers, MoGraph, simulation, workspace, extensibility
+
+Lower resolution on purpose — plan in detail when v0.9 lands.
+
 * **Deformers:** Bend, Twist, Taper, Bulge, FFD — evaluated after generators.
 * **MoGraph-lite:** Cloner (linear/radial/grid/object), Random and Plain effectors.
 * **Simulation:** rigid bodies via `rapier3d` (menu already lists Simulate).
