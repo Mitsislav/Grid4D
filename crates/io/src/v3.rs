@@ -23,9 +23,9 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
 };
 use grid4d_scene::{
-    Axis, ComponentState, Components, Curve, Document, Falloff, FrameRange, Interpolation, Key, LightDetails,
-    LightShadow, LightType, Material, MaterialId, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, Param,
-    RenderSettings, Tag, Tangents, TimeSettings, Track, Transform,
+    Axis, ComponentState, Components, Curve, Document, Falloff, FrameNaming, FrameRange, ImageFormat, Interpolation,
+    Key, LightDetails, LightShadow, LightType, Material, MaterialId, MeshHandle, MeshId, NodeData, NodeId, ObjectKind,
+    Param, RenderSettings, Tag, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -140,6 +140,49 @@ struct RenderDto {
     save: bool,
     output: String,
     alpha: bool,
+    /// Added with step 8.5; PNG when absent.
+    #[serde(default, skip_serializing_if = "ImageFormatDto::is_png")]
+    format: ImageFormatDto,
+    /// Added with step 8.5; `name0000` when absent.
+    #[serde(default, skip_serializing_if = "FrameNamingDto::is_default")]
+    naming: FrameNamingDto,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ImageFormatDto {
+    #[default]
+    Png,
+    Exr,
+}
+
+impl ImageFormatDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_png(&self) -> bool {
+        *self == Self::Png
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FrameNamingDto {
+    #[default]
+    Name0000,
+    NameDot0000,
+    NameUnderscore0000,
+}
+
+impl FrameNamingDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_default(&self) -> bool {
+        *self == Self::Name0000
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -168,6 +211,8 @@ impl RenderDto {
             save,
             ref output,
             alpha,
+            format,
+            naming,
         } = *settings;
         Some(Self {
             width,
@@ -185,6 +230,15 @@ impl RenderDto {
             save,
             output: output.clone(),
             alpha,
+            format: match format {
+                ImageFormat::Png => ImageFormatDto::Png,
+                ImageFormat::Exr => ImageFormatDto::Exr,
+            },
+            naming: match naming {
+                FrameNaming::Name0000 => FrameNamingDto::Name0000,
+                FrameNaming::NameDot0000 => FrameNamingDto::NameDot0000,
+                FrameNaming::NameUnderscore0000 => FrameNamingDto::NameUnderscore0000,
+            },
         })
     }
 
@@ -205,6 +259,15 @@ impl RenderDto {
             save: self.save,
             output: self.output,
             alpha: self.alpha,
+            format: match self.format {
+                ImageFormatDto::Png => ImageFormat::Png,
+                ImageFormatDto::Exr => ImageFormat::Exr,
+            },
+            naming: match self.naming {
+                FrameNamingDto::Name0000 => FrameNaming::Name0000,
+                FrameNamingDto::NameDot0000 => FrameNaming::NameDot0000,
+                FrameNamingDto::NameUnderscore0000 => FrameNaming::NameUnderscore0000,
+            },
         }
         .validated()
     }
@@ -2012,10 +2075,27 @@ mod tests {
             save: false,
             output: "renders/shot 010".to_owned(),
             alpha: true,
+            format: ImageFormat::Exr,
+            naming: FrameNaming::NameDot0000,
         };
         assert_eq!(round_trip(&doc).render, doc.render);
         doc.render.frames = FrameRange::All;
         assert_eq!(round_trip(&doc).render, doc.render);
+    }
+
+    /// Files written in step 8.2 have no format or naming: the defaults.
+    #[test]
+    fn render_settings_without_format_and_naming_load() {
+        let mut doc = Document::new("t");
+        doc.render.samples = 64;
+        let json = document_json(&doc);
+        assert!(!json.contains("\"format\": \"png\"") && !json.contains("\"naming\""));
+        let loaded = from_bytes(&archive(&[(DOCUMENT_ENTRY, json.as_bytes())])).unwrap();
+        assert_eq!(loaded.render, doc.render);
+        assert_eq!(
+            (loaded.render.format, loaded.render.naming),
+            (ImageFormat::Png, FrameNaming::Name0000)
+        );
     }
 
     #[test]

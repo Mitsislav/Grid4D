@@ -1174,8 +1174,9 @@ left: **Output**, **Save**, **Sampling** or **Options**.
 | Frame Step | renders every n-th frame of the range |
 | Frames | how many pictures the range gives |
 
-Rendering whole frame ranges is *planned*: for now a render is always of the
-current frame.
+**Render to Picture Viewer** renders every frame of the range at the Frame
+Step and saves each as its own numbered file ([§16.2](#162-the-picture-viewer));
+the Render View always shows the current frame.
 
 ![The Save page: renders go to renders/shot.png next to the document, with transparency](images/manual/render-settings-save.png)
 
@@ -1184,11 +1185,15 @@ current frame.
 | Setting | Meaning |
 |---------|---------|
 | Save | a finished render is saved to File |
-| File | where: type a path, or click **…** to choose one. A name without a folder, or a path like `renders/shot`, is taken from the document's folder (the document must be saved first); `.png` is added if missing |
-| Format | PNG, 8 bits per channel (OpenEXR is *planned*) |
+| File | where: type a path, or click **…** to choose one. A name without a folder, or a path like `renders/shot`, is taken from the document's folder (the document must be saved first); the Format's extension is added (a typed `.png` or `.exr` is replaced) |
+| Format | **PNG (8 bit)**: ordinary pictures. **OpenEXR (16-bit float)**: the light as the renderer computed it — linear, with highlights brighter than white kept — for compositing and grading |
+| Name | how an animation's frame numbers join the file name: **Name0000** (`shot0012.png`), **Name.0000** (`shot.0012.png`) or **Name_0000** (`shot_0012.png`) |
 | Alpha Channel | keep the transparency of the background and of the objects' edges; off: the background is black |
 
-The line under the settings says where the picture will go.
+The line under the settings says where the picture will go — for an animation,
+how many frames and the first file's name.
+
+![The Save page set up for an animation: OpenEXR files named shot.0000.exr, shot.0002.exr, … next to the document](images/manual/render-settings-animation.png)
 
 **Sampling**
 
@@ -1210,11 +1215,13 @@ Every change is one undo step, and the settings are saved with the document.
 **Render ▸ Render to Picture Viewer**, **Shift+R** or the toolbar button next to
 the gear renders the scene and opens the **Picture Viewer**. It renders:
 
-- the scene **at the current frame**, as it is when you start (later edits do
-  not change a render that runs);
+- the scene **at the current frame** — or, with a Frame Range of several frames
+  in the Render Settings, **every frame of the range** in turn (an
+  **animation**) — as it is when you start (later edits do not change a render
+  that runs);
 - through the **active view's camera** — the view's own camera, or the camera
-  object it looks through (Cameras menu) — in the picture size of the Render
-  Settings;
+  object it looks through (Cameras menu), which in an animation follows that
+  camera's movement — in the picture size of the Render Settings;
 - with the Render Settings' samples, bounces and Auto Light.
 
 ![The Picture Viewer rendering: the picture sharpens while the bar fills](images/manual/picture-viewer-rendering.png)
@@ -1226,10 +1233,18 @@ render while one runs stops the old one. Closing the window does not stop a
 render; **Window ▸ Picture Viewer** opens it again.
 
 **When a render finishes** it is saved where Render Settings ▸ Save says (its
-folder is made if needed), as PNG, with transparency if Alpha Channel is on.
-The line at the bottom says where it went, or why it was not saved — Save off,
-no file, or a file next to a document that was never saved. Stopped renders are
-not saved. **Save As…** saves the shown picture anywhere.
+folder is made if needed), as PNG or OpenEXR, with transparency if Alpha Channel
+is on. The line at the bottom says where it went, or why it was not saved — Save
+off, no file, or a file next to a document that was never saved. Stopped renders
+are not saved. **Save As…** saves the shown picture anywhere, as PNG.
+
+**Animations**: each frame is saved the moment it is finished, as a numbered
+file (`shot0000.png`, `shot0001.png`, … by the Name setting), so a stopped
+animation keeps the frames it completed. The History has one entry for the whole
+animation; it shows the frame being rendered, and the line at the bottom counts
+the frames ("frame 4 (3 of 3 done)") and the files saved.
+
+![An animation of three frames in the Picture Viewer: one History entry, transparency over the checkerboard](images/manual/picture-viewer-animation.png)
 
 ![Two renders in the History; the newest is shown](images/manual/picture-viewer.png)
 
@@ -1354,10 +1369,11 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   the per-light switches (no illumination, ambient, diffuse or specular only).
 - **Interchange and rendering**: textures, animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only); the
-  frame ranges and OpenEXR files are next; the Render Region (Alt+R) and a
-  Render View that updates while you edit; several render settings per document, Preview Range, a
-  render frame rate of its own, DPI and film aspect; a render queue, and the
-  Picture Viewer's filters, channels, comparison and animation playback.
+  Render Region (Alt+R) and a Render View that updates while you edit; several
+  render settings per document, Preview Range, a render frame rate of its own,
+  DPI and film aspect; movie files, multi-pass and layered files, 32-bit
+  OpenEXR, OpenEXR from Save As; a render queue, and the Picture Viewer's
+  filters, channels, comparison and animation playback.
 - The Takes, Layers and Filter panels are placeholders.
 
 See [`progress.md`](progress.md) for what changed in each step.

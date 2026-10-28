@@ -12,12 +12,13 @@ use std::{
 
 use egui::ViewportCommand;
 use grid4d_io::{ObjectEntry, Objects};
-use grid4d_scene::{Document, MeshHandle, NodeData, NodeId, ObjectKind, RenderSettings, SceneEdit, Tags};
+use grid4d_raytrace::Image;
+use grid4d_scene::{Document, ImageFormat, MeshHandle, NodeData, NodeId, ObjectKind, SceneEdit, Tags};
 
 use crate::{
     EditorCommand, EditorState, History, ViewportPanel,
     recent::RecentFiles,
-    rendering::{Picture, SaveTarget},
+    rendering::{FinishedFrame, Output, SaveTarget},
 };
 
 /// Every extension File ▸ Open and File ▸ Merge accept.
@@ -86,7 +87,7 @@ impl FileDialogs for NativeDialogs {
     fn pick_render_output(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
         with_directory(rfd::FileDialog::new(), directory)
             .set_title("Save Render As")
-            .add_filter("PNG Image", &[RenderSettings::EXTENSION])
+            .add_filter("Pictures (PNG, OpenEXR)", &["png", "exr"])
             .set_file_name(suggested)
             .save_file()
     }
@@ -465,32 +466,60 @@ pub(crate) fn export(doc: &Document, editor: &mut EditorState) {
     }
 }
 
-/// Saves picture `number`, which has just finished, where its Render Settings
-/// said (its folder made if needed), and notes the outcome on the picture; a
-/// failure also shows an alert.
-pub(crate) fn save_finished_render(editor: &mut EditorState, number: u32) {
-    let Some(picture) = editor.renders.picture(number) else {
+/// Saves a frame a render has just finished where its Render Settings said
+/// (its folder made if needed; a numbered file for an animation, PNG or
+/// OpenEXR), and notes the outcome on the picture. The first failure of a
+/// render also shows an alert.
+pub(crate) fn save_rendered_frame(editor: &mut EditorState, done: &FinishedFrame) {
+    let Some(picture) = editor.renders.picture(done.number) else {
         return;
     };
-    let note = match &picture.target {
-        SaveTarget::Nowhere(why) => (*why).to_owned(),
-        SaveTarget::File(path) => match write_picture(picture, path) {
-            Ok(()) => format!("Saved to {}", path.display()),
-            Err(err) => {
+    let output = match &picture.target {
+        SaveTarget::File(output) => output,
+        SaveTarget::Nowhere(why) => {
+            let why = (*why).to_owned();
+            editor.renders.set_note(done.number, why);
+            return;
+        }
+    };
+    let Some(path) = output.file(done.frame) else {
+        return;
+    };
+    match write_frame(&done.image, output, &path) {
+        Ok(()) => editor.renders.record_saved(done.number, &path),
+        Err(err) => {
+            let first_failure = !picture.note.starts_with("Not saved");
+            if first_failure {
                 editor.file.alert = Some(Alert {
                     title: "Could Not Save the Render",
-                    message: format!(
-                        "{}
-
-{err}",
-                        path.display()
-                    ),
+                    message: format!("{}\n\n{err}", path.display()),
                 });
-                format!("Not saved: {err}")
             }
-        },
+            editor.renders.set_note(done.number, format!("Not saved: {err}"));
+        }
+    }
+}
+
+/// Writes a finished frame in `output`'s format and alpha setting, making its
+/// folder if needed: sRGB PNG, or OpenEXR in linear light.
+fn write_frame(image: &Image, output: &Output, path: &Path) -> Result<(), grid4d_io::IoError> {
+    make_folder(path)?;
+    let channels = if output.alpha() {
+        grid4d_io::Channels::Rgba
+    } else {
+        grid4d_io::Channels::Rgb
     };
-    editor.renders.set_note(number, note);
+    match output.format() {
+        ImageFormat::Png => {
+            let pixels = if output.alpha() {
+                image.to_rgba8()
+            } else {
+                image.to_rgb8()
+            };
+            grid4d_io::save_png(path, image.width, image.height, channels, &pixels)
+        }
+        ImageFormat::Exr => grid4d_io::save_exr(path, image.width, image.height, channels, &image.pixels),
+    }
 }
 
 /// The Picture Viewer's Save As…: asks where, then saves the shown picture as
@@ -500,58 +529,50 @@ pub(crate) fn save_render_as(doc: &Document, editor: &mut EditorState) {
     let Some(picture) = renders.shown_picture().filter(|p| p.has_pixels()) else {
         return;
     };
+    let png = ImageFormat::Png.extension();
     let current = match &picture.target {
-        SaveTarget::File(path) => Some(path.as_path()),
+        SaveTarget::File(output) => output.file(picture.frame),
         SaveTarget::Nowhere(_) => None,
     };
     let directory = current
+        .as_deref()
         .and_then(Path::parent)
         .or_else(|| file.directory())
         .map(Path::to_path_buf);
-    let suggested = current.and_then(Path::file_name).map_or_else(
-        || {
-            format!(
-                "{} {}.{}",
-                file_stem_for(&file.display_name(doc)),
-                picture.number,
-                RenderSettings::EXTENSION
-            )
-        },
-        |name| name.to_string_lossy().into_owned(),
+    let suggested = current.as_deref().and_then(Path::file_stem).map_or_else(
+        || format!("{} {}", file_stem_for(&file.display_name(doc)), picture.number),
+        |stem| stem.to_string_lossy().into_owned(),
     );
-    let Some(mut path) = file.dialogs.pick_render_output(directory.as_deref(), &suggested) else {
+    let Some(mut path) = file
+        .dialogs
+        .pick_render_output(directory.as_deref(), &format!("{suggested}.{png}"))
+    else {
         return;
     };
-    if !path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case(RenderSettings::EXTENSION))
-    {
+    if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case(png)) {
         path.as_mut_os_string().push(".png");
     }
     let number = picture.number;
-    match write_picture(picture, &path) {
+    let (pixels, channels) = picture.pixels();
+    let written =
+        make_folder(&path).and_then(|()| grid4d_io::save_png(&path, picture.width, picture.height, channels, pixels));
+    match written {
         Ok(()) => renders.set_note(number, format!("Saved to {}", path.display())),
         Err(err) => {
             file.alert = Some(Alert {
                 title: "Could Not Save the Render",
-                message: format!(
-                    "{}
-
-{err}",
-                    path.display()
-                ),
+                message: format!("{}\n\n{err}", path.display()),
             });
         }
     }
 }
 
-/// Writes `picture` as PNG to `path`, making its folder if needed.
-fn write_picture(picture: &Picture, path: &Path) -> Result<(), grid4d_io::IoError> {
+/// Makes the folder `path` goes in, if it has one.
+fn make_folder(path: &Path) -> Result<(), grid4d_io::IoError> {
     if let Some(folder) = path.parent().filter(|folder| !folder.as_os_str().is_empty()) {
         std::fs::create_dir_all(folder)?;
     }
-    let (pixels, channels) = picture.pixels();
-    grid4d_io::save_png(path, picture.width, picture.height, channels, pixels)
+    Ok(())
 }
 
 /// Render Settings ▸ Save ▸ File ▸ …: asks where renders go and returns the
@@ -569,7 +590,7 @@ pub(crate) fn pick_render_output(doc: &Document, editor: &mut EditorState) -> Op
             format!(
                 "{}.{}",
                 file_stem_for(&editor.file.display_name(doc)),
-                RenderSettings::EXTENSION
+                doc.render.format.extension()
             )
         },
         |name| name.to_string_lossy().into_owned(),
@@ -966,6 +987,36 @@ mod tests {
             f.doc.render.output,
             f.dir.join("renders").join("still.png").to_string_lossy()
         );
+    }
+
+    #[test]
+    fn an_animation_is_saved_as_numbered_files() {
+        let mut f = Fixture::new("render_animation", None, Some("shot.g4d"));
+        crate::rendering::tests::small(&mut f.doc, 1);
+        f.doc.render.frames = grid4d_scene::FrameRange::Manual { from: 3, to: 5 };
+        f.doc.render.format = ImageFormat::Exr;
+        f.run(&[EditorCommand::SaveAs, EditorCommand::BrowseRenderOutput]);
+        f.run(&[EditorCommand::RenderToPictureViewer]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while f.editor.renders.is_rendering() {
+            assert!(std::time::Instant::now() < deadline, "the render did not end");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            f.run(&[]);
+        }
+        let folder = f.dir.join("renders");
+        for frame in ["0003", "0004", "0005"] {
+            let file = folder.join(format!("still{frame}.exr"));
+            let bytes = std::fs::read(&file).unwrap();
+            assert!(
+                bytes.starts_with(&[0x76, 0x2f, 0x31, 0x01]),
+                "an OpenEXR file: {}",
+                file.display()
+            );
+        }
+        assert!(!folder.join("still.png").exists() && !folder.join("still.exr").exists());
+        let picture = f.editor.renders.shown_picture().unwrap();
+        assert_eq!((picture.frames, picture.saved), (3, 3));
+        assert!(picture.note.starts_with("Saved 3 of 3 frames"), "{}", picture.note);
     }
 
     #[test]

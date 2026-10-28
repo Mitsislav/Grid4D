@@ -265,12 +265,17 @@ fn history(ui: &mut Ui, renders: &mut Renders, height: f32) {
                         RenderState::Finished => "",
                         RenderState::Stopped => " · stopped",
                     };
+                    let frames = if picture.frames > 1 {
+                        format!(" · {} frames", picture.frames)
+                    } else {
+                        String::new()
+                    };
                     let text = format!(
-                        "Render {}{state}\n{} × {} · {} spp · {}",
+                        "Render {}{state}\n{} × {} · {} spp{frames} · {}",
                         picture.number,
                         picture.width,
                         picture.height,
-                        picture.samples,
+                        picture.total_samples,
                         seconds(picture.elapsed)
                     );
                     let button = Button::selectable(shown == Some(picture.number), text)
@@ -291,8 +296,16 @@ fn status_line(ui: &mut Ui, renders: &Renders) {
     let Some(picture) = renders.shown_picture() else {
         return;
     };
+    let frames = if picture.frames > 1 {
+        format!(
+            " · frame {} ({} of {} done)",
+            picture.frame, picture.frames_done, picture.frames
+        )
+    } else {
+        String::new()
+    };
     let summary = format!(
-        "Render {} · {} × {} · {} of {} samples · {}",
+        "Render {} · {} × {}{frames} · {} of {} samples · {}",
         picture.number,
         picture.width,
         picture.height,
@@ -377,7 +390,9 @@ mod tests {
         crate::rendering::tests::small(&mut doc, 1);
         (doc.render.width, doc.render.height) = (160, 90);
         let mut editor = EditorState::default();
-        editor.renders.start(&doc, &grid4d_render::OrbitCamera::default(), None);
+        editor
+            .renders
+            .start(&doc, &grid4d_render::OrbitCamera::default(), None, None);
         crate::rendering::tests::wait(&mut editor.renders);
         editor.renders.viewer_open = true;
 

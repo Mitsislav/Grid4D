@@ -79,3 +79,4 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 8.2 | [`render-settings.md`](render-settings.md) — Render Settings: size, frames, file, sampling, Auto Light | implemented 2026-10-21 |
 | 8.3 | [`render-picture-viewer.md`](render-picture-viewer.md) — the Picture Viewer: background renders, history, zoom, saving | implemented 2026-10-28 |
 | 8.4 | [`render-view.md`](render-view.md) — the Render View: rendering the active view in place | implemented 2026-10-28 |
+| 8.5 | [`render-animation.md`](render-animation.md) — rendering frame ranges to numbered files, OpenEXR | implemented 2026-10-29 |

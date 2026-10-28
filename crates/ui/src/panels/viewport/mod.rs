@@ -294,6 +294,12 @@ impl ViewportPanel {
         }
     }
 
+    /// The camera object the active view looks through, if any (only View 1 links).
+    #[must_use]
+    pub fn view_object(&self) -> Option<NodeId> {
+        self.linked.filter(|_| self.active == 0)
+    }
+
     /// What a Render View of the active view depends on, as it is now: the view,
     /// its camera and size, the scene's revision, the render settings, the frame.
     #[must_use]

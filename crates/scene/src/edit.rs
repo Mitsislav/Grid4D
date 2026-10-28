@@ -534,6 +534,12 @@ mod tests {
                 },
                 auto_light: rng.chance(2),
                 output: format!("render {}", rng.below(10)),
+                format: if rng.chance(2) {
+                    crate::ImageFormat::Exr
+                } else {
+                    crate::ImageFormat::Png
+                },
+                naming: crate::FrameNaming::ALL[rng.below(3)],
                 ..RenderSettings::default()
             }),
             _ => SceneEdit::Insert {

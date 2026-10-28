@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 8 — Offline renderer (v0.8) |
-| Last step done | 8.4 — The Render View (2026-10-28) |
-| Next step | 8.5 — Frame ranges to numbered files; EXR output |
-| Tests | 514, all passing; clippy and rustfmt clean |
+| Last step done | 8.5 — Frame ranges and OpenEXR (2026-10-29); Phase 8 complete |
+| Next step | Phase 9 — plan it in detail (splines, generators, deformers, …) |
+| Tests | 521, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -692,6 +692,7 @@ Phase 7 is complete.
 | 8.2 | Render Settings (Ctrl+B, Render menu, toolbar): a window with Output (size, presets, Lock Ratio, frame range and step), Save (file, PNG, alpha), Sampling (samples, bounces) and Options (Auto Light) pages; the settings live in the document, are undoable and saved in `.g4d`; the renderer and its example take them | 499 |
 | 8.3 | The Picture Viewer (Shift+R, Render menu, toolbar): renders run in the background and sharpen pass by pass, can be stopped, are saved where Render Settings say, and stay in a history; zoom, pan, Save As | 511 |
 | 8.4 | The Render View (Ctrl+R, Render menu, toolbar): the active view rendered in place at its size, sharpening pass by pass, cleared by Esc or as soon as the view, the scene, the settings or the frame change | 514 |
+| 8.5 | Frame ranges and OpenEXR: Render to Picture Viewer renders every frame of the Render Settings' range (at its step, through a linked camera that may move) and saves each finished frame as a numbered PNG or OpenEXR file (Format, Name on the Save page) | 521 |
 
 *Problems and solutions:*
 - **What the renderer sees.** The evaluation was built for the viewport (editor
@@ -841,6 +842,48 @@ Phase 7 is complete.
   0.1 s at its size (16 samples), with the status line in the corner and the
   button lit; Esc brought the normal view back. Clearing on camera moves, edits,
   settings, frames and view changes is covered by a headless viewport test.
+
+**8.5 — Frame ranges and OpenEXR**
+
+*Problems and solutions:*
+- **OpenEXR without a heavy dependency.** The format's simplest form — one
+  part, scanlines, 16-bit floats, ZIP blocks of 16 lines — is written by hand
+  (about a hundred lines): the header attributes, an offset table filled in as
+  blocks are written, and each block's bytes split into even and odd halves and
+  delta-coded before zlib, as the format expects. zlib comes from `flate2` with
+  the pure-Rust backend `zip` already uses, half floats from `half` (both were
+  already in the dependency tree). A writer checked only against itself proves
+  little, so the tests decode the files with the independent `exr` crate (dev
+  only): every value, both channel sets, a short last block, clamping.
+- **Linear light for EXR, screen colours for PNG.** The worker now hands every
+  finished frame back in the renderer's own linear, premultiplied values; the
+  editor converts to sRGB bytes only for PNG, and writes EXR straight from them,
+  so highlights brighter than white survive.
+- **Saving as frames finish.** Each frame is saved the moment it is done, not
+  at the end, so a long animation that is stopped (or a crash) keeps what was
+  rendered; a failing folder shows one alert, not one per frame.
+- **Animated cameras.** A render that looks through a camera object follows
+  it: the worker evaluates the scene at each frame and places the camera where
+  it is drawn then (animation, Target tags), falling back to the view's camera
+  if it was deleted. A test renders three frames of a moving camera and gets
+  three different pictures.
+- **Older files.** Documents saved with 8.2's Render Settings have no format or
+  naming; both are optional in the file (omitted while default), so those files
+  load with PNG and `Name0000`, and the golden file is unchanged.
+- **One frame, no number.** Numbering only when the range gives several
+  pictures, so a still keeps the plain name it had in 8.3 (`shot.png`).
+- **On-screen testing:** a document with Frame Range 0–4, Frame Step 2,
+  OpenEXR, Name.0000, Alpha Channel and File `anim/shot` rendered three frames
+  in 0.3 s and wrote `anim/shot.0000.exr`, `shot.0002.exr`, `shot.0004.exr`
+  next to it; the Picture Viewer showed one History entry ("3 frames"), the
+  frame count, and the transparent background over the checkerboard; the Save
+  page said "Saves 3 frames as …shot.0000.exr …".
+- **Driving the app:** posted key presses go through the user's (Greek)
+  keyboard layout, which added Greek letters to a typed path, and character
+  messages alone are ignored; the test document was prepared instead (the
+  golden file with Render Settings added) and opened from the command line.
+
+Phase 8 is complete.
 
 ---
 

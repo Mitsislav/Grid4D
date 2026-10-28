@@ -63,9 +63,14 @@ gltf = { version = "1.4.1", default-features = false, features = ["utils", "name
 # Wavefront OBJ reading (std HashMap instead of the default ahash).
 tobj = { version = "4.0.5", default-features = false }
 
-# Final rendering: tiles in parallel (grid4d-raytrace); PNG for its example and tests.
+# Final rendering: tiles in parallel (grid4d-raytrace).
 rayon = "1.10"
+# Rendered pictures (grid4d-io): PNG; OpenEXR written by hand with zlib (the
+# backend zip already uses) and half floats. `exr` (dev only) reads them back in tests.
 png = "0.18"
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+half = "2.7"
+exr = "1.73"
 
 # Diagnostics
 log = "0.4"

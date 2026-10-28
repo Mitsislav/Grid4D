@@ -32,6 +32,75 @@ impl FrameRange {
     }
 }
 
+/// The file format of saved pictures.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ImageFormat {
+    /// sRGB, 8 bits per channel.
+    #[default]
+    Png,
+    /// OpenEXR: linear light in 16-bit floats (values above 1 kept).
+    Exr,
+}
+
+impl ImageFormat {
+    pub const ALL: [Self; 2] = [Self::Png, Self::Exr];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Png => "PNG (8 bit)",
+            Self::Exr => "OpenEXR (16-bit float)",
+        }
+    }
+
+    /// The file extension, without the dot.
+    #[must_use]
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Exr => "exr",
+        }
+    }
+}
+
+/// How frame numbers join the file name of an animation's pictures.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum FrameNaming {
+    /// `shot0012.png`
+    #[default]
+    Name0000,
+    /// `shot.0012.png`
+    NameDot0000,
+    /// `shot_0012.png`
+    NameUnderscore0000,
+}
+
+impl FrameNaming {
+    pub const ALL: [Self; 3] = [Self::Name0000, Self::NameDot0000, Self::NameUnderscore0000];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Name0000 => "Name0000",
+            Self::NameDot0000 => "Name.0000",
+            Self::NameUnderscore0000 => "Name_0000",
+        }
+    }
+
+    /// What follows the name for `frame`: four digits at least, a minus sign
+    /// before negative frames.
+    #[must_use]
+    pub fn number(self, frame: i32) -> String {
+        let sign = if frame < 0 { "-" } else { "" };
+        let digits = frame.unsigned_abs();
+        match self {
+            Self::Name0000 => format!("{sign}{digits:04}"),
+            Self::NameDot0000 => format!(".{sign}{digits:04}"),
+            Self::NameUnderscore0000 => format!("_{sign}{digits:04}"),
+        }
+    }
+}
+
 /// The document's render settings. Change them through
 /// [`SceneEdit::SetRender`](crate::SceneEdit::SetRender), which keeps them
 /// [`validated`](Self::validated).
@@ -59,6 +128,10 @@ pub struct RenderSettings {
     pub output: String,
     /// The saved picture keeps its transparency; otherwise the background is black.
     pub alpha: bool,
+    /// The file format of saved pictures.
+    pub format: ImageFormat,
+    /// How frame numbers join the file names of an animation's pictures.
+    pub naming: FrameNaming,
 }
 
 impl Default for RenderSettings {
@@ -75,6 +148,8 @@ impl Default for RenderSettings {
             save: true,
             output: String::new(),
             alpha: false,
+            format: ImageFormat::Png,
+            naming: FrameNaming::Name0000,
         }
     }
 }
@@ -84,8 +159,6 @@ impl RenderSettings {
     pub const MAX_SAMPLES: u32 = 4096;
     pub const MAX_BOUNCES: u32 = 64;
     pub const MAX_FRAME_STEP: u32 = 10_000;
-    /// The extension of saved pictures (PNG; OpenEXR is planned).
-    pub const EXTENSION: &str = "png";
 
     /// The settings with every value in its range.
     #[must_use]
@@ -125,12 +198,26 @@ impl RenderSettings {
         u64::try_from(length).map_or(1, |length| length / u64::from(self.frame_step.max(1)) + 1)
     }
 
-    /// The file a finished render is saved to, for a document saved at
-    /// `document` (`None`: not saved yet). `None` when Save is off, File is
-    /// empty, or File is relative and the document has no folder yet. `.png` is
-    /// added unless the name ends with it.
+    /// Whether the range gives several pictures, saved as numbered files.
+    #[must_use]
+    pub fn is_animation(&self, time: &TimeState) -> bool {
+        self.frame_count(time) > 1
+    }
+
+    /// The file a single finished picture is saved to: [`Self::output_file`]
+    /// without a frame number.
     #[must_use]
     pub fn output_path(&self, document: Option<&Path>) -> Option<PathBuf> {
+        self.output_file(document, None)
+    }
+
+    /// The file a finished picture is saved to, for a document saved at
+    /// `document` (`None`: not saved yet): File, with `frame`'s number by
+    /// [`Self::naming`] for an animation, and the [`Self::format`]'s extension
+    /// (a typed `.png` or `.exr` is replaced). `None` when Save is off, File is
+    /// empty, or File is relative and the document has no folder yet.
+    #[must_use]
+    pub fn output_file(&self, document: Option<&Path>, frame: Option<i32>) -> Option<PathBuf> {
         let typed = self.output.trim();
         if !self.save || typed.is_empty() {
             return None;
@@ -142,16 +229,21 @@ impl RenderSettings {
         } else {
             document?.parent()?.join(typed)
         };
-        let has_extension = path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case(Self::EXTENSION));
-        if !has_extension {
-            let mut name = path.into_os_string();
-            name.push(".");
-            name.push(Self::EXTENSION);
-            path = PathBuf::from(name);
+        let typed_image = path.extension().is_some_and(|ext| {
+            ImageFormat::ALL
+                .iter()
+                .any(|format| ext.eq_ignore_ascii_case(format.extension()))
+        });
+        if typed_image {
+            path.set_extension("");
         }
-        Some(path)
+        let mut name = path.into_os_string();
+        if let Some(frame) = frame {
+            name.push(self.naming.number(frame));
+        }
+        name.push(".");
+        name.push(self.format.extension());
+        Some(PathBuf::from(name))
     }
 }
 
@@ -219,7 +311,8 @@ mod tests {
         settings.output = "out/final.PNG".to_owned();
         assert_eq!(
             settings.output_path(Some(document)),
-            Some(PathBuf::from("/projects/shot/out/final.PNG"))
+            Some(PathBuf::from("/projects/shot/out/final.png")),
+            "a typed image extension gives way to the format's"
         );
         settings.output = "take.v2".to_owned();
         assert_eq!(
@@ -234,5 +327,39 @@ mod tests {
 
         settings.save = false;
         assert_eq!(settings.output_path(None), None, "Save off");
+    }
+
+    #[test]
+    fn animations_are_numbered_files() {
+        let document = Path::new("/projects/shot/scene.g4d");
+        let mut settings = RenderSettings {
+            output: "renders/shot.png".to_owned(),
+            ..RenderSettings::default()
+        };
+        let file = |settings: &RenderSettings, frame| settings.output_file(Some(document), frame).unwrap();
+        assert_eq!(
+            file(&settings, Some(12)),
+            PathBuf::from("/projects/shot/renders/shot0012.png")
+        );
+        assert_eq!(file(&settings, None), PathBuf::from("/projects/shot/renders/shot.png"));
+        settings.naming = FrameNaming::NameDot0000;
+        settings.format = ImageFormat::Exr;
+        assert_eq!(
+            file(&settings, Some(12345)),
+            PathBuf::from("/projects/shot/renders/shot.12345.exr")
+        );
+        settings.naming = FrameNaming::NameUnderscore0000;
+        assert_eq!(
+            file(&settings, Some(-3)),
+            PathBuf::from("/projects/shot/renders/shot_-0003.exr")
+        );
+
+        let mut time = TimeState::default();
+        time.set_range(0, 90);
+        assert!(!settings.is_animation(&time), "the current frame");
+        settings.frames = FrameRange::Manual { from: 10, to: 10 };
+        assert!(!settings.is_animation(&time), "a range of one frame");
+        settings.frames = FrameRange::All;
+        assert!(settings.is_animation(&time));
     }
 }

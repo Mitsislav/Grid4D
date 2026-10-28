@@ -69,7 +69,7 @@ pub use crate::{
         remap_objects,
     },
     obj::{export_obj, import_obj, obj_text},
-    picture::{PngChannels, png_bytes, save_png},
+    picture::{Channels, exr_bytes, png_bytes, save_exr, save_png},
 };
 
 /// File extension, without the dot.

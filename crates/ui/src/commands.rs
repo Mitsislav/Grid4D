@@ -299,11 +299,11 @@ pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mu
         editor.seen_frame = Some(frame);
         changed = doc.scene.discard_unkeyed(f64::from(frame));
     }
-    // News from a render in the background; a finished one is saved.
+    // News from renders in the background; finished frames are saved.
     let (rendered, finished) = editor.renders.poll();
     changed |= rendered;
-    if let Some(number) = finished {
-        file::save_finished_render(editor, number);
+    for frame in &finished {
+        file::save_rendered_frame(editor, frame);
     }
     if editor.commands.is_empty() {
         return changed;
@@ -335,7 +335,9 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::MergeFile(path) => file::merge(&path, doc, editor, viewport),
         EditorCommand::Export => file::export(doc, editor),
         EditorCommand::RenderToPictureViewer => {
-            editor.renders.start(doc, viewport.camera(), editor.file.path());
+            editor
+                .renders
+                .start(doc, viewport.camera(), viewport.view_object(), editor.file.path());
             editor.renders.viewer_open = true;
         }
         EditorCommand::RenderView => {

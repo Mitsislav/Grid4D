@@ -6,7 +6,7 @@
 //! through [`LiveEdit`].
 
 use egui::{Button, ComboBox, DragValue, Frame, Grid, Id, RichText, TextEdit, Ui, Window};
-use grid4d_scene::{Document, FrameRange, RenderSettings, SceneEdit, TimeState};
+use grid4d_scene::{Document, FrameNaming, FrameRange, ImageFormat, RenderSettings, SceneEdit, TimeState};
 
 use crate::{
     EditorCommand, EditorState,
@@ -117,7 +117,7 @@ impl RenderSettingsPanel {
                         let Document { render, time, .. } = doc;
                         match self.page {
                             Page::Output => output_page(ui, render, time, self.ratio),
-                            Page::Save => save_page(ui, render, editor),
+                            Page::Save => save_page(ui, render, time, editor),
                             Page::Sampling => sampling_page(ui, render),
                             Page::Options => options_page(ui, render),
                         }
@@ -272,13 +272,13 @@ fn output_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, ratio: (u3
             ui.end_row();
         });
     ui.label(
-        RichText::new("Pictures render the current frame; whole frame ranges are planned.")
+        RichText::new("Render to Picture Viewer renders every frame of the range; the Render View the current one.")
             .size(11.0)
             .color(p::TEXT_FAINT),
     );
 }
 
-fn save_page(ui: &mut Ui, s: &mut RenderSettings, editor: &mut EditorState) {
+fn save_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, editor: &mut EditorState) {
     section_heading(ui, "Save");
     Grid::new("grid4d.render.save")
         .num_columns(2)
@@ -300,7 +300,28 @@ fn save_page(ui: &mut Ui, s: &mut RenderSettings, editor: &mut EditorState) {
             ui.end_row();
 
             attr_label(ui, "Format", LABEL_WIDTH);
-            ui.label("PNG (8 bit)");
+            ComboBox::from_id_salt("grid4d.render.format")
+                .selected_text(s.format.label())
+                .width(190.0)
+                .show_ui(ui, |ui| {
+                    for format in ImageFormat::ALL {
+                        ui.selectable_value(&mut s.format, format, format.label());
+                    }
+                })
+                .response
+                .on_hover_text("OpenEXR keeps the light's full range, in linear colour, for compositing");
+            ui.end_row();
+            attr_label(ui, "Name", LABEL_WIDTH);
+            ComboBox::from_id_salt("grid4d.render.naming")
+                .selected_text(s.naming.label())
+                .width(FIELD_WIDTH + 30.0)
+                .show_ui(ui, |ui| {
+                    for naming in FrameNaming::ALL {
+                        ui.selectable_value(&mut s.naming, naming, naming.label());
+                    }
+                })
+                .response
+                .on_hover_text("How frame numbers join the file names of an animation");
             ui.end_row();
             attr_label(ui, "Alpha Channel", LABEL_WIDTH);
             ui.checkbox(&mut s.alpha, "")
@@ -311,6 +332,11 @@ fn save_page(ui: &mut Ui, s: &mut RenderSettings, editor: &mut EditorState) {
         (false, _) => "Renders are not saved.".to_owned(),
         (true, true) => "No file: renders are not saved.".to_owned(),
         (true, false) => match s.output_path(editor.file.path()) {
+            Some(_) if s.is_animation(time) => {
+                let first = s.frames(time).next().unwrap_or(0);
+                let file = s.output_file(editor.file.path(), Some(first)).unwrap_or_default();
+                format!("Saves {} frames as {} …", s.frame_count(time), file.display())
+            }
             Some(path) => format!("Saves to {}", path.display()),
             None => "Relative to the document's folder: renders are saved once the document is saved.".to_owned(),
         },

@@ -17,6 +17,11 @@ zip.workspace = true
 gltf.workspace = true
 tobj.workspace = true
 png.workspace = true
+flate2.workspace = true
+half.workspace = true
+
+[dev-dependencies]
+exr.workspace = true
 
 [lints]
 workspace = true
