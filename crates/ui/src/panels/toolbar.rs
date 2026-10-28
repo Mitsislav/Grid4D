@@ -53,12 +53,16 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
         group_gap(ui);
 
         icon_button(ui, Icon::RenderView, disabled, "Render View (Ctrl+R) — planned");
-        icon_button(
+        if icon_button(
             ui,
             Icon::RenderPictureViewer,
-            disabled,
-            "Render to Picture Viewer (Shift+R) — planned",
-        );
+            IconStyle::default(),
+            "Render to Picture Viewer (Shift+R)",
+        )
+        .clicked()
+        {
+            editor.commands.push(EditorCommand::RenderToPictureViewer);
+        }
         let settings = IconStyle {
             selected: editor.show_render_settings,
             ..IconStyle::default()

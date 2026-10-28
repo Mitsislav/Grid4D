@@ -47,6 +47,7 @@ mod gltf_export;
 mod gltf_import;
 mod import;
 mod obj;
+mod picture;
 mod v1;
 mod v2;
 mod v3;
@@ -68,6 +69,7 @@ pub use crate::{
         remap_objects,
     },
     obj::{export_obj, import_obj, obj_text},
+    picture::{PngChannels, png_bytes, save_png},
 };
 
 /// File extension, without the dot.

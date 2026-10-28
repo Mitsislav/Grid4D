@@ -14,7 +14,11 @@ use egui::ViewportCommand;
 use grid4d_io::{ObjectEntry, Objects};
 use grid4d_scene::{Document, MeshHandle, NodeData, NodeId, ObjectKind, RenderSettings, SceneEdit, Tags};
 
-use crate::{EditorCommand, EditorState, History, ViewportPanel, recent::RecentFiles};
+use crate::{
+    EditorCommand, EditorState, History, ViewportPanel,
+    recent::RecentFiles,
+    rendering::{Picture, SaveTarget},
+};
 
 /// Every extension File ▸ Open and File ▸ Merge accept.
 const ANY_EXTENSIONS: [&str; 5] = ["g4d", "oc4d", "gltf", "glb", "obj"];
@@ -461,6 +465,95 @@ pub(crate) fn export(doc: &Document, editor: &mut EditorState) {
     }
 }
 
+/// Saves picture `number`, which has just finished, where its Render Settings
+/// said (its folder made if needed), and notes the outcome on the picture; a
+/// failure also shows an alert.
+pub(crate) fn save_finished_render(editor: &mut EditorState, number: u32) {
+    let Some(picture) = editor.renders.picture(number) else {
+        return;
+    };
+    let note = match &picture.target {
+        SaveTarget::Nowhere(why) => (*why).to_owned(),
+        SaveTarget::File(path) => match write_picture(picture, path) {
+            Ok(()) => format!("Saved to {}", path.display()),
+            Err(err) => {
+                editor.file.alert = Some(Alert {
+                    title: "Could Not Save the Render",
+                    message: format!(
+                        "{}
+
+{err}",
+                        path.display()
+                    ),
+                });
+                format!("Not saved: {err}")
+            }
+        },
+    };
+    editor.renders.set_note(number, note);
+}
+
+/// The Picture Viewer's Save As…: asks where, then saves the shown picture as
+/// PNG (with transparency if it was rendered with Alpha Channel).
+pub(crate) fn save_render_as(doc: &Document, editor: &mut EditorState) {
+    let (renders, file) = (&mut editor.renders, &mut editor.file);
+    let Some(picture) = renders.shown_picture().filter(|p| p.has_pixels()) else {
+        return;
+    };
+    let current = match &picture.target {
+        SaveTarget::File(path) => Some(path.as_path()),
+        SaveTarget::Nowhere(_) => None,
+    };
+    let directory = current
+        .and_then(Path::parent)
+        .or_else(|| file.directory())
+        .map(Path::to_path_buf);
+    let suggested = current.and_then(Path::file_name).map_or_else(
+        || {
+            format!(
+                "{} {}.{}",
+                file_stem_for(&file.display_name(doc)),
+                picture.number,
+                RenderSettings::EXTENSION
+            )
+        },
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let Some(mut path) = file.dialogs.pick_render_output(directory.as_deref(), &suggested) else {
+        return;
+    };
+    if !path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case(RenderSettings::EXTENSION))
+    {
+        path.as_mut_os_string().push(".png");
+    }
+    let number = picture.number;
+    match write_picture(picture, &path) {
+        Ok(()) => renders.set_note(number, format!("Saved to {}", path.display())),
+        Err(err) => {
+            file.alert = Some(Alert {
+                title: "Could Not Save the Render",
+                message: format!(
+                    "{}
+
+{err}",
+                    path.display()
+                ),
+            });
+        }
+    }
+}
+
+/// Writes `picture` as PNG to `path`, making its folder if needed.
+fn write_picture(picture: &Picture, path: &Path) -> Result<(), grid4d_io::IoError> {
+    if let Some(folder) = path.parent().filter(|folder| !folder.as_os_str().is_empty()) {
+        std::fs::create_dir_all(folder)?;
+    }
+    let (pixels, channels) = picture.pixels();
+    grid4d_io::save_png(path, picture.width, picture.height, channels, pixels)
+}
+
 /// Render Settings ▸ Save ▸ File ▸ …: asks where renders go and returns the
 /// File setting for it — relative to the document's folder (with `/`) when the
 /// file is inside it, else the full path — or `None` if cancelled.
@@ -873,6 +966,35 @@ mod tests {
             f.doc.render.output,
             f.dir.join("renders").join("still.png").to_string_lossy()
         );
+    }
+
+    #[test]
+    fn a_finished_render_is_saved_where_the_settings_say() {
+        let mut f = Fixture::new("render_save", None, Some("shot.g4d"));
+        crate::rendering::tests::small(&mut f.doc, 2);
+        f.doc.render.alpha = true;
+        f.run(&[EditorCommand::SaveAs, EditorCommand::BrowseRenderOutput]);
+        f.run(&[EditorCommand::RenderToPictureViewer]);
+        assert!(f.editor.renders.viewer_open);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while f.editor.renders.is_rendering() {
+            assert!(std::time::Instant::now() < deadline, "the render did not end");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            f.run(&[]);
+        }
+        let file = f.dir.join("renders").join("still.png");
+        let picture = f.editor.renders.shown_picture().unwrap();
+        assert_eq!(picture.note, format!("Saved to {}", file.display()));
+        let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&file).unwrap()));
+        let info = decoder.read_info().unwrap().info().clone();
+        assert_eq!((info.width, info.height), (24, 14));
+        assert_eq!(info.color_type, png::ColorType::Rgba, "Alpha Channel on");
+
+        // Save As writes the shown picture again (the fake dialog answers the same file).
+        std::fs::remove_file(&file).unwrap();
+        f.run(&[EditorCommand::SaveRenderAs]);
+        assert!(file.exists());
+        assert!(f.editor.file.alert.is_none());
     }
 
     #[test]

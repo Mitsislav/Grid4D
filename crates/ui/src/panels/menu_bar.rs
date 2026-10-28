@@ -339,7 +339,13 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
 
         ui.menu_button("Render", |ui| {
             planned(ui, "Render View", "Ctrl+R");
-            planned(ui, "Render to Picture Viewer", "Shift+R");
+            command(
+                ui,
+                editor,
+                "Render to Picture Viewer",
+                "Shift+R",
+                EditorCommand::RenderToPictureViewer,
+            );
             ui.separator();
             let settings = Button::new("Edit Render Settings…")
                 .shortcut_text("Ctrl+B")
@@ -360,6 +366,11 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 .selected(editor.bottom == crate::BottomPanel::Materials);
             if ui.add(materials).clicked() {
                 editor.bottom = crate::BottomPanel::Materials;
+                ui.close();
+            }
+            let viewer = Button::new("Picture Viewer").selected(editor.renders.viewer_open);
+            if ui.add(viewer).clicked() {
+                editor.renders.viewer_open = !editor.renders.viewer_open;
                 ui.close();
             }
             for (tab, label, shortcut) in [

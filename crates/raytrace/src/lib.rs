@@ -23,4 +23,4 @@ mod trace;
 pub use camera::{CameraProjection, RenderCamera};
 pub use image::Image;
 pub use scene::RenderScene;
-pub use trace::{RenderOptions, render};
+pub use trace::{Progressive, RenderControl, RenderOptions, render};

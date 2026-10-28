@@ -1,6 +1,8 @@
 //! The path tracer: per pixel, samples of paths from the camera that pick up
 //! the lights' light at every surface they meet.
 
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
 use glam::Vec3;
 use grid4d_scene::{Falloff, LightShadow, LightType, RenderSettings};
 use rayon::prelude::*;
@@ -64,36 +66,143 @@ impl From<&RenderSettings> for RenderOptions {
 /// is the same however the work is shared.
 #[must_use]
 pub fn render(scene: &RenderScene, camera: &RenderCamera, options: &RenderOptions) -> Image {
-    let width = options.width.clamp(1, MAX_SIZE);
-    let height = options.height.clamp(1, MAX_SIZE);
-    let mut image = Image::new(width, height);
-    let automatic = [automatic_light(camera)];
-    let lights = if scene.lights().is_empty() && options.auto_light {
-        &automatic[..]
-    } else {
-        scene.lights()
-    };
-    let job = Job {
-        scene,
-        lights,
-        camera,
-        width,
-        height,
-        samples: options.samples.clamp(1, MAX_SAMPLES),
-        bounces: options.bounces,
-        seed: options.seed,
-    };
-    let row_length = usize::try_from(width).unwrap_or(1);
-    image
-        .pixels
-        .par_chunks_mut(row_length)
-        .zip(0..height)
-        .for_each(|(row, y)| {
-            for (pixel, x) in row.iter_mut().zip(0..width) {
-                *pixel = job.pixel(x, y);
-            }
-        });
-    image
+    let mut progressive = Progressive::new(options);
+    progressive.add_samples(scene, camera, options, u32::MAX, &RenderControl::default());
+    progressive.image()
+}
+
+/// Lets another thread follow a render and stop it.
+#[derive(Debug, Default)]
+pub struct RenderControl {
+    cancelled: AtomicBool,
+    progress: AtomicU64,
+}
+
+impl RenderControl {
+    /// Asks the render to stop: rows not started yet are skipped.
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+
+    /// Work done so far, in rows × samples (a whole render: height × samples).
+    #[must_use]
+    pub fn progress(&self) -> u64 {
+        self.progress.load(Ordering::Relaxed)
+    }
+}
+
+/// A render built up in passes, for showing it while it sharpens: each pass
+/// adds samples to every pixel. Samples are added in the same order as one
+/// [`render`] adds them, so the finished picture is exactly the same.
+#[derive(Clone, Debug)]
+pub struct Progressive {
+    width: u32,
+    height: u32,
+    /// Per pixel: the sum of its samples' colours, and how many met a surface.
+    sums: Vec<[f32; 4]>,
+    samples: u32,
+}
+
+impl Progressive {
+    /// No samples yet, at the size of `options`.
+    #[must_use]
+    pub fn new(options: &RenderOptions) -> Self {
+        let width = options.width.clamp(1, MAX_SIZE);
+        let height = options.height.clamp(1, MAX_SIZE);
+        let count = usize::try_from(u64::from(width) * u64::from(height)).unwrap_or(0);
+        Self {
+            width,
+            height,
+            sums: vec![[0.0; 4]; count],
+            samples: 0,
+        }
+    }
+
+    /// Samples per pixel so far.
+    #[must_use]
+    pub fn samples(&self) -> u32 {
+        self.samples
+    }
+
+    /// Whether every sample of `options` is in.
+    #[must_use]
+    pub fn is_complete(&self, options: &RenderOptions) -> bool {
+        self.samples >= options.samples.clamp(1, MAX_SAMPLES)
+    }
+
+    /// Adds up to `count` samples per pixel (never more than `options` asks
+    /// for in all). Returns `false` if `control` was cancelled before the pass
+    /// was done: some rows then lack the pass, so the render must be dropped.
+    pub fn add_samples(
+        &mut self,
+        scene: &RenderScene,
+        camera: &RenderCamera,
+        options: &RenderOptions,
+        count: u32,
+        control: &RenderControl,
+    ) -> bool {
+        let total = options.samples.clamp(1, MAX_SAMPLES);
+        let first = self.samples.min(total);
+        let last = first.saturating_add(count).min(total);
+        if first == last {
+            return !control.is_cancelled();
+        }
+        let automatic = [automatic_light(camera)];
+        let lights = if scene.lights().is_empty() && options.auto_light {
+            &automatic[..]
+        } else {
+            scene.lights()
+        };
+        let job = Job {
+            scene,
+            lights,
+            camera,
+            width: self.width,
+            height: self.height,
+            bounces: options.bounces,
+            seed: options.seed,
+        };
+        let row_length = usize::try_from(self.width).unwrap_or(1);
+        let pass = u64::from(last - first);
+        self.sums
+            .par_chunks_mut(row_length)
+            .zip(0..self.height)
+            .for_each(|(row, y)| {
+                if control.is_cancelled() {
+                    return;
+                }
+                for (sum, x) in row.iter_mut().zip(0..self.width) {
+                    job.add_samples(x, y, first..last, sum);
+                }
+                control.progress.fetch_add(pass, Ordering::Relaxed);
+            });
+        if control.is_cancelled() {
+            return false;
+        }
+        self.samples = last;
+        true
+    }
+
+    /// The picture so far: each pixel the average of its samples, colour
+    /// premultiplied by coverage. Transparent before the first pass.
+    #[must_use]
+    pub fn image(&self) -> Image {
+        let mut image = Image::new(self.width, self.height);
+        if self.samples == 0 {
+            return image;
+        }
+        let n = to_f32(self.samples);
+        for (pixel, &[r, g, b, covered]) in image.pixels.iter_mut().zip(&self.sums) {
+            let colour = Vec3::new(r, g, b) / n;
+            *pixel = [colour.x, colour.y, colour.z, covered / n];
+        }
+        image
+    }
 }
 
 /// What every pixel of one render shares.
@@ -103,32 +212,29 @@ struct Job<'a> {
     camera: &'a RenderCamera,
     width: u32,
     height: u32,
-    samples: u32,
     bounces: u32,
     seed: u32,
 }
 
 impl Job<'_> {
-    /// One pixel: the average of its samples, colour premultiplied by coverage.
-    fn pixel(&self, x: u32, y: u32) -> [f32; 4] {
+    /// Adds samples `samples` of pixel (`x`, `y`) to `sum`: their colours, and
+    /// one per sample that met a surface.
+    fn add_samples(&self, x: u32, y: u32, samples: std::ops::Range<u32>, sum: &mut [f32; 4]) {
         let (w, h) = (to_f32(self.width), to_f32(self.height));
         let aspect = w / h;
-        let mut sum = Vec3::ZERO;
-        let mut covered = 0.0;
-        for sample in 0..self.samples {
+        for sample in samples {
             let mut rng = Rng::new(x, y, sample, self.seed);
             // A point spread over the pixel: smooth edges.
             let px = (to_f32(x) + rng.next_f32()) / w * 2.0 - 1.0;
             let py = 1.0 - (to_f32(y) + rng.next_f32()) / h * 2.0;
             let (origin, dir) = self.camera.ray(px, py, aspect);
             if let Some(radiance) = self.trace(origin, dir, &mut rng) {
-                sum += radiance;
-                covered += 1.0;
+                sum[0] += radiance.x;
+                sum[1] += radiance.y;
+                sum[2] += radiance.z;
+                sum[3] += 1.0;
             }
         }
-        let n = to_f32(self.samples);
-        let colour = sum / n;
-        [colour.x, colour.y, colour.z, covered / n]
     }
 
     /// The light coming back along one path; `None` if the first ray meets no
@@ -436,5 +542,43 @@ mod tests {
             },
         );
         assert_ne!(a, reseeded, "another seed, another noise");
+    }
+
+    #[test]
+    fn passes_add_up_to_the_same_picture() {
+        let scene = scene_of(&Document::with_demo_scene());
+        let (min, max) = scene.bounds().unwrap();
+        let camera = RenderCamera::framing(min, max, 40f32.to_radians());
+        let options = options(20, 7, 1);
+        let whole = render(&scene, &camera, &options);
+
+        let control = RenderControl::default();
+        let mut progressive = Progressive::new(&options);
+        assert_eq!(progressive.image().pixels[0], [0.0; 4], "transparent before any pass");
+        for count in [1, 1, 2, 100] {
+            assert!(progressive.add_samples(&scene, &camera, &options, count, &control));
+        }
+        assert!(progressive.is_complete(&options));
+        assert_eq!(progressive.samples(), 7, "never more than asked for");
+        assert_eq!(progressive.image(), whole, "exactly the same picture");
+        assert_eq!(control.progress(), 20 * 7, "rows × samples");
+
+        let mut first = Progressive::new(&options);
+        first.add_samples(&scene, &camera, &options, 1, &control);
+        assert_ne!(first.image(), whole, "one sample is noisier");
+    }
+
+    #[test]
+    fn a_cancelled_render_stops() {
+        let scene = scene_of(&Document::with_demo_scene());
+        let (min, max) = scene.bounds().unwrap();
+        let camera = RenderCamera::framing(min, max, 40f32.to_radians());
+        let options = options(16, 4, 1);
+        let control = RenderControl::default();
+        control.cancel();
+        let mut progressive = Progressive::new(&options);
+        assert!(!progressive.add_samples(&scene, &camera, &options, 4, &control));
+        assert_eq!(progressive.samples(), 0);
+        assert_eq!(control.progress(), 0, "no row was rendered");
     }
 }

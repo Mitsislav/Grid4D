@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 8 — Offline renderer (v0.8) |
-| Last step done | 8.2 — Render Settings (2026-10-21) |
-| Next step | 8.3 — Picture Viewer: rendering in the application |
-| Tests | 499, all passing; clippy and rustfmt clean |
+| Last step done | 8.3 — The Picture Viewer (2026-10-28) |
+| Next step | 8.4 — Render View: rendering into the active viewport |
+| Tests | 511, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -690,6 +690,7 @@ Phase 7 is complete.
 |------|-------|-------|
 | 8.1 | The path tracer core: a new crate `grid4d-raytrace` that renders the scene (render visibility and levels) through a camera — every light with its Shadow setting, diffuse and glossy/metal materials, luminance, two bounces, the automatic light, a transparent background — repeatably and in parallel; an example renders documents to PNG; a reference-image test | 485 |
 | 8.2 | Render Settings (Ctrl+B, Render menu, toolbar): a window with Output (size, presets, Lock Ratio, frame range and step), Save (file, PNG, alpha), Sampling (samples, bounces) and Options (Auto Light) pages; the settings live in the document, are undoable and saved in `.g4d`; the renderer and its example take them | 499 |
+| 8.3 | The Picture Viewer (Shift+R, Render menu, toolbar): renders run in the background and sharpen pass by pass, can be stopped, are saved where Render Settings say, and stay in a history; zoom, pan, Save As | 511 |
 
 *Problems and solutions:*
 - **What the renderer sees.** The evaluation was built for the viewport (editor
@@ -770,6 +771,49 @@ Phase 7 is complete.
 - **Driving the app:** the first click after the window appears is swallowed,
   and posted drags do not reach egui's drag values; a harmless first click and
   typing into fields worked instead.
+
+**8.3 — The Picture Viewer**
+
+*Problems and solutions:*
+- **A picture that sharpens without changing the result.** Rendering in passes
+  would normally give a slightly different picture than one render, because
+  floating-point sums depend on their order. The renderer now keeps, per
+  pixel, the running sum of its samples and adds each pass's samples in sample
+  order — exactly what a single render does — so the finished picture is
+  identical (a test compares them byte for byte), and the reference image
+  still matches. `render` itself is now one pass of that.
+- **Never blocking the editor.** A render works on its own thread over a copy of
+  the scene (meshes are shared handles, so the copy is cheap); it evaluates the
+  scene for the renderer there, so even a heavy Subdivision Surface does not
+  pause the UI. The editor takes the worker's news once a frame and, while a
+  render runs, asks egui to repaint every 100 ms even with the window closed,
+  so a finished render is saved without waiting for the mouse to move.
+- **Stopping at once.** Every row checks a shared flag before it starts, so
+  Stop takes effect within a row; the pass that was cut short is dropped and
+  the picture keeps the last complete pass. A render that is replaced or
+  dropped stops its worker the same way.
+- **Passes that stay frequent.** Passes of 1, 1, 2, 4 … samples, at most 32,
+  show a first picture at once and keep refreshing on long renders; each pass
+  sends two 8-bit pictures (with and without transparency).
+- **Where the file goes is decided at the start.** The document may be saved
+  elsewhere or its settings changed while a render runs, so the target (or the
+  reason it is not saved) is fixed when the render starts. A missing folder
+  (`renders/`) is created.
+- **Paths with mixed separators.** On Windows `renders/shot` showed as
+  `…\renders/shot.png`; typed paths are now rebuilt from their parts.
+- **PNG writing.** `png` moved from the renderer's examples into `grid4d-io`
+  (`save_png`, atomic like documents), the crate that writes files.
+- **On-screen testing:** the toolbar button opened the window and rendered the
+  demo through the editor camera (1280 × 720, 16 samples in 0.5 s); with 4096
+  samples the picture sharpened while the bar and the history entry counted the
+  samples, and Stop kept the picture at 320 samples, marked stopped and not
+  saved; a second render joined the history, newest first; 100 % showed one
+  picture pixel per screen pixel. Without a file in the Render Settings the
+  status line said so.
+- **Driving the app:** the display now runs at 100 % scaling, so last week's
+  click positions (125 %) landed elsewhere — one created a sphere in a run that
+  was then discarded. Posted mouse-wheel messages did not reach the viewer, so
+  the wheel zoom is checked by a headless test instead.
 
 ---
 

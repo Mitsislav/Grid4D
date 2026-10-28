@@ -135,9 +135,10 @@ impl RenderSettings {
         if !self.save || typed.is_empty() {
             return None;
         }
-        let typed = Path::new(typed);
+        // Rebuilt from its parts: `renders/shot` shows with the platform's separators.
+        let typed: PathBuf = Path::new(typed).components().collect();
         let mut path = if typed.is_absolute() {
-            typed.to_path_buf()
+            typed
         } else {
             document?.parent()?.join(typed)
         };

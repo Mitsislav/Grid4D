@@ -965,7 +965,7 @@ Select the generator and open **Attribute Manager ▸ Object**:
 |-----------|---------|
 | Type | **Catmull-Clark (N-Gons)**: every polygon with *n* corners becomes *n* quads, then the surface is smoothed. It is the only type for now. |
 | Subdivision Viewport | How many times the viewport subdivides (0 shows the cage itself, 6 at most). Each level multiplies the polygons by about four, so keep it low (2) while modelling. |
-| Subdivision Renderer | The level for final renders (the renderer reaches the application soon; *planned*). |
+| Subdivision Renderer | The level for final renders ([§16](#16-rendering)). |
 | Linear Pre-Subdivision | Splits the cage this many times *without* smoothing before the smoothing levels, which keeps the result closer to the cage. |
 | Boundary Interpolation | How open borders (the edge of a plane) are smoothed. **Edge and Corner** keeps a border's corners in place; **Edge** rounds them off as well. |
 
@@ -1149,9 +1149,9 @@ glTF and OBJ files ([§9](#9-files)), and come along when you merge a document.
 
 A **render** is the finished picture of the scene: materials and lights as
 they look for real — soft shadows, light bouncing between surfaces, reflections —
-where the viewport only approximates them. Rendering pictures from the
-application (the Picture Viewer and the Render View) is *planned* for the next
-steps; what you set up now is how the document will be rendered.
+where the viewport only approximates them. **Render Settings** say how the
+document is rendered; the **Picture Viewer** renders it and shows the result.
+Rendering straight into the viewport (Render View, Ctrl+R) is *planned*.
 
 ### 16.1 Render Settings
 
@@ -1205,6 +1205,44 @@ The line under the settings says where the picture will go.
 
 Every change is one undo step, and the settings are saved with the document.
 
+### 16.2 The Picture Viewer
+
+**Render ▸ Render to Picture Viewer**, **Shift+R** or the toolbar button next to
+the gear renders the scene and opens the **Picture Viewer**. It renders:
+
+- the scene **at the current frame**, as it is when you start (later edits do
+  not change a render that runs);
+- through the **active view's camera** — the view's own camera, or the camera
+  object it looks through (Cameras menu) — in the picture size of the Render
+  Settings;
+- with the Render Settings' samples, bounces and Auto Light.
+
+![The Picture Viewer rendering: the picture sharpens while the bar fills](images/manual/picture-viewer-rendering.png)
+
+The picture appears after a moment and **sharpens** as more samples arrive; the
+bar at the bottom shows how far it is. You can keep working meanwhile. **Stop**
+ends the render and keeps the picture so far (marked *stopped*). Starting a new
+render while one runs stops the old one. Closing the window does not stop a
+render; **Window ▸ Picture Viewer** opens it again.
+
+**When a render finishes** it is saved where Render Settings ▸ Save says (its
+folder is made if needed), as PNG, with transparency if Alpha Channel is on.
+The line at the bottom says where it went, or why it was not saved — Save off,
+no file, or a file next to a document that was never saved. Stopped renders are
+not saved. **Save As…** saves the shown picture anywhere.
+
+![Two renders in the History; the newest is shown](images/manual/picture-viewer.png)
+
+**History**: every render of the session is listed on the right, newest first,
+with its size, samples and render time. Click one to show it again. The history
+lasts until you close Grid4D; when the pictures take more than 512 MB together,
+the oldest go.
+
+**Zoom**: **Fit** shows the whole picture (the default), **100 %** one picture
+pixel per screen pixel, **−** and **+** halve and double. The **mouse wheel**
+zooms about the pointer and **dragging** moves the picture. A picture with
+transparency shows over a grey checkerboard.
+
 ## 17. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
@@ -1251,6 +1289,7 @@ Esc cancels a chord.
 | Shift+F2 | Material Manager |
 | Ctrl+N (pointer over the Material Manager) | New material |
 | Ctrl+B | Render Settings |
+| Shift+R | Render to Picture Viewer |
 | Tab (pointer over the timeline) | Timeline / F-Curve tab |
 | H / S (pointer over the F-Curve graph) | Frame all curves / the selected keys |
 
@@ -1295,10 +1334,10 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   the per-light switches (no illumination, ambient, diffuse or specular only).
 - **Interchange and rendering**: textures, animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only); the
-  rendering pictures in the application — the Picture Viewer and the Render
-  View are next (their menu entries and buttons are disabled until then), then
-  frame ranges and OpenEXR files; several render settings per document,
-  Preview Range, a render frame rate of its own, DPI and film aspect.
+  the Render View (rendering into the viewport) is next, then frame ranges
+  and OpenEXR files; several render settings per document, Preview Range, a
+  render frame rate of its own, DPI and film aspect; a render queue, and the
+  Picture Viewer's filters, channels, comparison and animation playback.
 - The Takes, Layers and Filter panels are placeholders.
 
 See [`progress.md`](progress.md) for what changed in each step.

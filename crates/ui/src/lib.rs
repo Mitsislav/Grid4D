@@ -25,6 +25,7 @@ mod live_edit;
 mod modeling;
 pub mod panels;
 pub mod recent;
+pub mod rendering;
 pub mod shortcuts;
 pub mod theme;
 mod widgets;
@@ -39,7 +40,7 @@ pub use editor::{
 pub use file::{DocumentFile, FileAction, FileDialogs, NativeDialogs, UnsavedChoice};
 pub use history::{History, UndoGroup};
 pub use panels::{
-    AttributesPanel, CoordinatesPanel, FCurvePanel, MaterialsPanel, OutlinerPanel, RenderSettingsPanel, TimelinePanel,
-    ViewportPanel,
+    AttributesPanel, CoordinatesPanel, FCurvePanel, MaterialsPanel, OutlinerPanel, PictureViewerPanel,
+    RenderSettingsPanel, TimelinePanel, ViewportPanel,
 };
 pub use recent::RecentFiles;

@@ -21,6 +21,7 @@ pub mod menu_bar;
 pub mod mode_palette;
 pub mod optimize;
 pub mod outliner;
+pub mod picture_viewer;
 pub mod render_settings;
 pub mod status_bar;
 pub mod timeline;
@@ -33,6 +34,7 @@ pub use coordinates::CoordinatesPanel;
 pub use fcurve::FCurvePanel;
 pub use materials::MaterialsPanel;
 pub use outliner::OutlinerPanel;
+pub use picture_viewer::PictureViewerPanel;
 pub use render_settings::RenderSettingsPanel;
 pub use timeline::TimelinePanel;
 pub use viewport::ViewportPanel;
@@ -99,6 +101,18 @@ mod tests {
         assert_idle_frames_leave_the_document_alone(doc, editor);
     }
 
+    /// The Picture Viewer shows a finished render without writing anything.
+    #[test]
+    fn idle_frames_with_the_picture_viewer_do_not_touch_the_document() {
+        let mut doc = Document::with_demo_scene();
+        crate::rendering::tests::small(&mut doc, 2);
+        let mut editor = EditorState::default();
+        editor.renders.start(&doc, &grid4d_render::OrbitCamera::default(), None);
+        crate::rendering::tests::wait(&mut editor.renders);
+        editor.renders.viewer_open = true;
+        assert_idle_frames_leave_the_document_alone(doc, editor);
+    }
+
     /// The Attribute Manager and the gizmo show animated values between keys.
     #[test]
     fn idle_frames_between_keys_do_not_touch_the_document() {
@@ -125,6 +139,7 @@ mod tests {
         let mut coordinates = CoordinatesPanel::default();
         let mut materials = MaterialsPanel;
         let mut render_settings = RenderSettingsPanel::default();
+        let mut picture_viewer = PictureViewerPanel::default();
         let mut viewport = ViewportPanel::new(None);
 
         let mut frame = |doc: &mut Document, editor: &mut EditorState| {
@@ -140,6 +155,7 @@ mod tests {
                 materials.show(ui, doc, editor);
                 viewport.show(ui, doc, editor);
                 render_settings.show(ui.ctx(), doc, editor);
+                picture_viewer.show(ui.ctx(), editor);
             })
             .drop_without_applying_deltas();
             commands::apply_pending(doc, editor, &mut viewport);

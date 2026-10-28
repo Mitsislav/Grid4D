@@ -76,6 +76,13 @@ pub enum EditorCommand {
     /// Asks where renders are saved and sets the render settings' File (one
     /// undo step).
     BrowseRenderOutput,
+    /// Renders the scene at the current frame through the active view, in the
+    /// background, and opens the Picture Viewer (Shift+R). Stops a render that runs.
+    RenderToPictureViewer,
+    /// Stops the running render, keeping what it rendered.
+    StopRender,
+    /// Asks where, then saves the picture the Picture Viewer shows as PNG.
+    SaveRenderAs,
     /// Adds a tag of this kind to every selected object that has none (one undo
     /// step) and selects it on the active object.
     AddTag(grid4d_scene::TagKind),
@@ -289,6 +296,12 @@ pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mu
         editor.seen_frame = Some(frame);
         changed = doc.scene.discard_unkeyed(f64::from(frame));
     }
+    // News from a render in the background; a finished one is saved.
+    let (rendered, finished) = editor.renders.poll();
+    changed |= rendered;
+    if let Some(number) = finished {
+        file::save_finished_render(editor, number);
+    }
     if editor.commands.is_empty() {
         return changed;
     }
@@ -318,6 +331,12 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         }
         EditorCommand::MergeFile(path) => file::merge(&path, doc, editor, viewport),
         EditorCommand::Export => file::export(doc, editor),
+        EditorCommand::RenderToPictureViewer => {
+            editor.renders.start(doc, viewport.camera(), editor.file.path());
+            editor.renders.viewer_open = true;
+        }
+        EditorCommand::StopRender => editor.renders.stop(),
+        EditorCommand::SaveRenderAs => file::save_render_as(doc, editor),
         EditorCommand::BrowseRenderOutput => {
             if let Some(output) = file::pick_render_output(doc, editor) {
                 let mut settings = doc.render.clone();

@@ -13,12 +13,16 @@ grid4d-geom.workspace = true
 grid4d-eval.workspace = true
 grid4d-render.workspace = true
 grid4d-io.workspace = true
+grid4d-raytrace.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
 glam.workspace = true
 log.workspace = true
 slotmap.workspace = true
 rfd.workspace = true
+
+[dev-dependencies]
+png.workspace = true
 
 [lints]
 workspace = true

@@ -741,6 +741,8 @@ pub struct EditorState {
     pub show_optimize: bool,
     /// The Render Settings window is open (Ctrl+B).
     pub show_render_settings: bool,
+    /// The session's renders and the Picture Viewer (Shift+R).
+    pub renders: crate::rendering::Renders,
 }
 
 impl EditorState {
@@ -789,6 +791,7 @@ impl Default for EditorState {
             show_about: false,
             show_optimize: false,
             show_render_settings: false,
+            renders: crate::rendering::Renders::default(),
         }
     }
 }

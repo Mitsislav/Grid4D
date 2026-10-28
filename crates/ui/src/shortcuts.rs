@@ -28,6 +28,7 @@
 //! | `Shift+F2`     | Material Manager (bottom tab) |
 //! | `Ctrl+N` (over the Material Manager) | New material |
 //! | `Ctrl+B`       | Render Settings window open / closed |
+//! | `Shift+R`      | Render to Picture Viewer   |
 //!
 //! Two-key chords (press the first key, then the second) are listed in
 //! [`Chord::complete`]: `U~L` Loop Selection, `K~L` Loop/Path Cut, `M~M` Connect,
@@ -294,6 +295,9 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         }
         if i.modifiers.shift_only() && i.key_pressed(Key::S) {
             editor.snap.enabled = !editor.snap.enabled;
+        }
+        if i.modifiers.shift_only() && i.key_pressed(Key::R) {
+            editor.commands.push(EditorCommand::RenderToPictureViewer);
         }
         if i.modifiers.shift_only() && i.key_pressed(Key::F2) {
             editor.bottom = BottomPanel::Materials;
@@ -610,6 +614,15 @@ mod tests {
         };
         ctx.run_ui(input, |ui| handle(ui.ctx(), doc, editor))
             .drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn shift_r_renders_to_the_picture_viewer() {
+        assert_eq!(
+            press(Key::R, Modifiers::SHIFT, false),
+            [EditorCommand::RenderToPictureViewer]
+        );
+        assert!(press(Key::R, Modifiers::NONE, false).is_empty(), "R is the Rotate tool");
     }
 
     #[test]
