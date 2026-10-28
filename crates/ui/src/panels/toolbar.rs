@@ -59,12 +59,13 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
             disabled,
             "Render to Picture Viewer (Shift+R) — planned",
         );
-        icon_button(
-            ui,
-            Icon::RenderSettings,
-            disabled,
-            "Edit Render Settings (Ctrl+B) — planned",
-        );
+        let settings = IconStyle {
+            selected: editor.show_render_settings,
+            ..IconStyle::default()
+        };
+        if icon_button(ui, Icon::RenderSettings, settings, "Edit Render Settings (Ctrl+B)").clicked() {
+            editor.show_render_settings = !editor.show_render_settings;
+        }
         group_gap(ui);
 
         let others = [ObjectKindTag::Null, ObjectKindTag::Camera, ObjectKindTag::Light];

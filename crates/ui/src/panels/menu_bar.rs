@@ -341,7 +341,13 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             planned(ui, "Render View", "Ctrl+R");
             planned(ui, "Render to Picture Viewer", "Shift+R");
             ui.separator();
-            planned(ui, "Edit Render Settings…", "Ctrl+B");
+            let settings = Button::new("Edit Render Settings…")
+                .shortcut_text("Ctrl+B")
+                .selected(editor.show_render_settings);
+            if ui.add(settings).clicked() {
+                editor.show_render_settings = !editor.show_render_settings;
+                ui.close();
+            }
         });
 
         ui.menu_button("Window", |ui| {

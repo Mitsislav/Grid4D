@@ -48,6 +48,18 @@ impl Image {
         }
         bytes
     }
+
+    /// 8-bit RGB over a black background (no transparency): colours
+    /// sRGB-encoded (clamped), three bytes per pixel.
+    #[must_use]
+    pub fn to_rgb8(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.pixels.len() * 3);
+        for &[r, g, b, _] in &self.pixels {
+            // Premultiplied colour is already the colour over black.
+            bytes.extend([r, g, b].map(|c| to_byte(linear_to_srgb(c))));
+        }
+        bytes
+    }
 }
 
 /// The sRGB transfer curve, input clamped to 0…1.
@@ -81,5 +93,9 @@ mod tests {
         assert_eq!(bytes[5], 255, "clamped");
         assert_eq!(image.pixel(1, 0), Some([0.216, 1.5, 0.0, 1.0]));
         assert_eq!(image.pixel(2, 0), None);
+
+        let opaque = image.to_rgb8();
+        assert_eq!(&opaque[..3], &[188, 188, 188], "half grey over black: linear 0.5");
+        assert_eq!(&opaque[3..], &[128, 255, 0]);
     }
 }

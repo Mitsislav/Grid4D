@@ -27,6 +27,7 @@
 //! | `Shift+F5` / `Shift+F7` | Attribute / Coordinate Manager |
 //! | `Shift+F2`     | Material Manager (bottom tab) |
 //! | `Ctrl+N` (over the Material Manager) | New material |
+//! | `Ctrl+B`       | Render Settings window open / closed |
 //!
 //! Two-key chords (press the first key, then the second) are listed in
 //! [`Chord::complete`]: `U~L` Loop Selection, `K~L` Loop/Path Cut, `M~M` Connect,
@@ -306,6 +307,9 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         let ctrl_only = i.modifiers.command && !i.modifiers.shift && !i.modifiers.alt;
         if ctrl_only && i.key_pressed(Key::F9) {
             editor.animation.autokey = !editor.animation.autokey;
+        }
+        if ctrl_only && i.key_pressed(Key::B) {
+            editor.show_render_settings = !editor.show_render_settings;
         }
         for (key, forward) in [(Key::F, false), (Key::G, true)] {
             if ctrl_only
@@ -606,6 +610,16 @@ mod tests {
         };
         ctx.run_ui(input, |ui| handle(ui.ctx(), doc, editor))
             .drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn ctrl_b_opens_and_closes_the_render_settings() {
+        let (mut doc, mut editor) = (Document::with_demo_scene(), EditorState::default());
+        press_on(&mut doc, &mut editor, Key::B, Modifiers::COMMAND);
+        assert!(editor.show_render_settings);
+        assert_ne!(editor.tool, Tool::Bridge, "not the Bridge tool (B)");
+        press_on(&mut doc, &mut editor, Key::B, Modifiers::COMMAND);
+        assert!(!editor.show_render_settings);
     }
 
     #[test]

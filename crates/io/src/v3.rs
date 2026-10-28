@@ -23,9 +23,9 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
 };
 use grid4d_scene::{
-    Axis, ComponentState, Components, Curve, Document, Falloff, Interpolation, Key, LightDetails, LightShadow,
-    LightType, Material, MaterialId, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, Param, Tag, Tangents,
-    TimeSettings, Track, Transform,
+    Axis, ComponentState, Components, Curve, Document, Falloff, FrameRange, Interpolation, Key, LightDetails,
+    LightShadow, LightType, Material, MaterialId, MeshHandle, MeshId, NodeData, NodeId, ObjectKind, Param,
+    RenderSettings, Tag, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -61,6 +61,10 @@ struct DocumentDto {
     /// Material tags refer to them by index.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     materials: Vec<MaterialDto>,
+    /// Added in the course of version 3 (step 8.2); absent while they are the
+    /// defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    render: Option<RenderDto>,
 }
 
 /// A material; colours are linear RGB.
@@ -120,6 +124,90 @@ struct TimeDto {
     start: i32,
     end: i32,
     looping: bool,
+}
+
+/// The render settings; out-of-range values are clamped on loading.
+#[derive(Debug, Serialize, Deserialize)]
+struct RenderDto {
+    width: u32,
+    height: u32,
+    lock_ratio: bool,
+    frames: FrameRangeDto,
+    frame_step: u32,
+    samples: u32,
+    bounces: u32,
+    auto_light: bool,
+    save: bool,
+    output: String,
+    alpha: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FrameRangeDto {
+    Current,
+    All,
+    Manual { from: i32, to: i32 },
+}
+
+impl RenderDto {
+    /// `None` for the defaults, which files leave out.
+    fn new(settings: &RenderSettings) -> Option<Self> {
+        if *settings == RenderSettings::default() {
+            return None;
+        }
+        let RenderSettings {
+            width,
+            height,
+            lock_ratio,
+            frames,
+            frame_step,
+            samples,
+            bounces,
+            auto_light,
+            save,
+            ref output,
+            alpha,
+        } = *settings;
+        Some(Self {
+            width,
+            height,
+            lock_ratio,
+            frames: match frames {
+                FrameRange::Current => FrameRangeDto::Current,
+                FrameRange::All => FrameRangeDto::All,
+                FrameRange::Manual { from, to } => FrameRangeDto::Manual { from, to },
+            },
+            frame_step,
+            samples,
+            bounces,
+            auto_light,
+            save,
+            output: output.clone(),
+            alpha,
+        })
+    }
+
+    fn into_settings(self) -> RenderSettings {
+        RenderSettings {
+            width: self.width,
+            height: self.height,
+            lock_ratio: self.lock_ratio,
+            frames: match self.frames {
+                FrameRangeDto::Current => FrameRange::Current,
+                FrameRangeDto::All => FrameRange::All,
+                FrameRangeDto::Manual { from, to } => FrameRange::Manual { from, to },
+            },
+            frame_step: self.frame_step,
+            samples: self.samples,
+            bounces: self.bounces,
+            auto_light: self.auto_light,
+            save: self.save,
+            output: self.output,
+            alpha: self.alpha,
+        }
+        .validated()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -777,6 +865,7 @@ pub(crate) fn write(doc: &Document) -> Result<Vec<u8>, IoError> {
             },
             objects,
             materials: doc.scene.materials().iter().map(|(_, m)| MaterialDto::new(m)).collect(),
+            render: RenderDto::new(&doc.render),
         },
         meshes: table.meshes.iter().map(|(mesh, _)| MeshDto::of(mesh.mesh())).collect(),
     };
@@ -832,6 +921,7 @@ impl File {
             time,
             objects,
             materials,
+            render,
         } = self.document;
         let materials = materials
             .into_iter()
@@ -855,6 +945,7 @@ impl File {
             looping: time.looping,
         };
         let (mut doc, ids) = assemble_with_ids(name, time, objects)?;
+        doc.render = render.map(RenderDto::into_settings).unwrap_or_default();
         let material_ids: Vec<MaterialId> = materials
             .into_iter()
             .map(|material| doc.scene.materials_mut().insert(material))
@@ -1902,5 +1993,40 @@ mod tests {
         let json = document_json(&Document::new("t")).replacen("\"fps\": 30", "\"fps\": 0", 1);
         let doc = from_bytes(&archive(&[(DOCUMENT_ENTRY, json.as_bytes())])).unwrap();
         assert_eq!(doc.time.fps(), 1);
+    }
+
+    #[test]
+    fn render_settings_round_trip_and_are_left_out_while_default() {
+        assert!(!document_json(&Document::with_demo_scene()).contains("\"render\""));
+
+        let mut doc = Document::new("t");
+        doc.render = RenderSettings {
+            width: 1920,
+            height: 1080,
+            lock_ratio: true,
+            frames: FrameRange::Manual { from: 5, to: 40 },
+            frame_step: 5,
+            samples: 128,
+            bounces: 4,
+            auto_light: false,
+            save: false,
+            output: "renders/shot 010".to_owned(),
+            alpha: true,
+        };
+        assert_eq!(round_trip(&doc).render, doc.render);
+        doc.render.frames = FrameRange::All;
+        assert_eq!(round_trip(&doc).render, doc.render);
+    }
+
+    #[test]
+    fn render_settings_are_validated_on_load() {
+        let mut doc = Document::new("t");
+        doc.render.samples = 64;
+        let json = document_json(&doc)
+            .replacen("\"samples\": 64", "\"samples\": 0", 1)
+            .replacen("\"width\": 1280", "\"width\": 999999", 1);
+        let loaded = from_bytes(&archive(&[(DOCUMENT_ENTRY, json.as_bytes())])).unwrap();
+        assert_eq!(loaded.render.samples, 1);
+        assert_eq!(loaded.render.width, RenderSettings::MAX_SIZE);
     }
 }

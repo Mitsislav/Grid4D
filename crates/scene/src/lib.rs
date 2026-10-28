@@ -1,7 +1,8 @@
 //! # grid4d-scene
 //!
-//! The document model of Grid4D: the scene graph (objects, hierarchy, transforms)
-//! and document time. This crate is the single source of truth for scene data.
+//! The document model of Grid4D: the scene graph (objects, hierarchy, transforms),
+//! document time and render settings. This crate is the single source of truth
+//! for scene data.
 //!
 //! ## Architecture rule
 //!
@@ -24,6 +25,7 @@ mod light;
 mod material;
 mod mesh;
 mod node;
+mod render;
 mod scene;
 mod tag;
 mod time;
@@ -42,6 +44,7 @@ pub use light::{Falloff, LightDetails, LightShadow, LightType};
 pub use material::{Material, MaterialId, Materials};
 pub use mesh::{ComponentState, Components, MeshHandle, MeshId};
 pub use node::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, Node, NodeData, NodeId, ObjectKind, ObjectKindTag};
+pub use render::{FrameRange, RenderSettings};
 pub use scene::{Detached, Scene, SceneError, WalkItem};
 pub use tag::{Aim, DEFAULT_PHONG_ANGLE, Protection, Tag, TagKind, Tags};
 pub use time::{Playback, TimeSettings, TimeState};

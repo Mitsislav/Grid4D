@@ -5,8 +5,10 @@
 //! ```
 //!
 //! The picture is seen through the document's first camera object, else from a
-//! view that frames the whole scene. Defaults: the demo scene, `render.png`,
-//! 640 × 360, 16 samples.
+//! view that frames the whole scene. Size, samples, bounces, Auto Light and Alpha
+//! Channel come from the document's render settings (Ctrl+B in the app); the
+//! size and samples given here override them. Defaults: the demo scene,
+//! `render.png`.
 
 use std::{error::Error, fs::File, io::BufWriter, path::Path, time::Instant};
 
@@ -18,19 +20,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let source = args.first().map_or("demo", String::as_str);
     let output = args.get(1).map_or("render.png", String::as_str);
-    let mut options = RenderOptions::default();
+    let doc = if source == "demo" {
+        Document::with_demo_scene()
+    } else {
+        grid4d_io::load(Path::new(source))?
+    };
+    let mut options = RenderOptions::from(&doc.render);
     if let Some((w, h)) = args.get(2).and_then(|size| size.split_once('x')) {
         (options.width, options.height) = (w.parse()?, h.parse()?);
     }
     if let Some(samples) = args.get(3) {
         options.samples = samples.parse()?;
     }
-
-    let doc = if source == "demo" {
-        Document::with_demo_scene()
-    } else {
-        grid4d_io::load(Path::new(source))?
-    };
     let mut evaluated = EvaluatedScene::for_render();
     evaluated.update(&doc.scene);
     let started = Instant::now();
@@ -68,9 +69,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let mut encoder = png::Encoder::new(BufWriter::new(File::create(output)?), image.width, image.height);
-    encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
-    encoder.write_header()?.write_image_data(&image.to_rgba8())?;
+    if doc.render.alpha {
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.write_header()?.write_image_data(&image.to_rgba8())?;
+    } else {
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.write_header()?.write_image_data(&image.to_rgb8())?;
+    }
     println!("saved {output}");
     Ok(())
 }

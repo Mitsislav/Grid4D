@@ -2,7 +2,7 @@
 //! the lights' light at every surface they meet.
 
 use glam::Vec3;
-use grid4d_scene::{Falloff, LightShadow, LightType};
+use grid4d_scene::{Falloff, LightShadow, LightType, RenderSettings};
 use rayon::prelude::*;
 
 use crate::{Image, RenderCamera, RenderScene, sample::Rng, scene::Light, shade::Material};
@@ -28,6 +28,9 @@ pub struct RenderOptions {
     pub bounces: u32,
     /// Changes the noise pattern, nothing else.
     pub seed: u32,
+    /// A scene without lights is lit by the automatic light (over the camera's
+    /// shoulder, no shadows); otherwise it stays dark but for luminance.
+    pub auto_light: bool,
 }
 
 impl Default for RenderOptions {
@@ -38,6 +41,21 @@ impl Default for RenderOptions {
             samples: 16,
             bounces: 2,
             seed: 0,
+            auto_light: true,
+        }
+    }
+}
+
+impl From<&RenderSettings> for RenderOptions {
+    /// The document's render settings (seed 0).
+    fn from(settings: &RenderSettings) -> Self {
+        Self {
+            width: settings.width,
+            height: settings.height,
+            samples: settings.samples,
+            bounces: settings.bounces,
+            seed: 0,
+            auto_light: settings.auto_light,
         }
     }
 }
@@ -50,7 +68,7 @@ pub fn render(scene: &RenderScene, camera: &RenderCamera, options: &RenderOption
     let height = options.height.clamp(1, MAX_SIZE);
     let mut image = Image::new(width, height);
     let automatic = [automatic_light(camera)];
-    let lights = if scene.lights().is_empty() {
+    let lights = if scene.lights().is_empty() && options.auto_light {
         &automatic[..]
     } else {
         scene.lights()
@@ -244,6 +262,7 @@ mod tests {
             samples,
             bounces,
             seed: 0,
+            auto_light: true,
         }
     }
 
@@ -352,6 +371,46 @@ mod tests {
         assert!(
             (glowing[0] - 1.0).abs() < 0.05 && (glowing[1] - 0.5).abs() < 0.05 && glowing[2] < 0.02,
             "{glowing:?}"
+        );
+
+        // Auto Light off: dark, but the luminance and the coverage stay.
+        let dark = RenderOptions {
+            auto_light: false,
+            ..options(60, 2, 0)
+        };
+        let image = render(&scene_of(&doc), &top_camera(), &dark);
+        let unlit = at(&image, 200.0, 0.0);
+        assert!(unlit[0] == 0.0 && unlit[3] == 1.0, "no light at all: {unlit:?}");
+        // Exactly the luminance: no highlight from a light either.
+        assert_eq!(at(&image, 0.0, 0.0), [1.0, 0.5, 0.0, 1.0], "luminance needs no light");
+    }
+
+    #[test]
+    fn options_come_from_the_render_settings() {
+        let settings = RenderSettings {
+            width: 320,
+            height: 200,
+            samples: 7,
+            bounces: 3,
+            auto_light: false,
+            ..RenderSettings::default()
+        };
+        assert_eq!(
+            RenderOptions::from(&settings),
+            RenderOptions {
+                width: 320,
+                height: 200,
+                samples: 7,
+                bounces: 3,
+                seed: 0,
+                auto_light: false,
+            }
+        );
+        let defaults = RenderOptions::from(&RenderSettings::default());
+        assert_eq!(
+            (defaults.samples, defaults.bounces, defaults.auto_light),
+            (16, 2, true),
+            "the same quality as the renderer's own defaults"
         );
     }
 

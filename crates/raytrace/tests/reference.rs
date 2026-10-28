@@ -38,6 +38,7 @@ fn demo() -> Image {
         samples: 8,
         bounces: 1,
         seed: 0,
+        auto_light: true,
     };
     render(&RenderScene::new(&evaluated), &camera, &options)
 }

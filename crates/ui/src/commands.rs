@@ -73,6 +73,9 @@ pub enum EditorCommand {
     MergeFile(std::path::PathBuf),
     /// Asks where, then writes the document as glTF or OBJ (File ▸ Export).
     Export,
+    /// Asks where renders are saved and sets the render settings' File (one
+    /// undo step).
+    BrowseRenderOutput,
     /// Adds a tag of this kind to every selected object that has none (one undo
     /// step) and selects it on the active object.
     AddTag(grid4d_scene::TagKind),
@@ -315,6 +318,21 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         }
         EditorCommand::MergeFile(path) => file::merge(&path, doc, editor, viewport),
         EditorCommand::Export => file::export(doc, editor),
+        EditorCommand::BrowseRenderOutput => {
+            if let Some(output) = file::pick_render_output(doc, editor) {
+                let mut settings = doc.render.clone();
+                settings.output = output;
+                if settings != doc.render {
+                    commit(
+                        doc,
+                        editor,
+                        "Render Settings",
+                        vec![SceneEdit::SetRender(settings)],
+                        |_, _| {},
+                    );
+                }
+            }
+        }
         EditorCommand::AddTag(kind) => {
             let edits = editor
                 .selection
@@ -1222,6 +1240,7 @@ fn is_current_state(doc: &Document, edit: &SceneEdit) -> bool {
         SceneEdit::SetTime(settings) => doc.time.settings() == *settings,
         SceneEdit::SetName(name) => doc.name == *name,
         SceneEdit::SetMaterials(materials) => doc.scene.materials() == materials,
+        SceneEdit::SetRender(settings) => doc.render == *settings,
         // Structural changes are never made live; record them as given.
         SceneEdit::Insert { .. } | SceneEdit::Detach { .. } | SceneEdit::Attach { .. } | SceneEdit::Move { .. } => {
             false

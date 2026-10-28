@@ -5,7 +5,7 @@ use egui::{CentralPanel, Margin, Panel};
 use grid4d_scene::Document;
 use grid4d_ui::{
     AttributesPanel, BottomPanel, CoordinatesPanel, EditorCommand, EditorState, FCurvePanel, ManagerTab,
-    MaterialsPanel, OutlinerPanel, RecentFiles, TimelinePanel, ViewportPanel, commands, file,
+    MaterialsPanel, OutlinerPanel, RecentFiles, RenderSettingsPanel, TimelinePanel, ViewportPanel, commands, file,
     panels::{about, alert, drop_overlay, menu_bar, mode_palette, optimize, status_bar, toolbar, unsaved_changes},
     recent, shortcuts,
     theme::{self, metrics},
@@ -26,6 +26,7 @@ pub struct Grid4DApp {
     timeline: TimelinePanel,
     fcurve: FCurvePanel,
     materials: MaterialsPanel,
+    render_settings: RenderSettingsPanel,
     /// Time of the previous playback tick (egui clock, seconds).
     last_tick: Option<f64>,
     window_fit: WindowFit,
@@ -75,6 +76,7 @@ impl Grid4DApp {
             timeline: TimelinePanel::default(),
             fcurve: FCurvePanel::default(),
             materials: MaterialsPanel,
+            render_settings: RenderSettingsPanel::default(),
             last_tick: None,
             window_fit: WindowFit::default(),
         }
@@ -190,6 +192,7 @@ impl eframe::App for Grid4DApp {
 
         CentralPanel::no_frame().show(ui, |ui| self.viewport.show(ui, &mut self.doc, &mut self.editor));
 
+        self.render_settings.show(&ctx, &mut self.doc, &mut self.editor);
         about::show(&ctx, &mut self.editor);
         optimize::show(&ctx, &mut self.editor);
         unsaved_changes::show(&ctx, &self.doc, &mut self.editor);

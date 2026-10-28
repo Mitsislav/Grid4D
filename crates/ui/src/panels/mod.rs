@@ -21,6 +21,7 @@ pub mod menu_bar;
 pub mod mode_palette;
 pub mod optimize;
 pub mod outliner;
+pub mod render_settings;
 pub mod status_bar;
 pub mod timeline;
 pub mod toolbar;
@@ -32,6 +33,7 @@ pub use coordinates::CoordinatesPanel;
 pub use fcurve::FCurvePanel;
 pub use materials::MaterialsPanel;
 pub use outliner::OutlinerPanel;
+pub use render_settings::RenderSettingsPanel;
 pub use timeline::TimelinePanel;
 pub use viewport::ViewportPanel;
 
@@ -86,6 +88,17 @@ mod tests {
         assert_idle_frames_leave_the_document_alone(doc, editor);
     }
 
+    /// The Render Settings window draws without writing anything.
+    #[test]
+    fn idle_frames_with_the_render_settings_do_not_touch_the_document() {
+        let doc = Document::with_demo_scene();
+        let editor = EditorState {
+            show_render_settings: true,
+            ..EditorState::default()
+        };
+        assert_idle_frames_leave_the_document_alone(doc, editor);
+    }
+
     /// The Attribute Manager and the gizmo show animated values between keys.
     #[test]
     fn idle_frames_between_keys_do_not_touch_the_document() {
@@ -111,6 +124,7 @@ mod tests {
         let mut fcurve = FCurvePanel::default();
         let mut coordinates = CoordinatesPanel::default();
         let mut materials = MaterialsPanel;
+        let mut render_settings = RenderSettingsPanel::default();
         let mut viewport = ViewportPanel::new(None);
 
         let mut frame = |doc: &mut Document, editor: &mut EditorState| {
@@ -125,6 +139,7 @@ mod tests {
                 coordinates.show(ui, doc, editor);
                 materials.show(ui, doc, editor);
                 viewport.show(ui, doc, editor);
+                render_settings.show(ui.ctx(), doc, editor);
             })
             .drop_without_applying_deltas();
             commands::apply_pending(doc, editor, &mut viewport);
@@ -132,6 +147,7 @@ mod tests {
         frame(&mut doc, &mut editor);
         frame(&mut doc, &mut editor);
         let revision = doc.scene.revision();
+        let (render, steps) = (doc.render.clone(), editor.history.undo_len());
         for _ in 0..5 {
             frame(&mut doc, &mut editor);
         }
@@ -140,5 +156,7 @@ mod tests {
             revision,
             "a panel wrote the scene on an idle frame"
         );
+        assert_eq!(doc.render, render, "a panel wrote the render settings on an idle frame");
+        assert_eq!(editor.history.undo_len(), steps, "an idle frame recorded an undo step");
     }
 }

@@ -39,6 +39,7 @@ pub use editor::{
 pub use file::{DocumentFile, FileAction, FileDialogs, NativeDialogs, UnsavedChoice};
 pub use history::{History, UndoGroup};
 pub use panels::{
-    AttributesPanel, CoordinatesPanel, FCurvePanel, MaterialsPanel, OutlinerPanel, TimelinePanel, ViewportPanel,
+    AttributesPanel, CoordinatesPanel, FCurvePanel, MaterialsPanel, OutlinerPanel, RenderSettingsPanel, TimelinePanel,
+    ViewportPanel,
 };
 pub use recent::RecentFiles;

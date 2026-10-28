@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 8 — Offline renderer (v0.8) |
-| Last step done | 8.1 — The path tracer core (2026-10-21) |
-| Next step | 8.2 — Render Settings in the document |
-| Tests | 485, all passing; clippy and rustfmt clean |
+| Last step done | 8.2 — Render Settings (2026-10-21) |
+| Next step | 8.3 — Picture Viewer: rendering in the application |
+| Tests | 499, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -689,6 +689,7 @@ Phase 7 is complete.
 | Step | Built | Tests |
 |------|-------|-------|
 | 8.1 | The path tracer core: a new crate `grid4d-raytrace` that renders the scene (render visibility and levels) through a camera — every light with its Shadow setting, diffuse and glossy/metal materials, luminance, two bounces, the automatic light, a transparent background — repeatably and in parallel; an example renders documents to PNG; a reference-image test | 485 |
+| 8.2 | Render Settings (Ctrl+B, Render menu, toolbar): a window with Output (size, presets, Lock Ratio, frame range and step), Save (file, PNG, alpha), Sampling (samples, bounces) and Options (Auto Light) pages; the settings live in the document, are undoable and saved in `.g4d`; the renderer and its example take them | 499 |
 
 *Problems and solutions:*
 - **What the renderer sees.** The evaluation was built for the viewport (editor
@@ -722,6 +723,53 @@ Phase 7 is complete.
   the chrome sphere reflecting the floor and the other spheres, the glossy red
   highlight, the glowing cube, a transparent background. 960 × 540 at 64
   samples took under half a second on 16 threads for these small scenes.
+
+**8.2 — Render Settings**
+
+*Problems and solutions:*
+- **Where the settings live.** They describe the document, not the editor, so
+  `RenderSettings` is a field of `Document` next to the time settings, changed
+  through a new `SceneEdit::SetRender` that validates (clamps) every value — so
+  an undo step and a loaded file can never hold an impossible size or sample
+  count. The random undo/redo test now also changes render settings.
+- **The file format without a new version.** Version 3 grows additively: a
+  `render` entry is written only when the settings differ from the defaults, so
+  every existing file — and the golden test file — stays byte for byte the
+  same, and files without it load with the defaults.
+- **A window, not a modal dialog.** Like the reference, the settings stay open
+  beside the workspace. Its fields write the document live and record one undo
+  step per interaction (`LiveEdit`); closing the window in the middle of typing
+  records that change too.
+- **Lock Ratio without drift.** Recomputing the other side from the current
+  proportions on every step of a drag would let rounding creep in (1280 × 720
+  dragged slowly would end up taller than 16:9). The proportions are taken from
+  before the interaction, with integer arithmetic.
+- **A window that jumps.** Centred on its middle, the window moved whenever a
+  page of another height was shown, so the next click landed elsewhere. It is now
+  placed by its top-left corner (centred the first time) and every page is as
+  tall as the tallest.
+- **A separator that stretched the window.** A vertical separator between the
+  page list and the page grew to the window's full height, which in turn grew the
+  window. The page list is now a well of its own height.
+- **Paths that travel.** Choosing the file with **…** stores a path relative to
+  the document's folder (with `/`) when the file is inside it, so a project
+  folder can move or change machines; a relative path needs the document saved
+  before a render can be saved.
+- **Testing the window headless.** egui gives no access to where a widget is, so
+  the UI tests reach fields with Tab (close button, title bar, the page buttons,
+  then the fields) and type into them: a typed Samples value is one undo step, a
+  typed Width with Lock Ratio sets the Height, a typed From frame makes the range
+  Manual.
+- **On-screen testing:** the gear button and Ctrl+B open and close the window;
+  Lock Ratio on and Width 1920 gave a Height of 1080 and the Preset showed HD
+  1080; All Frames showed 91 frames (0 to 90); the Save page took
+  `renders/shot` and explained it waits for the document to be saved; each
+  change marked the document modified and could be undone. The example
+  renderer took the demo document's settings (1280 × 720, 16 samples, an RGB
+  PNG without alpha).
+- **Driving the app:** the first click after the window appears is swallowed,
+  and posted drags do not reach egui's drag values; a harmless first click and
+  typing into fields worked instead.
 
 ---
 

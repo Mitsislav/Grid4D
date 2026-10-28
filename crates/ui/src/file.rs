@@ -12,7 +12,7 @@ use std::{
 
 use egui::ViewportCommand;
 use grid4d_io::{ObjectEntry, Objects};
-use grid4d_scene::{Document, MeshHandle, NodeData, NodeId, ObjectKind, SceneEdit, Tags};
+use grid4d_scene::{Document, MeshHandle, NodeData, NodeId, ObjectKind, RenderSettings, SceneEdit, Tags};
 
 use crate::{EditorCommand, EditorState, History, ViewportPanel, recent::RecentFiles};
 
@@ -33,6 +33,11 @@ pub trait FileDialogs: std::fmt::Debug {
     /// Where to export (File ▸ Export): a `.glb` or `.gltf` path, or `None` if
     /// cancelled. `suggested` is a bare file name such as `Untitled 1.glb`.
     fn pick_export(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
+        self.pick_save(directory, suggested)
+    }
+    /// Where renders are saved (Render Settings ▸ Save ▸ File), or `None` if
+    /// cancelled. `suggested` is a bare file name such as `Untitled 1.png`.
+    fn pick_render_output(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
         self.pick_save(directory, suggested)
     }
 }
@@ -72,6 +77,14 @@ impl FileDialogs for NativeDialogs {
             .set_file_name(suggested)
             .save_file()
             .map(with_export_extension)
+    }
+
+    fn pick_render_output(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
+        with_directory(rfd::FileDialog::new(), directory)
+            .set_title("Save Render As")
+            .add_filter("PNG Image", &[RenderSettings::EXTENSION])
+            .set_file_name(suggested)
+            .save_file()
     }
 }
 
@@ -448,6 +461,44 @@ pub(crate) fn export(doc: &Document, editor: &mut EditorState) {
     }
 }
 
+/// Render Settings ▸ Save ▸ File ▸ …: asks where renders go and returns the
+/// File setting for it — relative to the document's folder (with `/`) when the
+/// file is inside it, else the full path — or `None` if cancelled.
+pub(crate) fn pick_render_output(doc: &Document, editor: &mut EditorState) -> Option<String> {
+    let current = doc.render.output_path(editor.file.path());
+    let directory = current
+        .as_deref()
+        .and_then(Path::parent)
+        .or_else(|| editor.file.directory())
+        .map(Path::to_path_buf);
+    let suggested = current.as_deref().and_then(Path::file_name).map_or_else(
+        || {
+            format!(
+                "{}.{}",
+                file_stem_for(&editor.file.display_name(doc)),
+                RenderSettings::EXTENSION
+            )
+        },
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let path = editor
+        .file
+        .dialogs
+        .pick_render_output(directory.as_deref(), &suggested)?;
+    let relative = editor
+        .file
+        .directory()
+        .and_then(|folder| path.strip_prefix(folder).ok())
+        .map(|inside| {
+            inside
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        });
+    Some(relative.unwrap_or_else(|| path.to_string_lossy().into_owned()))
+}
+
 /// The document's objects as an export writes them: every primitive as a polygon
 /// object of its current shape, every switched-on generator as one holding its
 /// result (its cage left out), a switched-off generator as a Null over its children.
@@ -718,6 +769,8 @@ mod tests {
     struct FakeDialogs {
         open: Option<PathBuf>,
         save: Option<PathBuf>,
+        /// The answer to Render Settings ▸ File ▸ ….
+        render: Option<PathBuf>,
         log: Rc<RefCell<DialogLog>>,
     }
 
@@ -730,6 +783,11 @@ mod tests {
         fn pick_save(&mut self, _directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
             self.log.borrow_mut().save_suggestions.push(suggested.to_owned());
             self.save.clone()
+        }
+
+        fn pick_render_output(&mut self, _directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
+            self.log.borrow_mut().save_suggestions.push(suggested.to_owned());
+            self.render.clone()
         }
     }
 
@@ -752,6 +810,7 @@ mod tests {
             let dialogs = FakeDialogs {
                 open: open.map(|name| dir.join(name)),
                 save: save.map(|name| dir.join(name)),
+                render: Some(dir.join("renders").join("still.png")),
                 log: Rc::clone(&log),
             };
             let editor = EditorState {
@@ -788,6 +847,32 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[test]
+    fn the_render_output_is_stored_relative_to_the_document() {
+        let mut f = Fixture::new("render_output", None, Some("shot.g4d"));
+        // Not saved yet: the full path, and the document's name is suggested.
+        f.run(&[EditorCommand::BrowseRenderOutput]);
+        let full = f.dir.join("renders").join("still.png");
+        assert_eq!(f.doc.render.output, full.to_string_lossy());
+        assert_eq!(f.log.borrow().save_suggestions, ["Untitled 1.png"]);
+        assert_eq!(f.editor.history.undo_label(), Some("Render Settings"));
+
+        // Saved: inside its folder, relative with `/`; the file's name is suggested.
+        f.run(&[EditorCommand::SaveAs, EditorCommand::BrowseRenderOutput]);
+        assert_eq!(f.doc.render.output, "renders/still.png");
+        assert_eq!(f.doc.render.output_path(f.editor.file.path()), Some(full));
+        assert_eq!(
+            f.log.borrow().save_suggestions.last().map(String::as_str),
+            Some("still.png")
+        );
+
+        f.run(&[EditorCommand::Undo]);
+        assert_eq!(
+            f.doc.render.output,
+            f.dir.join("renders").join("still.png").to_string_lossy()
+        );
     }
 
     #[test]

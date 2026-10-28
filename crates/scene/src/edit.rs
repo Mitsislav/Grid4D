@@ -5,7 +5,9 @@
 //! The UI translates its `EditorCommand`s into edits and keeps the inverses in
 //! its history; this crate only guarantees that every inverse is exact.
 
-use crate::{Detached, Document, Materials, Node, NodeData, NodeId, SceneError, TimeSettings, Transform};
+use crate::{
+    Detached, Document, Materials, Node, NodeData, NodeId, RenderSettings, SceneError, TimeSettings, Transform,
+};
 
 /// One reversible change to a [`Document`].
 ///
@@ -51,6 +53,8 @@ pub enum SceneEdit {
     /// Replaces the document's materials (the whole table, ids included: tags
     /// keep pointing at the same materials across undo and redo).
     SetMaterials(Materials),
+    /// Replaces the document's render settings (validated).
+    SetRender(RenderSettings),
 }
 
 impl SceneEdit {
@@ -62,7 +66,9 @@ impl SceneEdit {
         match *self {
             Self::Detach { root } | Self::Attach { root, .. } => Some(root),
             Self::Move { id, .. } | Self::SetData { id, .. } => Some(id),
-            Self::Insert { .. } | Self::SetTime(_) | Self::SetName(_) | Self::SetMaterials(_) => None,
+            Self::Insert { .. } | Self::SetTime(_) | Self::SetName(_) | Self::SetMaterials(_) | Self::SetRender(_) => {
+                None
+            }
         }
     }
 }
@@ -122,6 +128,10 @@ impl Document {
                 self.scene.materials_mut(),
                 materials,
             ))),
+            SceneEdit::SetRender(settings) => Ok(SceneEdit::SetRender(std::mem::replace(
+                &mut self.render,
+                settings.validated(),
+            ))),
         }
     }
 
@@ -164,6 +174,7 @@ mod tests {
         name: String,
         time: TimeSettings,
         materials: Materials,
+        render: RenderSettings,
         nodes: Vec<(NodeId, Option<NodeId>, u32, NodeData)>,
     }
 
@@ -178,6 +189,7 @@ mod tests {
             name: doc.name.clone(),
             time: doc.time.settings(),
             materials: doc.scene.materials().clone(),
+            render: doc.render.clone(),
             nodes,
         }
     }
@@ -300,6 +312,30 @@ mod tests {
             }),
         );
         assert_round_trip(&mut doc, SceneEdit::SetName("Shot 010".to_owned()));
+        assert_round_trip(
+            &mut doc,
+            SceneEdit::SetRender(RenderSettings {
+                width: 1920,
+                height: 1080,
+                samples: 64,
+                output: "shot".to_owned(),
+                ..RenderSettings::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn render_settings_are_validated() {
+        let mut doc = Document::new("t");
+        let undo = doc
+            .apply(SceneEdit::SetRender(RenderSettings {
+                width: 0,
+                samples: 0,
+                ..RenderSettings::default()
+            }))
+            .unwrap();
+        assert_eq!((doc.render.width, doc.render.samples), (1, 1));
+        assert_eq!(undo, SceneEdit::SetRender(RenderSettings::default()));
     }
 
     #[test]
@@ -485,6 +521,21 @@ mod tests {
                 }
                 SceneEdit::SetMaterials(materials)
             }
+            (9, _) if rng.chance(2) => SceneEdit::SetRender(RenderSettings {
+                width: u32::try_from(rng.below(20_000)).unwrap(),
+                samples: u32::try_from(rng.below(5000)).unwrap(),
+                frames: match rng.below(3) {
+                    0 => crate::FrameRange::Current,
+                    1 => crate::FrameRange::All,
+                    _ => crate::FrameRange::Manual {
+                        from: i32::try_from(rng.below(50)).unwrap(),
+                        to: i32::try_from(rng.below(50)).unwrap(),
+                    },
+                },
+                auto_light: rng.chance(2),
+                output: format!("render {}", rng.below(10)),
+                ..RenderSettings::default()
+            }),
             _ => SceneEdit::Insert {
                 parent,
                 index,

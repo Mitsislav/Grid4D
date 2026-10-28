@@ -25,8 +25,9 @@ screenshots come from the application itself.
 13. [Snapping](#13-snapping)
 14. [Tags](#14-tags)
 15. [Materials](#15-materials)
-16. [Keyboard shortcuts](#16-keyboard-shortcuts)
-17. [Limitations and what is planned](#17-limitations-and-what-is-planned)
+16. [Rendering](#16-rendering)
+17. [Keyboard shortcuts](#17-keyboard-shortcuts)
+18. [Limitations and what is planned](#18-limitations-and-what-is-planned)
 
 ---
 
@@ -1144,7 +1145,67 @@ their objects show their display colour again; undo brings everything back.
 Every change is one undo step. Materials are saved with the document, travel with
 glTF and OBJ files ([§9](#9-files)), and come along when you merge a document.
 
-## 16. Keyboard shortcuts
+## 16. Rendering
+
+A **render** is the finished picture of the scene: materials and lights as
+they look for real — soft shadows, light bouncing between surfaces, reflections —
+where the viewport only approximates them. Rendering pictures from the
+application (the Picture Viewer and the Render View) is *planned* for the next
+steps; what you set up now is how the document will be rendered.
+
+### 16.1 Render Settings
+
+**Render ▸ Edit Render Settings…**, **Ctrl+B** or the gear button in the
+toolbar opens the **Render Settings** window. It stays open while you work;
+close it with its **×**, Ctrl+B or the gear button again. Pick a page on its
+left: **Output**, **Save**, **Sampling** or **Options**.
+
+![The Output page: a 1920 × 1080 picture with Lock Ratio on, all frames of the document](images/manual/render-settings-output.png)
+
+**Output**
+
+| Setting | Meaning |
+|---------|---------|
+| Preset | common picture sizes (HD 720, HD 1080, 4K UHD, square, portrait, …); *Custom* when the size matches none |
+| Width, Height | the picture's size in pixels (1 to 16384); 1280 × 720 for a new document |
+| Lock Ratio | changing Width changes Height with it, and the other way round, keeping the proportions |
+| Aspect | the proportions, e.g. 16:9 |
+| Frame Range | **Current Frame** (the frame at the time slider), **All Frames** (the document's range, Project Settings ▸ Minimum to Maximum Time) or **Manual** (From to To). Typing a From or To frame switches to Manual |
+| Frame Step | renders every n-th frame of the range |
+| Frames | how many pictures the range gives |
+
+Rendering whole frame ranges is *planned*: for now a render is always of the
+current frame.
+
+![The Save page: renders go to renders/shot.png next to the document, with transparency](images/manual/render-settings-save.png)
+
+**Save**
+
+| Setting | Meaning |
+|---------|---------|
+| Save | a finished render is saved to File |
+| File | where: type a path, or click **…** to choose one. A name without a folder, or a path like `renders/shot`, is taken from the document's folder (the document must be saved first); `.png` is added if missing |
+| Format | PNG, 8 bits per channel (OpenEXR is *planned*) |
+| Alpha Channel | keep the transparency of the background and of the objects' edges; off: the background is black |
+
+The line under the settings says where the picture will go.
+
+**Sampling**
+
+| Setting | Meaning |
+|---------|---------|
+| Samples | samples per pixel (16 by default, up to 4096): more give smoother edges and less noise in soft shadows and reflections, and take longer |
+| Bounces | how often light bounces between surfaces (2 by default; 0: direct light only) |
+
+**Options**
+
+| Setting | Meaning |
+|---------|---------|
+| Auto Light | a scene without lights is lit by an automatic light over the camera's shoulder; off, such a scene renders dark (only glowing materials show) |
+
+Every change is one undo step, and the settings are saved with the document.
+
+## 17. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -1189,6 +1250,7 @@ Esc cancels a chord.
 | Shift+F5 / Shift+F7 | Attribute Manager / Coordinate Manager |
 | Shift+F2 | Material Manager |
 | Ctrl+N (pointer over the Material Manager) | New material |
+| Ctrl+B | Render Settings |
 | Tab (pointer over the timeline) | Timeline / F-Curve tab |
 | H / S (pointer over the F-Curve graph) | Frame all curves / the selected keys |
 
@@ -1196,7 +1258,7 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 17. Limitations and what is planned
+## 18. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
@@ -1233,9 +1295,10 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   the per-light switches (no illumination, ambient, diffuse or specular only).
 - **Interchange and rendering**: textures, animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only); the
-  final renderer exists but is not in the application yet — the Render menu,
-  Render Settings, the Picture Viewer and the Render View are next (the Render
-  menu is disabled until then).
+  rendering pictures in the application — the Picture Viewer and the Render
+  View are next (their menu entries and buttons are disabled until then), then
+  frame ranges and OpenEXR files; several render settings per document,
+  Preview Range, a render frame rate of its own, DPI and film aspect.
 - The Takes, Layers and Filter panels are placeholders.
 
 See [`progress.md`](progress.md) for what changed in each step.

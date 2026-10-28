@@ -76,3 +76,4 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 7.5 | [`viewport-filter.md`](viewport-filter.md) — the Filter menu per view | implemented 2026-10-21 |
 | 7.6 | [`viewport-effects.md`](viewport-effects.md) — shadows and SSAO in the viewport, the light's Shadow | implemented 2026-10-21 |
 | 8.1 | [`render-engine.md`](render-engine.md) — the final renderer: what a render shows | implemented 2026-10-21 |
+| 8.2 | [`render-settings.md`](render-settings.md) — Render Settings: size, frames, file, sampling, Auto Light | implemented 2026-10-21 |

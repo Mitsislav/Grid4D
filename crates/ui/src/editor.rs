@@ -739,6 +739,8 @@ pub struct EditorState {
     pub show_about: bool,
     /// Mesh ▸ Optimize… dialog is open.
     pub show_optimize: bool,
+    /// The Render Settings window is open (Ctrl+B).
+    pub show_render_settings: bool,
 }
 
 impl EditorState {
@@ -786,6 +788,7 @@ impl Default for EditorState {
             renderer_info: String::new(),
             show_about: false,
             show_optimize: false,
+            show_render_settings: false,
         }
     }
 }

@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use crate::{Node, ObjectKind, ObjectKindTag, Scene, TimeState, Transform};
+use crate::{Node, ObjectKind, ObjectKindTag, RenderSettings, Scene, TimeState, Transform};
 
 /// A complete Grid4D document: the scene graph plus document-level settings.
 #[derive(Clone, Debug)]
@@ -8,6 +8,8 @@ pub struct Document {
     pub name: String,
     pub scene: Scene,
     pub time: TimeState,
+    /// How the document is rendered.
+    pub render: RenderSettings,
 }
 
 impl Default for Document {
@@ -24,6 +26,7 @@ impl Document {
             name: name.into(),
             scene: Scene::new(),
             time: TimeState::default(),
+            render: RenderSettings::default(),
         }
     }
 
