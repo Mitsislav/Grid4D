@@ -114,6 +114,105 @@ impl Drop for Job {
     }
 }
 
+impl Job {
+    /// Starts a worker rendering `scene` at `frame`; `None` if no thread could start.
+    fn spawn(number: u32, scene: Scene, frame: f64, camera: RenderCamera, options: RenderOptions) -> Option<Self> {
+        let control = Arc::new(RenderControl::default());
+        let (sender, updates) = mpsc::channel();
+        let worker_control = Arc::clone(&control);
+        let spawned = thread::Builder::new()
+            .name(format!("grid4d render {number}"))
+            .spawn(move || work(&scene, frame, &camera, &options, &worker_control, &sender));
+        if let Err(err) = spawned {
+            log::error!("could not start the render thread: {err}");
+            return None;
+        }
+        let rows = options.height.clamp(1, RenderSettings::MAX_SIZE);
+        let samples = options.samples.clamp(1, RenderSettings::MAX_SAMPLES);
+        Some(Self {
+            number,
+            control,
+            updates,
+            started: Instant::now(),
+            total: u64::from(rows) * u64::from(samples),
+        })
+    }
+
+    /// Takes the worker's news into `picture`. Returns whether the picture
+    /// changed, and whether the render ended (`Some(stopped)`).
+    fn drain(&self, picture: &mut Picture) -> (bool, Option<bool>) {
+        let mut changed = false;
+        let mut ended = None;
+        loop {
+            let update = match self.updates.try_recv() {
+                Ok(update) => update,
+                Err(mpsc::TryRecvError::Empty) => break,
+                // The worker is gone without saying so (it panicked).
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    ended = Some(true);
+                    break;
+                }
+            };
+            match update {
+                Update::Pass { rgba, rgb, samples } => {
+                    (picture.rgba, picture.rgb, picture.samples) = (rgba, rgb, samples);
+                    picture.version += 1;
+                    changed = true;
+                }
+                Update::Done { stopped } => {
+                    ended = Some(stopped);
+                    break;
+                }
+            }
+        }
+        picture.elapsed = self.started.elapsed();
+        (changed, ended)
+    }
+
+    /// How far the render is (0…1).
+    fn fraction(&self) -> f32 {
+        let done = self.control.progress().min(self.total);
+        // Display only: the precision of f32 is plenty.
+        #[expect(clippy::cast_precision_loss, reason = "a progress bar")]
+        let fraction = done as f32 / self.total.max(1) as f32;
+        fraction
+    }
+}
+
+/// What a Render View shows: when any of it changes, the picture is no longer
+/// true and goes away.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewKey {
+    /// Which view, through which camera, at which size in pixels.
+    pub view: usize,
+    pub camera: OrbitCamera,
+    pub size: [u32; 2],
+    /// The scene's revision, the render settings and the frame.
+    pub revision: u64,
+    pub settings: RenderSettings,
+    pub frame: i32,
+}
+
+/// The Render View: a render of the active view, drawn over it.
+pub struct ViewRender {
+    pub key: ViewKey,
+    pub picture: Picture,
+    job: Option<Job>,
+}
+
+impl ViewRender {
+    #[must_use]
+    pub fn is_rendering(&self) -> bool {
+        self.job.is_some()
+    }
+
+    /// How far the render is (0…1), if it runs.
+    #[must_use]
+    pub fn progress(&self) -> Option<f32> {
+        self.job.as_ref().map(Job::fraction)
+    }
+}
+
 /// The session's renders (editor state): the running one and the history.
 #[derive(Default)]
 pub struct Renders {
@@ -125,6 +224,8 @@ pub struct Renders {
     pub viewer_open: bool,
     job: Option<Job>,
     last_number: u32,
+    /// The Render View, if one shows.
+    view: Option<ViewRender>,
 }
 
 impl std::fmt::Debug for Renders {
@@ -133,6 +234,7 @@ impl std::fmt::Debug for Renders {
             .field("pictures", &self.history.len())
             .field("shown", &self.shown)
             .field("rendering", &self.is_rendering())
+            .field("view", &self.view.as_ref().map(|view| view.picture.samples))
             .finish_non_exhaustive()
     }
 }
@@ -162,15 +264,68 @@ impl Renders {
         self.job.is_some()
     }
 
+    /// Whether any render runs (the Picture Viewer's or the Render View's).
+    #[must_use]
+    pub fn is_busy(&self) -> bool {
+        self.job.is_some() || self.view.as_ref().is_some_and(ViewRender::is_rendering)
+    }
+
     /// How far the running render is (0…1), if one runs.
     #[must_use]
     pub fn progress(&self) -> Option<(u32, f32)> {
         let job = self.job.as_ref()?;
-        let done = job.control.progress().min(job.total);
-        // Display only: the precision of f32 is plenty.
-        #[expect(clippy::cast_precision_loss, reason = "a progress bar")]
-        let fraction = done as f32 / job.total.max(1) as f32;
-        Some((job.number, fraction))
+        Some((job.number, job.fraction()))
+    }
+
+    /// The Render View, if one shows.
+    #[must_use]
+    pub fn view_render(&self) -> Option<&ViewRender> {
+        self.view.as_ref()
+    }
+
+    /// Renders the view `key` describes (through `view`, at its size, with
+    /// the Render Settings' quality) for the Render View, replacing one that
+    /// shows. Nothing is saved or kept in the history.
+    pub fn start_view(&mut self, doc: &Document, view: &OrbitCamera, key: ViewKey) {
+        self.view = None;
+        let settings = doc.render.clone().validated();
+        let options = RenderOptions {
+            width: key.size[0],
+            height: key.size[1],
+            ..RenderOptions::from(&settings)
+        };
+        let job = Job::spawn(
+            0,
+            doc.scene.clone(),
+            f64::from(doc.time.frame()),
+            render_camera(view),
+            options,
+        );
+        let picture = Picture {
+            number: 0,
+            width: options.width,
+            height: options.height,
+            rgba: Vec::new(),
+            rgb: Vec::new(),
+            alpha: false,
+            samples: 0,
+            total_samples: settings.samples,
+            elapsed: Duration::ZERO,
+            state: if job.is_some() {
+                RenderState::Rendering
+            } else {
+                RenderState::Stopped
+            },
+            target: SaveTarget::Nowhere("The Render View is not saved."),
+            note: String::new(),
+            version: 0,
+        };
+        self.view = Some(ViewRender { key, picture, job });
+    }
+
+    /// Removes the Render View, stopping its render.
+    pub fn clear_view(&mut self) {
+        self.view = None;
     }
 
     /// Starts rendering `doc` at its current frame through `view` with its
@@ -200,27 +355,18 @@ impl Renders {
         });
         self.shown = None;
 
-        let control = Arc::new(RenderControl::default());
-        let (sender, updates) = mpsc::channel();
-        let scene = doc.scene.clone();
-        let frame = f64::from(doc.time.frame());
-        let camera = render_camera(view);
-        let worker_control = Arc::clone(&control);
-        let spawned = thread::Builder::new()
-            .name(format!("grid4d render {number}"))
-            .spawn(move || work(&scene, frame, &camera, &options, &worker_control, &sender));
-        if let Err(err) = spawned {
-            log::error!("could not start the render thread: {err}");
+        let job = Job::spawn(
+            number,
+            doc.scene.clone(),
+            f64::from(doc.time.frame()),
+            render_camera(view),
+            options,
+        );
+        if job.is_none() {
             self.end(number, true);
             return number;
         }
-        self.job = Some(Job {
-            number,
-            control,
-            updates,
-            started: Instant::now(),
-            total: u64::from(settings.height) * u64::from(settings.samples),
-        });
+        self.job = job;
         self.trim();
         number
     }
@@ -234,43 +380,35 @@ impl Renders {
         }
     }
 
-    /// Takes the worker's news. Returns `(changed, finished)`: whether a picture
-    /// changed (repaint), and the number of a render that has just finished
-    /// completely (to be saved).
+    /// Takes the workers' news. Returns `(changed, finished)`: whether a
+    /// picture changed (repaint), and the number of a Picture Viewer render
+    /// that has just finished completely (to be saved).
     pub fn poll(&mut self) -> (bool, Option<u32>) {
-        let Some(job) = &self.job else {
-            return (false, None);
-        };
-        let (number, elapsed) = (job.number, job.started.elapsed());
         let mut changed = false;
-        let mut ended = None;
-        loop {
-            let update = match job.updates.try_recv() {
-                Ok(update) => update,
-                Err(mpsc::TryRecvError::Empty) => break,
-                // The worker is gone without saying so (it panicked).
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    ended = Some(true);
-                    break;
-                }
-            };
-            match update {
-                Update::Pass { rgba, rgb, samples } => {
-                    if let Some(picture) = self.history.iter_mut().find(|p| p.number == number) {
-                        (picture.rgba, picture.rgb, picture.samples) = (rgba, rgb, samples);
-                        picture.version += 1;
-                    }
-                    changed = true;
-                }
-                Update::Done { stopped } => {
-                    ended = Some(stopped);
-                    break;
-                }
+        if let Some(view) = &mut self.view
+            && let Some(job) = &view.job
+        {
+            let (passed, ended) = job.drain(&mut view.picture);
+            changed |= passed;
+            if let Some(stopped) = ended {
+                view.job = None;
+                view.picture.state = if stopped {
+                    RenderState::Stopped
+                } else {
+                    RenderState::Finished
+                };
+                changed = true;
             }
         }
-        if let Some(picture) = self.history.iter_mut().find(|p| p.number == number) {
-            picture.elapsed = elapsed;
-        }
+        let Some(job) = &self.job else {
+            return (changed, None);
+        };
+        let number = job.number;
+        let Some(picture) = self.history.iter_mut().find(|p| p.number == number) else {
+            return (changed, None);
+        };
+        let (passed, ended) = job.drain(picture);
+        changed |= passed;
         let Some(stopped) = ended else {
             return (changed, None);
         };
@@ -406,6 +544,16 @@ pub(crate) mod tests {
         None
     }
 
+    /// Polls until the Render View's render ends (at most a few seconds).
+    pub(crate) fn wait_view(renders: &mut Renders) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while renders.view_render().is_some_and(ViewRender::is_rendering) {
+            assert!(Instant::now() < deadline, "the render did not end");
+            renders.poll();
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+
     pub(crate) fn small(doc: &mut Document, samples: u32) {
         doc.render.width = 24;
         doc.render.height = 14;
@@ -464,6 +612,51 @@ pub(crate) mod tests {
         renders.stop();
         assert_eq!(wait(&mut renders), None);
         assert_eq!(renders.history().len(), 3);
+    }
+
+    #[test]
+    fn the_render_view_renders_the_view_and_keeps_nothing() {
+        let mut doc = Document::with_demo_scene();
+        small(&mut doc, 3);
+        let camera = OrbitCamera::default();
+        let key = ViewKey {
+            view: 0,
+            camera,
+            size: [40, 30],
+            revision: doc.scene.revision(),
+            settings: doc.render.clone(),
+            frame: 0,
+        };
+        let mut renders = Renders::default();
+        renders.start_view(&doc, &camera, key.clone());
+        assert!(
+            renders.is_busy() && !renders.is_rendering(),
+            "not a Picture Viewer render"
+        );
+        wait_view(&mut renders);
+        let view = renders.view_render().unwrap();
+        assert_eq!(view.key, key);
+        assert_eq!(view.picture.state, RenderState::Finished);
+        assert_eq!(
+            (view.picture.width, view.picture.height, view.picture.samples),
+            (40, 30, 3)
+        );
+        assert!(renders.history().is_empty(), "not in the history");
+
+        // The view's size and camera, the settings' quality.
+        let mut evaluated = EvaluatedScene::for_render();
+        evaluated.update(&doc.scene);
+        let options = RenderOptions {
+            width: 40,
+            height: 30,
+            ..RenderOptions::from(&doc.render)
+        };
+        let whole = grid4d_raytrace::render(&RenderScene::new(&evaluated), &render_camera(&camera), &options);
+        assert_eq!(view.picture.rgb, whole.to_rgb8());
+
+        renders.start_view(&doc, &camera, key);
+        renders.clear_view();
+        assert!(renders.view_render().is_none() && !renders.is_busy());
     }
 
     #[test]

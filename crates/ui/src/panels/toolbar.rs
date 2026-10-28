@@ -16,10 +16,6 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
 
-        let disabled = IconStyle {
-            enabled: false,
-            ..IconStyle::default()
-        };
         history_button(ui, editor, HistoryStep::Undo);
         history_button(ui, editor, HistoryStep::Redo);
         group_gap(ui);
@@ -52,7 +48,13 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
         }
         group_gap(ui);
 
-        icon_button(ui, Icon::RenderView, disabled, "Render View (Ctrl+R) — planned");
+        let view_style = IconStyle {
+            selected: editor.renders.view_render().is_some(),
+            ..IconStyle::default()
+        };
+        if icon_button(ui, Icon::RenderView, view_style, "Render View (Ctrl+R)").clicked() {
+            editor.commands.push(EditorCommand::RenderView);
+        }
         if icon_button(
             ui,
             Icon::RenderPictureViewer,

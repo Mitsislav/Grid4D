@@ -53,8 +53,8 @@ impl std::fmt::Debug for PictureViewerPanel {
 
 impl PictureViewerPanel {
     pub fn show(&mut self, ctx: &egui::Context, editor: &mut EditorState) {
-        if editor.renders.is_rendering() {
-            // The editor polls the render once a frame, also with the window closed.
+        if editor.renders.is_busy() {
+            // The editor polls renders once a frame, also with the window closed.
             ctx.request_repaint_after(POLL);
         }
         if !editor.renders.viewer_open {

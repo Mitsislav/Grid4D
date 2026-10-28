@@ -338,7 +338,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
         });
 
         ui.menu_button("Render", |ui| {
-            planned(ui, "Render View", "Ctrl+R");
+            command(ui, editor, "Render View", "Ctrl+R", EditorCommand::RenderView);
             command(
                 ui,
                 editor,

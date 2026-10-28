@@ -1150,8 +1150,8 @@ glTF and OBJ files ([§9](#9-files)), and come along when you merge a document.
 A **render** is the finished picture of the scene: materials and lights as
 they look for real — soft shadows, light bouncing between surfaces, reflections —
 where the viewport only approximates them. **Render Settings** say how the
-document is rendered; the **Picture Viewer** renders it and shows the result.
-Rendering straight into the viewport (Render View, Ctrl+R) is *planned*.
+document is rendered; the **Picture Viewer** renders it and shows the result;
+the **Render View** renders the view you work in, in place.
 
 ### 16.1 Render Settings
 
@@ -1243,6 +1243,25 @@ pixel per screen pixel, **−** and **+** halve and double. The **mouse wheel**
 zooms about the pointer and **dragging** moves the picture. A picture with
 transparency shows over a grey checkerboard.
 
+### 16.3 The Render View
+
+**Render ▸ Render View**, **Ctrl+R** or the leftmost render button in the
+toolbar renders the **active view** right where it is: at the view's own size,
+through its camera, at the current frame, with the Render Settings' samples,
+bounces and Auto Light. The picture sharpens like in the Picture Viewer; a line
+in the view's bottom-left corner shows the progress, then the samples and the
+time. The toolbar button stays lit while a Render View shows.
+
+![The Render View: the active view rendered in place, the gizmo still on top](images/manual/render-view.png)
+
+It is a quick look, so it goes away as soon as it would no longer be true:
+when you move the view, edit the scene (or undo), change the Render Settings or
+the frame, resize the view or switch views — a render that runs then stops.
+**Esc** clears it too. Selecting objects keeps it, and the gizmo and the other
+overlays stay on top, so you can carry on working. **Ctrl+R** again renders
+afresh. The Render View is never saved and does not appear in the Picture
+Viewer's history; use **Shift+R** for a picture to keep.
+
 ## 17. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
@@ -1290,6 +1309,7 @@ Esc cancels a chord.
 | Ctrl+N (pointer over the Material Manager) | New material |
 | Ctrl+B | Render Settings |
 | Shift+R | Render to Picture Viewer |
+| Ctrl+R / Esc | Render View / clear it |
 | Tab (pointer over the timeline) | Timeline / F-Curve tab |
 | H / S (pointer over the F-Curve graph) | Frame all curves / the selected keys |
 
@@ -1334,8 +1354,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   the per-light switches (no illumination, ambient, diffuse or specular only).
 - **Interchange and rendering**: textures, animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only); the
-  the Render View (rendering into the viewport) is next, then frame ranges
-  and OpenEXR files; several render settings per document, Preview Range, a
+  frame ranges and OpenEXR files are next; the Render Region (Alt+R) and a
+  Render View that updates while you edit; several render settings per document, Preview Range, a
   render frame rate of its own, DPI and film aspect; a render queue, and the
   Picture Viewer's filters, channels, comparison and animation playback.
 - The Takes, Layers and Filter panels are placeholders.

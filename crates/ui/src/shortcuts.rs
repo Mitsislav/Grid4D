@@ -29,6 +29,7 @@
 //! | `Ctrl+N` (over the Material Manager) | New material |
 //! | `Ctrl+B`       | Render Settings window open / closed |
 //! | `Shift+R`      | Render to Picture Viewer   |
+//! | `Ctrl+R` / `Esc` | Render View / clear it   |
 //!
 //! Two-key chords (press the first key, then the second) are listed in
 //! [`Chord::complete`]: `U~L` Loop Selection, `K~L` Loop/Path Cut, `M~M` Connect,
@@ -314,6 +315,13 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         }
         if ctrl_only && i.key_pressed(Key::B) {
             editor.show_render_settings = !editor.show_render_settings;
+        }
+        if ctrl_only && i.key_pressed(Key::R) {
+            editor.commands.push(EditorCommand::RenderView);
+        }
+        // Esc clears the Render View; a drag in progress takes it for itself.
+        if plain && i.key_pressed(Key::Escape) && !i.pointer.any_down() {
+            editor.renders.clear_view();
         }
         for (key, forward) in [(Key::F, false), (Key::G, true)] {
             if ctrl_only
@@ -614,6 +622,21 @@ mod tests {
         };
         ctx.run_ui(input, |ui| handle(ui.ctx(), doc, editor))
             .drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn ctrl_r_renders_the_view_and_esc_clears_it() {
+        assert_eq!(press(Key::R, Modifiers::COMMAND, false), [EditorCommand::RenderView]);
+        let mut doc = Document::with_demo_scene();
+        crate::rendering::tests::small(&mut doc, 1);
+        let mut editor = EditorState::default();
+        let key = crate::ViewportPanel::new(None).view_key(&doc);
+        editor
+            .renders
+            .start_view(&doc, &grid4d_render::OrbitCamera::default(), key);
+        assert!(editor.renders.view_render().is_some());
+        press_on(&mut doc, &mut editor, Key::Escape, Modifiers::NONE);
+        assert!(editor.renders.view_render().is_none(), "Esc clears it");
     }
 
     #[test]

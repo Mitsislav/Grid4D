@@ -75,6 +75,15 @@ pub(super) fn view_label(painter: &Painter, rect: Rect, label: &str) {
     );
 }
 
+/// The Render View's status, in the view's bottom-left corner on a dark band.
+pub(super) fn render_view_status(painter: &Painter, rect: Rect, text: &str) {
+    let galley = painter.layout_no_wrap(text.to_owned(), FontId::proportional(12.0), p::TEXT_STRONG);
+    let pos = rect.left_bottom() + vec2(10.0, -10.0 - galley.size().y);
+    let band = Rect::from_min_size(pos, galley.size()).expand2(vec2(6.0, 3.0));
+    painter.rect_filled(band, 3.0, egui::Color32::from_black_alpha(170));
+    painter.galley(pos, galley, p::TEXT_STRONG);
+}
+
 /// Every visible camera object except the one the view looks through (`linked`),
 /// as a wire pyramid of its field of view (at the view's aspect ratio) with a
 /// small triangle marking its up side.

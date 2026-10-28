@@ -227,6 +227,24 @@ pub struct ViewportPanel {
     synced: Option<OrbitCamera>,
     /// Navigation moving the linked object: its data before, for one undo step.
     camera_edit: Option<(NodeId, NodeData)>,
+    /// Screen pixels per point last frame (a view's size in pixels).
+    pixels_per_point: f32,
+    /// The Render View's picture on the GPU.
+    render_view: Option<RenderViewTexture>,
+}
+
+/// The Render View's picture as a texture, with the version it was made from.
+struct RenderViewTexture {
+    version: u64,
+    texture: egui::TextureHandle,
+}
+
+impl std::fmt::Debug for RenderViewTexture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderViewTexture")
+            .field("version", &self.version)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ViewportPanel {
@@ -271,6 +289,22 @@ impl ViewportPanel {
             editor_camera: None,
             synced: None,
             camera_edit: None,
+            pixels_per_point: 1.0,
+            render_view: None,
+        }
+    }
+
+    /// What a Render View of the active view depends on, as it is now: the view,
+    /// its camera and size, the scene's revision, the render settings, the frame.
+    #[must_use]
+    pub fn view_key(&self, doc: &Document) -> crate::rendering::ViewKey {
+        crate::rendering::ViewKey {
+            view: self.active,
+            camera: self.camera,
+            size: pixel_size(self.view_rect, self.pixels_per_point),
+            revision: doc.scene.revision(),
+            settings: doc.render.clone(),
+            frame: doc.time.frame(),
         }
     }
 
@@ -470,6 +504,16 @@ impl ViewportPanel {
         self.swap_view(0);
         self.follow_view_camera(doc, editor);
         self.swap_view(0);
+        self.pixels_per_point = ui.ctx().pixels_per_point();
+        // A Render View that no longer shows the view as it is goes away.
+        if editor
+            .renders
+            .view_render()
+            .is_some_and(|view| view.key != self.view_key(doc))
+        {
+            editor.renders.clear_view();
+            self.render_view = None;
+        }
 
         let several = cells.iter().flatten().count() > 1;
         self.camera_moved = false;
@@ -660,6 +704,9 @@ impl ViewportPanel {
                 Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
             );
+            if interactive {
+                self.paint_render_view(ui, painter, rect, editor);
+            }
         } else {
             painter.text(
                 rect.center(),
@@ -783,6 +830,67 @@ impl ViewportPanel {
     }
 
     /// Viewport header with C4D's menu set and the navigation drag-icons.
+    /// The Render View over the active view: its picture (over black, without
+    /// the grid), and a line saying how far it is.
+    fn paint_render_view(&mut self, ui: &Ui, painter: &egui::Painter, rect: Rect, editor: &EditorState) {
+        let Some(view) = editor.renders.view_render() else {
+            self.render_view = None;
+            return;
+        };
+        if view.key.view != self.active {
+            return;
+        }
+        let picture = &view.picture;
+        let progress = view.progress();
+        if progress.is_some() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        if picture.has_pixels() {
+            if self.render_view.as_ref().is_none_or(|t| t.version != picture.version) {
+                let size = [
+                    usize::try_from(picture.width).unwrap_or(0),
+                    usize::try_from(picture.height).unwrap_or(0),
+                ];
+                let image = egui::ColorImage::from_rgb(size, &picture.rgb);
+                let options = egui::TextureOptions::NEAREST;
+                match &mut self.render_view {
+                    Some(cached) => {
+                        cached.texture.set(image, options);
+                        cached.version = picture.version;
+                    }
+                    None => {
+                        self.render_view = Some(RenderViewTexture {
+                            version: picture.version,
+                            texture: ui.ctx().load_texture("grid4d.render_view", image, options),
+                        });
+                    }
+                }
+            }
+            if let Some(cached) = &self.render_view {
+                painter.image(
+                    cached.texture.id(),
+                    rect,
+                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        let seconds = picture.elapsed.as_secs_f32();
+        let status = match progress {
+            Some(fraction) => format!(
+                "Render View · rendering {:.0} % · {} of {} samples · {seconds:.1} s",
+                fraction * 100.0,
+                picture.samples,
+                picture.total_samples
+            ),
+            None => format!(
+                "Render View · {} samples · {seconds:.1} s · Esc clears",
+                picture.samples
+            ),
+        };
+        overlay::render_view_status(painter, rect, &status);
+    }
+
     /// Links the view to `editor.view_camera` (or back to the editor camera) and
     /// follows the linked object at the current frame. A view moved outside `show`
     /// (framing) is written to the object first.
@@ -1376,6 +1484,15 @@ mod tests {
                 editor,
                 viewport: ViewportPanel::new(None),
             }
+        }
+
+        /// Renders the active view and waits for the Render View.
+        fn render_view(&mut self) {
+            self.editor.commands.push(EditorCommand::RenderView);
+            self.frame(Vec::new());
+            crate::rendering::tests::wait_view(&mut self.editor.renders);
+            self.frame(Vec::new());
+            assert!(self.editor.renders.view_render().is_some(), "the Render View shows");
         }
 
         /// One frame: input events, layout, then the queued commands (as the app does).
@@ -2756,5 +2873,60 @@ mod tests {
         h.frame(vec![Harness::button(start, false)]);
         h.frame(vec![]);
         assert!(!h.editor.history.can_undo());
+    }
+
+    #[test]
+    fn the_render_view_goes_away_when_what_it_shows_changes() {
+        let mut h = Harness::new();
+        h.doc.render.samples = 1;
+        h.frame(Vec::new());
+        h.render_view();
+        let view = h.editor.renders.view_render().unwrap();
+        assert_eq!(
+            [view.picture.width, view.picture.height],
+            pixel_size(h.viewport.view_rect, 1.0),
+            "rendered at the view's size"
+        );
+        for _ in 0..3 {
+            h.frame(Vec::new());
+        }
+        h.editor.selection.clear();
+        h.frame(Vec::new());
+        assert!(
+            h.editor.renders.view_render().is_some(),
+            "idle frames and selecting keep it"
+        );
+
+        // A command applies at the end of a frame; the next one notices.
+        let gone = |h: &mut Harness, what: &str| {
+            h.frame(Vec::new());
+            h.frame(Vec::new());
+            assert!(h.editor.renders.view_render().is_none(), "{what} clears it");
+        };
+        h.viewport.camera.orbit(0.2, 0.0);
+        gone(&mut h, "moving the camera");
+
+        h.render_view();
+        let cube = h.doc.scene.roots()[0];
+        let mut data = h.doc.scene.get(cube).unwrap().data.clone();
+        data.transform.position.x += 50.0;
+        h.editor.commands.push(EditorCommand::Edit {
+            edit: grid4d_scene::SceneEdit::SetData { id: cube, data },
+            label: "Move",
+        });
+        gone(&mut h, "an edit");
+
+        h.render_view();
+        h.doc.render.samples = 2;
+        gone(&mut h, "changing the Render Settings");
+
+        h.render_view();
+        h.doc.time.set_frame(5);
+        gone(&mut h, "another frame");
+
+        h.render_view();
+        h.editor.commands.push(EditorCommand::ShowView(None));
+        h.frame(Vec::new());
+        gone(&mut h, "four views (another size)");
     }
 }

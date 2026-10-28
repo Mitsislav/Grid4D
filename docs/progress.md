@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 8 — Offline renderer (v0.8) |
-| Last step done | 8.3 — The Picture Viewer (2026-10-28) |
-| Next step | 8.4 — Render View: rendering into the active viewport |
-| Tests | 511, all passing; clippy and rustfmt clean |
+| Last step done | 8.4 — The Render View (2026-10-28) |
+| Next step | 8.5 — Frame ranges to numbered files; EXR output |
+| Tests | 514, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -691,6 +691,7 @@ Phase 7 is complete.
 | 8.1 | The path tracer core: a new crate `grid4d-raytrace` that renders the scene (render visibility and levels) through a camera — every light with its Shadow setting, diffuse and glossy/metal materials, luminance, two bounces, the automatic light, a transparent background — repeatably and in parallel; an example renders documents to PNG; a reference-image test | 485 |
 | 8.2 | Render Settings (Ctrl+B, Render menu, toolbar): a window with Output (size, presets, Lock Ratio, frame range and step), Save (file, PNG, alpha), Sampling (samples, bounces) and Options (Auto Light) pages; the settings live in the document, are undoable and saved in `.g4d`; the renderer and its example take them | 499 |
 | 8.3 | The Picture Viewer (Shift+R, Render menu, toolbar): renders run in the background and sharpen pass by pass, can be stopped, are saved where Render Settings say, and stay in a history; zoom, pan, Save As | 511 |
+| 8.4 | The Render View (Ctrl+R, Render menu, toolbar): the active view rendered in place at its size, sharpening pass by pass, cleared by Esc or as soon as the view, the scene, the settings or the frame change | 514 |
 
 *Problems and solutions:*
 - **What the renderer sees.** The evaluation was built for the viewport (editor
@@ -814,6 +815,32 @@ Phase 7 is complete.
   click positions (125 %) landed elsewhere — one created a sphere in a run that
   was then discarded. Posted mouse-wheel messages did not reach the viewer, so
   the wheel zoom is checked by a headless test instead.
+
+**8.4 — The Render View**
+
+*Problems and solutions:*
+- **One worker, two uses.** The Picture Viewer's job was taught to spawn and
+  drain generically, so the Render View is a second job beside it with its own
+  picture; both can run at once and neither waits for the other. The view's
+  picture is never saved and stays out of the history.
+- **Knowing when the picture is no longer true.** Rather than reacting to each
+  kind of change, the Render View remembers what it was made of — the view, its
+  camera, its size in pixels, the scene's revision, the render settings and the
+  frame — and the viewport compares that with the present at the start of every
+  frame; any difference clears it and stops its worker. Selection lives outside
+  the scene's revision, so selecting keeps it, as intended. An edit applied at
+  the end of a frame is noticed on the next one.
+- **Exactly the view.** The render uses the view's own camera and pixel size,
+  so the picture lines up with the overlays drawn over it (a test compares it
+  with a full render at that size, and on screen the gizmo and the selection
+  corners sat on the rendered cube).
+- **Esc without stealing it from tools.** Esc clears the Render View only when
+  no mouse button is held; drags (Live Selection, mesh tools) keep using Esc
+  to cancel themselves, and a pending chord takes it first.
+- **On-screen testing:** the toolbar button rendered the perspective view in
+  0.1 s at its size (16 samples), with the status line in the corner and the
+  button lit; Esc brought the normal view back. Clearing on camera moves, edits,
+  settings, frames and view changes is covered by a headless viewport test.
 
 ---
 

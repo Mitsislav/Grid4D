@@ -79,6 +79,9 @@ pub enum EditorCommand {
     /// Renders the scene at the current frame through the active view, in the
     /// background, and opens the Picture Viewer (Shift+R). Stops a render that runs.
     RenderToPictureViewer,
+    /// Renders the active view into the viewport (Render View, Ctrl+R),
+    /// replacing one that shows. Not saved.
+    RenderView,
     /// Stops the running render, keeping what it rendered.
     StopRender,
     /// Asks where, then saves the picture the Picture Viewer shows as PNG.
@@ -334,6 +337,10 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::RenderToPictureViewer => {
             editor.renders.start(doc, viewport.camera(), editor.file.path());
             editor.renders.viewer_open = true;
+        }
+        EditorCommand::RenderView => {
+            let key = viewport.view_key(doc);
+            editor.renders.start_view(doc, viewport.camera(), key);
         }
         EditorCommand::StopRender => editor.renders.stop(),
         EditorCommand::SaveRenderAs => file::save_render_as(doc, editor),
