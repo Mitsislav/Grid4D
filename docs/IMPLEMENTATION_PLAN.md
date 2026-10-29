@@ -33,11 +33,11 @@ references, no `unsafe`, no `unwrap`, exhaustive `match`, and
 12. [Phase 8 — Offline renderer](#phase-8--offline-renderer-v08)
 13. [Phase 9 — Splines & spline generators](#phase-9--splines--spline-generators-v09)
 14. [Phase 10 — Deformers & MoGraph](#phase-10--deformers--mograph-v010)
-    · [Phase 11 — Simulation](#phase-11--simulation-v011)
+15. [Phase 11 — Simulation](#phase-11--simulation-v011)
     · [Phase 12 — Workspace](#phase-12--workspace-v012)
     · [Phase 13 — Extensibility](#phase-13--extensibility-v013)
-15. [Cross-cutting: testing, performance, CI, docs](#cross-cutting-testing-performance-ci-docs)
-16. [Risks & open decisions](#risks--open-decisions)
+16. [Cross-cutting: testing, performance, CI, docs](#cross-cutting-testing-performance-ci-docs)
+17. [Risks & open decisions](#risks--open-decisions)
 
 Size legend for steps: **S** ≈ one small PR (< 300 lines), **M** ≈ one focused PR
 (300–1000 lines), **L** ≈ several PRs.
@@ -99,9 +99,10 @@ appears:
                 grid4d-scene  (Document, hierarchy, tags, materials, animation data, SceneEdit/History)
                  ▲         ▲
          grid4d-eval      grid4d-io   (eval: generators, deformers, animation → EvaluatedScene)
-          ▲     ▲               ▲     (io: .g4d, glTF, OBJ — serde lives here, not in scene)
+          ▲     ▲      ▲        ▲     (io: .g4d, glTF, OBJ — serde lives here, not in scene)
 grid4d-render  grid4d-raytrace  │     (raytrace: Phase 8)
-          ▲     ▲               │
+          ▲     ▲  grid4d-sim   │     (sim: Phase 11 — rapier3d, the cache)
+          ▲     ▲      ▲        │
           └───── grid4d-ui ─────┘
                      ▲
                 grid4d (bin)
@@ -116,6 +117,7 @@ grid4d-render  grid4d-raytrace  │     (raytrace: Phase 8)
 | `grid4d-render` | exists | eval, scene, geom, `wgpu` | egui |
 | `grid4d-raytrace` | Phase 8 | eval, scene, geom, `rayon` | wgpu (CPU first), egui |
 | `grid4d-text` | Phase 9 | geom, `ttf-parser`, `epaint_default_fonts` (font bytes only) | scene, wgpu, egui |
+| `grid4d-sim` | Phase 11 | eval, scene, geom, `rapier3d` (its types never leave the crate) | wgpu, egui |
 | `grid4d-ui` | exists | all of the above, `egui`, `rfd` | — |
 
 \* Keeping serde out of `grid4d-scene` means the file format is a separate,
@@ -147,7 +149,7 @@ Two architectural moves carry most of the later phases:
 | v0.8 | Rendering | 8 | Render View + Picture Viewer, CPU path tracer, PNG/EXR output |
 | v0.9 | Splines | 9 | Spline objects and primitives, point editing and the Pen, Extrude / Lathe / Sweep / Loft, Text |
 | v0.10 | Deformers & MoGraph | 10 | Animated parameters; Bend / Twist / Taper / Bulge / FFD; Current State to Object; Cloner (Linear, Radial, Grid, Object) with Plain and Random effectors |
-| v0.11 | Simulation | 11 | Rigid bodies (rapier3d), cached per frame |
+| v0.11 | Simulation | 11 | Rigid and collider bodies (rapier3d) on objects and clones, cached per frame and saved when baked; renders and export show the simulation |
 | v0.12 | Workspace | 12 | Docking layouts, Layers, Takes, Preferences, Greek translation |
 | v0.13 | Extensibility | 13 | Plugin trait for objects / tags / tools, then scripting |
 | v1.0 | Stabilisation | — | File format frozen (with migrations), docs, packaging, perf budget met |
@@ -745,17 +747,121 @@ tested — 1 000 clones are one instanced draw with no per-frame allocation.
 
 ## Phase 11 — Simulation (v0.11)
 
-Lower resolution on purpose — plan in detail when v0.10 lands.
+**Goal:** things fall, collide, bounce and come to rest. A *Rigid Body* tag
+makes an object (or every clone of a Cloner) a solid body under gravity; a
+*Collider Body* tag makes it something others hit. The simulation runs from
+the start frame and is **cached per frame**, so scrubbing, playback, the Render
+View, final renders and export all show the same, repeatable motion — and any
+edit that changes the outcome simply makes the cache stale.
 
-* **Rigid bodies** via `rapier3d` (pure Rust; check its glam / MSRV
-  compatibility first): a *Rigid Body* tag (dynamic, kinematic, static;
-  mass, friction, bounciness, shape: box / sphere / convex hull / mesh) and
-  a *Collider* tag; gravity and substeps in the project settings.
-* **Cached, not live:** simulation runs from the start frame and caches each
-  object's transform per frame (memory budget, *Bake* / *Clear cache*); playback
-  and renders read the cache, so scrubbing is deterministic; edits invalidate it.
-* Clones as rigid bodies (each instance a body) once 10.6 is stable.
-* The Simulate menu (already listed) gets its first entries.
+**Behaviour specs** (written per step before implementing, from the public
+manual — clean-room): `reference/simulation-rigid-body.md` (11.1–11.2:
+the tags, shapes, mass, bounce and friction, project settings),
+`simulation-cache.md` (11.3, 11.5: start state, cache, bake, playback,
+renders), `simulation-clones.md` (11.4).
+
+### Design
+
+* **Engine: `rapier3d` 0.36** (Dimforge, Apache-2.0, pure Rust, MSRV 1.86),
+  behind a new crate **`grid4d-sim`** — the only crate that sees it. Rapier
+  0.36 does its maths in **glam 0.33** (through `glamx`) while we are on
+  glam 0.34, so two glam versions coexist; `grid4d-sim` converts at its edge
+  through plain arrays (`[f32; 3]`, `[f32; 4]`) and nothing else ever touches
+  a rapier type. When rapier follows glam 0.34 the conversions shrink to
+  nothing (decision D10). Built without the `parallel` feature: one thread
+  per simulation, so a run is deterministic on a machine (tests compare with
+  a tolerance across platforms).
+* **Units:** the scene is in centimetres, rapier is tuned for metres (contact
+  tolerances, sleeping thresholds), so `grid4d-sim` simulates **in metres**
+  and scales by 0.01 at its edge; gravity is set in the UI in cm/s² (default
+  981 down). Masses in kilograms from a density in g/cm³ (default 1, water).
+* **Scene data (11.1).** A body is a tag, like C4D's:
+  `Tag::Dynamics(Body)` with `Body { motion: Motion, shape: CollisionShape,
+  mass: Mass, bounce, friction, linear_damping, angular_damping,
+  initial_velocity: (linear cm/s, angular °/s), children: Inherit }`.
+  `Motion`: **Dynamic** (falls and collides), **Kinematic** (follows its own
+  animation and pushes others), **Static** (never moves). The Tags menu offers
+  it twice — *Rigid Body* (Dynamic) and *Collider Body* (Static) — as presets
+  of the same tag (one per object). `CollisionShape`: **Automatic** (convex
+  hull for moving bodies, the mesh itself for static ones), **Box**,
+  **Sphere**, **Convex Hull**, **Static Mesh** (static / kinematic only).
+  `Inherit`: *None* (only this object) or *Compound* (this object and its
+  visible children as one body). Project-wide **`SimulationSettings`** in
+  `Document::simulation` (enabled, gravity, steps per frame 1–100 default 5,
+  solver iterations, time scale), changed through `SceneEdit::SetSimulation`
+  (validated, like `SetRender`), shown in the Attribute Manager's Project
+  settings. `.g4d` v3 grows additively (a `dynamics` tag, a `simulation`
+  block omitted while default).
+* **The simulation core (11.2)** is plain data, `Send`, no UI:
+  `Simulation::new(&EvaluatedScene /* at the start frame */, &Scene, &settings)`
+  gathers every body — its shape from the **evaluated** mesh (so a primitive,
+  a polygon object, a generator's result, a deformed shape all work), scaled
+  by its world matrix's scale (rapier bodies have none) — and builds the
+  rapier world; `step_to(frame)` advances it frame by frame (`steps` sub-steps
+  of `1 / fps × time scale`), kinematic bodies moved to their animated pose
+  each sub-step (`set_next_kinematic_position`), and records each body's
+  world pose per frame into a **`SimCache`** (frames × bodies of position +
+  rotation; 28 bytes per body per frame — 1 000 bodies × 300 frames ≈ 8 MB).
+  Bodies are identified by `BodyKey::{Node(NodeId), Clone(NodeId, u32)}`.
+* **Evaluation stays simulation-agnostic (11.3).** `grid4d-eval` gets a
+  general hook: **`EvaluatedScene::set_overrides(&Overrides)`** — world
+  matrices for some nodes (and some clones, by Cloner and clone number) at the
+  current frame, applied after animation (children follow their simulated
+  parent, as with animation). `grid4d-sim` turns a cached frame into
+  `Overrides`; the dependency arrow stays eval ◀ sim ◀ ui.
+* **The cache in the editor (11.3).** `EditorState::simulation` (a
+  `ui::simulation::Sim`, like `Renders`) owns the `Simulation` and its cache.
+  A cheap **inputs key** — for every body node: its tag, its pose and shape
+  key (mesh id or primitive parameters) at the start frame, its animation
+  when kinematic; plus the settings and the frame range — is rebuilt when the
+  scene revision changes and compared: selecting, renaming or moving an
+  unrelated object keeps the cache; anything else drops it. Before drawing
+  frame *f*, the cache is filled up to *f* within a time budget per UI frame
+  (a few ms; the rest next frame, with a repaint request), so the first
+  playthrough simulates "live" and every later visit is read from the cache;
+  scrubbing back is instant. The timeline draws the cached range as a bar.
+  **Simulate ▸ Bake** fills the whole range now (with progress, cancellable);
+  **Clear Cache** empties it. Frames before the start frame show the start
+  state.
+* **Everything else reads the cache.** The viewport (through overrides),
+  Current State to Object and export at the current frame (their evaluations
+  get the same overrides), the Render View and final renders (the job gets a
+  snapshot of the cache plus its own `Simulation` to extend it — the run is
+  deterministic, so it simulates the same motion), picking and snapping.
+* **Clones as bodies (11.4).** A Rigid Body tag on a Cloner makes **every
+  clone** a body (each clone's shape from its child, a cloned group as a
+  compound), keyed `BodyKey::Clone(cloner, n)`; the clones' placements at the
+  start frame (layout and effectors) are their start state; afterwards the
+  cache moves them. Collider Body on a Cloner: static clones (a field of
+  posts).
+* **Bodies in the file and performance (11.5).** A baked cache can be saved
+  with the document (`.g4d` v3 `simulation.bin`: frames × bodies, little-endian,
+  checked sizes, dropped on load if the inputs key no longer matches) so a
+  reopened file plays at once; a memory budget (Project settings, default
+  256 MB) stops caching beyond it with a warning; a benchmark keeps 1 000
+  falling cubes at interactive speed.
+* **Not in Phase 11:** soft bodies, cloth, ropes, particles, fluids, forces
+  (wind, attractor), connectors / joints and motors, collision triggers
+  (*On Collision*), Follow Position / Rotation springs, fracturing. The
+  Simulate menu keeps them listed as planned.
+
+### Steps
+
+| Step | Size | Work |
+|------|------|------|
+| 11.1 | M | **Scene data and the physics crate:** spec `simulation-rigid-body.md`; `Tag::Dynamics(Body)` (`Motion`, `CollisionShape`, `Mass`, bounce, friction, damping, initial velocity, `Inherit`), Tags ▸ Rigid Body / Collider Body presets, Attribute Manager tag rows; `SimulationSettings` + `SceneEdit::SetSimulation` (validated) in Project settings; `.g4d` v3 additive; new crate `grid4d-sim` with `rapier3d` 0.36 (no `parallel`), the array conversions at its edge and a smoke test (a ball falls); CI and MSRV still green |
+| 11.2 | L | **Simulation core:** `Simulation::new` from an evaluated start frame (shapes from evaluated meshes: box, sphere, convex hull, static trimesh; Automatic; world scale baked in; compound children), metres inside, `step_to(frame)` with sub-steps and kinematic poses from animation, initial velocities, `SimCache` per frame; tests: a cube falls onto a plane and rests on it, a ball bounces lower each time, a box slides further on less friction, kinematic pushes dynamic, identical runs give identical caches |
+| 11.3 | L | **Playback, cache and renders:** spec `simulation-cache.md`; `EvaluatedScene::set_overrides` (nodes and clones, children follow) with a hot-path test; `ui::simulation::Sim` in `EditorState` (inputs key, invalidation, budgeted filling, start state before the start frame); timeline cache bar; Simulate ▸ Bake / Clear Cache (progress, Esc); Current State to Object and export at the simulated frame; the Render View and final renders with a cache snapshot (extended in the job) |
+| 11.4 | M | **Clones as bodies:** spec `simulation-clones.md`; a Dynamics tag on a Cloner makes every clone a body (`BodyKey::Clone`), groups as compounds, start placements from layout and effectors; clone overrides in evaluation; Make Editable / Current State to Object bake the simulated clones |
+| 11.5 | M | **Saved caches and limits:** a baked cache stored in the `.g4d` (`simulation.bin`, checked, dropped if stale), the memory budget setting with a warning, a `criterion` benchmark (1 000 cubes falling into a box), the manual's Simulation chapter completed |
+
+**Acceptance:** a stack of cubes knocked over by a dynamic sphere; 1 000 spheres
+from a Cloner poured into a bowl (a static mesh collider); a kinematic paddle
+animated by keys pushing boxes; scrubbing back and forth shows identical frames;
+changing a bounce or moving a body re-simulates, selecting or renaming does
+not; the Render View, final renders, Current State to Object and glTF / OBJ
+export show the simulated state; a baked cache is saved and reopens playing;
+everything undoable.
 
 ## Phase 12 — Workspace (v0.12)
 
@@ -837,6 +943,9 @@ per steady-state frame" for the hot path, complementing `extract_reuses_capacity
 | R2 | Trademark / trade-dress | Keep "inspired by" wording, original icons only, no C4D file formats; review menus/labels before each release | ongoing |
 | D8 | Clones: nodes or instances | **Instances** in a separate `EvaluatedScene::instances()` list built after animation, so the node list keeps its pre-order invariants (animation, Target tags, component modes) and thousands of clones stay one instanced draw | Phase 10 |
 | D9 | What can be animated | Real-valued object parameters (10.1); counts follow when a step needs them (the Cloner's count, rounded); enums and booleans are not (the reference animates them stepwise — revisit if needed) | Phase 10 |
+| D10 | Physics engine | `rapier3d` 0.36 in its own crate (`grid4d-sim`), single-threaded for determinism; it brings glam 0.33 (via `glamx`) beside our 0.34, converted through arrays at the crate's edge — accepted until rapier moves to glam 0.34 (a hand-written solver would cost far more and be less robust) | Phase 11 |
+| D11 | Simulation units | Metres inside the engine (its tolerances assume them), centimetres everywhere else; gravity shown in cm/s² | Phase 11 |
+| D12 | Where the cache lives | Editor state, filled on demand within a frame budget and keyed by the simulation's inputs (selection and unrelated edits keep it); a baked cache is also saved in the `.g4d` (11.5) | Phase 11 |
 | R3 | Scope creep | Ship the release train in order; each phase must leave the app usable and tests green | ongoing |
 
 ---

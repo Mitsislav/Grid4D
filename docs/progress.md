@@ -12,9 +12,9 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 10 — Deformers & MoGraph (v0.10) |
-| Last step done | 10.8 — Effectors (2026-10-30); Phase 10 complete |
-| Next step | Phase 11 — Simulation: plan it in detail |
+| Current phase | 11 — Simulation (v0.11) |
+| Last step done | Phase 11 planned (2026-10-30) |
+| Next step | 11.1 — Scene data and the physics crate |
 | Tests | 658, all passing; clippy and rustfmt clean |
 
 ---
@@ -1448,6 +1448,24 @@ Phase 9 is complete.
 
 Phase 10 is complete: deformers, the Cloner and effectors, with animated
 parameters, are undoable, saved, picked, exported and rendered.
+
+---
+
+## Phase 11 — Simulation (2026-10-30 – )
+
+| Step | What was built | Tests |
+|------|----------------|-------|
+| — | Phase 11 planned in detail: rigid and collider bodies as a Dynamics tag, `rapier3d` 0.36 in a new `grid4d-sim` crate (metres inside, arrays at its edge), a per-frame cache in editor state keyed by the simulation's inputs, evaluation overrides, clones as bodies, saved caches (`IMPLEMENTATION_PLAN.md`) | 658 |
+
+**Planning notes:**
+- **The engine's maths library.** `rapier3d` 0.36 (the latest, 2026-10) uses
+  glam 0.33 through `glamx`; we are on glam 0.34. Rather than hold glam back
+  or write a solver, the physics lives in its own crate and talks to the rest
+  through plain arrays (decision D10).
+- **Keeping evaluation independent.** The simulation needs evaluated meshes,
+  and evaluation must show simulated poses; a general override hook in
+  `grid4d-eval` (world matrices by node or clone) keeps the arrow one way:
+  eval ◀ sim ◀ ui.
 
 ---
 
