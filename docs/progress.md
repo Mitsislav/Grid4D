@@ -12,9 +12,9 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 9 — Splines & spline generators (v0.9) |
+| Current phase | 10 — Deformers & MoGraph (v0.10) |
 | Last step done | 9.8 — Text spline (2026-10-29); Phase 9 complete |
-| Next step | Phase 10 — plan it in detail (deformers, MoGraph-lite, simulation, workspace, extensibility) |
+| Next step | 10.1 — Animated parameters |
 | Tests | 600, all passing; clippy and rustfmt clean |
 
 ---
@@ -1185,7 +1185,15 @@ Phase 9 is complete.
 
 ---
 
-## How this file is kept## How this file is kept
+## Phase 10 — Deformers & MoGraph (2026-10-29 – )
+
+| Step | Built | Tests |
+|------|-------|-------|
+| — | Phase 10 planned in detail: animated parameters, Bend / Twist / Taper / Bulge / FFD, Current State to Object, Cloner (Linear, Radial, Grid, Object) and Plain / Random effectors; Phases 11–13 (simulation, workspace, extensibility) sketched (`IMPLEMENTATION_PLAN.md`) | 600 |
+
+---
+
+## How this file is kept
 
 After every step (and every fix worth noting) this file gets the new step in its
 phase's table, its problems and solutions, and an updated Status block. The manual is

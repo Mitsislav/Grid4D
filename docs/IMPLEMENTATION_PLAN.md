@@ -32,7 +32,10 @@ references, no `unsafe`, no `unwrap`, exhaustive `match`, and
 11. [Phase 7 — Viewport: cameras, lights, 4-view, shading](#phase-7--viewport-cameras-lights-4-view-shading-v07)
 12. [Phase 8 — Offline renderer](#phase-8--offline-renderer-v08)
 13. [Phase 9 — Splines & spline generators](#phase-9--splines--spline-generators-v09)
-14. [Phase 10+ — Deformers, MoGraph, simulation, workspace, extensibility](#phase-10--deformers-mograph-simulation-workspace-extensibility)
+14. [Phase 10 — Deformers & MoGraph](#phase-10--deformers--mograph-v010)
+    · [Phase 11 — Simulation](#phase-11--simulation-v011)
+    · [Phase 12 — Workspace](#phase-12--workspace-v012)
+    · [Phase 13 — Extensibility](#phase-13--extensibility-v013)
 15. [Cross-cutting: testing, performance, CI, docs](#cross-cutting-testing-performance-ci-docs)
 16. [Risks & open decisions](#risks--open-decisions)
 
@@ -112,6 +115,7 @@ grid4d-render  grid4d-raytrace  │     (raytrace: Phase 8)
 | `grid4d-io` | Phase 2 | scene, geom, `serde`, `serde_json`, `gltf`, `tobj` | wgpu, egui |
 | `grid4d-render` | exists | eval, scene, geom, `wgpu` | egui |
 | `grid4d-raytrace` | Phase 8 | eval, scene, geom, `rayon` | wgpu (CPU first), egui |
+| `grid4d-text` | Phase 9 | geom, `ttf-parser`, `epaint_default_fonts` (font bytes only) | scene, wgpu, egui |
 | `grid4d-ui` | exists | all of the above, `egui`, `rfd` | — |
 
 \* Keeping serde out of `grid4d-scene` means the file format is a separate,
@@ -142,6 +146,10 @@ Two architectural moves carry most of the later phases:
 | v0.7 | Viewport | 7 | Scene cameras, 4-view, shading modes, real lights, snapping |
 | v0.8 | Rendering | 8 | Render View + Picture Viewer, CPU path tracer, PNG/EXR output |
 | v0.9 | Splines | 9 | Spline objects and primitives, point editing and the Pen, Extrude / Lathe / Sweep / Loft, Text |
+| v0.10 | Deformers & MoGraph | 10 | Animated parameters; Bend / Twist / Taper / Bulge / FFD; Current State to Object; Cloner (Linear, Radial, Grid, Object) with Plain and Random effectors |
+| v0.11 | Simulation | 11 | Rigid bodies (rapier3d), cached per frame |
+| v0.12 | Workspace | 12 | Docking layouts, Layers, Takes, Preferences, Greek translation |
+| v0.13 | Extensibility | 13 | Plugin trait for objects / tags / tools, then scripting |
 | v1.0 | Stabilisation | — | File format frozen (with migrations), docs, packaging, perf budget met |
 
 Phases 1 and 2 are independent and can run in parallel. Phase 5 needs Phase 3;
@@ -614,17 +622,158 @@ for the spline generators).
 
 ---
 
-## Phase 10+ — Deformers, MoGraph, simulation, workspace, extensibility
+## Phase 10 — Deformers & MoGraph (v0.10)
 
-Lower resolution on purpose — plan in detail when v0.9 lands.
+**Goal:** shapes that move and multiply. Deformers bend, twist, taper and bulge
+any object (primitives, polygon objects, generator results) without touching its
+points; the Cloner repeats objects along lines, circles, grids and over other
+objects, and effectors vary the clones. Object parameters (a Bend's strength, a
+cube's size, a Cloner's count) become animatable, so all of it can move.
 
-* **Deformers:** Bend, Twist, Taper, Bulge, FFD — evaluated after generators.
-* **MoGraph-lite:** Cloner (linear/radial/grid/object), Random and Plain effectors.
-* **Simulation:** rigid bodies via `rapier3d` (menu already lists Simulate).
-* **Workspace:** Takes, Layers, customisable docking layouts (e.g. `egui_dock`),
-  preferences window, theme variants, i18n.
-* **Extensibility:** a statically-registered Rust plugin trait for object/tag/tool
-  types first; scripting (Rhai or Python via `pyo3`) after the API stabilises.
+**Behaviour specs** (written per step before implementing, as before, from the
+public manual — clean-room): `reference/animation-parameters.md` (10.1),
+`deformer-basics.md` and `deformer-bend.md` (10.2), `deformer-twist-taper-bulge.md`
+(10.3), `deformer-ffd.md` (10.4), `modeling-current-state.md` (10.5),
+`mograph-cloner.md` (10.6–10.7), `mograph-effectors.md` (10.8).
+
+### Design
+
+* **Animated parameters (10.1).** `Param` grows a variant for an object's own
+  numbers: `Param::Object(ObjectParam)`, where `ObjectParam` names one numeric
+  field of an `ObjectKind` (a closed enum per kind, e.g. `CubeSize(Axis)`,
+  `BendStrength`, `ClonerCount`), with `ObjectKind::param(p) -> Option<f32>` and
+  `set_param(p, f32)` (integers rounded and clamped; enums and booleans are not
+  animatable). `grid4d-eval` evaluates a node's kind at the frame
+  (`NodeData::kind_at(frame)`, like `transform_at`) before drawing, sampling
+  curves or building generators — the existing caches compare parameters, so an
+  animated parameter rebuilds only what depends on it. The Attribute Manager
+  gets key buttons beside animatable rows (the same states as the Coordinates
+  fields: none, keyed, key here, changed), Autokeying records parameter edits,
+  and the F-Curve editor lists the new tracks by their labels. Temporary values
+  (`NodeData::unkeyed`) cover parameters as they cover transforms.
+* **Deformers (10.2–10.4)** are objects (`ObjectKind::Bend { .. }`, `Twist`,
+  `Taper`, `Bulge`, `Ffd`), each with a **box** in its own space (`size`, and a
+  `DeformerMode`: *Limited* — the effect stops at the box but carries the rest
+  along, *Within Box* — only inside the box, *Unlimited*). Their maths is pure
+  and in `grid4d-geom::deform`: `fn bend(point, &Bend) -> Vec3` and friends, in
+  the deformer's space, so they are unit-tested like the primitives.
+  **Who is deformed:** a deformer deforms its **parent** and everything below
+  the parent (the reference behaviour: group objects under a Null with the
+  deformer to bend them together). Several deformers apply in Object Manager
+  order, the deepest first. A generator's inputs are built with the deformers
+  *inside* the input (a Bend under the cage bends the cage before smoothing);
+  deformers beside the cage, under the generator, deform the generator's
+  result. Splines are not deformed in Phase 10.
+  **Evaluation:** `grid4d-eval` gathers, for each object with geometry, its
+  deformer chain (ids, parameters, matrices into each deformer's space) — an
+  unchanged chain means an unchanged result, cached per node like generator
+  results (`Deformed { inputs, mesh }`), so idle frames and unrelated edits do
+  nothing. A deformed primitive is drawn from its own mesh
+  (`MeshKey::Polygon` of the result) instead of the shared unit mesh. Picking,
+  snapping, framing, the path tracer and export all see the deformed mesh,
+  since they already read evaluated meshes.
+  **Display:** a deformer draws its box as lines in its display colour
+  (overlay, not rendered), is picked near its lines, and has *Fit to Parent*
+  (size and placement from the parent's bounds). Interactive handles (drag the
+  strength) come with 10.3.
+* **FFD (10.4)** is a lattice of `grid` points (default 3 × 3 × 3) spanning its
+  box: the deformer's points are edited in Points mode like a spline's
+  (selection, gizmo, one `CommitLive` per drag — the `PointEdit` seam grows a
+  third case), and every deformed point moves by the trivariate Bernstein
+  blend of the lattice's offsets.
+* **Current State to Object (10.5)** bakes what the viewport shows — deformers,
+  generators, clones, animation at the current frame — into a new polygon
+  object (or a Null holding one per part), leaving the original untouched; one
+  undo step. Make Editable keeps its meaning (the object's own geometry).
+* **Cloner (10.6–10.7)** is a generator (`ObjectKind::Cloner { mode, .. }`)
+  whose children are the objects to repeat. Modes: **Linear** (count, offset,
+  per-step or end-point P / R / S), **Radial** (count, radius, plane, start /
+  end angle, align), **Grid Array** (count × 3, per-step or end-point size;
+  cube form), then **Object** (on another object's points or polygon centres,
+  aligned to normals) in 10.7. **Clones** chooses which child each clone uses:
+  Iterate, Random (seed). Clones are **instances**, not nodes:
+  `EvaluatedScene::instances()` lists `EvaluatedInstance { owner, source,
+  kind, world, bounds, drawable, pick }`, built after animation and Target
+  tags so they follow the cloner. Consumers already batch by `MeshKey`, so a
+  thousand cubes stay one instanced draw; picking a clone selects its Cloner;
+  the path tracer and export bake instances like other surfaces. A child with
+  its own children (a group) is cloned whole. Nested cloners clone clones.
+  The instance list is rebuilt only when the evaluation is; it reuses its
+  buffer (hot-path rule) and a test guards it.
+* **Effectors (10.8):** **Plain** and **Random** objects, linked in a Cloner's
+  *Effectors* list (`Vec<NodeId>`; creating an effector with a Cloner selected
+  adds it there). Each has a **Strength**, Position / Rotation / Scale
+  offsets (Random: within ± those values, from a seed per clone), a colour mode
+  (off, or the effector's colour blended by strength) and a simple **falloff**
+  of its own — Infinite, Sphere, Box or Linear, with size and soft edge, in the
+  effector's space — drawn as lines like a deformer's box. Applied in list
+  order to the clones' local matrices and colours. (Fields, the reference's
+  modular falloffs, are later.)
+* **File format:** `.g4d` v3 grows additively — deformer, cloner and effector
+  kinds; parameter tracks as `Param` DTOs (`object` variant with the
+  parameter's stable name). No version bump while v3 is unreleased.
+* **Not in Phase 10:** deforming splines, the Wrap / Spline / Displacer /
+  Smoothing deformers, Fields, MoGraph selections, the Shader / Step / Delay /
+  Formula effectors, Fracture, the Matrix object, Tracer, Text MoGraph,
+  render instances and multi-instances as separate modes (clones are always
+  instances), clone colours per material.
+
+### Steps
+
+| Step | Size | Work |
+|------|------|------|
+| 10.1 | L | Animated parameters: `ObjectParam` per kind (every numeric parameter of primitives, splines, generators — integers rounded), `ObjectKind::{param, set_param}`, `Param::Object`, `NodeData::kind_at(frame)` evaluated in `grid4d-eval` before drawables, curves and generators; Attribute Manager key buttons, Autokeying of parameter edits, `unkeyed` for parameters; F-Curve editor and timeline key strip show the tracks; `.g4d` DTO; tests: an animated Extrude offset and a Cube size per frame, undo of keys, idle frames |
+| 10.2 | L | Deformer framework and **Bend**: `grid4d-geom::deform` (box, `DeformerMode`, `bend` with Strength, Angle, Keep Y-Axis Length; origin at the box's bottom, centre or top as in the reference), `ObjectKind::Bend`, deformer chains and the `Deformed` cache in `grid4d-eval` (parent and its subtree; generator inputs with their inner deformers; results deformed by deformers beside the cage), deformed primitives drawn from their own mesh, the box drawn and picked as lines, Fit to Parent, Create ▸ Deformer menu and toolbar group, Attribute Manager; file kind; tests on hand-built shapes |
+| 10.3 | M | **Twist, Taper, Bulge** (strength, curvature, fillet where the reference has them) and the deformers' viewport handle: drag a deformer's strength handle (one `CommitLive`, snapping like other drags) |
+| 10.4 | M | **FFD**: lattice grid (2–20 per axis) over the box, Points mode on the FFD (selection, gizmo, Tweak; the `PointEdit` seam's third case), Bernstein blending; Reset lattice; saved lattice offsets |
+| 10.5 | S | **Current State to Object** (Mesh ▸ Conversion, the reference's shortcut if verified): bakes deformed, generated and cloned geometry at the current frame into new polygon objects beside the original, one undo step |
+| 10.6 | L | **Cloner** framework: `ObjectKind::Cloner` (Linear, Radial, Grid Array; Clones Iterate / Random with seed; Reset Coordinates), `EvaluatedScene::instances()` and its consumers (instanced drawing, picking → the Cloner, selection highlight, framing, filter, path tracer, glTF/OBJ export as objects), Make Editable → a Null of polygon objects; hot-path test for the instance buffer |
+| 10.7 | M | Cloner **Object** mode (points, polygon centres; align to normals) on polygon objects, primitives and generator results; nested cloners; cloning groups with their children |
+| 10.8 | L | **Effectors**: `ObjectKind::{PlainEffector, RandomEffector}` with Strength, P / R / S, colour, falloff (Infinite, Sphere, Box, Linear; size, soft edge) drawn as lines; the Cloner's Effectors list (drag from the Object Manager, auto-add on create); effects applied in order to instance matrices and colours; seeds per clone; animatable through 10.1 |
+
+**Acceptance:** a cylinder bent into an arch with an animated Bend, a twisted
+and tapered column, an FFD-shaped sphere; a Subdivision Surface over a deformed
+cage; a ring of cubes from a Radial Cloner and a grid of spheres pushed by a
+Plain effector's falloff and scattered by a Random one, with colours; all
+animated by keys on parameters, undoable, saved, picked, exported and rendered
+by the path tracer; the viewport stays interactive with 1 000 clones.
+
+---
+
+## Phase 11 — Simulation (v0.11)
+
+Lower resolution on purpose — plan in detail when v0.10 lands.
+
+* **Rigid bodies** via `rapier3d` (pure Rust; check its glam / MSRV
+  compatibility first): a *Rigid Body* tag (dynamic, kinematic, static;
+  mass, friction, bounciness, shape: box / sphere / convex hull / mesh) and
+  a *Collider* tag; gravity and substeps in the project settings.
+* **Cached, not live:** simulation runs from the start frame and caches each
+  object's transform per frame (memory budget, *Bake* / *Clear cache*); playback
+  and renders read the cache, so scrubbing is deterministic; edits invalidate it.
+* Clones as rigid bodies (each instance a body) once 10.6 is stable.
+* The Simulate menu (already listed) gets its first entries.
+
+## Phase 12 — Workspace (v0.12)
+
+* **Docking layouts:** panels in an `egui_dock` tree (check it follows egui
+  0.37 first; otherwise our own splitter tree), saved per user, a few presets
+  (Standard, Modeling, Animate), *Reset Layout*.
+* **Layers** (the placeholder panel): colour-coded layers with visibility,
+  render, lock and selection switches per layer; objects reference a layer by id.
+* **Takes** (the placeholder panel): overrides of parameters per take, the
+  render picks a take.
+* **Preferences** window: units display, undo depth, autosave, viewport
+  defaults, theme variants (dark / darker / light), language.
+* **Internationalisation:** UI strings through one table; English first, Greek
+  as the first translation.
+
+## Phase 13 — Extensibility (v0.13)
+
+* A statically registered Rust plugin trait for object, tag and tool types
+  (generators and deformers first, since their evaluation seam exists).
+* Scripting (Rhai, or Python via `pyo3`) after the API stabilises: read and edit
+  the document through `SceneEdit`, so scripts are undoable.
 
 ---
 
@@ -683,6 +832,8 @@ per steady-state frame" for the hot path, complementing `extract_reuses_capacity
 | D7 | License | MIT OR Apache-2.0 (Rust default, as the README proposes) | Phase 0 |
 | R1 | egui/wgpu major upgrades (egui-wgpu pins wgpu's major) | Upgrade both together in a dedicated PR per egui release; never mix wgpu majors | ongoing |
 | R2 | Trademark / trade-dress | Keep "inspired by" wording, original icons only, no C4D file formats; review menus/labels before each release | ongoing |
+| D8 | Clones: nodes or instances | **Instances** in a separate `EvaluatedScene::instances()` list built after animation, so the node list keeps its pre-order invariants (animation, Target tags, component modes) and thousands of clones stay one instanced draw | Phase 10 |
+| D9 | What can be animated | Numeric object parameters (`f32`, integers rounded); enums and booleans are not (the reference animates them stepwise — revisit if needed) | Phase 10 |
 | R3 | Scope creep | Ship the release train in order; each phase must leave the app usable and tests green | ongoing |
 
 ---
