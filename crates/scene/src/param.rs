@@ -71,11 +71,13 @@ pub enum ObjectParam {
     StartGrowth,
     /// 0 – 1.
     EndGrowth,
+    /// A deformer's strength (radians for a Bend).
+    Strength,
 }
 
 impl ObjectParam {
     /// How many there are ([`ObjectParam::index`] is below this).
-    pub const COUNT: usize = 39;
+    pub const COUNT: usize = 40;
 
     /// Every parameter, in index order.
     pub const ALL: [Self; Self::COUNT] = [
@@ -118,6 +120,7 @@ impl ObjectParam {
         Self::EndRotation,
         Self::StartGrowth,
         Self::EndGrowth,
+        Self::Strength,
     ];
 
     /// The row label (shared by the Attribute Manager and the F-Curve editor).
@@ -163,6 +166,7 @@ impl ObjectParam {
             Self::EndRotation => "End Rotation",
             Self::StartGrowth => "Start Growth",
             Self::EndGrowth => "End Growth",
+            Self::Strength => "Strength",
         }
     }
 
@@ -205,6 +209,7 @@ impl ObjectParam {
             Self::EndRotation => 36,
             Self::StartGrowth => 37,
             Self::EndGrowth => 38,
+            Self::Strength => 39,
         }
     }
 
@@ -213,7 +218,9 @@ impl ObjectParam {
     #[must_use]
     pub const fn unit(self) -> ParamUnit {
         match self {
-            Self::StartAngle | Self::EndAngle | Self::Twist | Self::Angle | Self::EndRotation => ParamUnit::Radians,
+            Self::StartAngle | Self::EndAngle | Self::Twist | Self::Angle | Self::EndRotation | Self::Strength => {
+                ParamUnit::Radians
+            }
             Self::RadialBias
             | Self::HeightBias
             | Self::Intensity
@@ -314,6 +321,13 @@ impl ObjectKind {
             ],
             Self::Lathe(_) => &[P::Angle, P::Rise, P::Scaling],
             Self::Sweep(_) => &[P::EndScale, P::EndRotation, P::StartGrowth, P::EndGrowth],
+            Self::Bend(_) => &[
+                P::Size(Axis::X),
+                P::Size(Axis::Y),
+                P::Size(Axis::Z),
+                P::Strength,
+                P::Angle,
+            ],
             Self::Null
             | Self::Polygon { .. }
             | Self::SubdivisionSurface { .. }
@@ -434,6 +448,9 @@ impl ObjectKind {
             (Self::Sweep(sweep), P::EndRotation) => Some(&mut sweep.end_rotation),
             (Self::Sweep(sweep), P::StartGrowth) => Some(&mut sweep.start_growth),
             (Self::Sweep(sweep), P::EndGrowth) => Some(&mut sweep.end_growth),
+            (Self::Bend(bend), P::Size(axis)) => Some(&mut bend.size[axis.index()]),
+            (Self::Bend(bend), P::Strength) => Some(&mut bend.strength),
+            (Self::Bend(bend), P::Angle) => Some(&mut bend.angle),
             _ => None,
         }
     }

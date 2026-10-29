@@ -8,6 +8,7 @@
 //! typed value, a click) is recorded as one undo step through [`LiveEdit`].
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
+use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_geom::spline::{
@@ -278,7 +279,13 @@ impl AttributesPanel {
         match self.tab {
             Tab::Basic => basic_tab(ui, &mut data),
             Tab::Coord => label = coord_tab(ui, &mut data, keying).unwrap_or(label),
-            Tab::Object => label = object_tab_at(ui, &mut data, keying).unwrap_or(label),
+            Tab::Object => {
+                let mut fit = false;
+                label = object_tab_at(ui, &mut data, keying, &mut fit).unwrap_or(label);
+                if fit {
+                    commands.push(EditorCommand::FitToParent(id));
+                }
+            }
         }
         self.finish_node_edit(ui, doc, id, &data, label, commands);
     }
@@ -513,12 +520,13 @@ struct Shown {
 /// there, edits written back as keys, temporary values or base values (like
 /// the Coordinates fields), and the key buttons. Returns an undo label when a
 /// key button was used.
-fn object_tab_at(ui: &mut Ui, data: &mut NodeData, keying: Keying) -> Option<&'static str> {
+fn object_tab_at(ui: &mut Ui, data: &mut NodeData, keying: Keying, fit: &mut bool) -> Option<&'static str> {
     let frame = keying.frame;
     let shown = data.kind_at(frame).into_owned();
     let mut edited = shown.clone();
     let mut keys = KeyRows::new(data, &shown, frame);
     object_tab(ui, &mut edited, &mut keys);
+    *fit = keys.fit_to_parent;
     if edited != shown {
         data.set_kind_at(&edited, frame, keying.autokey);
     }
@@ -544,6 +552,8 @@ struct KeyRows {
     states: Vec<(ObjectParam, KeyState)>,
     drawn: Vec<ObjectParam>,
     clicked: Option<(ObjectParam, KeyClick)>,
+    /// A deformer's Fit to Parent button was clicked.
+    fit_to_parent: bool,
 }
 
 impl KeyRows {
@@ -768,6 +778,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows) {
                 hierarchical,
             } => extrude_rows(ui, k, extrusion, hierarchical),
             ObjectKind::Lathe(lathe) => lathe_rows(ui, k, lathe),
+            ObjectKind::Bend(bend) => bend_rows(ui, k, bend),
             ObjectKind::Sweep(sweep) => sweep_rows(ui, k, sweep),
             ObjectKind::Loft(loft) => loft_rows(ui, loft),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, k, primitive),
@@ -1522,6 +1533,46 @@ fn sweep_rows(ui: &mut Ui, k: &mut KeyRows, sweep: &mut Sweep) {
     ui.end_row();
 }
 
+/// The Bend deformer's parameters and its Fit to Parent button.
+fn bend_rows(ui: &mut Ui, k: &mut KeyRows, bend: &mut Bend) {
+    for (axis, label) in ["Size . X", "Size . Y", "Size . Z"].into_iter().enumerate() {
+        length_row(ui, k, label, &mut bend.size[axis]);
+    }
+    attr_label(ui, "Mode", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.deformer.mode")
+        .selected_text(bend.mode.label())
+        .show_ui(ui, |ui| {
+            for mode in DeformerMode::ALL {
+                ui.selectable_value(&mut bend.mode, mode, mode.label());
+            }
+        });
+    ui.end_row();
+    angle_row(ui, k, "Strength", &mut bend.strength, -36_000.0..=36_000.0);
+    angle_row(ui, k, "Angle", &mut bend.angle, -36_000.0..=36_000.0);
+    check_row(ui, "Keep Y-Axis Length", &mut bend.keep_length);
+    attr_label(ui, "Origin", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.bend.origin")
+        .selected_text(bend.origin.label())
+        .show_ui(ui, |ui| {
+            for origin in BendOrigin::ALL {
+                ui.selectable_value(&mut bend.origin, origin, origin.label());
+            }
+        });
+    ui.end_row();
+    ui.label("");
+    if ui
+        .button("Fit to Parent")
+        .on_hover_text("Size the box to the parent and centre it there")
+        .clicked()
+    {
+        k.fit_to_parent = true;
+    }
+    ui.end_row();
+    ui.label("");
+    ui.label(RichText::new("Bends its parent's subtree").color(p::TEXT_DIM));
+    ui.end_row();
+}
+
 /// The Loft generator's Object and Caps parameters.
 fn loft_rows(ui: &mut Ui, loft: &mut Loft) {
     for (label, value) in [
@@ -1850,7 +1901,7 @@ mod tests {
         };
         for _ in 0..3 {
             ctx.run_ui(egui::RawInput::default(), |ui| {
-                assert_eq!(object_tab_at(ui, &mut data, keying), None);
+                assert_eq!(object_tab_at(ui, &mut data, keying, &mut false), None);
             })
             .drop_without_applying_deltas();
         }

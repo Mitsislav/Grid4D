@@ -15,7 +15,11 @@ use grid4d_geom::{
 };
 use grid4d_scene::{MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
 
-use crate::{Purpose, editable_mesh};
+use crate::{
+    Purpose,
+    deform::{self, Link},
+    editable_mesh,
+};
 
 /// What a generator makes from its inputs, for one evaluation's purpose.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,6 +39,8 @@ pub(crate) struct Input {
     source: Source,
     /// The input node's transform relative to the generator.
     matrix: Mat4,
+    /// The deformers inside the input reaching this node (empty for most).
+    links: Vec<Link>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -149,9 +155,14 @@ pub(crate) fn gather(
             _ => None,
         };
         if let Some(source) = source {
+            let links = match source {
+                Source::Mesh(_) | Source::Primitive(_) => deform::input_chain(scene, node_id, id, frame),
+                Source::SplinePrimitive(_) | Source::Text(_) | Source::Spline(..) => Vec::new(),
+            };
             inputs.push(Input {
                 source,
                 matrix: into_generator * scene.world_matrix_at(node_id, frame),
+                links,
             });
         }
         if walk {
@@ -188,7 +199,11 @@ fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs:
         } else {
             into_generator * scene.world_matrix_at(child, frame)
         };
-        inputs.push(Input { source, matrix });
+        inputs.push(Input {
+            source,
+            matrix,
+            links: Vec::new(),
+        });
     }
     if inputs.len() < 2 {
         inputs.clear();
@@ -218,6 +233,7 @@ fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs: 
             inputs.push(Input {
                 source,
                 matrix: into_generator * scene.world_matrix_at(child, frame),
+                links: Vec::new(),
             });
         }
     }
@@ -233,10 +249,11 @@ pub(crate) fn build(inputs: &[Input], options: &Options) -> PolyMesh {
         Options::Subdivision(options) => {
             for input in inputs {
                 match &input.source {
-                    Source::Mesh(handle) => merged.add(handle.mesh(), input.matrix),
+                    Source::Mesh(handle) if input.links.is_empty() => merged.add(handle.mesh(), input.matrix),
+                    Source::Mesh(handle) => merged.add(&deform::deform_mesh(handle.mesh(), &input.links), input.matrix),
                     Source::Primitive(kind) => {
                         if let Some(mesh) = editable_mesh(kind) {
-                            merged.add(&mesh, input.matrix);
+                            merged.add(&deform::deform_mesh(&mesh, &input.links), input.matrix);
                         }
                     }
                     Source::SplinePrimitive(_) | Source::Text(_) | Source::Spline(..) => {}

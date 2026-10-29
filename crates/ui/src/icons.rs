@@ -481,6 +481,26 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
                 c.disc(p, 0.055);
             }
         }
+        ObjectKindTag::Bend => {
+            // A bar bent through a quarter turn inside its faint box.
+            c.rect_stroke((0.1, 0.1), (0.9, 0.9), soft);
+            let arc = |radius: f32| -> Vec<P> {
+                (0..=12)
+                    .map(|i| {
+                        let a = PI + 0.5 * PI * i as f32 / 12.0;
+                        (0.9 + radius * a.cos(), 0.9 + radius * a.sin())
+                    })
+                    .collect()
+            };
+            let (outer, inner) = (arc(0.68), arc(0.46));
+            let mut band = outer.clone();
+            band.extend(inner.iter().rev());
+            c.fill_with(&band, soft);
+            c.polyline(&outer, false);
+            c.polyline(&inner, false);
+            c.line((0.22, 0.9), (0.44, 0.9));
+            c.line((0.9, 0.22), (0.9, 0.44));
+        }
         ObjectKindTag::Light => {
             c.disc((0.5, 0.5), 0.19);
             for i in 0..8 {

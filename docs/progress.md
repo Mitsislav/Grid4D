@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 10 — Deformers & MoGraph (v0.10) |
-| Last step done | 10.1 — Animated parameters (2026-10-29) |
-| Next step | 10.2 — Deformer framework and Bend |
-| Tests | 609, all passing; clippy and rustfmt clean |
+| Last step done | 10.2 — Deformer framework and Bend (2026-10-29) |
+| Next step | 10.3 — Twist, Taper, Bulge and the strength handle |
+| Tests | 621, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1191,6 +1191,7 @@ Phase 9 is complete.
 |------|-------|-------|
 | — | Phase 10 planned in detail: animated parameters, Bend / Twist / Taper / Bulge / FFD, Current State to Object, Cloner (Linear, Radial, Grid, Object) and Plain / Random effectors; Phases 11–13 (simulation, workspace, extensibility) sketched (`IMPLEMENTATION_PLAN.md`) | 600 |
 | 10.1 | Animated parameters: every real-valued Object-tab parameter keyable — key buttons beside the fields, Autokeying and temporary values, F-Curve editor and key strip; evaluated at the frame everywhere (viewport, generators, renders); Make Editable bakes the frame; saved by name | 609 |
+| 10.2 | Deformers and the Bend: a deformer reshapes its parent and the parent's subtree (deepest first), inside a cage before smoothing or beside it on the result; Bend with Mode, Strength, Angle, Keep Y-Axis Length, Origin; its box drawn bent and picked; Shift + create under the selection, Fit to Parent; cached; animatable; saved; rendered | 621 |
 
 **10.1 — Animated parameters**
 
@@ -1230,6 +1231,49 @@ Phase 9 is complete.
   70 cm beside a red ring; a click on the ring set a key (red disc, the title
   marked unsaved) and the F-Curve editor showed the Radius curve through three
   keys.
+
+**10.2 — Deformer framework and Bend**
+
+*Problems and solutions:*
+- **Who is deformed, cheaply.** The scene walk is pre-order, so a node's
+  deformer children are known before its subtree: each visited node pushes its
+  switched-on deformer children onto a stack tagged with its depth, and the
+  stack is cut back on the way to the next sibling (as the material stack is).
+  An object's chain is the stack read deepest group first, siblings in order;
+  links hold the matrices into each deformer's space at the frame, so moving or
+  animating a deformer is a changed chain.
+- **Caching.** Deformed meshes are cached per node by (source mesh id or the
+  primitive's parameters, links); idle frames and unrelated edits rebuild
+  nothing, and a test moves an unrelated object to prove it. A deformed
+  primitive is drawn from its own mesh instead of the shared unit mesh.
+- **Generators.** A Bend inside a Subdivision Surface's cage must bend the cage
+  before smoothing; generator inputs now carry the chain of deformers between
+  them and the generator, applied as the cage is merged. A Bend beside the cage
+  is simply in the generator's own chain and bends the result.
+- **Drawing the box.** Instead of a new overlay, the box is a polyline: its
+  twelve edges cut into pieces and bent by the deformer itself, cached and
+  drawn by the curve pipeline and picked like a spline — so the bend shows even
+  before an object is attached.
+- **Bend maths.** A column turns through `strength · s / height` on a circle of
+  radius `height / strength` (keep length) or with its chord the height; points
+  to the side follow at their distance, points past the box continue along the
+  end's tangent (Limited). Centre origins bend both halves by half the
+  strength, mirrored (C) or point-mirrored (S). Strength is stated in degrees,
+  not the reference's percentage, and the spec says so.
+- **A filter mask one bit short.** The Filter menu's "hide everything" value
+  was a fixed nine-bit mask; with the new Deformer entry the existing test of
+  every entry failed until it covered ten.
+- **Stale menu entries.** Create ▸ Generator still listed Extrude, Lathe, Loft
+  and Sweep as greyed "planned" items beside the real ones (left over from
+  Phase 9); only the Cloner is planned now, and Create ▸ Deformer lists Twist,
+  Taper, Bulge and FFD as planned.
+- **A panel that grew, again.** The hint under the Bend's parameters widened the
+  right panel by about 46 px on screen; shortened to "Bends its parent's
+  subtree".
+- **On-screen testing:** a tube bent 120° into an arch, a column curled into an S
+  (Center S-Shape, 180°) and a Subdivision Surface bent towards −Z (Angle 90°)
+  showed with their boxes bent alike; selecting a Bend showed its rows with key
+  buttons. The path tracer rendered the three shapes (6272 triangles).
 
 ---
 

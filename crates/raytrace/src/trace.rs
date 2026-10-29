@@ -655,4 +655,25 @@ mod tests {
             .unwrap();
         assert!(scene_of(&doc).triangle_count() > 200);
     }
+
+    #[test]
+    fn a_bent_object_is_rendered_bent() {
+        let mut doc = Document::new("t");
+        let cube = doc.scene.insert(Node::new(
+            "Cube",
+            ObjectKind::Cube {
+                size: Vec3::new(20.0, 200.0, 20.0),
+                segments: [1, 20, 1],
+            },
+        ));
+        let straight = scene_of(&doc).bounds().unwrap();
+        let mut bend = Node::new("Bend", ObjectKindTag::Bend.default_kind());
+        if let ObjectKind::Bend(b) = &mut bend.data.kind {
+            b.size = Vec3::new(100.0, 200.0, 100.0);
+            b.strength = std::f32::consts::FRAC_PI_2;
+        }
+        doc.scene.insert_child(cube, bend).unwrap();
+        let bent = scene_of(&doc).bounds().unwrap();
+        assert!(bent.1.x > straight.1.x + 50.0, "{bent:?} vs {straight:?}");
+    }
 }

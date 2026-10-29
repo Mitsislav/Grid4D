@@ -143,6 +143,11 @@ pub enum EditorCommand {
     /// The answer to a pending "Save changes?" prompt.
     AnswerUnsaved(UnsavedChoice),
     CreateObject(ObjectKindTag),
+    /// Creates an object under the active one (Shift + create for deformers),
+    /// a deformer fitted to it; at the top without an active object.
+    CreateChild(ObjectKindTag),
+    /// Sizes a deformer's box to its parent and centres it there.
+    FitToParent(NodeId),
     DeleteSelected,
     /// Turns the selected primitives into polygon objects that look the same
     /// (C4D's "Make Editable", `C`), and the selected generators into polygon
@@ -479,6 +484,38 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     selection.set_single(id);
                 }
             });
+        }
+        EditorCommand::CreateChild(tag) => {
+            let Some(parent) = editor.selection.active().filter(|&id| doc.scene.contains(id)) else {
+                apply(EditorCommand::CreateObject(tag), doc, editor, viewport);
+                return;
+            };
+            let mut data = new_object_data(tag, &doc.scene, viewport.camera());
+            fit_to_parent(doc, parent, &mut data);
+            let edit = SceneEdit::Insert {
+                parent: Some(parent),
+                index: usize::MAX,
+                data,
+            };
+            commit(doc, editor, "Create Object", vec![edit], |inverses, selection| {
+                if let Some(id) = inverses.first().and_then(SceneEdit::node) {
+                    selection.set_single(id);
+                }
+            });
+        }
+        EditorCommand::FitToParent(id) => {
+            let Some(node) = doc.scene.get(id) else { return };
+            let Some(parent) = node.parent() else { return };
+            let mut data = node.data.clone();
+            if fit_to_parent(doc, parent, &mut data) {
+                commit(
+                    doc,
+                    editor,
+                    "Fit to Parent",
+                    vec![SceneEdit::SetData { id, data }],
+                    |_, _| {},
+                );
+            }
         }
         // A selected tag goes first: Delete removes it, not its object.
         EditorCommand::DeleteSelected if editor.mode == EditMode::Model && editor.selected_tag(doc).is_some() => {
@@ -1692,6 +1729,32 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
     edits
 }
 
+/// Sizes the deformer in `data` to `parent`'s extent at the current frame and
+/// centres it there, unrotated. `false` (nothing changed) for other objects
+/// or a parent without an extent (a Null).
+fn fit_to_parent(doc: &Document, parent: NodeId, data: &mut NodeData) -> bool {
+    let frame = f64::from(doc.time.frame());
+    let Some(node) = doc.scene.get(parent) else {
+        return false;
+    };
+    let bounds = node.data.kind_at(frame).local_bounds().or_else(|| {
+        let (min, max) = grid4d_eval::generator_mesh(&doc.scene, parent, frame)?.bounds()?;
+        Some(grid4d_scene::Aabb { min, max })
+    });
+    let Some(bounds) = bounds.filter(|b| !b.is_empty()) else {
+        return false;
+    };
+    match &mut data.kind {
+        ObjectKind::Bend(bend) => bend.size = (bounds.max - bounds.min).max(Vec3::splat(1.0)),
+        _ => return false,
+    }
+    data.transform = Transform {
+        position: bounds.center(),
+        ..Transform::IDENTITY
+    };
+    true
+}
+
 /// `data` without the tracks of parameters its (new) kind does not have.
 fn without_lost_tracks(mut data: NodeData) -> NodeData {
     let kept = data.kind.params();
@@ -1728,6 +1791,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Flower
         | ObjectKindTag::Text
         | ObjectKindTag::Spline => data.display_color = [0.9, 0.9, 0.92],
+        // A light violet box, apart from splines and selections.
+        ObjectKindTag::Bend => data.display_color = [0.55, 0.4, 0.9],
         ObjectKindTag::Null
         | ObjectKindTag::Cube
         | ObjectKindTag::Sphere
@@ -1796,6 +1861,7 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Flower
         | ObjectKindTag::Text
         | ObjectKindTag::Spline => palette::ICON_SPLINE,
+        ObjectKindTag::Bend => palette::ICON_DEFORMER,
         ObjectKindTag::Cube
         | ObjectKindTag::Sphere
         | ObjectKindTag::Cylinder
@@ -3848,5 +3914,52 @@ mod tests {
         let (_, max) = mesh.mesh().bounds().unwrap();
         assert!((max.y - 50.0).abs() < 0.5, "the radius at frame 10: {max}");
         assert_eq!(data.tracks.len(), 1, "the radius track goes, the position track stays");
+    }
+
+    #[test]
+    fn shift_create_puts_a_deformer_under_the_selection_fitted_to_it() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Cylinder)],
+        );
+        let cylinder = editor.selection.active().unwrap();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateChild(ObjectKindTag::Bend)],
+        );
+        let bend = editor.selection.active().unwrap();
+        let node = doc.scene.get(bend).unwrap();
+        assert_eq!(node.parent(), Some(cylinder));
+        let ObjectKind::Bend(b) = node.data.kind else {
+            panic!("not a bend")
+        };
+        assert!(b.size.abs_diff_eq(Vec3::new(100.0, 200.0, 100.0), 1e-3), "{}", b.size);
+        assert_eq!(node.data.transform.position, Vec3::ZERO, "the cylinder is centred");
+        assert_eq!(editor.history.undo_label(), Some("Create Object"));
+
+        // Moved and resized by hand, then fitted again: one step.
+        let data = &mut doc.scene.get_mut(bend).unwrap().data;
+        data.transform.position.x = 77.0;
+        if let ObjectKind::Bend(b) = &mut data.kind {
+            b.size = Vec3::ONE;
+        }
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::FitToParent(bend)]);
+        assert_eq!(doc.scene.get(bend).unwrap().data.transform.position.x, 0.0);
+        assert_eq!(editor.history.undo_label(), Some("Fit to Parent"));
+        // Without a selection Shift + create adds at the top.
+        editor.selection.clear();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateChild(ObjectKindTag::Bend)],
+        );
+        let top = editor.selection.active().unwrap();
+        assert_eq!(doc.scene.get(top).unwrap().parent(), None);
     }
 }

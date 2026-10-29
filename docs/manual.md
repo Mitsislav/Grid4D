@@ -23,12 +23,13 @@ screenshots come from the application itself.
 11. [Polygon modelling](#11-polygon-modelling)
 12. [Generators: Subdivision Surface](#12-generators-subdivision-surface)
 13. [Splines](#13-splines)
-14. [Snapping](#14-snapping)
-15. [Tags](#15-tags)
-16. [Materials](#16-materials)
-17. [Rendering](#17-rendering)
-18. [Keyboard shortcuts](#18-keyboard-shortcuts)
-19. [Limitations and what is planned](#19-limitations-and-what-is-planned)
+14. [Deformers](#14-deformers)
+15. [Snapping](#15-snapping)
+16. [Tags](#16-tags)
+17. [Materials](#17-materials)
+18. [Rendering](#18-rendering)
+19. [Keyboard shortcuts](#19-keyboard-shortcuts)
+20. [Limitations and what is planned](#20-limitations-and-what-is-planned)
 
 ---
 
@@ -59,7 +60,7 @@ sessions.
 |---|------|----------------|
 | 1 | **Menu bar** | Every command: File, Edit, Create, Modes, Select, Tools, Mesh, Animate, Window, Help. |
 | 2 | **Command palette** | Undo/redo, the selection tools, Move/Scale/Rotate, axis locks, World/Object coordinates, render buttons (*planned*) and buttons that create objects. |
-| 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§14](#14-snapping)). |
+| 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§15](#15-snapping)). |
 | 4 | **Viewport** | The 3D view of the scene, or up to four views ([§3.2](#32-several-views-top-front-and-side)). Each view's header has the View, Cameras, Display, Options, Filter and Panel menus and three navigation icons. |
 | 5 | **Object Manager** | The scene's objects as a hierarchy. |
 | 6 | **Attribute Manager** | The parameters of the selected object, or the options of the current tool. |
@@ -233,7 +234,7 @@ Everything is shown in a new view.
 
 - **Object types**: *Polygon* (polygon objects), *Generator* (the parametric
   objects: Cube, Sphere, …, and the Extrude, Lathe, Sweep and Loft),
-  *Subdivision Surface*, *Spline*, *Camera* and *Light*. A hidden
+  *Subdivision Surface*, *Spline*, *Deformer* (their boxes), *Camera* and *Light*. A hidden
   type is neither drawn nor clickable in that view: clicks, rectangle selections
   and snapping go through it. Only the objects of that type are hidden, not their
   children. Hidden lights still light the view.
@@ -333,7 +334,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
 
 - Spot and Infinite lights shine along their **−Z axis**, like cameras look. Turn
   them with the Rotate tool or the Coordinates, or give them a **Target tag** to
-  point them at an object ([§15.3](#153-target)). *Cameras ▸ Selected Object as
+  point them at an object ([§16.3](#163-target)). *Cameras ▸ Selected Object as
   Camera* shows what a light points at.
 - In the viewport a **Spot** shows its cone and an **Infinite** light an arrow
   along its direction (orange when selected).
@@ -341,7 +342,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
   light the viewport.
 - Sides that no light reaches keep a little soft light, so shapes stay readable.
 
-**Materials** show in the lit viewport too ([§16](#16-materials)): roughness sets
+**Materials** show in the lit viewport too ([§17](#17-materials)): roughness sets
 how sharp the highlights are, metals reflect in their own colour, and luminance
 makes a surface glow whatever the light.
 
@@ -373,7 +374,7 @@ then drag a handle of the gizmo.
 - **Alt + drag** always navigates, even over the gizmo.
 - For exact values, type them in the Attribute Manager ([§7](#7-the-attribute-manager)).
 - To place objects exactly on other objects or on the grid, turn on snapping
-  (**Shift+S**, [§14](#14-snapping)).
+  (**Shift+S**, [§15](#15-snapping)).
 
 Every drag is one undo step.
 
@@ -391,7 +392,7 @@ Every drag is one undo step.
 - **Re-parent**: drag a row onto another row. The object keeps its position in the
   world. Right-click ▸ *Move to Top Level* takes it out of its group.
 - **Search**: type in the search field to show only matching objects.
-- **Tags** appear as icons after the name; click one to edit it ([§15](#15-tags)).
+- **Tags** appear as icons after the name; click one to edit it ([§16](#16-tags)).
 - Right-click a row for Rename, Frame Object, Move to Top Level, Add Tag and Delete.
 
 ## 7. The Attribute Manager
@@ -1009,7 +1010,7 @@ Select the generator and open **Attribute Manager ▸ Object**:
 |-----------|---------|
 | Type | **Catmull-Clark (N-Gons)**: every polygon with *n* corners becomes *n* quads, then the surface is smoothed. It is the only type for now. |
 | Subdivision Viewport | How many times the viewport subdivides (0 shows the cage itself, 6 at most). Each level multiplies the polygons by about four, so keep it low (2) while modelling. |
-| Subdivision Renderer | The level for final renders ([§17](#17-rendering)). |
+| Subdivision Renderer | The level for final renders ([§18](#18-rendering)). |
 | Linear Pre-Subdivision | Splits the cage this many times *without* smoothing before the smoothing levels, which keeps the result closer to the cage. |
 | Boundary Interpolation | How open borders (the edge of a plane) are smoothed. **Edge and Corner** keeps a border's corners in place; **Edge** rounds them off as well. |
 
@@ -1313,7 +1314,60 @@ downwards. **Make Editable** (C) turns the text into an editable spline with
 one closed segment per contour, so single letters can be edited point by
 point.
 
-## 14. Snapping
+## 14. Deformers
+
+A **deformer** changes the shape of other objects without touching their
+points: bend a tube into an arch, curl a column into an S — and keep editing the
+original or animate the deformer. The first one is the **Bend**.
+
+![Three Bends: a tube bent into an arch, a column curled into an S, a Subdivision Surface bent towards the back; the selected Bend's box and its Object properties](images/manual/deformer-bend.png)
+
+### 14.1 How deformers work
+
+- A deformer changes its **parent** and **everything below the parent**. To
+  bend one object, put the deformer under it; to bend several together, put
+  them and the deformer under one Null.
+- **Creating:** **Create ▸ Deformer ▸ Bend** or the deformer button in the
+  toolbar adds a Bend at the top of the Object Manager. Hold **Shift** to add
+  it **under the selected object, sized to it** — the quickest way to bend one
+  object.
+- The deformer's **box** is drawn as lines (violet, orange when selected),
+  bent the way it bends. Click near its lines to select it. Move, rotate and
+  scale the deformer to place its effect; the box is never rendered.
+- Several deformers apply one after another: the ones under the object first,
+  then those further up.
+- With a **Subdivision Surface**, a deformer under the cage bends the cage
+  before it is smoothed; a deformer under the Subdivision Surface itself,
+  beside the cage, bends the smooth result.
+- The check mark in the Object Manager switches a deformer off; hiding it only
+  hides its box. The deformed object's own points never change: Make Editable
+  keeps the undeformed shape.
+- **Filter ▸ Deformer** hides the boxes in a view (the deformation stays).
+
+### 14.2 Bend
+
+The Attribute Manager's **Object** tab:
+
+- **Size**: the box. Its height (Y) is the part that bends.
+- **Mode**: **Limited** bends what is inside the box and carries the rest along
+  straight; **Within Box** bends only what is inside the box and leaves the rest
+  where it is; **Unlimited** bends the whole object.
+- **Strength**: how far the box's height bends round, in degrees: 90° is a
+  quarter circle, 360° a full ring; negative values bend the other way.
+- **Angle**: the direction of the bend around the deformer's Y axis (0° towards
+  its X axis).
+- **Keep Y-Axis Length**: on, the bent part keeps its length; off, its two ends
+  stay the box's height apart, so it stretches as it bends.
+- **Origin**: where the bend starts — **Bottom** (the top bends over), **Top**
+  (the bottom bends), **Center C-Shape** (both halves curl the same way) or
+  **Center S-Shape** (they curl opposite ways).
+- **Fit to Parent**: sizes the box to the parent and centres it there.
+
+Strength, Angle and Size have key buttons: animate Strength to make an object
+bend over time. Objects need enough segments along the bend to look smooth (a
+Cube with one height segment cannot bend).
+
+## 15. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
 the floor grid, so you can place things exactly: an object's axis level with a
@@ -1360,7 +1414,7 @@ Move tool and look at the **Snap** group in the Attribute Manager's Tool mode
 Within the radius, points win over edges and grid lines, which win over surfaces,
 so a corner can be caught right next to its edges.
 
-## 15. Tags
+## 16. Tags
 
 Tags add a property or a behaviour to an object without changing what kind of
 object it is. They show as small icons to the right of the object's name in the
@@ -1381,7 +1435,7 @@ change can be undone and is saved with the document.
 **Removing:** click the tag icon, then press **Delete** (or right-click the icon ▸
 *Delete Tag*). With a tag selected, Delete removes only the tag, not its object.
 
-### 15.1 Phong
+### 16.1 Phong
 
 Controls how smooth the object looks.
 
@@ -1394,7 +1448,7 @@ Controls how smooth the object looks.
 
 ![A sphere with a Phong tag at 0°: flat shading](images/manual/tags_flat.png)
 
-### 15.2 Protection
+### 16.2 Protection
 
 Guards an object against accidental changes. Tick **Position**, **Scale** and/or
 **Rotation**. A protected channel cannot be changed with the gizmo (the Move, Scale
@@ -1402,7 +1456,7 @@ or Rotate gizmo does not appear for the object) or in the Coordinates fields of 
 Attribute Manager, which turn grey. The object's points, edges and polygons can still
 be edited in the component modes.
 
-### 15.3 Target
+### 16.3 Target
 
 Turns the object to face another object.
 
@@ -1418,11 +1472,11 @@ Turns the object to face another object.
 
 ![The Target tag's settings](images/manual/tags_target.png)
 
-### 15.4 Material
+### 16.4 Material
 
-Links a material to the object; see [§16](#16-materials).
+Links a material to the object; see [§17](#17-materials).
 
-## 16. Materials
+## 17. Materials
 
 A **material** gives objects their surface. Materials live in the **Material
 Manager**, the **Materials** tab at the bottom (beside Timeline and F-Curve;
@@ -1476,7 +1530,7 @@ their objects show their display colour again; undo brings everything back.
 Every change is one undo step. Materials are saved with the document, travel with
 glTF and OBJ files ([§9](#9-files)), and come along when you merge a document.
 
-## 17. Rendering
+## 18. Rendering
 
 A **render** is the finished picture of the scene: materials and lights as
 they look for real — soft shadows, light bouncing between surfaces, reflections —
@@ -1484,7 +1538,7 @@ where the viewport only approximates them. **Render Settings** say how the
 document is rendered; the **Picture Viewer** renders it and shows the result;
 the **Render View** renders the view you work in, in place.
 
-### 17.1 Render Settings
+### 18.1 Render Settings
 
 **Render ▸ Edit Render Settings…**, **Ctrl+B** or the gear button in the
 toolbar opens the **Render Settings** window. It stays open while you work;
@@ -1506,7 +1560,7 @@ left: **Output**, **Save**, **Sampling** or **Options**.
 | Frames | how many pictures the range gives |
 
 **Render to Picture Viewer** renders every frame of the range at the Frame
-Step and saves each as its own numbered file ([§17.2](#172-the-picture-viewer));
+Step and saves each as its own numbered file ([§18.2](#182-the-picture-viewer));
 the Render View always shows the current frame.
 
 ![The Save page: renders go to renders/shot.png next to the document, with transparency](images/manual/render-settings-save.png)
@@ -1541,7 +1595,7 @@ how many frames and the first file's name.
 
 Every change is one undo step, and the settings are saved with the document.
 
-### 17.2 The Picture Viewer
+### 18.2 The Picture Viewer
 
 **Render ▸ Render to Picture Viewer**, **Shift+R** or the toolbar button next to
 the gear renders the scene and opens the **Picture Viewer**. It renders:
@@ -1589,7 +1643,7 @@ pixel per screen pixel, **−** and **+** halve and double. The **mouse wheel**
 zooms about the pointer and **dragging** moves the picture. A picture with
 transparency shows over a grey checkerboard.
 
-### 17.3 The Render View
+### 18.3 The Render View
 
 **Render ▸ Render View**, **Ctrl+R** or the leftmost render button in the
 toolbar renders the **active view** right where it is: at the view's own size,
@@ -1608,7 +1662,7 @@ overlays stay on top, so you can carry on working. **Ctrl+R** again renders
 afresh. The Render View is never saved and does not appear in the Picture
 Viewer's history; use **Shift+R** for a picture to keep.
 
-## 18. Keyboard shortcuts
+## 19. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -1663,7 +1717,7 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 19. Limitations and what is planned
+## 20. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
@@ -1672,6 +1726,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Modelling**:
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
   Solid, Proportional and Radial modes; Bridge point by point.
+- **Deformers**: only the Bend; Twist, Taper, Bulge and FFD come next. No
+  strength handle in the viewport yet; splines are not deformed; component
+  modes show the undeformed points.
 - **Generators**: the Subdivision Surface has one type (Catmull-Clark) and no
   edge weights (creases) or UV options. The Extrude has no bevels (fillets),
   Delaunay or grid caps, UVs or selections for its caps; neither have the Lathe

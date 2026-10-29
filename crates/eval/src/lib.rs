@@ -22,6 +22,7 @@
 //! when the scene's revision is unchanged and allocates nothing in steady state.
 
 mod curve;
+mod deform;
 mod drawable;
 mod evaluated;
 mod generator;

@@ -10,6 +10,7 @@ use grid4d_scene::{
 use crate::{
     CurveHandle, CurveId, Drawable, MeshKey, Shading, Surface,
     curve::{CachedCurve, CurveSource},
+    deform::{self, Active, Base, Deformed, Link},
     drawable,
     generator::{self, Input, Options},
 };
@@ -120,6 +121,12 @@ pub struct EvaluatedScene {
     curve_cache: HashMap<NodeId, CachedCurve>,
     /// The visible editable splines and their components (Points mode).
     splines: HashMap<NodeId, (SplineHandle, Components)>,
+    /// Each deformed object's mesh, rebuilt only when its source or chain changes.
+    deformed: HashMap<NodeId, Deformed>,
+    /// Scratch space for deformers: those reaching the node being visited, and
+    /// its chain.
+    active: Vec<Active>,
+    links: Vec<Link>,
     /// Scratch space for gathering a generator's inputs.
     inputs: Vec<Input>,
     cage_stack: Vec<NodeId>,
@@ -203,6 +210,8 @@ impl EvaluatedScene {
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
         let material_stack = &mut self.material_stack;
         material_stack.clear();
+        let (deformed, active, links) = (&mut self.deformed, &mut self.active, &mut self.links);
+        active.clear();
         let materials = scene.materials();
         // The next cage root to consume, and the depth of the cage being consumed.
         let mut next_cage: Option<NodeId> = None;
@@ -211,6 +220,7 @@ impl EvaluatedScene {
             if cage_depth.is_some_and(|d| depth <= d) {
                 cage_depth = None;
             }
+            deform::leave(active, depth);
             let data = &node.data;
             // Its own parameters at the frame (borrowed unless animated).
             let kind = data.kind_at(frame);
@@ -223,6 +233,8 @@ impl EvaluatedScene {
                 cage_depth = Some(depth);
                 next_cage = None;
             }
+            // Its deformer children reach it and everything below it.
+            deform::push_children(scene, id, depth, frame, active);
             // Its Material tag's material, else the nearest ancestor's.
             while material_stack.last().is_some_and(|&(d, _)| d >= depth) {
                 material_stack.pop();
@@ -242,6 +254,9 @@ impl EvaluatedScene {
                 }
             });
             let mut pick = pick_shape(&kind);
+            // The surface deformers would reshape: a polygon object's shown
+            // mesh or a generator's result (primitives are made on demand).
+            let mut surface: Option<MeshHandle> = None;
             if let ObjectKind::Polygon { mesh, components } = &*kind {
                 polygons.insert(id, (mesh.clone(), components.clone()));
                 let hidden = &components.hidden().polygons;
@@ -252,6 +267,7 @@ impl EvaluatedScene {
                 };
                 meshes.insert(mesh.id(), mesh.clone());
                 pick = PickShape::Mesh(mesh.id());
+                surface = Some(mesh.clone());
                 drawable = drawable.filter(|_| mesh.mesh().face_count() > 0).map(|d| Drawable {
                     key: MeshKey::Polygon(mesh.id()),
                     ..d
@@ -269,6 +285,7 @@ impl EvaluatedScene {
                     splines.insert(id, (spline.clone(), components.clone()));
                     Some(CurveSource::Editable(spline.id(), *interpolation))
                 }
+                ObjectKind::Bend(bend) => Some(CurveSource::Bend(*bend)),
                 _ => None,
             };
             if let Some(source) = source {
@@ -302,7 +319,7 @@ impl EvaluatedScene {
                 });
                 curves.insert(handle.id(), handle);
             }
-            let mut bounds = if kind.is_spline() {
+            let mut bounds = if kind.is_spline() || kind.is_deformer() {
                 bounds_of_curve
             } else {
                 kind.local_bounds()
@@ -313,6 +330,7 @@ impl EvaluatedScene {
                 ) {
                     let mesh = &result.mesh;
                     if mesh.mesh().face_count() > 0 {
+                        surface = Some(mesh.clone());
                         meshes.insert(mesh.id(), mesh.clone());
                         bounds = mesh.bounds();
                         pick = PickShape::Mesh(mesh.id());
@@ -344,6 +362,32 @@ impl EvaluatedScene {
                 // else under them is not used and stays as it is.
                 if matches!(options, Options::Subdivision(_)) {
                     next_cage = scene.children(id).first().copied();
+                }
+            }
+            // Deformers reaching it reshape its surface (not a cage's: the
+            // generator takes those, nor a deformer's or a curve's).
+            if cage_depth.is_none()
+                && !active.is_empty()
+                && let Some(d) = drawable.filter(|d| !d.unlit && !d.marker)
+            {
+                let base = match surface.take() {
+                    Some(mesh) => Some(Base::Mesh(mesh)),
+                    None if !matches!(d.key, MeshKey::Polygon(_)) => Some(Base::Primitive(kind.clone().into_owned())),
+                    None => None,
+                };
+                if let Some(base) = base {
+                    deform::chain(active, scene.world_matrix_at(id, frame), links);
+                    if let Some(entry) = deform::deformed(deformed, id, base, links, revision) {
+                        let mesh = &entry.mesh;
+                        meshes.insert(mesh.id(), mesh.clone());
+                        pick = PickShape::Mesh(mesh.id());
+                        bounds = mesh.bounds();
+                        drawable = Some(Drawable {
+                            key: MeshKey::Polygon(mesh.id()),
+                            scale: Vec3::ONE,
+                            ..d
+                        });
+                    }
                 }
             }
             if cage_depth.is_some() && !kind.is_spline() {
@@ -406,6 +450,7 @@ impl EvaluatedScene {
         // Objects gone, hidden or with nothing hidden any more.
         self.shown.retain(|_, entry| self.meshes.contains_key(&entry.mesh.id()));
         self.generated.retain(|_, entry| entry.seen == revision);
+        self.deformed.retain(|_, entry| entry.seen == revision);
         self.curve_cache.retain(|_, entry| entry.seen == revision);
         self.revision = Some(scene.revision());
         true
@@ -625,6 +670,7 @@ fn curve_of(kind: &ObjectKind) -> Polyline {
     match kind {
         ObjectKind::SplinePrimitive(primitive) => primitive.polyline(),
         ObjectKind::Text(text) => grid4d_text::text_spline(text).sample(text.interpolation),
+        ObjectKind::Bend(bend) => bend.box_lines(),
         ObjectKind::Spline {
             spline, interpolation, ..
         } => spline.spline().sample(*interpolation),
@@ -654,6 +700,7 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Lathe(_)
         | ObjectKind::Sweep(_)
         | ObjectKind::Loft(_)
+        | ObjectKind::Bend(_)
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Text(_)
         | ObjectKind::Spline { .. } => PickShape::None,
@@ -1677,5 +1724,129 @@ mod tests {
         assert!(eval.update(&doc.scene), "a new frame re-evaluates animated parameters");
         assert_eq!(node(&eval, sphere).drawable.unwrap().scale, Vec3::splat(200.0));
         assert!((result_of(&eval, extrude).bounds().unwrap().max.z - 120.0).abs() < 1e-3);
+    }
+
+    fn bend_node(strength_degrees: f32) -> Node {
+        let mut node = Node::new("Bend", ObjectKindTag::Bend.default_kind());
+        let ObjectKind::Bend(bend) = &mut node.data.kind else {
+            unreachable!()
+        };
+        bend.size = Vec3::new(100.0, 200.0, 100.0);
+        bend.strength = strength_degrees.to_radians();
+        node
+    }
+
+    fn tall_cube() -> Node {
+        Node::new(
+            "Cube",
+            ObjectKind::Cube {
+                size: Vec3::new(20.0, 200.0, 20.0),
+                segments: [1, 20, 1],
+            },
+        )
+    }
+
+    #[test]
+    fn a_bend_reshapes_its_parent_and_the_parents_subtree() {
+        let mut doc = Document::new("bend");
+        let group = doc.scene.insert(Node::new("Group", ObjectKind::Null));
+        let a = doc.scene.insert_child(group, tall_cube()).unwrap();
+        let b = doc.scene.insert_child(group, tall_cube()).unwrap();
+        let bend = doc.scene.insert_child(group, bend_node(90.0)).unwrap();
+        let outside = doc.scene.insert(tall_cube());
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        for id in [a, b] {
+            let shown = node(&eval, id);
+            assert!(
+                matches!(shown.drawable.unwrap().key, MeshKey::Polygon(_)),
+                "drawn from its deformed mesh"
+            );
+            assert!(
+                shown.bounds.unwrap().max.x > 50.0,
+                "bent over towards +X: {:?}",
+                shown.bounds
+            );
+        }
+        assert!(
+            matches!(node(&eval, outside).drawable.unwrap().key, MeshKey::Cube { .. }),
+            "out of reach"
+        );
+        let box_node = node(&eval, bend);
+        assert!(
+            matches!(box_node.pick, PickShape::Curve(_)),
+            "the box is picked like a spline"
+        );
+        assert_eq!(box_node.kind, ObjectKindTag::Bend);
+        assert_eq!(
+            doc.scene.get(a).unwrap().data.kind,
+            tall_cube().data.kind,
+            "the object's own data is untouched"
+        );
+
+        // Nothing changed: the same mesh; moving the deformer: a new one.
+        let mesh_of = |eval: &EvaluatedScene| match node(eval, a).drawable.unwrap().key {
+            MeshKey::Polygon(id) => id,
+            other => panic!("{other:?}"),
+        };
+        let first = mesh_of(&eval);
+        doc.scene.get_mut(outside).unwrap().data.transform.position.x = 900.0;
+        eval.update(&doc.scene);
+        assert_eq!(mesh_of(&eval), first, "unrelated edits rebuild nothing");
+        doc.scene.get_mut(bend).unwrap().data.transform.position.y = 30.0;
+        eval.update(&doc.scene);
+        assert_ne!(mesh_of(&eval), first);
+
+        // Switched off: no deformation.
+        doc.scene.get_mut(bend).unwrap().data.enabled = false;
+        eval.update(&doc.scene);
+        assert!(matches!(node(&eval, a).drawable.unwrap().key, MeshKey::Cube { .. }));
+    }
+
+    #[test]
+    fn deformers_in_a_cage_shape_the_cage_and_beside_it_the_result() {
+        let mut doc = Document::new("sds");
+        let sds = doc.scene.insert(Node::new(
+            "Subdivision Surface",
+            ObjectKindTag::SubdivisionSurface.default_kind(),
+        ));
+        let cage = doc.scene.insert_child(sds, tall_cube()).unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let straight = result_of(&eval, sds).bounds().unwrap();
+
+        let inner = doc.scene.insert_child(cage, bend_node(90.0)).unwrap();
+        eval.update(&doc.scene);
+        let bent = result_of(&eval, sds).bounds().unwrap();
+        assert!(bent.max.x > straight.max.x + 30.0, "the cage bent before smoothing");
+
+        doc.scene.get_mut(inner).unwrap().data.enabled = false;
+        doc.scene.insert_child(sds, bend_node(-90.0)).unwrap();
+        eval.update(&doc.scene);
+        let result = node(&eval, sds).bounds.unwrap();
+        assert!(result.min.x < straight.min.x - 30.0, "the result bent the other way");
+    }
+
+    #[test]
+    fn an_animated_bend_deforms_per_frame() {
+        use grid4d_scene::{Interpolation, Key, ObjectParam, Param, Track};
+        let mut doc = Document::new("bend");
+        let cube = doc.scene.insert(tall_cube());
+        let mut bend = bend_node(0.0);
+        bend.data.tracks.push(Track {
+            param: Param::Object(ObjectParam::Strength),
+            curve: grid4d_scene::Curve::from_keys([0.0, 10.0].map(|f: f64| Key {
+                interpolation: Interpolation::Linear,
+                ..Key::new(f, if f == 0.0 { 0.0 } else { std::f32::consts::PI })
+            })),
+        });
+        doc.scene.insert_child(cube, bend).unwrap();
+        let mut eval = EvaluatedScene::new();
+        let reach = |eval: &EvaluatedScene| node(eval, cube).bounds.unwrap().max.x;
+        eval.update(&doc.scene);
+        assert!(reach(&eval) < 11.0, "unbent at frame 0");
+        eval.set_frame(10.0);
+        eval.update(&doc.scene);
+        assert!(reach(&eval) > 50.0, "half a turn at frame 10: {}", reach(&eval));
     }
 }

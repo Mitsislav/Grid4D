@@ -150,11 +150,12 @@ const STYLE_MENU: [(DisplayStyle, &str, &str); 2] = [
 ];
 
 /// The Filter menu: object types, then elements of the view.
-const FILTER_OBJECTS: [(FilterItem, &str); 6] = [
+const FILTER_OBJECTS: [(FilterItem, &str); 7] = [
     (FilterItem::Polygon, "Polygon"),
     (FilterItem::Generator, "Generator"),
     (FilterItem::SubdivisionSurface, "Subdivision Surface"),
     (FilterItem::Spline, "Spline"),
+    (FilterItem::Deformer, "Deformer"),
     (FilterItem::Camera, "Camera"),
     (FilterItem::Light, "Light"),
 ];

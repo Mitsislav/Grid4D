@@ -120,6 +120,22 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
                 });
             }
         }
+        group_gap(ui);
+        for tag in ObjectKindTag::DEFORMERS {
+            let style = IconStyle {
+                tint: Some(tag_color(tag)),
+                ..IconStyle::default()
+            };
+            if icon_button(ui, Icon::Object(tag), style, create_tooltip(tag)).clicked() {
+                // Shift + click: under the selected object, fitted to it.
+                let shift = ui.input(|i| i.modifiers.shift);
+                editor.commands.push(if shift {
+                    EditorCommand::CreateChild(tag)
+                } else {
+                    EditorCommand::CreateObject(tag)
+                });
+            }
+        }
     });
 }
 
@@ -261,6 +277,7 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Lathe => "Add Lathe (Alt: around the selected spline)",
         ObjectKindTag::Sweep => "Add Sweep: profile first, path second (Alt: around the selected spline)",
         ObjectKindTag::Loft => "Add Loft: a skin over its child splines (Alt: around the selected splines)",
+        ObjectKindTag::Bend => "Add Bend (Shift: under the selected object, fitted to it)",
         ObjectKindTag::Circle => "Add Circle",
         ObjectKindTag::Rectangle => "Add Rectangle",
         ObjectKindTag::Arc => "Add Arc",

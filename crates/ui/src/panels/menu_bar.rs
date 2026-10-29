@@ -94,7 +94,26 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                         ui.close();
                     }
                 }
-                for name in ["Extrude", "Lathe", "Loft", "Sweep", "Cloner"] {
+                planned(ui, "Cloner", "");
+            });
+            ui.menu_button("Deformer", |ui| {
+                for tag in ObjectKindTag::DEFORMERS {
+                    if ui
+                        .button(tag.label())
+                        .on_hover_text("Shift + click: under the selected object, fitted to it")
+                        .clicked()
+                    {
+                        let shift = ui.input(|i| i.modifiers.shift);
+                        editor.commands.push(if shift {
+                            EditorCommand::CreateChild(tag)
+                        } else {
+                            EditorCommand::CreateObject(tag)
+                        });
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                for name in ["Twist", "Taper", "Bulge", "FFD"] {
                     planned(ui, name, "");
                 }
             });

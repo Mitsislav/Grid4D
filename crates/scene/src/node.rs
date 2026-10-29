@@ -124,6 +124,8 @@ pub enum ObjectKind {
     Sweep(grid4d_geom::surface::Sweep),
     /// Loft generator: stretches a skin over its child splines, in order.
     Loft(grid4d_geom::surface::Loft),
+    /// Bend deformer: bends its parent and everything below the parent.
+    Bend(grid4d_geom::deform::Bend),
     /// A parametric spline (Circle, Rectangle, Arc, n-Side, Star, Helix,
     /// Flower): a curve, drawn as lines, not rendered.
     SplinePrimitive(SplinePrimitive),
@@ -159,6 +161,7 @@ pub enum ObjectKindTag {
     Lathe,
     Sweep,
     Loft,
+    Bend,
     Circle,
     Rectangle,
     Arc,
@@ -171,7 +174,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 27] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -189,6 +192,7 @@ impl ObjectKindTag {
         Self::Lathe,
         Self::Sweep,
         Self::Loft,
+        Self::Bend,
         Self::Circle,
         Self::Rectangle,
         Self::Arc,
@@ -220,6 +224,9 @@ impl ObjectKindTag {
         Self::Sweep,
         Self::Loft,
     ];
+
+    /// Deformers: objects that reshape their parent and its subtree.
+    pub const DEFORMERS: [Self; 1] = [Self::Bend];
 
     /// Geometric primitives (the "Create ▸ Object" family).
     pub const PRIMITIVES: [Self; 8] = [
@@ -253,6 +260,7 @@ impl ObjectKindTag {
             Self::Lathe => "Lathe",
             Self::Sweep => "Sweep",
             Self::Loft => "Loft",
+            Self::Bend => "Bend",
             Self::Circle => "Circle",
             Self::Rectangle => "Rectangle",
             Self::Arc => "Arc",
@@ -339,6 +347,8 @@ impl ObjectKindTag {
             Self::Sweep => ObjectKind::Sweep(grid4d_geom::surface::Sweep::default()),
             // docs/reference/generator-loft.md: 30 × 10, through the sections.
             Self::Loft => ObjectKind::Loft(grid4d_geom::surface::Loft::default()),
+            // docs/reference/deformer-bend.md: a 250 cm box, no strength yet.
+            Self::Bend => ObjectKind::Bend(grid4d_geom::deform::Bend::default()),
             // The manual states no defaults: these are ours (docs/reference/object-spline.md).
             Self::Circle => spline(SplineShape::Circle {
                 radius: 200.0,
@@ -468,6 +478,7 @@ impl ObjectKind {
             Self::Lathe(_) => ObjectKindTag::Lathe,
             Self::Sweep(_) => ObjectKindTag::Sweep,
             Self::Loft(_) => ObjectKindTag::Loft,
+            Self::Bend(_) => ObjectKindTag::Bend,
             Self::SplinePrimitive(primitive) => match primitive.shape {
                 SplineShape::Circle { .. } => ObjectKindTag::Circle,
                 SplineShape::Rectangle { .. } => ObjectKindTag::Rectangle,
@@ -510,8 +521,15 @@ impl ObjectKind {
             | Self::Polygon { .. }
             | Self::SplinePrimitive(_)
             | Self::Text(_)
-            | Self::Spline { .. } => 0,
+            | Self::Spline { .. }
+            | Self::Bend(_) => 0,
         }
+    }
+
+    /// Reshapes its parent and the parent's subtree (see [`ObjectKindTag::DEFORMERS`]).
+    #[must_use]
+    pub const fn is_deformer(&self) -> bool {
+        matches!(self, Self::Bend(_))
     }
 
     /// Builds its geometry from its children (see [`ObjectKindTag::GENERATORS`]).
@@ -575,6 +593,8 @@ impl ObjectKind {
             Self::SplinePrimitive(ref primitive) => return curve_bounds(&primitive.polyline()),
             // A text's extent needs its font: evaluation knows it.
             Self::Text(_) => return None,
+            // The deformer's box (unbent).
+            Self::Bend(bend) => bend.size * 0.5,
             Self::Spline {
                 ref spline,
                 interpolation,

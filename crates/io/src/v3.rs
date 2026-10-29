@@ -20,6 +20,7 @@ use std::{
 use glam::{Vec2, Vec3};
 use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
+    deform::{Bend, BendOrigin, DeformerMode},
     spline::{
         ArcType, Interpolation as SplineInterpolation, Segment, Spline, SplinePlane, SplinePrimitive, SplineShape,
         SplineType, Text, TextAlign,
@@ -362,6 +363,7 @@ enum ParamDto {
     EndRotation,
     StartGrowth,
     EndGrowth,
+    Strength,
 }
 
 impl From<Param> for ParamDto {
@@ -415,6 +417,7 @@ impl From<Param> for ParamDto {
             Param::Object(ObjectParam::EndRotation) => Self::EndRotation,
             Param::Object(ObjectParam::StartGrowth) => Self::StartGrowth,
             Param::Object(ObjectParam::EndGrowth) => Self::EndGrowth,
+            Param::Object(ObjectParam::Strength) => Self::Strength,
         }
     }
 }
@@ -470,6 +473,7 @@ impl From<ParamDto> for Param {
             ParamDto::EndRotation => Self::Object(ObjectParam::EndRotation),
             ParamDto::StartGrowth => Self::Object(ObjectParam::StartGrowth),
             ParamDto::EndGrowth => Self::Object(ObjectParam::EndGrowth),
+            ParamDto::Strength => Self::Object(ObjectParam::Strength),
         }
     }
 }
@@ -823,6 +827,19 @@ enum KindDto {
         #[serde(default, skip_serializing_if = "CapTypeDto::is_ngons")]
         cap_type: CapTypeDto,
     },
+    /// A Bend deformer (added in step 10.2); angles in radians, defaults omitted.
+    Bend {
+        size: [f32; 3],
+        #[serde(default, skip_serializing_if = "DeformerModeDto::is_limited")]
+        mode: DeformerModeDto,
+        strength: f32,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        angle: f32,
+        #[serde(default, skip_serializing_if = "is_false")]
+        keep_length: bool,
+        #[serde(default, skip_serializing_if = "BendOriginDto::is_bottom")]
+        origin: BendOriginDto,
+    },
     /// A spline primitive (added in step 9.1). Angles in radians.
     Spline {
         spline: SplineShapeDto,
@@ -962,6 +979,45 @@ impl ExtrudeDirectionDto {
     )]
     fn is_auto(&self) -> bool {
         *self == Self::Auto
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DeformerModeDto {
+    #[default]
+    Limited,
+    WithinBox,
+    Unlimited,
+}
+
+impl DeformerModeDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_limited(&self) -> bool {
+        *self == Self::Limited
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BendOriginDto {
+    #[default]
+    Bottom,
+    CenterC,
+    CenterS,
+    Top,
+}
+
+impl BendOriginDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_bottom(&self) -> bool {
+        *self == Self::Bottom
     }
 }
 
@@ -1987,6 +2043,23 @@ impl KindDto {
                 reverse: text.reverse,
                 intermediate_points: SplinePointsDto::new(text.interpolation),
             },
+            ObjectKind::Bend(bend) => Self::Bend {
+                size: bend.size.to_array(),
+                mode: match bend.mode {
+                    DeformerMode::Limited => DeformerModeDto::Limited,
+                    DeformerMode::WithinBox => DeformerModeDto::WithinBox,
+                    DeformerMode::Unlimited => DeformerModeDto::Unlimited,
+                },
+                strength: bend.strength,
+                angle: bend.angle,
+                keep_length: bend.keep_length,
+                origin: match bend.origin {
+                    BendOrigin::Bottom => BendOriginDto::Bottom,
+                    BendOrigin::CenterC => BendOriginDto::CenterC,
+                    BendOrigin::CenterS => BendOriginDto::CenterS,
+                    BendOrigin::Top => BendOriginDto::Top,
+                },
+            },
             ObjectKind::Lathe(lathe) => Self::Lathe {
                 angle: lathe.angle,
                 subdivision: lathe.subdivision,
@@ -2224,6 +2297,30 @@ impl KindDto {
                 },
                 hierarchical,
             },
+            Self::Bend {
+                size,
+                mode,
+                strength,
+                angle,
+                keep_length,
+                origin,
+            } => ObjectKind::Bend(Bend {
+                size: Vec3::from_array(size).abs(),
+                mode: match mode {
+                    DeformerModeDto::Limited => DeformerMode::Limited,
+                    DeformerModeDto::WithinBox => DeformerMode::WithinBox,
+                    DeformerModeDto::Unlimited => DeformerMode::Unlimited,
+                },
+                strength,
+                angle,
+                keep_length,
+                origin: match origin {
+                    BendOriginDto::Bottom => BendOrigin::Bottom,
+                    BendOriginDto::CenterC => BendOrigin::CenterC,
+                    BendOriginDto::CenterS => BendOrigin::CenterS,
+                    BendOriginDto::Top => BendOrigin::Top,
+                },
+            }),
             Self::Text {
                 text,
                 height,
@@ -2410,6 +2507,9 @@ impl KindDto {
                 scaling,
                 ..
             } => vec![angle, movement, scaling],
+            Self::Bend {
+                size, strength, angle, ..
+            } => vec![size[0], size[1], size[2], strength, angle],
             Self::Text {
                 height,
                 horizontal_spacing,
@@ -3083,6 +3183,34 @@ mod tests {
         assert_eq!(json, r#""size_y""#);
         let json = serde_json::to_string(&ParamDto::from(Param::Object(ObjectParam::Rise))).unwrap();
         assert_eq!(json, r#""rise""#);
+    }
+
+    #[test]
+    fn bend_deformers_round_trip_and_defaults_are_omitted() {
+        let mut doc = Document::new("bend");
+        let plain = ObjectKindTag::Bend.default_kind();
+        let custom = ObjectKind::Bend(Bend {
+            size: Vec3::new(10.0, 20.0, 30.0),
+            mode: DeformerMode::Unlimited,
+            strength: 1.5,
+            angle: -0.5,
+            keep_length: true,
+            origin: BendOrigin::CenterS,
+        });
+        doc.scene.insert(Node::new("Bend", plain.clone()));
+        doc.scene.insert(Node::new("Bend.1", custom.clone()));
+        let loaded = round_trip(&doc);
+        let kinds: Vec<&ObjectKind> = loaded
+            .scene
+            .roots()
+            .iter()
+            .map(|&id| &loaded.scene.get(id).unwrap().data.kind)
+            .collect();
+        assert_eq!(kinds, [&plain, &custom]);
+        let json = serde_json::to_string(&KindDto::new(&plain, "Bend", &mut MeshTable::default())).unwrap();
+        assert_eq!(json, r#"{"type":"bend","size":[250.0,250.0,250.0],"strength":0.0}"#);
+        let json = serde_json::to_string(&ParamDto::from(Param::Object(ObjectParam::Strength))).unwrap();
+        assert_eq!(json, r#""strength""#);
     }
 
     #[test]

@@ -11,6 +11,8 @@ pub enum FilterItem {
     SubdivisionSurface,
     /// Splines (curves).
     Spline,
+    /// Deformers (their boxes; their effect stays).
+    Deformer,
     Camera,
     Light,
     /// The grid.
@@ -21,11 +23,12 @@ pub enum FilterItem {
 }
 
 impl FilterItem {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Polygon,
         Self::Generator,
         Self::SubdivisionSurface,
         Self::Spline,
+        Self::Deformer,
         Self::Camera,
         Self::Light,
         Self::Grid,
@@ -63,6 +66,7 @@ impl FilterItem {
             | ObjectKindTag::Flower
             | ObjectKindTag::Text
             | ObjectKindTag::Spline => Some(Self::Spline),
+            ObjectKindTag::Bend => Some(Self::Deformer),
         }
     }
 
@@ -77,6 +81,7 @@ impl FilterItem {
             Self::WorldAxis => 1 << 6,
             Self::Hud => 1 << 7,
             Self::Spline => 1 << 8,
+            Self::Deformer => 1 << 9,
         }
     }
 }
@@ -91,7 +96,7 @@ impl ViewFilter {
     /// Everything shown.
     pub const ALL: Self = Self { hidden: 0 };
     /// Everything hidden.
-    pub const NONE: Self = Self { hidden: 0x1FF };
+    pub const NONE: Self = Self { hidden: 0x3FF };
 
     #[must_use]
     pub const fn shows(self, item: FilterItem) -> bool {
