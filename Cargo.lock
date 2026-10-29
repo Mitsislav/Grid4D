@@ -1624,6 +1624,7 @@ dependencies = [
  "glam",
  "grid4d-geom",
  "grid4d-scene",
+ "grid4d-text",
 ]
 
 [[package]]
@@ -1687,6 +1688,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "grid4d-text"
+version = "0.1.0"
+dependencies = [
+ "epaint_default_fonts",
+ "glam",
+ "grid4d-geom",
+ "ttf-parser",
+]
+
+[[package]]
 name = "grid4d-ui"
 version = "0.1.0"
 dependencies = [
@@ -1699,6 +1710,7 @@ dependencies = [
  "grid4d-raytrace",
  "grid4d-render",
  "grid4d-scene",
+ "grid4d-text",
  "log",
  "png",
  "rfd",

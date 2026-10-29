@@ -101,7 +101,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
     };
     match *kind {
         // A spline's curve is sampled and named during evaluation.
-        ObjectKind::Null | ObjectKind::SplinePrimitive(_) | ObjectKind::Spline { .. } => None,
+        ObjectKind::Null | ObjectKind::SplinePrimitive(_) | ObjectKind::Text(_) | ObjectKind::Spline { .. } => None,
         ObjectKind::Cube { size, segments } => shaded(MeshKey::Cube { segments }, size),
         ObjectKind::Sphere { radius, segments } => shaded(MeshKey::Sphere { segments }, Vec3::splat(radius)),
         ObjectKind::Cylinder {
@@ -278,6 +278,7 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
         | ObjectKind::Loft(_)
         // Curves, not surfaces (a spline primitive is made editable as a spline).
         | ObjectKind::SplinePrimitive(_)
+        | ObjectKind::Text(_)
         | ObjectKind::Spline { .. } => None,
     }
 }

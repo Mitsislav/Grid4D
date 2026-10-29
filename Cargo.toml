@@ -10,12 +10,14 @@
 #                            ▲                                                │
 #                            └─────────────────  grid4d-io  ◀─────────────────┘   (.g4d files)
 #
+#  grid4d-text (text splines' glyph outlines) depends only on grid4d-geom; eval and ui use it.
+#
 #  See ARCHITECTURE.md for the architectural rules.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [workspace]
 resolver = "3"
-members = ["crates/geom", "crates/scene", "crates/eval", "crates/render", "crates/raytrace", "crates/io", "crates/ui"]
+members = ["crates/geom", "crates/text", "crates/scene", "crates/eval", "crates/render", "crates/raytrace", "crates/io", "crates/ui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -27,6 +29,7 @@ publish = false
 [workspace.dependencies]
 # Internal crates
 grid4d-geom = { path = "crates/geom" }
+grid4d-text = { path = "crates/text" }
 grid4d-scene = { path = "crates/scene" }
 grid4d-eval = { path = "crates/eval" }
 grid4d-render = { path = "crates/render" }
@@ -71,6 +74,10 @@ png = "0.18"
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 half = "2.7"
 exr = "1.73"
+
+# Text splines (grid4d-text): glyph outlines, and the typeface egui already embeds.
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
+epaint_default_fonts = "0.37"
 
 # Diagnostics
 log = "0.4"

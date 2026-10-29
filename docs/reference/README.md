@@ -85,3 +85,4 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 9.5 | [`generator-lathe.md`](generator-lathe.md) — the Lathe generator: angle, subdivision, movement, scaling, caps | implemented 2026-10-29 |
 | 9.6 | [`generator-sweep.md`](generator-sweep.md) — the Sweep generator: profile along a path, banking, growth, end scale and rotation | implemented 2026-10-29 |
 | 9.7 | [`generator-loft.md`](generator-loft.md) — the Loft generator: a skin over sections, U / V, organic, loop, linear | implemented 2026-10-29 |
+| 9.8 | [`object-text.md`](object-text.md) — the Text spline: outlines from the built-in font, lines, alignment, spacing | implemented 2026-10-29 |

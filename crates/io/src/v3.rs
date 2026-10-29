@@ -22,7 +22,7 @@ use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
     spline::{
         ArcType, Interpolation as SplineInterpolation, Segment, Spline, SplinePlane, SplinePrimitive, SplineShape,
-        SplineType,
+        SplineType, Text, TextAlign,
     },
     subdivision::{Boundary, MAX_LEVEL},
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
@@ -716,6 +716,23 @@ enum KindDto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         intermediate_points: Option<SplinePointsDto>,
     },
+    /// A Text spline (added in step 9.8): its parameters, not its outline.
+    Text {
+        text: String,
+        height: f32,
+        #[serde(default, skip_serializing_if = "TextAlignDto::is_left")]
+        align: TextAlignDto,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        horizontal_spacing: f32,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        vertical_spacing: f32,
+        #[serde(default, skip_serializing_if = "SplinePlaneDto::is_xy")]
+        plane: SplinePlaneDto,
+        #[serde(default, skip_serializing_if = "is_false")]
+        reverse: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intermediate_points: Option<SplinePointsDto>,
+    },
     /// An editable spline (added in step 9.2), its arrays inline.
     EditableSpline {
         spline_type: SplineTypeDto,
@@ -827,6 +844,25 @@ impl ExtrudeDirectionDto {
     )]
     fn is_auto(&self) -> bool {
         *self == Self::Auto
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TextAlignDto {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+impl TextAlignDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_left(&self) -> bool {
+        *self == Self::Left
     }
 }
 
@@ -1815,6 +1851,24 @@ impl KindDto {
                 end_cap: extrusion.end_cap,
                 cap_type: extrusion.cap_type.into(),
             },
+            ObjectKind::Text(ref text) => Self::Text {
+                text: text.text.to_string(),
+                height: text.height,
+                align: match text.align {
+                    TextAlign::Left => TextAlignDto::Left,
+                    TextAlign::Center => TextAlignDto::Center,
+                    TextAlign::Right => TextAlignDto::Right,
+                },
+                horizontal_spacing: text.horizontal_spacing,
+                vertical_spacing: text.vertical_spacing,
+                plane: match text.plane {
+                    SplinePlane::XY => SplinePlaneDto::Xy,
+                    SplinePlane::ZY => SplinePlaneDto::Zy,
+                    SplinePlane::XZ => SplinePlaneDto::Xz,
+                },
+                reverse: text.reverse,
+                intermediate_points: SplinePointsDto::new(text.interpolation),
+            },
             ObjectKind::Lathe(lathe) => Self::Lathe {
                 angle: lathe.angle,
                 subdivision: lathe.subdivision,
@@ -2052,6 +2106,35 @@ impl KindDto {
                 },
                 hierarchical,
             },
+            Self::Text {
+                text,
+                height,
+                align,
+                horizontal_spacing,
+                vertical_spacing,
+                plane,
+                reverse,
+                intermediate_points,
+            } => ObjectKind::Text(Text {
+                // Never trust a size a file claims: long texts are cut.
+                text: text.chars().take(Text::MAX_CHARS).collect::<String>().into(),
+                height: height.max(0.0),
+                align: match align {
+                    TextAlignDto::Left => TextAlign::Left,
+                    TextAlignDto::Center => TextAlign::Center,
+                    TextAlignDto::Right => TextAlign::Right,
+                },
+                horizontal_spacing,
+                vertical_spacing,
+                plane: match plane {
+                    SplinePlaneDto::Xy => SplinePlane::XY,
+                    SplinePlaneDto::Zy => SplinePlane::ZY,
+                    SplinePlaneDto::Xz => SplinePlane::XZ,
+                },
+                reverse,
+                interpolation: intermediate_points
+                    .map_or_else(SplineInterpolation::default, SplinePointsDto::into_interpolation),
+            }),
             Self::Lathe {
                 angle,
                 subdivision,
@@ -2209,6 +2292,17 @@ impl KindDto {
                 scaling,
                 ..
             } => vec![angle, movement, scaling],
+            Self::Text {
+                height,
+                horizontal_spacing,
+                vertical_spacing,
+                intermediate_points,
+                ..
+            } => {
+                let mut numbers = vec![height, horizontal_spacing, vertical_spacing];
+                numbers.extend(intermediate_points.map(SplinePointsDto::parameters).unwrap_or_default());
+                numbers
+            }
             Self::Sweep {
                 end_scale,
                 end_rotation,
@@ -2812,6 +2906,41 @@ mod tests {
             (loft.subdivision_u, loft.subdivision_v),
             (Loft::MIN_SUBDIVISION, Loft::MAX_SUBDIVISION)
         );
+    }
+
+    #[test]
+    fn text_splines_round_trip_and_long_texts_are_cut() {
+        let mut doc = Document::new("text");
+        let plain = ObjectKindTag::Text.default_kind();
+        let custom = ObjectKind::Text(Text {
+            text: "Two\nlines".into(),
+            height: 50.0,
+            align: TextAlign::Center,
+            horizontal_spacing: 3.0,
+            vertical_spacing: -4.0,
+            plane: SplinePlane::XZ,
+            reverse: true,
+            interpolation: SplineInterpolation::Uniform { number: 4 },
+        });
+        doc.scene.insert(Node::new("Text", plain.clone()));
+        doc.scene.insert(Node::new("Text.1", custom.clone()));
+        let loaded = round_trip(&doc);
+        let kinds: Vec<&ObjectKind> = loaded
+            .scene
+            .roots()
+            .iter()
+            .map(|&id| &loaded.scene.get(id).unwrap().data.kind)
+            .collect();
+        assert_eq!(kinds, [&plain, &custom]);
+        let json = serde_json::to_string(&KindDto::new(&plain, "Text", &mut MeshTable::default())).unwrap();
+        assert_eq!(json, r#"{"type":"text","text":"Text","height":200.0}"#);
+        let long = "x".repeat(Text::MAX_CHARS + 50);
+        let json = format!(r#"{{"type": "text", "text": "{long}", "height": -3.0}}"#);
+        let dto: KindDto = serde_json::from_str(&json).unwrap();
+        let ObjectKind::Text(text) = dto.into_kind(&[], "test").unwrap() else {
+            panic!("not a text")
+        };
+        assert_eq!((text.text.chars().count(), text.height), (Text::MAX_CHARS, 0.0));
     }
 
     #[test]

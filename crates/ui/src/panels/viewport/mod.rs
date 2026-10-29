@@ -12,6 +12,8 @@ mod select_tools;
 mod snapping;
 mod spline_tools;
 
+use std::collections::HashMap;
+
 use egui::{Align, Align2, Layout, Margin, PointerButton, Pos2, Rect, Response, Sense, Ui, pos2};
 use glam::{Mat4, Vec2 as GVec2, Vec3};
 use grid4d_eval::EvaluatedScene;
@@ -336,8 +338,24 @@ impl ViewportPanel {
     }
 
     pub fn frame_scene(&mut self, scene: &Scene) {
-        let bounds = scene.world_bounds(&mut self.walk_stack, |_| true);
+        let shown = self.evaluated_bounds();
+        let mut bounds = Aabb::EMPTY;
+        scene.walk(&mut self.walk_stack, |id, node, world, _| {
+            bounds = bounds.union(framing_bounds(&shown, id, node, world));
+            true
+        });
         self.frame_bounds(bounds);
+    }
+
+    /// Each evaluated node's world bounds: what was built for it this frame (a
+    /// text's curve, a generator's result), which the document alone does not
+    /// know.
+    fn evaluated_bounds(&self) -> HashMap<NodeId, Aabb> {
+        self.evaluated
+            .nodes()
+            .iter()
+            .filter_map(|n| Some((n.id, n.bounds?.transformed(&n.world))))
+            .collect()
     }
 
     /// Frames the selected objects including their children.
@@ -346,6 +364,7 @@ impl ViewportPanel {
             self.frame_scene(scene);
             return;
         }
+        let shown = self.evaluated_bounds();
         let mut bounds = Aabb::EMPTY;
         let mut selected_depth: Option<u32> = None;
         scene.walk(&mut self.walk_stack, |id, node, world, depth| {
@@ -356,7 +375,7 @@ impl ViewportPanel {
                 selected_depth = Some(depth);
             }
             if selected_depth.is_some() {
-                bounds = bounds.union(node.world_bounds(world));
+                bounds = bounds.union(framing_bounds(&shown, id, node, world));
             }
             true
         });
@@ -1497,6 +1516,17 @@ pub(super) fn project(view_proj: &Mat4, rect: Rect, point: Vec3) -> Option<Pos2>
         rect.left() + (ndc.x * 0.5 + 0.5) * rect.width(),
         rect.top() + (0.5 - ndc.y * 0.5) * rect.height(),
     ))
+}
+
+/// A node's world bounds for framing: its own extent, else what evaluation
+/// built for it (`shown`), else just its position.
+fn framing_bounds(shown: &HashMap<NodeId, Aabb>, id: NodeId, node: &grid4d_scene::Node, world: &Mat4) -> Aabb {
+    if node.data.kind.local_bounds().is_none()
+        && let Some(&bounds) = shown.get(&id)
+    {
+        return bounds;
+    }
+    node.world_bounds(world)
 }
 
 #[cfg(test)]
@@ -3165,5 +3195,29 @@ mod tests {
         let other = h.editor.selection.active().expect("a second spline");
         assert_ne!(other, id);
         assert_eq!(spline_state(&h, other).0.points.len(), 1);
+    }
+
+    #[test]
+    fn framing_uses_what_evaluation_built_for_texts_and_generators() {
+        let mut h = Harness::new();
+        h.doc = Document::new("text");
+        let extrude = h.doc.scene.insert(grid4d_scene::Node::new(
+            "Extrude",
+            ObjectKindTag::Extrude.default_kind(),
+        ));
+        let mut text = grid4d_scene::Node::new("Text", ObjectKindTag::Text.default_kind());
+        text.data.transform.position = Vec3::new(2000.0, 0.0, 0.0);
+        h.doc.scene.insert_child(extrude, text).unwrap();
+        h.editor.selection.clear();
+        h.frame(Vec::new());
+        h.viewport.frame_scene(&h.doc.scene);
+        let target = h.viewport.camera().target;
+        assert!(
+            target.x > 2000.0 && target.y > 0.0,
+            "the letters are framed, not the origin: {target}"
+        );
+        h.editor.selection.set_single(extrude);
+        h.viewport.frame_selection(&h.doc.scene, &h.editor.selection);
+        assert!(h.viewport.camera().target.x > 2000.0);
     }
 }

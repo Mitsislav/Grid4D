@@ -1,7 +1,7 @@
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use glam::Vec3;
-use grid4d_geom::spline::{ArcType, Interpolation, SplinePrimitive, SplineShape};
+use grid4d_geom::spline::{ArcType, Interpolation, SplinePrimitive, SplineShape, Text};
 
 use crate::{Aabb, Components, LightDetails, LightShadow, LightType, MeshHandle, SplineHandle, Transform};
 
@@ -127,6 +127,8 @@ pub enum ObjectKind {
     /// A parametric spline (Circle, Rectangle, Arc, n-Side, Star, Helix,
     /// Flower): a curve, drawn as lines, not rendered.
     SplinePrimitive(SplinePrimitive),
+    /// A Text spline: its letters' outlines (from a font, in `grid4d-text`).
+    Text(Text),
     /// An editable spline (Make Editable on a spline primitive): its own control
     /// points and tangents, how it is cut into pieces, and its selected and
     /// hidden points (the `points` sets of `components`).
@@ -164,11 +166,12 @@ pub enum ObjectKindTag {
     Star,
     Helix,
     Flower,
+    Text,
     Spline,
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -193,11 +196,12 @@ impl ObjectKindTag {
         Self::Star,
         Self::Helix,
         Self::Flower,
+        Self::Text,
         Self::Spline,
     ];
 
     /// Spline primitives (the "Create ▸ Spline" family).
-    pub const SPLINES: [Self; 7] = [
+    pub const SPLINES: [Self; 8] = [
         Self::Circle,
         Self::Rectangle,
         Self::Arc,
@@ -205,6 +209,7 @@ impl ObjectKindTag {
         Self::Star,
         Self::Helix,
         Self::Flower,
+        Self::Text,
     ];
 
     /// Generators: objects that build their geometry from their children.
@@ -255,6 +260,7 @@ impl ObjectKindTag {
             Self::Star => "Star",
             Self::Helix => "Helix",
             Self::Flower => "Flower",
+            Self::Text => "Text",
             Self::Spline => "Spline",
         }
     }
@@ -377,6 +383,8 @@ impl ObjectKindTag {
                 outer_radius: 200.0,
                 petals: 6,
             }),
+            // docs/reference/object-text.md: "Text", 200 cm, left aligned.
+            Self::Text => ObjectKind::Text(Text::new("Text")),
             // Empty, like a new polygon object.
             Self::Spline => ObjectKind::Spline {
                 spline: SplineHandle::empty(),
@@ -398,6 +406,7 @@ impl ObjectKindTag {
                 | Self::Star
                 | Self::Helix
                 | Self::Flower
+                | Self::Text
                 | Self::Spline
         )
     }
@@ -468,6 +477,7 @@ impl ObjectKind {
                 SplineShape::Helix { .. } => ObjectKindTag::Helix,
                 SplineShape::Flower { .. } => ObjectKindTag::Flower,
             },
+            Self::Text(_) => ObjectKindTag::Text,
             Self::Spline { .. } => ObjectKindTag::Spline,
         }
     }
@@ -475,7 +485,7 @@ impl ObjectKind {
     /// A curve rather than a surface (drawn as lines, not rendered).
     #[must_use]
     pub const fn is_spline(&self) -> bool {
-        matches!(self, Self::SplinePrimitive(_) | Self::Spline { .. })
+        matches!(self, Self::SplinePrimitive(_) | Self::Text(_) | Self::Spline { .. })
     }
 
     /// How many of its first children a generator takes as inputs (the Sweep:
@@ -499,6 +509,7 @@ impl ObjectKind {
             | Self::Light { .. }
             | Self::Polygon { .. }
             | Self::SplinePrimitive(_)
+            | Self::Text(_)
             | Self::Spline { .. } => 0,
         }
     }
@@ -562,6 +573,8 @@ impl ObjectKind {
             Self::Polygon { ref mesh, .. } => return mesh.bounds(),
             // The curve's, half a centimetre thicker so flat ones can be hit.
             Self::SplinePrimitive(ref primitive) => return curve_bounds(&primitive.polyline()),
+            // A text's extent needs its font: evaluation knows it.
+            Self::Text(_) => return None,
             Self::Spline {
                 ref spline,
                 interpolation,

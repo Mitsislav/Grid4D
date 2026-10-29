@@ -471,6 +471,16 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.ellipse((0.5, 0.5), (0.3, 0.07));
             c.ellipse((0.5, 0.16), (0.14, 0.05));
         }
+        ObjectKindTag::Text => {
+            // A serif "T" with control points at its corners.
+            let thick = Stroke::new(c.stroke.width * 1.6, c.color);
+            c.polyline_stroke(&[(0.16, 0.26), (0.16, 0.14), (0.84, 0.14), (0.84, 0.26)], false, thick);
+            c.polyline_stroke(&[(0.5, 0.14), (0.5, 0.86)], false, thick);
+            c.line((0.36, 0.86), (0.64, 0.86));
+            for p in [(0.16, 0.26), (0.84, 0.26), (0.36, 0.86), (0.64, 0.86)] {
+                c.disc(p, 0.055);
+            }
+        }
         ObjectKindTag::Light => {
             c.disc((0.5, 0.5), 0.19);
             for i in 0..8 {

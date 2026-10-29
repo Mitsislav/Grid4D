@@ -637,6 +637,68 @@ fn uniform(spans: &[[Vec3; 4]], closed: bool, number: u32, out: &mut Vec<Vec3>) 
 // ---------------------------------------------------------------------------
 // Primitives
 
+/// How each line of a [`Text`] sits relative to the origin.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TextAlign {
+    /// Lines start at the origin.
+    #[default]
+    Left,
+    /// Lines are centred on it.
+    Center,
+    /// Lines end at it.
+    Right,
+}
+
+impl TextAlign {
+    pub const ALL: [Self; 3] = [Self::Left, Self::Center, Self::Right];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Left => "Left",
+            Self::Center => "Center",
+            Self::Right => "Right",
+        }
+    }
+}
+
+/// A Text spline's parameters (see `docs/reference/object-text.md`). Plain
+/// data: the outline comes from a font, in `grid4d-text`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Text {
+    /// The characters; a line feed starts a new line. Shared, so copies are cheap.
+    pub text: std::sync::Arc<str>,
+    /// The font size: the height of its em square (cm).
+    pub height: f32,
+    pub align: TextAlign,
+    /// Added between letters and between lines (cm).
+    pub horizontal_spacing: f32,
+    pub vertical_spacing: f32,
+    pub plane: SplinePlane,
+    pub reverse: bool,
+    pub interpolation: Interpolation,
+}
+
+impl Text {
+    /// The most characters a text keeps (files claiming more are cut).
+    pub const MAX_CHARS: usize = 10_000;
+
+    /// `text` at the default size and settings.
+    #[must_use]
+    pub fn new(text: &str) -> Self {
+        Self {
+            text: text.into(),
+            height: 200.0,
+            align: TextAlign::Left,
+            horizontal_spacing: 0.0,
+            vertical_spacing: 0.0,
+            plane: SplinePlane::XY,
+            reverse: false,
+            interpolation: Interpolation::default(),
+        }
+    }
+}
+
 /// Which plane a primitive lies in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum SplinePlane {

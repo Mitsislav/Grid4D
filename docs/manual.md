@@ -998,8 +998,8 @@ Select the generator and open **Attribute Manager ▸ Object**:
 ## 13. Splines
 
 A **spline** is a curve: an outline, a path or a profile. Splines are drawn as
-lines in every display mode and are not visible in a render; in later versions
-generators (Extrude, Lathe, Sweep, Loft) will turn them into surfaces.
+lines in every display mode and are not visible in a render; the generators
+Extrude, Lathe, Sweep and Loft turn them into surfaces (§13.4–13.7).
 
 ![The seven spline primitives, the Star selected; the toolbar's spline button opened](images/manual/splines.png)
 
@@ -1017,6 +1017,7 @@ and is selected.
 | Star | Inner and Outer Radius, Twist (turns the inner points), Points |
 | Helix | Start and End Radius, Start and End Angle (the difference sets the turns: 720° = two), Radial Bias and Height Bias (50 % = even), Height, Subdivision (points along the coil) |
 | Flower | Inner and Outer Radius, Petals |
+| Text | The text itself (several lines), Align, Height, Horizontal and Vertical Spacing — see [§13.8](#138-text) |
 
 Every spline also has:
 
@@ -1254,6 +1255,32 @@ The Attribute Manager's **Object** tab:
 
 A Loft with a single closed section covers it with a flat cap. Q, Make Editable
 (every section goes with it) and rendering work as for the other generators.
+
+### 13.8 Text
+
+**Create ▸ Spline ▸ Text** (or Text in the toolbar's spline list) writes text as
+splines: the outline of every letter, with the holes of letters such as *o*,
+*a* and *B*. Put it under an **Extrude** for solid 3D letters.
+
+![Extruded text and a two-line Text spline; its Object properties with the text field](images/manual/spline-text.png)
+
+The Attribute Manager's **Object** tab:
+
+- **Text**: type the text; **Enter** starts a new line. The splines change as
+  you type.
+- **Font**: Ubuntu Light, the typeface of Grid4D's own interface (other fonts
+  are planned).
+- **Align**: **Left** (lines start at the object's origin), **Center** (lines are
+  centred on it) or **Right** (lines end at it).
+- **Height**: the font size, in centimetres (200 cm by default).
+- **Horizontal Spacing**: extra space between letters (negative values pull
+  them together). **Vertical Spacing**: extra space between lines.
+- **Plane**, **Reverse** and **Intermediate Points**: as for the other splines.
+
+The first line sits on the object's X axis (its baseline), further lines go
+downwards. **Make Editable** (C) turns the text into an editable spline with
+one closed segment per contour, so single letters can be edited point by
+point.
 
 ## 14. Snapping
 
@@ -1621,7 +1648,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   Scale and Rotation graphs and no Keep Segments. The Loft has no Adapt UV
   (no UVs) and uses only the first segment of each section (no holes). The
   Cloner is planned.
-- **Splines**: Text comes next; hiding points, Grow/Shrink on points,
+- **Splines**: other fonts for Text, kerning and Separate Letters; hiding
+  points, Grow/Shrink on points,
   snapping to spline points and the Pen snapping to objects; editing points
   inside the Pen (moving them while drawing); the Cissoid, Cogwheel, Cycloid, Formula, Profile,
   4-Side and Spiral primitives; splines in glTF and OBJ files; drawing splines in

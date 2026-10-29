@@ -643,4 +643,16 @@ mod tests {
         // 29 around × 9 rings of quads, and two 29-gon caps of 27 triangles.
         assert_eq!(scene_of(&doc).triangle_count(), 29 * 9 * 2 + 2 * 27);
     }
+
+    #[test]
+    fn extruded_text_is_rendered() {
+        let mut doc = Document::new("t");
+        let extrude = doc
+            .scene
+            .insert(Node::new("Extrude", ObjectKindTag::Extrude.default_kind()));
+        doc.scene
+            .insert_child(extrude, Node::new("Text", ObjectKindTag::Text.default_kind()))
+            .unwrap();
+        assert!(scene_of(&doc).triangle_count() > 200);
+    }
 }

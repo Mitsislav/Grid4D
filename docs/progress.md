@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 9 — Splines & spline generators (v0.9) |
-| Last step done | 9.7 — Loft generator (2026-10-29) |
-| Next step | 9.8 — Text spline |
-| Tests | 592, all passing; clippy and rustfmt clean |
+| Last step done | 9.8 — Text spline (2026-10-29); Phase 9 complete |
+| Next step | Phase 10 — plan it in detail (deformers, MoGraph-lite, simulation, workspace, extensibility) |
+| Tests | 600, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -900,6 +900,7 @@ Phase 8 is complete.
 | 9.6 | Sweep generator: a profile moved along a path — banking (parallel transport), level or parallel movement, constant cross section at corners, end scale and rotation, start / end growth, caps; Alt wraps two selected splines as profile and path; Make Editable removes both; saved; rendered | 582 |
 | 9.7 | Loft generator: a skin over child splines in order — Subdivision U / V, through the sections (Catmull-Rom) or Organic (B-spline), Linear, Per Segment, Loop, caps; sections turned the same way round; Alt wraps every selected spline in selection order; Make Editable removes them; saved; rendered | 589 |
 | — | Phase 9 review: export leaves every generator input out and uses the colour shown; only the Subdivision Surface hides its first child; generators follow animated inputs (placed at the evaluated frame) | 592 |
+| 9.8 | Text spline: letters' outlines from the built-in font (Ubuntu Light) as closed Bezier segments — multi-line text, Align, Height, Horizontal / Vertical Spacing, plane, reverse; Extrude makes solid letters with their holes; Make Editable; saved; framing (H / O) uses evaluated bounds for texts and generator results | 600 |
 
 **9.1 — Spline primitives**
 
@@ -1145,6 +1146,42 @@ fixed with tests (592 tests):
   the current frame (`generator_mesh(scene, id, frame)`).
 - Docs: the manual's Filter and glTF export sections and the filter spec name
   the spline generators; §12 points to §13.4–13.7.
+
+**9.8 — Text spline**
+
+*Problems and solutions:*
+- **A font without a new licence.** The plan asked for a bundled open font.
+  egui already embeds Ubuntu Light in Grid4D for its own interface
+  (`epaint_default_fonts`, Ubuntu Font Licence), and `ttf-parser` 0.25 was
+  already in the dependency tree; using both adds no font file and no licence
+  to the repository.
+- **Keeping geometry "glam only".** Font parsing went into a new crate,
+  `grid4d-text`, between `grid4d-geom` and `grid4d-eval`; the scene stores only
+  the parameters (`geom::spline::Text`), with the string as `Arc<str>` so that
+  evaluation's per-update clones of curve sources and generator inputs do not
+  allocate.
+- **Glyph outlines as splines.** TrueType contours mix lines and quadratic
+  curves: each quadratic span becomes the equal cubic Bezier (control points
+  two thirds of the way to the quadratic one); a contour whose last point lands
+  on its first is merged into it. Holes keep the font's direction; the
+  generators nest contours even-odd, so "o", "B", "4" and "D" extrude with
+  their holes.
+- **Bounds the document does not know.** A text's extent needs its font, so
+  `ObjectKind::local_bounds` is `None` for it, and evaluation now takes every
+  spline's bounds from its cached curve (no longer re-sampling primitives each
+  update). On screen, **H** then framed nothing and reset the view: framing
+  walked the document, where neither the text nor the Extrude around it has an
+  extent. Framing now uses the evaluated bounds of such objects (texts,
+  generator results), so H and O frame extruded letters; a test frames an
+  Extrude of a text 2000 cm away.
+- **A wrong count in a test.** "Text" has five contours (T, x, t and e with its
+  hole), not four.
+- **On-screen testing:** a document with an Extrude of "Grid4D" (centred, 160 cm)
+  and a two-line text showed solid letters with their holes and the outline;
+  H framed both; typing into the Text field changed the spline live. The path
+  tracer rendered the letters (1728 triangles).
+
+Phase 9 is complete.
 
 ---
 

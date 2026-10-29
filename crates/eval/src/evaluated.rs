@@ -255,8 +255,10 @@ impl EvaluatedScene {
                     ..d
                 });
             }
+            let mut bounds_of_curve = None;
             let source = match &data.kind {
                 ObjectKind::SplinePrimitive(primitive) => Some(CurveSource::Primitive(*primitive)),
+                ObjectKind::Text(text) => Some(CurveSource::Text(text.clone())),
                 ObjectKind::Spline {
                     spline,
                     interpolation,
@@ -281,6 +283,11 @@ impl EvaluatedScene {
                 };
                 let handle = cached.handle.clone();
                 pick = PickShape::Curve(handle.id());
+                // The cached curve's extent (a text's needs its font).
+                bounds_of_curve = handle.polyline().bounds().map(|(min, max)| Aabb {
+                    min: min - Vec3::splat(0.5),
+                    max: max + Vec3::splat(0.5),
+                });
                 // Lines in the display colour: a curve has no surface or material.
                 drawable = (!handle.polyline().points.is_empty()).then_some(Drawable {
                     key: MeshKey::Curve(handle.id()),
@@ -293,7 +300,11 @@ impl EvaluatedScene {
                 });
                 curves.insert(handle.id(), handle);
             }
-            let mut bounds = data.kind.local_bounds();
+            let mut bounds = if data.kind.is_spline() {
+                bounds_of_curve
+            } else {
+                data.kind.local_bounds()
+            };
             if let Some(options) = generator.filter(|_| data.enabled) {
                 if let Some(result) = generated_mesh(
                     generated, inputs, cage_stack, scene, id, options, revision, purpose, frame,
@@ -608,6 +619,7 @@ fn shown_mesh<'a>(shown: &'a mut HashMap<NodeId, Shown>, id: NodeId, mesh: &Mesh
 fn curve_of(kind: &ObjectKind) -> Polyline {
     match kind {
         ObjectKind::SplinePrimitive(primitive) => primitive.polyline(),
+        ObjectKind::Text(text) => grid4d_text::text_spline(text).sample(text.interpolation),
         ObjectKind::Spline {
             spline, interpolation, ..
         } => spline.spline().sample(*interpolation),
@@ -638,6 +650,7 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Sweep(_)
         | ObjectKind::Loft(_)
         | ObjectKind::SplinePrimitive(_)
+        | ObjectKind::Text(_)
         | ObjectKind::Spline { .. } => PickShape::None,
     }
 }
@@ -1582,5 +1595,45 @@ mod tests {
             500.0,
             "Make Editable bakes the frame it is given"
         );
+    }
+
+    #[test]
+    fn text_is_drawn_framed_and_extruded_with_its_holes() {
+        let mut doc = Document::new("text");
+        let text = doc.scene.insert(Node::new("Text", ObjectKindTag::Text.default_kind()));
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let shown = node(&eval, text);
+        let Some(PickShape::Curve(curve)) = Some(shown.pick) else {
+            unreachable!()
+        };
+        assert!(matches!(shown.drawable.map(|d| d.key), Some(MeshKey::Curve(id)) if id == curve));
+        let bounds = shown.bounds.expect("framed by its curve");
+        assert!(bounds.max.x > 200.0 && bounds.max.y > 100.0, "{bounds:?}");
+        // Unchanged text: the same curve; another text: a new one.
+        eval.update(&doc.scene);
+        doc.scene.get_mut(text).unwrap().data.transform.position.x = 5.0;
+        eval.update(&doc.scene);
+        assert_eq!(
+            node(&eval, text).pick,
+            PickShape::Curve(curve),
+            "moving it keeps the curve"
+        );
+        let ObjectKind::Text(t) = &mut doc.scene.get_mut(text).unwrap().data.kind else {
+            unreachable!()
+        };
+        t.text = "o".into();
+        eval.update(&doc.scene);
+        assert_ne!(node(&eval, text).pick, PickShape::Curve(curve));
+
+        // Extruded: "o" is a ring, its hole cut out of both caps.
+        let extrude = doc
+            .scene
+            .insert(Node::new("Extrude", ObjectKindTag::Extrude.default_kind()));
+        doc.scene.reparent(text, Some(extrude), true).unwrap();
+        eval.update(&doc.scene);
+        let ring = result_of(&eval, extrude);
+        let topology = grid4d_geom::Topology::build(ring.mesh());
+        assert!(topology.is_closed(), "a closed solid");
     }
 }

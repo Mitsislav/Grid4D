@@ -77,8 +77,6 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 for tag in ObjectKindTag::SPLINES {
                     create(ui, editor, tag);
                 }
-                ui.separator();
-                planned(ui, "Text", "");
             });
             ui.menu_button("Generator", |ui| {
                 for tag in ObjectKindTag::GENERATORS {

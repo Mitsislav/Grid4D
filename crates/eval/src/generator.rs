@@ -9,7 +9,7 @@
 use glam::Mat4;
 use grid4d_geom::{
     PolyMesh,
-    spline::{Interpolation, Polyline, SplinePrimitive},
+    spline::{Interpolation, Polyline, SplinePrimitive, Text},
     subdivision::{self, SubdivisionOptions},
     surface::{self, Extrusion, Lathe, Loft, Sweep},
 };
@@ -45,6 +45,8 @@ enum Source {
     Primitive(ObjectKind),
     /// A spline primitive's parameters (its curve is sampled when needed).
     SplinePrimitive(SplinePrimitive),
+    /// A text's parameters (its outline is made when needed).
+    Text(Text),
     /// An editable spline (compared by id) and how it is sampled.
     Spline(SplineHandle, Interpolation),
 }
@@ -54,6 +56,7 @@ impl Source {
     fn polyline(&self) -> Option<Polyline> {
         match self {
             Self::SplinePrimitive(primitive) => Some(primitive.polyline()),
+            Self::Text(text) => Some(grid4d_text::text_spline(text).sample(text.interpolation)),
             Self::Spline(spline, interpolation) => Some(spline.spline().sample(*interpolation)),
             Self::Mesh(_) | Self::Primitive(_) => None,
         }
@@ -135,6 +138,7 @@ pub(crate) fn gather(
             (ObjectKind::SplinePrimitive(primitive), Options::Extrude { .. } | Options::Lathe(_)) => {
                 Some(Source::SplinePrimitive(*primitive))
             }
+            (ObjectKind::Text(text), Options::Extrude { .. } | Options::Lathe(_)) => Some(Source::Text(text.clone())),
             (
                 ObjectKind::Spline {
                     spline, interpolation, ..
@@ -168,6 +172,7 @@ fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs:
         };
         let source = match &data.kind {
             ObjectKind::SplinePrimitive(primitive) => Source::SplinePrimitive(*primitive),
+            ObjectKind::Text(text) => Source::Text(text.clone()),
             ObjectKind::Spline {
                 spline, interpolation, ..
             } => Source::Spline(spline.clone(), *interpolation),
@@ -200,6 +205,7 @@ fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs: 
         };
         let source = match &data.kind {
             ObjectKind::SplinePrimitive(primitive) => Source::SplinePrimitive(*primitive),
+            ObjectKind::Text(text) => Source::Text(text.clone()),
             ObjectKind::Spline {
                 spline, interpolation, ..
             } => Source::Spline(spline.clone(), *interpolation),
@@ -230,7 +236,7 @@ pub(crate) fn build(inputs: &[Input], options: &Options) -> PolyMesh {
                             merged.add(&mesh, input.matrix);
                         }
                     }
-                    Source::SplinePrimitive(_) | Source::Spline(..) => {}
+                    Source::SplinePrimitive(_) | Source::Text(_) | Source::Spline(..) => {}
                 }
             }
             subdivision::subdivide(&merged.finish(), options)

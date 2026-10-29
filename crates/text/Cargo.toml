@@ -1,0 +1,17 @@
+[package]
+name = "grid4d-text"
+description = "Grid4D text splines: letters' outlines from a font as Bezier splines. No scene, no GPU, no UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+grid4d-geom.workspace = true
+glam.workspace = true
+ttf-parser.workspace = true
+epaint_default_fonts.workspace = true
+
+[lints]
+workspace = true

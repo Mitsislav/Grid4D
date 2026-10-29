@@ -1645,6 +1645,17 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
             edits.push(SceneEdit::SetData { id, data });
             continue;
         }
+        // A text becomes an editable spline of its outlines.
+        if let ObjectKind::Text(text) = &node.data.kind {
+            let mut data = node.data.clone();
+            data.kind = ObjectKind::Spline {
+                spline: SplineHandle::new(grid4d_text::text_spline(text)),
+                interpolation: text.interpolation,
+                components: Components::default(),
+            };
+            edits.push(SceneEdit::SetData { id, data });
+            continue;
+        }
         let mesh = if node.data.kind.is_generator() {
             // A disabled generator shows its children as they are: nothing to bake.
             if enabled_generator(id).is_none() {
@@ -1693,6 +1704,7 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Star
         | ObjectKindTag::Helix
         | ObjectKindTag::Flower
+        | ObjectKindTag::Text
         | ObjectKindTag::Spline => data.display_color = [0.9, 0.9, 0.92],
         ObjectKindTag::Null
         | ObjectKindTag::Cube
@@ -1760,6 +1772,7 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Star
         | ObjectKindTag::Helix
         | ObjectKindTag::Flower
+        | ObjectKindTag::Text
         | ObjectKindTag::Spline => palette::ICON_SPLINE,
         ObjectKindTag::Cube
         | ObjectKindTag::Sphere
@@ -3756,5 +3769,31 @@ mod tests {
             &[EditorCommand::Undo, EditorCommand::Undo],
         );
         assert_eq!(doc.scene.roots(), sections, "back in their places");
+    }
+
+    #[test]
+    fn make_editable_turns_a_text_into_its_outline_spline() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Text)],
+        );
+        let id = editor.selection.active().unwrap();
+        let ObjectKind::Text(text) = doc.scene.get(id).unwrap().data.kind.clone() else {
+            panic!("not a text")
+        };
+        assert_eq!(doc.scene.get(id).unwrap().data.name, "Text");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let (spline, _) = spline_of(&doc, id);
+        assert_eq!(spline, grid4d_text::text_spline(&text), "the same curve");
+        assert_eq!(
+            spline.segments.len(),
+            5,
+            "T, x and t one contour each, e two (its hole)"
+        );
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(id).unwrap().data.kind, ObjectKind::Text(text));
     }
 }

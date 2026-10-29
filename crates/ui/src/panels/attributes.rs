@@ -10,7 +10,9 @@
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
-use grid4d_geom::spline::{ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape, SplineType};
+use grid4d_geom::spline::{
+    ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape, SplineType, Text, TextAlign,
+};
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
     Axis, Document, Falloff, KeyState, LightDetails, LightShadow, LightType, Material, MaterialId, NodeData, NodeId,
@@ -705,6 +707,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
             ObjectKind::Sweep(sweep) => sweep_rows(ui, sweep),
             ObjectKind::Loft(loft) => loft_rows(ui, loft),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, primitive),
+            ObjectKind::Text(text) => text_rows(ui, text),
             ObjectKind::Spline {
                 spline, interpolation, ..
             } => editable_spline_rows(ui, spline, interpolation),
@@ -1155,17 +1158,62 @@ fn spline_rows(ui: &mut Ui, primitive: &mut SplinePrimitive) {
             bounded_count_row(ui, "Petals", petals, 1, SplineShape::MAX_SIDES);
         }
     }
-    attr_label(ui, "Plane", LABEL_WIDTH);
-    egui::ComboBox::from_id_salt("grid4d.attr.spline.plane")
-        .selected_text(primitive.plane.label())
+    placement_rows(
+        ui,
+        &mut primitive.plane,
+        &mut primitive.reverse,
+        &mut primitive.interpolation,
+    );
+}
+
+/// A Text spline's parameters: the text itself (several lines), its size,
+/// alignment and spacing, then plane, direction and sampling.
+fn text_rows(ui: &mut Ui, text: &mut Text) {
+    attr_label(ui, "Text", LABEL_WIDTH);
+    let mut written = text.text.to_string();
+    if ui
+        .add(
+            TextEdit::multiline(&mut written)
+                .id_salt("grid4d.attr.text.text")
+                .desired_rows(2)
+                .desired_width(FIELD_WIDTH + 40.0),
+        )
+        .changed()
+    {
+        text.text = written.chars().take(Text::MAX_CHARS).collect::<String>().into();
+    }
+    ui.end_row();
+    attr_label(ui, "Font", LABEL_WIDTH);
+    ui.label(grid4d_text::FONT_NAME);
+    ui.end_row();
+    attr_label(ui, "Align", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.text.align")
+        .selected_text(text.align.label())
         .show_ui(ui, |ui| {
-            for plane in SplinePlane::ALL {
-                ui.selectable_value(&mut primitive.plane, plane, plane.label());
+            for align in TextAlign::ALL {
+                ui.selectable_value(&mut text.align, align, align.label());
             }
         });
     ui.end_row();
-    check_row(ui, "Reverse", &mut primitive.reverse);
-    interpolation_rows(ui, &mut primitive.interpolation);
+    length_row(ui, "Height", &mut text.height);
+    offset_row(ui, "Horizontal Spacing", &mut text.horizontal_spacing);
+    offset_row(ui, "Vertical Spacing", &mut text.vertical_spacing);
+    placement_rows(ui, &mut text.plane, &mut text.reverse, &mut text.interpolation);
+}
+
+/// Plane, Reverse and the intermediate points of a spline primitive or text.
+fn placement_rows(ui: &mut Ui, plane: &mut SplinePlane, reverse: &mut bool, interpolation: &mut Interpolation) {
+    attr_label(ui, "Plane", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.spline.plane")
+        .selected_text(plane.label())
+        .show_ui(ui, |ui| {
+            for option in SplinePlane::ALL {
+                ui.selectable_value(plane, option, option.label());
+            }
+        });
+    ui.end_row();
+    check_row(ui, "Reverse", reverse);
+    interpolation_rows(ui, interpolation);
 }
 
 /// An editable spline: its type, closing and sampling; the points themselves are

@@ -11,6 +11,7 @@ publish.workspace = true
 grid4d-scene.workspace = true
 grid4d-geom.workspace = true
 grid4d-eval.workspace = true
+grid4d-text.workspace = true
 grid4d-render.workspace = true
 grid4d-io.workspace = true
 grid4d-raytrace.workspace = true

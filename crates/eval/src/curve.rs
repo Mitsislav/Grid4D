@@ -7,7 +7,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use grid4d_geom::spline::{Interpolation, Polyline, SplinePrimitive};
+use grid4d_geom::spline::{Interpolation, Polyline, SplinePrimitive, Text};
 use grid4d_scene::SplineId;
 
 /// Names one sampled curve; a changed spline gets a new id.
@@ -57,9 +57,11 @@ impl PartialEq for CurveHandle {
 }
 
 /// What a curve is sampled from: an unchanged source means an unchanged curve.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum CurveSource {
     Primitive(SplinePrimitive),
+    /// A text's parameters (its string shared, so this does not allocate).
+    Text(Text),
     /// An editable spline's content and sampling.
     Editable(SplineId, Interpolation),
 }

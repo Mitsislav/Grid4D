@@ -61,6 +61,7 @@ impl FilterItem {
             | ObjectKindTag::Star
             | ObjectKindTag::Helix
             | ObjectKindTag::Flower
+            | ObjectKindTag::Text
             | ObjectKindTag::Spline => Some(Self::Spline),
         }
     }

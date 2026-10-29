@@ -268,6 +268,7 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Star => "Add Star",
         ObjectKindTag::Helix => "Add Helix",
         ObjectKindTag::Flower => "Add Flower",
+        ObjectKindTag::Text => "Add Text",
         ObjectKindTag::Spline => "Add Spline",
     }
 }
