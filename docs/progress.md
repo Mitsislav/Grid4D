@@ -15,7 +15,7 @@ solved them. Newest steps at the bottom of each phase.
 | Current phase | 9 — Splines & spline generators (v0.9) |
 | Last step done | 9.7 — Loft generator (2026-10-29) |
 | Next step | 9.8 — Text spline |
-| Tests | 589, all passing; clippy and rustfmt clean |
+| Tests | 592, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -899,6 +899,7 @@ Phase 8 is complete.
 | 9.5 | Lathe generator: a profile turned around the Lathe's Y axis — angle, subdivision, movement (screws, springs), scaling (spirals), Reverse Normals, caps where a closed profile's turn stays open; a full turn closes and shares the points on the axis; saved; rendered | 572 |
 | 9.6 | Sweep generator: a profile moved along a path — banking (parallel transport), level or parallel movement, constant cross section at corners, end scale and rotation, start / end growth, caps; Alt wraps two selected splines as profile and path; Make Editable removes both; saved; rendered | 582 |
 | 9.7 | Loft generator: a skin over child splines in order — Subdivision U / V, through the sections (Catmull-Rom) or Organic (B-spline), Linear, Per Segment, Loop, caps; sections turned the same way round; Alt wraps every selected spline in selection order; Make Editable removes them; saved; rendered | 589 |
+| — | Phase 9 review: export leaves every generator input out and uses the colour shown; only the Subdivision Surface hides its first child; generators follow animated inputs (placed at the evaluated frame) | 592 |
 
 **9.1 — Spline primitives**
 
@@ -1121,6 +1122,29 @@ Phase 8 is complete.
   in the XZ plane, a circle-to-square piece, a looped ring of six sections
   turned around Y, a sheet over four arcs) showed all four as expected with the
   sections drawn; the path tracer rendered the file (6316 triangles).
+
+**Phase 9 review (after 9.7)**
+
+A careful pass over the spline generators before 9.8 found three bugs, all
+fixed with tests (592 tests):
+- **Export kept the inputs.** `file::exportable` left out only a generator's
+  first child and painted the result in that child's colour — right for the
+  Subdivision Surface, wrong for the spline generators: a Sweep's path and a
+  Loft's other sections were written as empty objects, and every solid came out
+  in the splines' light grey. It now leaves out every input
+  (`generator_inputs`) and takes the colour the viewport shows
+  (`grid4d_eval::generator_color`: the cage's for the Subdivision Surface, the
+  generator's own for the others).
+- **Unused children hidden.** Every generator hid its first child's subtree as
+  a cage; a cube placed under an Extrude disappeared without being used. Only
+  the Subdivision Surface hides its cage now.
+- **Animated inputs ignored.** Generators read their inputs' placement from
+  the base transforms, so an animated Loft section or Sweep path did not move
+  the result during playback or in renders. Inputs are now placed at the
+  evaluated frame (`Scene::world_matrix_at`), and Make Editable and export bake
+  the current frame (`generator_mesh(scene, id, frame)`).
+- Docs: the manual's Filter and glTF export sections and the filter spec name
+  the spline generators; §12 points to §13.4–13.7.
 
 ---
 

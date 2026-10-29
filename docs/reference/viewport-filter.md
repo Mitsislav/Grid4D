@@ -30,7 +30,7 @@ Each view has its own **Filter** menu; everything is shown in a new view.
 | Entry | Objects |
 |-------|---------|
 | Polygon | polygon objects |
-| Generator | parametric objects: the primitives (Cube, Sphere, …) |
+| Generator | parametric objects: the primitives (Cube, Sphere, …) and the spline generators (Extrude, Lathe, Sweep, Loft) |
 | Subdivision Surface | Subdivision Surface generators (their smoothed result) |
 | Camera | cameras (their marker and pyramid) |
 | Light | lights (their marker, cone or arrow) — they still light the view |

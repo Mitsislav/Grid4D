@@ -197,7 +197,7 @@ impl EvaluatedScene {
         self.curves.clear();
         self.splines.clear();
         let revision = scene.revision();
-        let purpose = self.purpose;
+        let (purpose, frame) = (self.purpose, self.frame);
         let (nodes, meshes, polygons, shown) = (&mut self.nodes, &mut self.meshes, &mut self.polygons, &mut self.shown);
         let (curves, curve_cache, splines) = (&mut self.curves, &mut self.curve_cache, &mut self.splines);
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
@@ -295,9 +295,9 @@ impl EvaluatedScene {
             }
             let mut bounds = data.kind.local_bounds();
             if let Some(options) = generator.filter(|_| data.enabled) {
-                if let Some(result) =
-                    generated_mesh(generated, inputs, cage_stack, scene, id, options, revision, purpose)
-                {
+                if let Some(result) = generated_mesh(
+                    generated, inputs, cage_stack, scene, id, options, revision, purpose, frame,
+                ) {
                     let mesh = &result.mesh;
                     if mesh.mesh().face_count() > 0 {
                         meshes.insert(mesh.id(), mesh.clone());
@@ -326,7 +326,12 @@ impl EvaluatedScene {
                         });
                     }
                 }
-                next_cage = scene.children(id).first().copied();
+                // Only a Subdivision Surface hides its cage: the spline
+                // generators' inputs are curves, drawn anyway, and anything
+                // else under them is not used and stays as it is.
+                if matches!(options, Options::Subdivision(_)) {
+                    next_cage = scene.children(id).first().copied();
+                }
             }
             if cage_depth.is_some() && !data.kind.is_spline() {
                 // Part of a cage: the generator shows it. (Splines stay drawn:
@@ -548,8 +553,9 @@ fn generated_mesh<'a>(
     options: Options,
     revision: u64,
     purpose: Purpose,
+    frame: f64,
 ) -> Option<&'a Generated> {
-    let colour = generator::gather(scene, id, &options, purpose, stack, inputs)?;
+    let colour = generator::gather(scene, id, &options, purpose, frame, stack, inputs)?;
     let fresh = generated
         .get(&id)
         .is_some_and(|entry| entry.options == options && entry.inputs == *inputs);
@@ -1104,7 +1110,7 @@ mod tests {
             node(&eval, sphere).drawable.is_some(),
             "a second child is drawn as it is"
         );
-        assert_eq!(crate::generator_mesh(&doc.scene, sds).unwrap(), *result.mesh());
+        assert_eq!(crate::generator_mesh(&doc.scene, sds, 0.0).unwrap(), *result.mesh());
     }
 
     #[test]
@@ -1350,7 +1356,7 @@ mod tests {
             );
             assert!(matches!(shown.pick, PickShape::Curve(_)));
         }
-        assert_eq!(crate::generator_mesh(&doc.scene, extrude).unwrap(), *result.mesh());
+        assert_eq!(crate::generator_mesh(&doc.scene, extrude, 0.0).unwrap(), *result.mesh());
 
         // Moving the generator or selecting it changes nothing; a parameter does.
         doc.scene.get_mut(extrude).unwrap().data.transform.position.y = 70.0;
@@ -1420,7 +1426,7 @@ mod tests {
             matches!(node(&eval, circle).pick, PickShape::Curve(_)),
             "the profile stays"
         );
-        assert_eq!(crate::generator_mesh(&doc.scene, lathe).unwrap(), *torus.mesh());
+        assert_eq!(crate::generator_mesh(&doc.scene, lathe, 0.0).unwrap(), *torus.mesh());
 
         let ObjectKind::Lathe(options) = &mut doc.scene.get_mut(lathe).unwrap().data.kind else {
             unreachable!()
@@ -1465,7 +1471,7 @@ mod tests {
         for id in [profile, path] {
             assert!(matches!(node(&eval, id).pick, PickShape::Curve(_)), "inputs stay drawn");
         }
-        assert_eq!(crate::generator_mesh(&doc.scene, sweep).unwrap(), *tube.mesh());
+        assert_eq!(crate::generator_mesh(&doc.scene, sweep, 0.0).unwrap(), *tube.mesh());
 
         // The profile is read in its own space; the path in the generator's.
         doc.scene.get_mut(profile).unwrap().data.transform.position.x = 500.0;
@@ -1515,10 +1521,66 @@ mod tests {
                 "sections stay drawn"
             );
         }
-        assert_eq!(crate::generator_mesh(&doc.scene, loft).unwrap(), *skin.mesh());
+        assert_eq!(crate::generator_mesh(&doc.scene, loft, 0.0).unwrap(), *skin.mesh());
         // Moving a section reshapes the skin.
         doc.scene.get_mut(sections[1]).unwrap().data.transform.position.z = 500.0;
         eval.update(&doc.scene);
         assert!((result_of(&eval, loft).bounds().unwrap().max.z - 500.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn only_a_subdivision_surface_hides_its_first_child() {
+        let mut doc = Document::new("extrude");
+        let extrude = doc
+            .scene
+            .insert(Node::new("Extrude", ObjectKindTag::Extrude.default_kind()));
+        let cube = doc
+            .scene
+            .insert_child(extrude, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        assert!(node(&eval, cube).drawable.is_some(), "not an input: drawn as it is");
+        assert_eq!(node(&eval, extrude).drawable, None, "nothing to extrude");
+        assert_eq!(
+            crate::generator_color(&doc.scene, extrude),
+            Some(doc.scene.get(extrude).unwrap().data.display_color)
+        );
+    }
+
+    #[test]
+    fn generators_follow_animated_inputs() {
+        use grid4d_scene::{Axis, Curve, Interpolation, Key, Param, Track};
+        let mut doc = Document::new("loft");
+        let loft = doc.scene.insert(Node::new("Loft", ObjectKindTag::Loft.default_kind()));
+        doc.scene
+            .insert_child(loft, Node::new("Circle", ObjectKindTag::Circle.default_kind()))
+            .unwrap();
+        let mut top = Node::new("Circle", ObjectKindTag::Circle.default_kind());
+        top.data.tracks = vec![Track {
+            param: Param::Position(Axis::Z),
+            curve: Curve::from_keys([0.0, 10.0].into_iter().zip([100.0, 500.0]).map(|(f, v)| Key {
+                interpolation: Interpolation::Linear,
+                ..Key::new(f, v)
+            })),
+        }];
+        doc.scene.insert_child(loft, top).unwrap();
+        let mut eval = EvaluatedScene::new();
+        let height = |eval: &EvaluatedScene| result_of(eval, loft).bounds().unwrap().max.z;
+        eval.update(&doc.scene);
+        assert!((height(&eval) - 100.0).abs() < 1e-3);
+        eval.set_frame(5.0);
+        eval.update(&doc.scene);
+        assert!((height(&eval) - 300.0).abs() < 1e-3, "{}", height(&eval));
+        assert_eq!(
+            crate::generator_mesh(&doc.scene, loft, 10.0)
+                .unwrap()
+                .bounds()
+                .unwrap()
+                .1
+                .z,
+            500.0,
+            "Make Editable bakes the frame it is given"
+        );
     }
 }

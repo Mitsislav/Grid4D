@@ -615,7 +615,8 @@ pub(crate) fn pick_render_output(doc: &Document, editor: &mut EditorState) -> Op
 
 /// The document's objects as an export writes them: every primitive as a polygon
 /// object of its current shape, every switched-on generator as one holding its
-/// result (its cage left out), a switched-off generator as a Null over its children.
+/// result in the colour it shows (its inputs left out: the cage, profile and
+/// path, sections), a switched-off generator as a Null over its children.
 #[must_use]
 pub fn exportable(doc: &Document) -> Objects {
     let mut nodes = Vec::new();
@@ -625,15 +626,17 @@ pub fn exportable(doc: &Document) -> Objects {
         let Some(node) = doc.scene.get(id) else { continue };
         let mut data = node.data.clone();
         let mut cage = None;
+        let mut inputs: &[NodeId] = &[];
         if data.kind.is_generator() {
-            match grid4d_eval::generator_mesh(&doc.scene, id).filter(|_| data.enabled) {
+            match grid4d_eval::generator_mesh(&doc.scene, id, f64::from(doc.time.frame())).filter(|_| data.enabled) {
                 Some(mesh) => {
-                    data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
-                    cage = node.children().first().copied();
-                    // The viewport shows the result in the cage's colour.
-                    if let Some(cage) = cage.and_then(|c| doc.scene.get(c)) {
-                        data.display_color = cage.data.display_color;
+                    let taken = node.children().len().min(data.kind.generator_inputs());
+                    inputs = &node.children()[..taken];
+                    cage = inputs.first().copied();
+                    if let Some(colour) = grid4d_eval::generator_color(&doc.scene, id) {
+                        data.display_color = colour;
                     }
+                    data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
                 }
                 None => data.kind = ObjectKind::Null,
             }
@@ -652,7 +655,7 @@ pub fn exportable(doc: &Document) -> Objects {
         let parent = node.parent().and_then(|p| index_of.get(&p).copied());
         index_of.insert(id, nodes.len());
         nodes.push(ObjectEntry { parent, data });
-        stack.extend(node.children().iter().rev().filter(|&&child| Some(child) != cage));
+        stack.extend(node.children().iter().rev().filter(|child| !inputs.contains(child)));
     }
     Objects {
         nodes,
@@ -1462,13 +1465,43 @@ mod tests {
     }
 
     #[test]
+    fn exportable_leaves_a_sweeps_profile_and_path_out_in_its_own_colour() {
+        let mut doc = Document::new("sweep");
+        let mut sweep = grid4d_scene::Node::new("Sweep", ObjectKindTag::Sweep.default_kind());
+        sweep.data.display_color = [0.1, 0.2, 0.3];
+        let sweep = doc.scene.insert(sweep);
+        for (name, tag) in [("Circle", ObjectKindTag::Circle), ("Helix", ObjectKindTag::Helix)] {
+            doc.scene
+                .insert_child(sweep, grid4d_scene::Node::new(name, tag.default_kind()))
+                .unwrap();
+        }
+        let extra = doc
+            .scene
+            .insert_child(
+                sweep,
+                grid4d_scene::Node::new("Cube", ObjectKindTag::Cube.default_kind()),
+            )
+            .unwrap();
+        let objects = exportable(&doc);
+        let names: Vec<&str> = objects.nodes.iter().map(|n| n.data.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["Sweep", "Cube"],
+            "profile and path baked in; other children kept"
+        );
+        assert_eq!(objects.nodes[0].data.display_color, [0.1, 0.2, 0.3], "its own colour");
+        assert_eq!(objects.nodes[1].parent, Some(0));
+        assert!(doc.scene.contains(extra));
+    }
+
+    #[test]
     fn exportable_bakes_primitives_and_generators_and_leaves_cages_out() {
         let mut f = Fixture::new("exportable", None, None);
         let sds = with_subdivision_surface(&mut f);
         let objects = exportable(&f.doc);
         let entry = |name: &str| objects.nodes.iter().find(|n| n.data.name == name);
         assert!(entry("Cube").is_none(), "the cage goes into the generator's mesh");
-        let smoothed = grid4d_eval::generator_mesh(&f.doc.scene, sds).unwrap();
+        let smoothed = grid4d_eval::generator_mesh(&f.doc.scene, sds, 0.0).unwrap();
         let ObjectKind::Polygon { mesh, .. } = &entry("Subdivision Surface").unwrap().data.kind else {
             panic!("the generator is written as its result")
         };

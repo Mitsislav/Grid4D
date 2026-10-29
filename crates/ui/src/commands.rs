@@ -1650,7 +1650,7 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
             if enabled_generator(id).is_none() {
                 continue;
             }
-            let Some(mesh) = grid4d_eval::generator_mesh(&doc.scene, id) else {
+            let Some(mesh) = grid4d_eval::generator_mesh(&doc.scene, id, f64::from(doc.time.frame())) else {
                 continue;
             };
             cages.extend(inputs(node));
@@ -3201,7 +3201,7 @@ mod tests {
         );
         let sds = editor.selection.active().unwrap();
         let before = doc.scene.get(sds).unwrap().data.clone();
-        let expected = grid4d_eval::generator_mesh(&doc.scene, sds).unwrap();
+        let expected = grid4d_eval::generator_mesh(&doc.scene, sds, 0.0).unwrap();
         assert_eq!(expected.face_count(), 6 * 4 * 4, "level 2 of a one-segment cube");
 
         // The cage selected too: it goes with the generator, not baked on its own.
@@ -3609,7 +3609,7 @@ mod tests {
         let extrude = editor.selection.active().unwrap();
         assert_eq!(doc.scene.get(extrude).unwrap().data.name, "Extrude");
         assert_eq!(doc.scene.get(rectangle).unwrap().parent(), Some(extrude));
-        let solid = grid4d_eval::generator_mesh(&doc.scene, extrude).unwrap();
+        let solid = grid4d_eval::generator_mesh(&doc.scene, extrude, 0.0).unwrap();
         assert_eq!(solid.face_count(), 4 + 2, "four walls and two caps");
         assert!(can_make_editable(&doc, &editor.selection));
 
@@ -3696,7 +3696,7 @@ mod tests {
         let sweep = editor.selection.active().unwrap();
         assert_eq!(doc.scene.children(sweep), [profile, path], "profile first, path second");
         assert_eq!(editor.history.undo_label(), Some("Create Generator"));
-        let solid = grid4d_eval::generator_mesh(&doc.scene, sweep).unwrap();
+        let solid = grid4d_eval::generator_mesh(&doc.scene, sweep, 0.0).unwrap();
         assert!(solid.face_count() > 0);
 
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
@@ -3746,7 +3746,7 @@ mod tests {
         );
         let loft = editor.selection.active().unwrap();
         assert_eq!(doc.scene.children(loft), [sections[2], sections[0], sections[1]]);
-        assert!(grid4d_eval::generator_mesh(&doc.scene, loft).unwrap().face_count() > 0);
+        assert!(grid4d_eval::generator_mesh(&doc.scene, loft, 0.0).unwrap().face_count() > 0);
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
         assert!(sections.iter().all(|&id| !doc.scene.contains(id)), "every section goes");
         run(

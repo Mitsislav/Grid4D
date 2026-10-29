@@ -93,21 +93,23 @@ pub(crate) fn options(kind: &ObjectKind, purpose: Purpose) -> Option<Options> {
 
 /// Fills `inputs` with the inputs of generator `id` — for a Subdivision
 /// Surface its cage (the first child and that child's visible, enabled
-/// descendants that have geometry), for an Extrude its spline(s) — and returns
-/// the colour the result shows without a material. `stack` is scratch space.
+/// descendants that have geometry), for an Extrude its spline(s) — placed as
+/// they are at `frame` (animation included), and returns the colour the result
+/// shows without a material. `stack` is scratch space.
 pub(crate) fn gather(
     scene: &Scene,
     id: NodeId,
     options: &Options,
     purpose: Purpose,
+    frame: f64,
     stack: &mut Vec<NodeId>,
     inputs: &mut Vec<Input>,
 ) -> Option<[f32; 3]> {
     inputs.clear();
     stack.clear();
     match options {
-        Options::Sweep(_) => return gather_sweep(scene, id, purpose, inputs),
-        Options::Loft(_) => return gather_loft(scene, id, purpose, inputs),
+        Options::Sweep(_) => return gather_sweep(scene, id, purpose, frame, inputs),
+        Options::Loft(_) => return gather_loft(scene, id, purpose, frame, inputs),
         Options::Subdivision(_) | Options::Extrude { .. } | Options::Lathe(_) => {}
     }
     let &first = scene.children(id).first()?;
@@ -119,7 +121,7 @@ pub(crate) fn gather(
         Options::Lathe(_) => (scene.get(id)?.data.display_color, false),
         Options::Sweep(_) | Options::Loft(_) => return None,
     };
-    let into_generator = scene.world_matrix(id).inverse();
+    let into_generator = scene.world_matrix_at(id, frame).inverse();
     stack.push(first);
     while let Some(node_id) = stack.pop() {
         let Some(node) = scene.get(node_id) else { continue };
@@ -144,7 +146,7 @@ pub(crate) fn gather(
         if let Some(source) = source {
             inputs.push(Input {
                 source,
-                matrix: into_generator * scene.world_matrix(node_id),
+                matrix: into_generator * scene.world_matrix_at(node_id, frame),
             });
         }
         if walk {
@@ -157,9 +159,9 @@ pub(crate) fn gather(
 
 /// The Sweep's inputs: its profile (in the profile's own space) and its path
 /// (in the generator's), both visible, enabled splines; nothing otherwise.
-fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, inputs: &mut Vec<Input>) -> Option<[f32; 3]> {
+fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs: &mut Vec<Input>) -> Option<[f32; 3]> {
     let colour = scene.get(id)?.data.display_color;
-    let into_generator = scene.world_matrix(id).inverse();
+    let into_generator = scene.world_matrix_at(id, frame).inverse();
     for (k, &child) in scene.children(id).iter().take(2).enumerate() {
         let Some(data) = scene.get(child).map(|node| &node.data) else {
             break;
@@ -177,7 +179,7 @@ fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, inputs: &mut Vec<In
         let matrix = if k == 0 {
             Mat4::IDENTITY
         } else {
-            into_generator * scene.world_matrix(child)
+            into_generator * scene.world_matrix_at(child, frame)
         };
         inputs.push(Input { source, matrix });
     }
@@ -189,9 +191,9 @@ fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, inputs: &mut Vec<In
 
 /// The Loft's inputs: every visible, enabled spline child, in order, in the
 /// generator's space.
-fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, inputs: &mut Vec<Input>) -> Option<[f32; 3]> {
+fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs: &mut Vec<Input>) -> Option<[f32; 3]> {
     let colour = scene.get(id)?.data.display_color;
-    let into_generator = scene.world_matrix(id).inverse();
+    let into_generator = scene.world_matrix_at(id, frame).inverse();
     for &child in scene.children(id) {
         let Some(data) = scene.get(child).map(|node| &node.data) else {
             continue;
@@ -206,7 +208,7 @@ fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, inputs: &mut Vec<Inp
         if purpose.shows(data) && data.enabled {
             inputs.push(Input {
                 source,
-                matrix: into_generator * scene.world_matrix(child),
+                matrix: into_generator * scene.world_matrix_at(child, frame),
             });
         }
     }
@@ -316,13 +318,40 @@ impl Merged {
     }
 }
 
-/// The mesh generator `id` shows in the viewport (what Make Editable bakes), in
-/// the generator's space; `None` if `id` is not a generator or has no children.
+/// The colour generator `id`'s result shows without a material: the
+/// Subdivision Surface's cage's (the result stands in for it), a spline
+/// generator's own; `None` if `id` is not a generator.
 #[must_use]
-pub fn generator_mesh(scene: &Scene, id: NodeId) -> Option<PolyMesh> {
+pub fn generator_color(scene: &Scene, id: NodeId) -> Option<[f32; 3]> {
+    let node = scene.get(id)?;
+    match options(&node.data.kind, Purpose::Editor)? {
+        Options::Subdivision(_) => scene
+            .children(id)
+            .first()
+            .and_then(|&cage| scene.get(cage))
+            .map(|cage| cage.data.display_color),
+        Options::Extrude { .. } | Options::Lathe(_) | Options::Sweep(_) | Options::Loft(_) => {
+            Some(node.data.display_color)
+        }
+    }
+}
+
+/// The mesh generator `id` shows in the viewport at `frame` (what Make
+/// Editable bakes), in the generator's space; `None` if `id` is not a
+/// generator or has no children.
+#[must_use]
+pub fn generator_mesh(scene: &Scene, id: NodeId, frame: f64) -> Option<PolyMesh> {
     let options = options(&scene.get(id)?.data.kind, Purpose::Editor)?;
     let mut inputs = Vec::new();
-    gather(scene, id, &options, Purpose::Editor, &mut Vec::new(), &mut inputs)?;
+    gather(
+        scene,
+        id,
+        &options,
+        Purpose::Editor,
+        frame,
+        &mut Vec::new(),
+        &mut inputs,
+    )?;
     Some(build(&inputs, &options))
 }
 

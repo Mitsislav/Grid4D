@@ -30,5 +30,5 @@ mod key;
 pub use curve::{CurveHandle, CurveId};
 pub use drawable::{Drawable, Shading, Surface, drawable, editable_mesh};
 pub use evaluated::{EvaluatedLight, EvaluatedNode, EvaluatedScene, PickShape, Purpose};
-pub use generator::generator_mesh;
+pub use generator::{generator_color, generator_mesh};
 pub use key::{MeshKey, Ratio};

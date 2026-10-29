@@ -232,7 +232,8 @@ Everything is shown in a new view.
 ![The Filter menu](images/manual/filter_menu.png)
 
 - **Object types**: *Polygon* (polygon objects), *Generator* (the parametric
-  objects: Cube, Sphere, …), *Subdivision Surface*, *Camera* and *Light*. A hidden
+  objects: Cube, Sphere, …, and the Extrude, Lathe, Sweep and Loft),
+  *Subdivision Surface*, *Spline*, *Camera* and *Light*. A hidden
   type is neither drawn nor clickable in that view: clicks, rectangle selections
   and snapping go through it. Only the objects of that type are hidden, not their
   children. Hidden lights still light the view.
@@ -528,8 +529,10 @@ What goes out:
 - Polygon objects as meshes, split into triangles, with the smoothing you see in
   the viewport and their UVs. **Primitives** are written in their current shape.
   A **Subdivision Surface** is written as its smooth result at the viewport level,
-  without its cage. A switched-off one is written as an empty object with its
-  children as they are.
+  without its cage; an **Extrude**, **Lathe**, **Sweep** or **Loft** as its
+  solid at the current frame, without the splines it is made from. A
+  switched-off generator is written as an empty object with its children as
+  they are. Splines themselves are written as empty objects.
 - Materials (name, colour, roughness, metallic, emission; one a mesh inherits from a
   parent included); objects without one get a simple material in their display
   colour. Cameras and lights.
@@ -924,8 +927,10 @@ Polygons that collapse are removed.
 
 ## 12. Generators: Subdivision Surface
 
-A **generator** is an object that builds its shape from its children. The first
-one is the **Subdivision Surface**. It turns a coarse polygon mesh, the **cage**,
+A **generator** is an object that builds its shape from its children. This
+section covers the **Subdivision Surface**; the spline generators (Extrude,
+Lathe, Sweep, Loft) are in [§13.4–13.7](#134-extrude-from-outline-to-solid).
+The Subdivision Surface turns a coarse polygon mesh, the **cage**,
 into a smooth, rounded surface. The result updates live while you keep modelling
 the few points of the cage.
 
