@@ -201,6 +201,16 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     editor.commands.push(EditorCommand::MakeEditable);
                     ui.close();
                 }
+                let bakeable = crate::commands::can_bake_current_state(doc, &editor.selection);
+                if ui
+                    .add_enabled(bakeable, Button::new("Current State to Object"))
+                    .on_hover_text("Add a copy of the selection as shown now: deformed, generated, at this frame")
+                    .on_disabled_hover_text("Select the objects to copy as they are shown")
+                    .clicked()
+                {
+                    editor.commands.push(EditorCommand::CurrentStateToObject);
+                    ui.close();
+                }
             });
             ui.menu_button("Spline", |ui| {
                 let spline = crate::commands::active_spline(doc, editor).is_some();

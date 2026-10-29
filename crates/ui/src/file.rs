@@ -622,6 +622,10 @@ pub fn exportable(doc: &Document) -> Objects {
     let mut nodes = Vec::new();
     let mut index_of: HashMap<NodeId, usize> = HashMap::new();
     let mut stack: Vec<NodeId> = doc.scene.roots().iter().rev().copied().collect();
+    // Deformed shapes as the viewport shows them at the current frame.
+    let mut evaluated = grid4d_eval::EvaluatedScene::new();
+    evaluated.set_frame(f64::from(doc.time.frame()));
+    evaluated.update(&doc.scene);
     while let Some(id) = stack.pop() {
         let Some(node) = doc.scene.get(id) else { continue };
         let mut data = node.data.clone();
@@ -642,6 +646,9 @@ pub fn exportable(doc: &Document) -> Objects {
             }
         } else if let Some(mesh) = grid4d_eval::editable_mesh(&data.kind_at(f64::from(doc.time.frame()))) {
             data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
+        }
+        if let Some(mesh) = evaluated.deformed(id) {
+            data.kind = ObjectKind::polygon(mesh.clone());
         }
         // A generator without a material shows its cage's.
         if let Some(cage) = cage.and_then(|c| doc.scene.get(c))
@@ -1674,5 +1681,29 @@ mod tests {
         assert_eq!(f.doc.name, "Dropped");
         assert_eq!(f.editor.file.path(), Some(path.as_path()));
         assert_eq!(f.editor.file.recent.paths().first(), Some(&path));
+    }
+
+    #[test]
+    fn export_writes_deformed_shapes() {
+        use grid4d_geom::deform::Bend;
+        let mut doc = Document::new("t");
+        let cube = doc
+            .scene
+            .insert(grid4d_scene::Node::new("Cube", ObjectKindTag::Cube.default_kind()));
+        let bend = Bend {
+            size: glam::Vec3::splat(200.0),
+            strength: 1.5,
+            ..Bend::default()
+        };
+        doc.scene
+            .insert_child(cube, grid4d_scene::Node::new("Bend", ObjectKind::Bend(bend)))
+            .unwrap();
+        let objects = exportable(&doc);
+        let entry = objects.nodes.iter().find(|e| e.data.name == "Cube").unwrap();
+        let ObjectKind::Polygon { mesh, .. } = &entry.data.kind else {
+            panic!("not baked")
+        };
+        let plain = grid4d_eval::editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap();
+        assert_ne!(mesh.mesh().points(), plain.points(), "the bent shape is written");
     }
 }

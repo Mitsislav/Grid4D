@@ -153,6 +153,11 @@ pub enum EditorCommand {
     /// (C4D's "Make Editable", `C`), and the selected generators into polygon
     /// objects holding their result (their cage goes); others are left alone.
     MakeEditable,
+    /// Adds copies of the selected objects as the viewport shows them at the
+    /// current frame (deformed, generated, animated) as plain objects, each
+    /// after its original, and selects them (C4D's "Current State to Object").
+    /// One undo step.
+    CurrentStateToObject,
     /// A new generator of kind `tag` that takes the active object's place in the
     /// hierarchy, with the object as its child (Alt + create). One undo step.
     WrapInGenerator(ObjectKindTag),
@@ -617,6 +622,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             let edits = make_editable_edits(doc, editor.selection.as_slice());
             commit(doc, editor, "Make Editable", edits, |_, _| {});
         }
+        EditorCommand::CurrentStateToObject => current_state_to_object(doc, editor),
         EditorCommand::WrapInGenerator(tag) => wrap_in_generator(doc, editor, viewport, tag),
         EditorCommand::ToggleParentGenerator => {
             let mut generators: Vec<NodeId> = Vec::new();
@@ -1626,6 +1632,70 @@ pub fn can_make_editable(doc: &Document, selection: &Selection) -> bool {
                 || (kind.is_generator() && node.data.enabled && !node.children().is_empty())
         })
     })
+}
+
+/// `true` if [`EditorCommand::CurrentStateToObject`] has something to copy in
+/// `selection` (enables the menu entry): an object other than a deformer.
+#[must_use]
+pub fn can_bake_current_state(doc: &Document, selection: &Selection) -> bool {
+    selection
+        .as_slice()
+        .iter()
+        .any(|&id| doc.scene.get(id).is_some_and(|node| !node.data.kind.is_deformer()))
+}
+
+/// Inserts the copies [`crate::current_state::bake`] makes as one undo step and
+/// selects the top ones.
+fn current_state_to_object(doc: &mut Document, editor: &mut EditorState) {
+    let baked = crate::current_state::bake(doc, editor.selection.as_slice());
+    if baked.is_empty() {
+        return;
+    }
+    let selection_before = editor.selection.clone();
+    let mut ids: Vec<NodeId> = Vec::with_capacity(baked.len());
+    let mut roots = Vec::new();
+    let mut inverses = Vec::with_capacity(baked.len());
+    for copy in baked {
+        let (parent, index) = match copy.parent {
+            Some(parent) => (ids.get(parent).copied(), usize::MAX),
+            // Right after its original.
+            None => (
+                doc.scene.get(copy.original).and_then(Node::parent),
+                doc.scene.index_in_parent(copy.original).map_or(usize::MAX, |i| i + 1),
+            ),
+        };
+        let inserted = doc
+            .apply(SceneEdit::Insert {
+                parent,
+                index,
+                data: copy.data,
+            })
+            .map_err(|err| err.to_string())
+            .and_then(|inverse| inverse.node().map(|id| (id, inverse)).ok_or_else(String::new));
+        let Ok((id, inverse)) = inserted else {
+            // All or nothing: take back what was inserted.
+            for inverse in inverses.into_iter().rev() {
+                let _ = doc.apply(inverse);
+            }
+            log::warn!("Current State to Object rejected");
+            return;
+        };
+        if copy.parent.is_none() {
+            roots.push(id);
+        }
+        ids.push(id);
+        inverses.push(inverse);
+    }
+    inverses.reverse(); // children before parents
+    editor.selection.set_all(roots);
+    let selection_after = editor.selection.clone();
+    editor.history.record(
+        doc,
+        "Current State to Object",
+        inverses,
+        selection_before,
+        selection_after,
+    );
 }
 
 /// Make Editable as document edits: each selected primitive becomes a polygon
@@ -4016,5 +4086,112 @@ mod tests {
         assert_eq!(editor.history.undo_len(), steps);
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SelectAll]);
         assert_eq!(points(&doc).1.len(), 27);
+    }
+
+    #[test]
+    fn current_state_adds_a_bent_cube_after_it_in_one_step() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Cube)],
+        );
+        let cube = editor.selection.active().unwrap();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateChild(ObjectKindTag::Bend)],
+        );
+        let bend = editor.selection.active().unwrap();
+        if let ObjectKind::Bend(b) = &mut doc.scene.get_mut(bend).unwrap().data.kind {
+            b.strength = 1.5;
+        }
+        editor.selection.set_single(cube);
+        let steps = editor.history.undo_len();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::CurrentStateToObject]);
+        let roots = doc.scene.roots().to_vec();
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[0], cube, "the copy follows its original");
+        let copy = roots[1];
+        assert_eq!(editor.selection.as_slice(), [copy]);
+        assert_eq!(editor.history.undo_len(), steps + 1);
+        let node = doc.scene.get(copy).unwrap();
+        assert_eq!(node.data.name, "Cube");
+        assert!(node.children().is_empty(), "the Bend is not copied");
+        let ObjectKind::Polygon { mesh, .. } = &node.data.kind else {
+            panic!("not a polygon object: {:?}", node.data.kind)
+        };
+        let original = &doc.scene.get(cube).unwrap().data.kind;
+        assert!(matches!(original, ObjectKind::Cube { .. }), "the original is untouched");
+        let plain = grid4d_eval::editable_mesh(original).unwrap();
+        assert_eq!(mesh.mesh().point_count(), plain.point_count());
+        assert_ne!(mesh.mesh().points(), plain.points(), "the bent shape");
+        assert_eq!(doc.scene.children(cube), [bend]);
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.roots(), [cube]);
+        assert_eq!(editor.selection.as_slice(), [cube]);
+    }
+
+    #[test]
+    fn current_state_copies_hierarchies_bakes_generators_and_freezes_animation() {
+        use grid4d_scene::{Axis, Key, Track};
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        let scene = &mut doc.scene;
+        let group = scene.insert(Node::new("Group", ObjectKind::Null));
+        let child = |scene: &mut Scene, parent, name: &str, tag: ObjectKindTag| {
+            scene.insert_child(parent, Node::new(name, tag.default_kind())).unwrap()
+        };
+        let sds = child(scene, group, "SDS", ObjectKindTag::SubdivisionSurface);
+        child(scene, sds, "Cage", ObjectKindTag::Cube);
+        let extrude = child(scene, group, "Extrude", ObjectKindTag::Extrude);
+        child(scene, extrude, "Rectangle", ObjectKindTag::Rectangle);
+        let hidden = child(scene, group, "Hidden", ObjectKindTag::Sphere);
+        child(scene, hidden, "Under Hidden", ObjectKindTag::Cube);
+        scene.get_mut(hidden).unwrap().data.visible_in_editor = false;
+        child(scene, group, "Light", ObjectKindTag::Light);
+        scene.get_mut(sds).unwrap().data.tracks.push(Track {
+            param: Param::Position(Axis::X),
+            curve: grid4d_scene::Curve::from_keys([Key::new(0.0, 0.0), Key::new(10.0, 100.0)]),
+        });
+        doc.time.set_frame(5);
+        editor.selection.set_all([group, sds]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::CurrentStateToObject]);
+
+        let roots = doc.scene.roots().to_vec();
+        assert_eq!(roots.len(), 2, "the SDS goes with its selected group");
+        let copy = roots[1];
+        assert_eq!(editor.selection.as_slice(), [copy]);
+        assert!(matches!(doc.scene.get(copy).unwrap().data.kind, ObjectKind::Null));
+        let names: Vec<&str> = doc
+            .scene
+            .children(copy)
+            .iter()
+            .map(|&id| doc.scene.get(id).unwrap().data.name.as_str())
+            .collect();
+        assert_eq!(names, ["SDS", "Extrude", "Light"], "hidden objects are left out");
+        for &id in doc.scene.children(copy) {
+            assert!(doc.scene.children(id).is_empty(), "consumed inputs are not copied");
+        }
+        let baked = &doc.scene.get(doc.scene.children(copy)[0]).unwrap().data;
+        let ObjectKind::Polygon { mesh, .. } = &baked.kind else {
+            panic!("the SDS is not baked")
+        };
+        assert!(mesh.mesh().face_count() > 6, "subdivided");
+        assert!(baked.tracks.is_empty());
+        assert!((baked.transform.position.x - 50.0).abs() < 1e-3, "frozen at frame 5");
+        let extruded = &doc.scene.get(doc.scene.children(copy)[1]).unwrap().data.kind;
+        assert!(matches!(extruded, ObjectKind::Polygon { .. }));
+        assert!(matches!(
+            doc.scene.get(doc.scene.children(copy)[2]).unwrap().data.kind,
+            ObjectKind::Light { .. }
+        ));
+        assert_eq!(
+            doc.scene.get(sds).unwrap().data.tracks.len(),
+            1,
+            "the original keeps its animation"
+        );
     }
 }

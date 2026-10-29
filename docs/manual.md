@@ -531,7 +531,8 @@ What goes out:
   the viewport and their UVs. **Primitives** are written in their current shape.
   A **Subdivision Surface** is written as its smooth result at the viewport level,
   without its cage; an **Extrude**, **Lathe**, **Sweep** or **Loft** as its
-  solid at the current frame, without the splines it is made from. A
+  solid at the current frame, without the splines it is made from. Objects
+  changed by **deformers** are written in their deformed shape. A
   switched-off generator is written as an empty object with its children as
   they are. Splines themselves are written as empty objects.
 - Materials (name, colour, roughness, metallic, emission; one a mesh inherits from a
@@ -560,8 +561,8 @@ and drop `.obj` files like glTF files, and pick the `.obj` type in
   and the materials of the `.mtl` file named in the OBJ become materials (colour,
   emission) linked by Material tags, their colours also the display colours.
   OBJ has no units: 1 unit is read as 1 cm.
-- **Exporting:** every mesh (primitives and Subdivision Surfaces included, as for
-  glTF) becomes one OBJ object, with its points where they are in the scene (OBJ
+- **Exporting:** every mesh (primitives, generators and deformed shapes included,
+  as for glTF) becomes one OBJ object, with its points where they are in the scene (OBJ
   has no positions or hierarchy of its own). Polygons keep all their corners.
   Normals follow the viewport's smoothing. Materials (under their names, with colour
   and emission), or display colours, go to a `.mtl` file of the same name next to
@@ -751,7 +752,9 @@ Mesh ▸ Conversion ▸ Make Editable). It becomes a polygon object that looks e
 the same: same name, position and place in the hierarchy. Its icon changes to a
 triangle. One undo step turns it back into the parametric object. On a Subdivision
 Surface, Make Editable keeps the smooth result
-([§12.4](#124-switching-it-off-and-baking-it)).
+([§12.4](#124-switching-it-off-and-baking-it)). To keep the original and get a
+polygon copy of what you see instead — deformers and animation included — use
+**Current State to Object** ([§14.6](#146-current-state-to-object)).
 
 ### 11.2 Component modes
 
@@ -1425,6 +1428,34 @@ The Attribute Manager's **Object** tab:
 
 Lattice points cannot be deleted, and the lattice is edited rather than
 animated.
+
+### 14.6 Current State to Object
+
+A deformed object stays editable: its own points never change. When you want
+the deformed shape itself — to model it further, or to keep it while you change
+the deformer — select the object and choose **Mesh ▸ Conversion ▸ Current State
+to Object**.
+
+![A cube twisted by a Twist and, below it in the Object Manager, its Current State copy: a polygon object of the twisted shape, selected](images/manual/current-state.png)
+
+A copy of the object appears right below it in the Object Manager, selected,
+with the same name: a polygon object of exactly what the viewport shows at the
+current frame. The original, its deformers and their settings are left as they
+were. **Ctrl+Z** removes the copy.
+
+- **Children** are copied too, as a hierarchy: each in its shown shape.
+- **Deformers** are not copied — their effect is in the shapes.
+- A **generator** (Subdivision Surface, Extrude, Lathe, Sweep, Loft) becomes one
+  polygon object of its result; the cage or splines it is made from are not
+  copied. A switched-off generator becomes a Null holding its children's copies.
+- **Primitives** become polygon objects; spline primitives and Texts editable
+  splines; Nulls, cameras and lights are copied as they are.
+- **Animation** is frozen: the copies stand where the objects are at the
+  current frame and have no keys.
+- Objects hidden in the viewport are left out.
+
+Unlike **Make Editable** (C), which converts the object itself, this always
+adds a copy.
 
 ## 15. Snapping
 

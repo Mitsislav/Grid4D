@@ -498,6 +498,16 @@ impl EvaluatedScene {
         self.curves.get(&id)
     }
 
+    /// The mesh deformers made of `id` in the last update (its shape as shown);
+    /// `None` when no deformer reaches it, or it is hidden.
+    #[must_use]
+    pub fn deformed(&self, id: NodeId) -> Option<&MeshHandle> {
+        self.deformed
+            .get(&id)
+            .map(|entry| &entry.mesh)
+            .filter(|mesh| self.meshes.contains_key(&mesh.id()))
+    }
+
     /// A visible polygon object's node, own mesh (hidden polygons included: the
     /// indices components refer to) and components; `None` for anything else
     /// (hidden, not a polygon object).

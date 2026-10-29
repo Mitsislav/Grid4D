@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 10 — Deformers & MoGraph (v0.10) |
-| Last step done | 10.4 — FFD (2026-10-29) |
-| Next step | 10.5 — Current State to Object |
-| Tests | 635, all passing; clippy and rustfmt clean |
+| Last step done | 10.5 — Current State to Object (2026-10-29) |
+| Next step | 10.6 — Cloner framework |
+| Tests | 638, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1194,6 +1194,7 @@ Phase 9 is complete.
 | 10.2 | Deformers and the Bend: a deformer reshapes its parent and the parent's subtree (deepest first), inside a cage before smoothing or beside it on the result; Bend with Mode, Strength, Angle, Keep Y-Axis Length, Origin; its box drawn bent and picked; Shift + create under the selection, Fit to Parent; cached; animatable; saved; rendered | 621 |
 | 10.3 | Twist, Taper and Bulge (curvature, fillet) beside the Bend; an orange strength handle on the selected deformer, dragged in the view (Shift steps, one undo step, Esc), before the gizmo; animatable; saved; rendered | 629 |
 | 10.4 | FFD: a lattice (2–20 points per axis) over the box whose moved points reshape the object by Bernstein blending; edited in Points mode like a spline's points (selection, gizmo, Tweak); Reset Lattice; Size scales it, a new grid regrids it; Delete leaves it; saved with its selection; rendered | 635 |
+| 10.5 | Current State to Object (Mesh ▸ Conversion): a polygon copy of what the viewport shows at the current frame (deformers, generators, animation), hierarchy kept, deformers and consumed inputs left out, after the original, selected, one undo step; export writes deformed shapes | 638 |
 
 **10.1 — Animated parameters**
 
@@ -1331,6 +1332,30 @@ Phase 9 is complete.
 - **On-screen testing:** a sphere under an FFD whose top-middle point is lifted
   and one side pushed out became an egg-like shape; in Points mode the 27
   lattice points and their lines showed over it. The path tracer rendered it.
+
+**10.5 — Current State to Object**
+
+*Problems and solutions:*
+- **Where the shown shape lives.** Deformed meshes exist only in the
+  evaluation's cache. Rather than deforming again in the UI, the command builds
+  an `EvaluatedScene` at the current frame and reads what each node draws: a
+  generator's result through its drawable's mesh key, and a deformed shape
+  through the new `EvaluatedScene::deformed(id)`, which checks the cached mesh
+  is still in use (the cache keeps entries for one revision, so a frame change
+  alone could leave a stale one).
+- **Selections on the copy.** Deforming moves points only, so a deformed
+  polygon object keeps its selections and hidden elements — unless hidden
+  polygons were left out of the shape, then they are dropped.
+- **Inserting a hierarchy as one step.** Children need their parent's new
+  `NodeId`, so the copies are applied one by one (parents first) and recorded
+  together, newest first, with all-or-nothing rollback, as Merge does.
+- **Export.** It now uses the same evaluation for deformed shapes, which the
+  10.2 notes left for this step.
+- **On-screen testing:** a cube under a Twist, then Mesh ▸ Conversion ▸
+  Current State to Object: a polygon "Cube" appeared after the original,
+  selected and twisted; switching the Twist off straightened the original while
+  the copy stayed twisted. (Typing into the Coordinates fields does not reach
+  the app through posted messages, so the copy was not moved aside.)
 
 ---
 

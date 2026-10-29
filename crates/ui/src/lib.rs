@@ -16,6 +16,7 @@
 //!   offscreen target; this crate only shows that target as an egui texture.
 
 pub mod commands;
+mod current_state;
 pub mod editor;
 pub mod file;
 pub mod history;
