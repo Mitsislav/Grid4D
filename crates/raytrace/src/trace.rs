@@ -630,4 +630,17 @@ mod tests {
             .unwrap();
         assert!(scene_of(&doc).triangle_count() > 100);
     }
+
+    #[test]
+    fn a_lofted_skin_is_rendered() {
+        let mut doc = Document::new("t");
+        let loft = doc.scene.insert(Node::new("Loft", ObjectKindTag::Loft.default_kind()));
+        for z in [0.0, 300.0] {
+            let mut circle = Node::new("Circle", ObjectKindTag::Circle.default_kind());
+            circle.data.transform.position.z = z;
+            doc.scene.insert_child(loft, circle).unwrap();
+        }
+        // 29 around × 9 rings of quads, and two 29-gon caps of 27 triangles.
+        assert_eq!(scene_of(&doc).triangle_count(), 29 * 9 * 2 + 2 * 27);
+    }
 }

@@ -240,6 +240,7 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
             | ObjectKind::Extrude { .. }
             | ObjectKind::Lathe(_)
             | ObjectKind::Sweep(_)
+            | ObjectKind::Loft(_)
             | ObjectKind::SplinePrimitive(_)
             | ObjectKind::Spline { .. } => continue,
         };

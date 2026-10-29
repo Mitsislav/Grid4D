@@ -11,7 +11,7 @@ use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdi
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_geom::spline::{ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape, SplineType};
-use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Sweep};
+use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
     Axis, Document, Falloff, KeyState, LightDetails, LightShadow, LightType, Material, MaterialId, NodeData, NodeId,
     ObjectKind, Param, Scene, SceneEdit, SplineHandle, Tag, TagKind, TimeSettings,
@@ -703,6 +703,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
             } => extrude_rows(ui, extrusion, hierarchical),
             ObjectKind::Lathe(lathe) => lathe_rows(ui, lathe),
             ObjectKind::Sweep(sweep) => sweep_rows(ui, sweep),
+            ObjectKind::Loft(loft) => loft_rows(ui, loft),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, primitive),
             ObjectKind::Spline {
                 spline, interpolation, ..
@@ -1395,6 +1396,28 @@ fn sweep_rows(ui: &mut Ui, sweep: &mut Sweep) {
     ui.end_row();
 }
 
+/// The Loft generator's Object and Caps parameters.
+fn loft_rows(ui: &mut Ui, loft: &mut Loft) {
+    for (label, value) in [
+        ("Subdivision U", &mut loft.subdivision_u),
+        ("Subdivision V", &mut loft.subdivision_v),
+    ] {
+        bounded_count_row(ui, label, value, Loft::MIN_SUBDIVISION, Loft::MAX_SUBDIVISION);
+    }
+    check_row(ui, "Organic Form", &mut loft.organic);
+    check_row(ui, "Per Segment", &mut loft.per_segment);
+    check_row(ui, "Loop", &mut loft.looped);
+    check_row(ui, "Linear Interpolation", &mut loft.linear);
+    check_row(ui, "Reverse Normals", &mut loft.reverse_normals);
+    ui.label("");
+    ui.label(RichText::new("Caps").strong());
+    ui.end_row();
+    cap_rows(ui, &mut loft.start_cap, &mut loft.end_cap, &mut loft.cap_type);
+    ui.label("");
+    ui.label(RichText::new("A skin over its child splines").color(p::TEXT_DIM));
+    ui.end_row();
+}
+
 /// A scale factor (1.0 = 100 %, never negative) edited in percent.
 fn scale_row(ui: &mut Ui, label: &str, value: &mut f32) {
     attr_label(ui, label, LABEL_WIDTH);
@@ -1414,7 +1437,7 @@ fn scale_row(ui: &mut Ui, label: &str, value: &mut f32) {
     ui.end_row();
 }
 
-/// Start / End Cap and Caps Type (Extrude, Lathe, Sweep).
+/// Start / End Cap and Caps Type (Extrude, Lathe, Sweep, Loft).
 fn cap_rows(ui: &mut Ui, start: &mut bool, end: &mut bool, cap_type: &mut CapType) {
     check_row(ui, "Start Cap", start);
     check_row(ui, "End Cap", end);

@@ -452,6 +452,25 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.polyline(&inner, false);
             c.ellipse((0.82, 0.3), (0.1, 0.13));
         }
+        ObjectKindTag::Loft => {
+            // Three sections, large to small, with the skin's outline over them.
+            let skin = [
+                (0.1, 0.84),
+                (0.2, 0.5),
+                (0.36, 0.16),
+                (0.64, 0.16),
+                (0.8, 0.5),
+                (0.9, 0.84),
+            ];
+            c.fill_with(&skin, soft);
+            c.line((0.1, 0.84), (0.2, 0.5));
+            c.line((0.2, 0.5), (0.36, 0.16));
+            c.line((0.9, 0.84), (0.8, 0.5));
+            c.line((0.8, 0.5), (0.64, 0.16));
+            c.ellipse((0.5, 0.84), (0.4, 0.09));
+            c.ellipse((0.5, 0.5), (0.3, 0.07));
+            c.ellipse((0.5, 0.16), (0.14, 0.05));
+        }
         ObjectKindTag::Light => {
             c.disc((0.5, 0.5), 0.19);
             for i in 0..8 {

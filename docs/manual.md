@@ -303,7 +303,8 @@ command palette) build their shape from their children. The Subdivision Surface
 smooths a polygon mesh ([§12](#12-generators-subdivision-surface)); the Extrude
 turns a spline into a solid ([§13.4](#134-extrude-from-outline-to-solid)) and
 the Lathe turns one around an axis ([§13.5](#135-lathe-turning-a-profile)) and
-the Sweep moves one along another ([§13.6](#136-sweep-a-profile-along-a-path)).
+the Sweep moves one along another ([§13.6](#136-sweep-a-profile-along-a-path))
+and the Loft stretches a skin over several ([§13.7](#137-loft-a-skin-over-sections)).
 
 **Splines** (Create ▸ Spline, or the circle button) are curves: Circle,
 Rectangle, Arc, n-Side, Star, Helix and Flower ([§13](#13-splines)).
@@ -1213,6 +1214,42 @@ The Attribute Manager's **Object** tab:
 Q, Make Editable (the profile and path go with it) and rendering work as for
 the other generators.
 
+### 13.7 Loft: a skin over sections
+
+The **Loft** generator stretches a skin over a row of splines, its
+**sections**: circles of different sizes make a vase, a circle and a square a
+transition piece, open arcs a curved sheet.
+
+![A vase from four circles, a circle-to-square piece, a looped ring and a sheet over four arcs, all Lofts; the Loft's Object properties](images/manual/spline-loft.png)
+
+1. Draw the sections and place them where the skin should pass (for a vase:
+   circles in the **XZ** plane, one above the other).
+2. Select them **in the order the skin should pass through them** (click the
+   first, Shift+click the others) and hold **Alt** while you choose **Create ▸
+   Generator ▸ Loft**. They become the Loft's children in that order. You can
+   also drag splines onto a Loft; their order in the Object Manager is the
+   order of the skin.
+3. The sections stay visible: move, scale or edit one and the skin follows.
+
+The Attribute Manager's **Object** tab:
+
+- **Subdivision U**: points around each section (a closed section gets one
+  fewer, since its last point would be its first). Sections are spaced
+  evenly by length from their **first point**: if the skin twists, line the
+  first points up with **Mesh ▸ Spline ▸ Set First Point**.
+- **Subdivision V**: rings along the skin, spread by the distance between
+  sections; every section gets a ring. **Per Segment** spreads them evenly
+  between each pair of sections instead.
+- **Organic Form**: off, the skin passes exactly through every section; on,
+  it becomes looser and smoother and only touches the first and last.
+- **Loop**: joins the last section back to the first, for a closed ring.
+- **Linear Interpolation**: straight lines between sections instead of curves.
+- **Reverse Normals** and the **Caps**: as for the Extrude; the first and last
+  sections get caps when they are closed and the skin is not looped.
+
+A Loft with a single closed section covers it with a flat cap. Q, Make Editable
+(every section goes with it) and rendering work as for the other generators.
+
 ## 14. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
@@ -1576,7 +1613,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   edge weights (creases) or UV options. The Extrude has no bevels (fillets),
   Delaunay or grid caps, UVs or selections for its caps; neither have the Lathe
   and the Sweep (no Isoparm display either). The Sweep has no rail spline, no
-  Scale and Rotation graphs and no Keep Segments. Loft and Cloner are planned.
+  Scale and Rotation graphs and no Keep Segments. The Loft has no Adapt UV
+  (no UVs) and uses only the first segment of each section (no holes). The
+  Cloner is planned.
 - **Splines**: Text comes next; hiding points, Grow/Shrink on points,
   snapping to spline points and the Pen snapping to objects; editing points
   inside the Pen (moving them while drawing); the Cissoid, Cogwheel, Cycloid, Formula, Profile,

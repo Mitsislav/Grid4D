@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 9 — Splines & spline generators (v0.9) |
-| Last step done | 9.6 — Sweep generator (2026-10-29) |
-| Next step | 9.7 — Loft generator |
-| Tests | 582, all passing; clippy and rustfmt clean |
+| Last step done | 9.7 — Loft generator (2026-10-29) |
+| Next step | 9.8 — Text spline |
+| Tests | 589, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -898,6 +898,7 @@ Phase 8 is complete.
 | 9.4 | Extrude generator: a spline pushed along Auto / X / Y / Z / Custom / Absolute by an offset, subdivided; start and end caps (N-Gons or Triangles) with holes cut out (even-odd nesting, hole bridging), outward whichever way the outlines run; Reverse Normals, Hierarchical; Alt wraps the selected spline, Make Editable bakes the solid; saved; rendered | 564 |
 | 9.5 | Lathe generator: a profile turned around the Lathe's Y axis — angle, subdivision, movement (screws, springs), scaling (spirals), Reverse Normals, caps where a closed profile's turn stays open; a full turn closes and shares the points on the axis; saved; rendered | 572 |
 | 9.6 | Sweep generator: a profile moved along a path — banking (parallel transport), level or parallel movement, constant cross section at corners, end scale and rotation, start / end growth, caps; Alt wraps two selected splines as profile and path; Make Editable removes both; saved; rendered | 582 |
+| 9.7 | Loft generator: a skin over child splines in order — Subdivision U / V, through the sections (Catmull-Rom) or Organic (B-spline), Linear, Per Segment, Loop, caps; sections turned the same way round; Alt wraps every selected spline in selection order; Make Editable removes them; saved; rendered | 589 |
 
 **9.1 — Spline primitives**
 
@@ -1094,6 +1095,32 @@ Phase 8 is complete.
   frame, a horn and an open, capped tube; a probe confirmed the horn's
   cross-section (57 cm at the start, 8 cm at the end). The path tracer
   rendered the file (60 296 triangles).
+
+**9.7 — Loft generator**
+
+*Problems and solutions:*
+- **Matching sections.** Sections have different point counts and shapes
+  (a circle and a square). Each is resampled into the same number of points,
+  evenly by length from its first point, so point *j* of every section lines up;
+  a closed section gets U − 1 points (its last would repeat the first). Closed
+  sections drawn the other way round are turned (keeping their first point)
+  so they all run counter-clockwise around the direction of the skin, which
+  also makes the skin face outwards; tests loft a frustum with either circle
+  reversed and check its volume.
+- **Through the sections, or near them.** "Organic Form" was read as an
+  approximating surface: the sections become control shapes of a uniform cubic
+  B-spline. Mirroring the sections beyond the ends (2·P₀ − P₁) makes both the
+  Catmull-Rom and the B-spline curves start and end exactly on the first and
+  last section; a test checks that the default skin passes through a narrow
+  middle section and the organic one does not.
+- **Every child an input.** `generator_inputs` became exhaustive over every
+  object kind (no `_` arm) and returns "all" for the Loft, so Make Editable
+  removes every section; Alt + create wraps every selected object, in selection
+  order, none inside another.
+- **On-screen testing:** a document with four Lofts (a vase from four circles
+  in the XZ plane, a circle-to-square piece, a looped ring of six sections
+  turned around Y, a sheet over four arcs) showed all four as expected with the
+  sections drawn; the path tracer rendered the file (6316 triangles).
 
 ---
 

@@ -3,14 +3,15 @@
 //! descendants merged into one mesh — in the generator's space; the Extrude
 //! pushes its first child spline (or, hierarchical, every spline below it) into
 //! a solid; the Lathe turns its first child spline around its Y axis; the
-//! Sweep moves its first child spline (the profile) along its second (the path).
+//! Sweep moves its first child spline (the profile) along its second (the path);
+//! the Loft stretches a skin over all its child splines.
 
 use glam::Mat4;
 use grid4d_geom::{
     PolyMesh,
     spline::{Interpolation, Polyline, SplinePrimitive},
     subdivision::{self, SubdivisionOptions},
-    surface::{self, Extrusion, Lathe, Sweep},
+    surface::{self, Extrusion, Lathe, Loft, Sweep},
 };
 use grid4d_scene::{MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
 
@@ -23,6 +24,7 @@ pub(crate) enum Options {
     Extrude { extrusion: Extrusion, hierarchical: bool },
     Lathe(Lathe),
     Sweep(Sweep),
+    Loft(Loft),
 }
 
 /// One input of a generator, in the generator's space: what decides the result,
@@ -84,6 +86,7 @@ pub(crate) fn options(kind: &ObjectKind, purpose: Purpose) -> Option<Options> {
         }),
         ObjectKind::Lathe(lathe) => Some(Options::Lathe(lathe)),
         ObjectKind::Sweep(sweep) => Some(Options::Sweep(sweep)),
+        ObjectKind::Loft(loft) => Some(Options::Loft(loft)),
         _ => None,
     }
 }
@@ -102,8 +105,10 @@ pub(crate) fn gather(
 ) -> Option<[f32; 3]> {
     inputs.clear();
     stack.clear();
-    if let Options::Sweep(_) = options {
-        return gather_sweep(scene, id, purpose, inputs);
+    match options {
+        Options::Sweep(_) => return gather_sweep(scene, id, purpose, inputs),
+        Options::Loft(_) => return gather_loft(scene, id, purpose, inputs),
+        Options::Subdivision(_) | Options::Extrude { .. } | Options::Lathe(_) => {}
     }
     let &first = scene.children(id).first()?;
     let (colour, walk) = match *options {
@@ -112,7 +117,7 @@ pub(crate) fn gather(
         // Its own: a spline's line colour would not suit a solid.
         Options::Extrude { hierarchical, .. } => (scene.get(id)?.data.display_color, hierarchical),
         Options::Lathe(_) => (scene.get(id)?.data.display_color, false),
-        Options::Sweep(_) => return None,
+        Options::Sweep(_) | Options::Loft(_) => return None,
     };
     let into_generator = scene.world_matrix(id).inverse();
     stack.push(first);
@@ -182,6 +187,32 @@ fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, inputs: &mut Vec<In
     Some(colour)
 }
 
+/// The Loft's inputs: every visible, enabled spline child, in order, in the
+/// generator's space.
+fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, inputs: &mut Vec<Input>) -> Option<[f32; 3]> {
+    let colour = scene.get(id)?.data.display_color;
+    let into_generator = scene.world_matrix(id).inverse();
+    for &child in scene.children(id) {
+        let Some(data) = scene.get(child).map(|node| &node.data) else {
+            continue;
+        };
+        let source = match &data.kind {
+            ObjectKind::SplinePrimitive(primitive) => Source::SplinePrimitive(*primitive),
+            ObjectKind::Spline {
+                spline, interpolation, ..
+            } => Source::Spline(spline.clone(), *interpolation),
+            _ => continue,
+        };
+        if purpose.shows(data) && data.enabled {
+            inputs.push(Input {
+                source,
+                matrix: into_generator * scene.world_matrix(child),
+            });
+        }
+    }
+    Some(colour)
+}
+
 /// The generator's result from `inputs`, in its space: the Subdivision
 /// Surface's merged and smoothed cage, the Extrude's solids merged, or the
 /// Lathe's body.
@@ -237,6 +268,19 @@ pub(crate) fn build(inputs: &[Input], options: &Options) -> PolyMesh {
                 *point = path.matrix.transform_point3(*point);
             }
             surface::sweep(&contour, &route, sweep)
+        }
+        Options::Loft(loft) => {
+            let sections: Vec<Polyline> = inputs
+                .iter()
+                .filter_map(|input| {
+                    let mut section = input.source.polyline()?;
+                    for point in &mut section.points {
+                        *point = input.matrix.transform_point3(*point);
+                    }
+                    Some(section)
+                })
+                .collect();
+            surface::loft(&sections, loft)
         }
     }
 }

@@ -630,6 +630,7 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Extrude { .. }
         | ObjectKind::Lathe(_)
         | ObjectKind::Sweep(_)
+        | ObjectKind::Loft(_)
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Spline { .. } => PickShape::None,
     }
@@ -1478,5 +1479,46 @@ mod tests {
         eval.update(&doc.scene);
         let moved = result_of(&eval, sweep).bounds().unwrap();
         assert!((moved.min.y - bounds.min.y - 300.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn a_loft_skins_its_child_splines_in_order() {
+        let mut doc = Document::new("loft");
+        let loft = doc.scene.insert(Node::new("Loft", ObjectKindTag::Loft.default_kind()));
+        let mut sections = Vec::new();
+        for (radius, z) in [(200.0, 0.0), (100.0, 300.0)] {
+            let mut circle = Node::new("Circle", ObjectKindTag::Circle.default_kind());
+            let ObjectKind::SplinePrimitive(primitive) = &mut circle.data.kind else {
+                unreachable!()
+            };
+            primitive.shape = grid4d_geom::spline::SplineShape::Circle {
+                radius,
+                ellipse: None,
+                ring: None,
+            };
+            circle.data.transform.position.z = z;
+            sections.push(doc.scene.insert_child(loft, circle).unwrap());
+        }
+        // Not a spline: ignored.
+        doc.scene
+            .insert_child(loft, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let skin = result_of(&eval, loft);
+        let bounds = skin.bounds().unwrap();
+        assert!((bounds.min.z, bounds.max.z) == (0.0, 300.0), "{bounds:?}");
+        assert!((bounds.max.x - 200.0).abs() < 1.0);
+        for id in &sections {
+            assert!(
+                matches!(node(&eval, *id).pick, PickShape::Curve(_)),
+                "sections stay drawn"
+            );
+        }
+        assert_eq!(crate::generator_mesh(&doc.scene, loft).unwrap(), *skin.mesh());
+        // Moving a section reshapes the skin.
+        doc.scene.get_mut(sections[1]).unwrap().data.transform.position.z = 500.0;
+        eval.update(&doc.scene);
+        assert!((result_of(&eval, loft).bounds().unwrap().max.z - 500.0).abs() < 1e-3);
     }
 }

@@ -240,7 +240,8 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
         ObjectKind::SubdivisionSurface { .. }
         | ObjectKind::Extrude { .. }
         | ObjectKind::Lathe(_)
-        | ObjectKind::Sweep(_) => None,
+        | ObjectKind::Sweep(_)
+        | ObjectKind::Loft(_) => None,
     }
 }
 
@@ -274,6 +275,7 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
         | ObjectKind::Extrude { .. }
         | ObjectKind::Lathe(_)
         | ObjectKind::Sweep(_)
+        | ObjectKind::Loft(_)
         // Curves, not surfaces (a spline primitive is made editable as a spline).
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Spline { .. } => None,
@@ -316,6 +318,7 @@ mod tests {
                     | ObjectKindTag::Extrude
                     | ObjectKindTag::Lathe
                     | ObjectKindTag::Sweep
+                    | ObjectKindTag::Loft
             ) && !tag.is_spline();
             assert_eq!(style.is_some(), expected, "{tag:?}");
         }

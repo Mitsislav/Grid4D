@@ -25,7 +25,7 @@ use grid4d_geom::{
         SplineType,
     },
     subdivision::{Boundary, MAX_LEVEL},
-    surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Sweep},
+    surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
 use grid4d_scene::{
     Axis, ComponentState, Components, Curve, Document, Falloff, FrameNaming, FrameRange, ImageFormat, Interpolation,
@@ -675,6 +675,27 @@ enum KindDto {
         constant_cross_section: bool,
         #[serde(default = "yes", skip_serializing_if = "is_true")]
         banking: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        reverse_normals: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        start_cap: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        end_cap: bool,
+        #[serde(default, skip_serializing_if = "CapTypeDto::is_ngons")]
+        cap_type: CapTypeDto,
+    },
+    /// A Loft generator (added in step 9.7); defaults omitted.
+    Loft {
+        subdivision_u: u32,
+        subdivision_v: u32,
+        #[serde(default, skip_serializing_if = "is_false")]
+        organic: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        per_segment: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        looped: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        linear: bool,
         #[serde(default, skip_serializing_if = "is_false")]
         reverse_normals: bool,
         #[serde(default = "yes", skip_serializing_if = "is_true")]
@@ -1804,6 +1825,18 @@ impl KindDto {
                 end_cap: lathe.end_cap,
                 cap_type: lathe.cap_type.into(),
             },
+            ObjectKind::Loft(loft) => Self::Loft {
+                subdivision_u: loft.subdivision_u,
+                subdivision_v: loft.subdivision_v,
+                organic: loft.organic,
+                per_segment: loft.per_segment,
+                looped: loft.looped,
+                linear: loft.linear,
+                reverse_normals: loft.reverse_normals,
+                start_cap: loft.start_cap,
+                end_cap: loft.end_cap,
+                cap_type: loft.cap_type.into(),
+            },
             ObjectKind::Sweep(sweep) => Self::Sweep {
                 end_scale: sweep.end_scale,
                 end_rotation: sweep.end_rotation,
@@ -2039,6 +2072,30 @@ impl KindDto {
                 end_cap,
                 cap_type: cap_type.into(),
             }),
+            Self::Loft {
+                subdivision_u,
+                subdivision_v,
+                organic,
+                per_segment,
+                looped,
+                linear,
+                reverse_normals,
+                start_cap,
+                end_cap,
+                cap_type,
+            } => ObjectKind::Loft(Loft {
+                // Never trust a count a file claims.
+                subdivision_u: subdivision_u.clamp(Loft::MIN_SUBDIVISION, Loft::MAX_SUBDIVISION),
+                subdivision_v: subdivision_v.clamp(Loft::MIN_SUBDIVISION, Loft::MAX_SUBDIVISION),
+                organic,
+                per_segment,
+                looped,
+                linear,
+                reverse_normals,
+                start_cap,
+                end_cap,
+                cap_type: cap_type.into(),
+            }),
             Self::Sweep {
                 end_scale,
                 end_rotation,
@@ -2144,7 +2201,7 @@ impl KindDto {
     /// Every floating-point parameter, for validation.
     fn parameters(&self) -> Vec<f32> {
         match *self {
-            Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } => Vec::new(),
+            Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } | Self::Loft { .. } => Vec::new(),
             Self::Extrude { offset, movement, .. } => vec![offset, movement[0], movement[1], movement[2]],
             Self::Lathe {
                 angle,
@@ -2716,6 +2773,45 @@ mod tests {
             panic!("not a sweep")
         };
         assert_eq!((sweep.end_scale, sweep.start_growth, sweep.end_growth), (0.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn loft_generators_round_trip_and_defaults_are_omitted() {
+        let mut doc = Document::new("loft");
+        let plain = ObjectKindTag::Loft.default_kind();
+        let custom = ObjectKind::Loft(Loft {
+            subdivision_u: 7,
+            subdivision_v: 40,
+            organic: true,
+            per_segment: true,
+            looped: true,
+            linear: true,
+            reverse_normals: true,
+            start_cap: false,
+            end_cap: false,
+            cap_type: CapType::Triangles,
+        });
+        doc.scene.insert(Node::new("Loft", plain.clone()));
+        doc.scene.insert(Node::new("Loft.1", custom.clone()));
+        let loaded = round_trip(&doc);
+        let kinds: Vec<&ObjectKind> = loaded
+            .scene
+            .roots()
+            .iter()
+            .map(|&id| &loaded.scene.get(id).unwrap().data.kind)
+            .collect();
+        assert_eq!(kinds, [&plain, &custom]);
+        let json = serde_json::to_string(&KindDto::new(&plain, "Loft", &mut MeshTable::default())).unwrap();
+        assert_eq!(json, r#"{"type":"loft","subdivision_u":30,"subdivision_v":10}"#);
+        let json = r#"{"type": "loft", "subdivision_u": 0, "subdivision_v": 9000000}"#;
+        let dto: KindDto = serde_json::from_str(json).unwrap();
+        let ObjectKind::Loft(loft) = dto.into_kind(&[], "test").unwrap() else {
+            panic!("not a loft")
+        };
+        assert_eq!(
+            (loft.subdivision_u, loft.subdivision_v),
+            (Loft::MIN_SUBDIVISION, Loft::MAX_SUBDIVISION)
+        );
     }
 
     #[test]

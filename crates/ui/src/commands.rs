@@ -1160,22 +1160,25 @@ fn wrap_in_generator(doc: &mut Document, editor: &mut EditorState, viewport: &mu
         apply(EditorCommand::CreateObject(tag), doc, editor, viewport);
         return;
     };
-    // The objects that become its inputs: the active one, or for the Sweep the
-    // first two selected (profile, then path), neither inside the other.
+    // The objects that become its inputs: the active one, or for generators
+    // with several inputs (Sweep: profile, path; Loft: sections) the selected
+    // objects in selection order, none inside another.
     let mut targets = vec![active];
-    if tag.default_kind().generator_inputs() >= 2 {
-        let selected: Vec<NodeId> = editor
-            .selection
-            .as_slice()
-            .iter()
-            .copied()
-            .filter(|&id| doc.scene.contains(id))
-            .collect();
-        if let [first, second, ..] = selected[..]
-            && !is_inside(&doc.scene, first, second)
-            && !is_inside(&doc.scene, second, first)
-        {
-            targets = vec![first, second];
+    let wanted = tag.default_kind().generator_inputs();
+    if wanted >= 2 {
+        let mut chosen: Vec<NodeId> = Vec::new();
+        for &id in editor.selection.as_slice() {
+            if chosen.len() < wanted
+                && doc.scene.contains(id)
+                && !chosen
+                    .iter()
+                    .any(|&other| is_inside(&doc.scene, id, other) || is_inside(&doc.scene, other, id))
+            {
+                chosen.push(id);
+            }
+        }
+        if chosen.len() >= 2 {
+            targets = chosen;
         }
     }
     let target = targets[0];
@@ -1704,7 +1707,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::SubdivisionSurface
         | ObjectKindTag::Extrude
         | ObjectKindTag::Lathe
-        | ObjectKindTag::Sweep => {}
+        | ObjectKindTag::Sweep
+        | ObjectKindTag::Loft => {}
     }
     data
 }
@@ -1744,9 +1748,11 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         ObjectKindTag::Null => palette::ICON_NULL,
         ObjectKindTag::Camera => palette::ICON_CAMERA,
         ObjectKindTag::Light => palette::ICON_LIGHT,
-        ObjectKindTag::SubdivisionSurface | ObjectKindTag::Extrude | ObjectKindTag::Lathe | ObjectKindTag::Sweep => {
-            palette::ICON_GENERATOR
-        }
+        ObjectKindTag::SubdivisionSurface
+        | ObjectKindTag::Extrude
+        | ObjectKindTag::Lathe
+        | ObjectKindTag::Sweep
+        | ObjectKindTag::Loft => palette::ICON_GENERATOR,
         ObjectKindTag::Circle
         | ObjectKindTag::Rectangle
         | ObjectKindTag::Arc
@@ -3713,5 +3719,42 @@ mod tests {
             assert_eq!(doc.scene.get(id).unwrap().parent(), None, "back at the top");
         }
         assert_eq!(doc.scene.roots(), [profile, path], "in their places");
+    }
+
+    #[test]
+    fn a_loft_wraps_every_selected_spline_and_bakes_without_them() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        let mut sections = Vec::new();
+        for z in [0.0, 200.0, 400.0] {
+            run(
+                &mut doc,
+                &mut editor,
+                &mut vp,
+                &[EditorCommand::CreateObject(ObjectKindTag::Circle)],
+            );
+            let id = editor.selection.active().unwrap();
+            doc.scene.get_mut(id).unwrap().data.transform.position.z = z;
+            sections.push(id);
+        }
+        // Selected out of their order: the selection's order decides.
+        editor.selection.set_all([sections[2], sections[0], sections[1]]);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::WrapInGenerator(ObjectKindTag::Loft)],
+        );
+        let loft = editor.selection.active().unwrap();
+        assert_eq!(doc.scene.children(loft), [sections[2], sections[0], sections[1]]);
+        assert!(grid4d_eval::generator_mesh(&doc.scene, loft).unwrap().face_count() > 0);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        assert!(sections.iter().all(|&id| !doc.scene.contains(id)), "every section goes");
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Undo, EditorCommand::Undo],
+        );
+        assert_eq!(doc.scene.roots(), sections, "back in their places");
     }
 }

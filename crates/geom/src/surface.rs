@@ -1,7 +1,7 @@
-//! Surfaces made from splines: the Extrude, Lathe and Sweep generators' bodies
-//! (see `docs/reference/generator-extrude.md`, `generator-lathe.md`,
-//! `generator-sweep.md`). Pure functions of sampled [`Polyline`]s; the Loft
-//! will join them.
+//! Surfaces made from splines: the Extrude, Lathe, Sweep and Loft generators'
+//! bodies (see `docs/reference/generator-extrude.md`, `generator-lathe.md`,
+//! `generator-sweep.md`, `generator-loft.md`). Pure functions of sampled
+//! [`Polyline`]s.
 
 use glam::{Vec2, Vec3};
 
@@ -731,6 +731,259 @@ fn orient(stations: &mut [Station], forwards: &[Vec3], closed: bool, sweep: &Swe
     }
 }
 
+/// The Loft generator's options: how a skin is stretched over sections.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Loft {
+    /// Points around each section (closed sections: one fewer).
+    pub subdivision_u: u32,
+    /// Rings along the skin (at least one per section).
+    pub subdivision_v: u32,
+    /// A looser surface that approximates the inner sections.
+    pub organic: bool,
+    /// Rings spread evenly per section pair rather than by distance.
+    pub per_segment: bool,
+    /// Joins the last section to the first.
+    pub looped: bool,
+    /// Straight lines between sections.
+    pub linear: bool,
+    /// Turns the skin inside out (caps untouched).
+    pub reverse_normals: bool,
+    pub start_cap: bool,
+    pub end_cap: bool,
+    pub cap_type: CapType,
+}
+
+impl Default for Loft {
+    fn default() -> Self {
+        Self {
+            subdivision_u: 30,
+            subdivision_v: 10,
+            organic: false,
+            per_segment: false,
+            looped: false,
+            linear: false,
+            reverse_normals: false,
+            start_cap: true,
+            end_cap: true,
+            cap_type: CapType::NGons,
+        }
+    }
+}
+
+impl Loft {
+    pub const MIN_SUBDIVISION: u32 = 2;
+    pub const MAX_SUBDIVISION: u32 = 4000;
+}
+
+/// The skin over `sections` (their first segments, in order): each resampled
+/// to the same number of points, closed ones turned the same way round,
+/// joined by curves (or lines) through them, with caps on closed ends. Empty
+/// without a section of two points.
+#[must_use]
+pub fn loft(sections: &[Polyline], loft: &Loft) -> PolyMesh {
+    let raw: Vec<(&[Vec3], bool)> = sections
+        .iter()
+        .filter_map(|section| section.runs().next())
+        .filter(|(points, _)| points.len() >= 2 && points.iter().all(|p| p.is_finite()))
+        .collect();
+    let Some(&(_, first_closed)) = raw.first() else {
+        return PolyMesh::new();
+    };
+    let closed = first_closed && raw[0].0.len() >= 3;
+    let u = loft.subdivision_u.clamp(Loft::MIN_SUBDIVISION, Loft::MAX_SUBDIVISION);
+    let count = if closed { (u - 1).max(3) } else { u };
+    let mut rings: Vec<Vec<Vec3>> = raw
+        .iter()
+        .map(|(points, _)| resample(points, closed, crate::us(count)))
+        .collect();
+    let n = rings.len();
+    let looped = loft.looped && n >= 3;
+    let centre = |ring: &[Vec3]| ring.iter().copied().sum::<Vec3>() / f32::from(u16::try_from(ring.len()).unwrap_or(1));
+    let centres: Vec<Vec3> = rings.iter().map(|r| centre(r)).collect();
+    // The direction the skin runs at each section (by its neighbours).
+    let along = |i: usize| -> Vec3 {
+        let (before, after) = if looped {
+            ((i + n - 1) % n, (i + 1) % n)
+        } else {
+            (i.saturating_sub(1), (i + 1).min(n - 1))
+        };
+        centres[after] - centres[before]
+    };
+    if closed {
+        // Counter-clockwise around the skin's direction, first point kept.
+        let mut previous: Option<Vec3> = None;
+        for (i, ring) in rings.iter_mut().enumerate() {
+            let normal = crate::mesh::newell(ring.iter().copied());
+            let reference = Some(along(i)).filter(|a| a.length_squared() > 1e-8).or(previous);
+            if reference.is_some_and(|a| normal.dot(a) < 0.0) {
+                ring[1..].reverse();
+            }
+            previous = Some(crate::mesh::newell(ring.iter().copied()));
+        }
+    }
+    if n == 1 {
+        // One section: just its cap.
+        if !closed {
+            return PolyMesh::new();
+        }
+        let ring = &rings[0];
+        let axis = crate::mesh::newell(ring.iter().copied());
+        let faces = cap_faces(ring, axis, 0, loft.cap_type);
+        return assemble(ring.clone(), &faces);
+    }
+
+    // Where along the sections each ring of the skin lies: (pair, t).
+    let pairs = if looped { n } else { n - 1 };
+    let v = loft.subdivision_v.clamp(Loft::MIN_SUBDIVISION, Loft::MAX_SUBDIVISION);
+    let total = crate::us(if looped { v } else { v - 1 }).max(pairs);
+    let steps: Vec<usize> = if loft.per_segment {
+        (0..pairs)
+            .map(|i| total / pairs + usize::from(i < total % pairs))
+            .collect()
+    } else {
+        let gaps: Vec<f32> = (0..pairs)
+            .map(|i| centres[i].distance(centres[(i + 1) % n]) + 1e-6)
+            .collect();
+        let sum: f32 = gaps.iter().sum();
+        let share = f32::from(u16::try_from(total).unwrap_or(u16::MAX));
+        gaps.iter()
+            .map(|&g| (share * g / sum).round().clamp(1.0, 4000.0) as usize)
+            .collect()
+    };
+    let mut stations: Vec<(usize, f32)> = Vec::new();
+    for (pair, &k) in steps.iter().enumerate() {
+        let span = f32::from(u16::try_from(k).unwrap_or(u16::MAX));
+        stations.extend((0..k).map(|s| (pair, f32::from(u16::try_from(s).unwrap_or(0)) / span)));
+    }
+    if !looped {
+        stations.push((n - 2, 1.0));
+    }
+
+    let ring_len = rings[0].len();
+    let section = |i: isize, j: usize| -> Vec3 {
+        let last = isize::try_from(n).unwrap_or(isize::MAX) - 1;
+        if looped {
+            return rings[crate::us(u32::try_from(i.rem_euclid(last + 1)).unwrap_or(0))][j];
+        }
+        // Beyond the ends: mirrored, so curves end on the first and last section.
+        let get = |k: isize| rings[crate::us(u32::try_from(k.clamp(0, last)).unwrap_or(0))][j];
+        if i < 0 {
+            get(0) * 2.0 - get(1)
+        } else if i > last {
+            get(last) * 2.0 - get(last - 1)
+        } else {
+            get(i)
+        }
+    };
+    let mut points = Vec::with_capacity(stations.len() * ring_len);
+    for &(pair, t) in &stations {
+        let i = isize::try_from(pair).unwrap_or(0);
+        for j in 0..ring_len {
+            let (p0, p1, p2, p3) = (section(i - 1, j), section(i, j), section(i + 1, j), section(i + 2, j));
+            points.push(if loft.linear {
+                p1.lerp(p2, t)
+            } else if loft.organic {
+                b_spline(p0, p1, p2, p3, t)
+            } else {
+                catmull_rom(p0, p1, p2, p3, t)
+            });
+        }
+    }
+
+    let rows = u32_index(stations.len());
+    let width = u32_index(ring_len);
+    let at = |row: u32, j: u32| (row % rows) * width + (j % width);
+    let mut faces: Vec<Vec<u32>> = Vec::new();
+    let row_steps = if looped { rows } else { rows - 1 };
+    let col_steps = if closed { width } else { width - 1 };
+    for k in 0..row_steps {
+        for j in 0..col_steps {
+            let mut quad = vec![at(k, j), at(k, j + 1), at(k + 1, j + 1), at(k + 1, j)];
+            if loft.reverse_normals {
+                quad.reverse();
+            }
+            faces.push(quad);
+        }
+    }
+    if closed && !looped {
+        let start = &points[..ring_len];
+        let end_row = crate::us(rows - 1) * ring_len;
+        let end = &points[end_row..end_row + ring_len];
+        if loft.start_cap {
+            faces.extend(cap_faces(start, -along(0), 0, loft.cap_type));
+        }
+        if loft.end_cap {
+            faces.extend(cap_faces(end, along(n - 1), u32_index(end_row), loft.cap_type));
+        }
+    }
+    assemble(points, &faces)
+}
+
+/// The cap faces of the closed `ring` (point indices from `base`), facing
+/// along `facing`.
+fn cap_faces(ring: &[Vec3], facing: Vec3, base: u32, cap_type: CapType) -> Vec<Vec<u32>> {
+    let Some(normal) = facing.try_normalize() else {
+        return Vec::new();
+    };
+    let u = normal.any_orthonormal_vector();
+    let v = normal.cross(u);
+    let line = Polyline {
+        points: ring.to_vec(),
+        segments: vec![crate::spline::Segment {
+            count: u32_index(ring.len()),
+            closed: true,
+        }],
+    };
+    let runs = profile(&line, |p| Vec2::new(p.dot(u), p.dot(v)));
+    // Counter-clockwise in (u, v) faces along `facing`.
+    caps(&runs, cap_type)
+        .into_iter()
+        .map(|polygon| polygon.into_iter().map(|(_, p)| base + p).collect())
+        .collect()
+}
+
+/// `count` points along `points` spaced evenly by length, from its first point
+/// (closed: round once, the start not repeated).
+fn resample(points: &[Vec3], closed: bool, count: usize) -> Vec<Vec3> {
+    let n = points.len();
+    let edges = if closed { n } else { n - 1 };
+    let mut lengths = Vec::with_capacity(edges + 1);
+    lengths.push(0.0f32);
+    for i in 0..edges {
+        let next = lengths[i] + points[i].distance(points[(i + 1) % n]);
+        lengths.push(next);
+    }
+    let total = lengths[edges];
+    if total <= 1e-6 {
+        return vec![points[0]; count];
+    }
+    let divisions = f32::from(u16::try_from(if closed { count } else { count - 1 }).unwrap_or(u16::MAX));
+    (0..count)
+        .map(|k| {
+            let length = total * f32::from(u16::try_from(k).unwrap_or(u16::MAX)) / divisions;
+            let i = lengths.partition_point(|&l| l <= length).clamp(1, edges);
+            let span = (lengths[i] - lengths[i - 1]).max(f32::MIN_POSITIVE);
+            points[i - 1].lerp(points[i % n], ((length - lengths[i - 1]) / span).clamp(0.0, 1.0))
+        })
+        .collect()
+}
+
+/// The Catmull-Rom curve through `p1` (t = 0) and `p2` (t = 1).
+fn catmull_rom(p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, t: f32) -> Vec3 {
+    let (t2, t3) = (t * t, t * t * t);
+    ((p1 * 2.0) + (p2 - p0) * t + (p0 * 2.0 - p1 * 5.0 + p2 * 4.0 - p3) * t2 + (p1 * 3.0 - p0 - p2 * 3.0 + p3) * t3)
+        * 0.5
+}
+
+/// The uniform cubic B-spline span of the four control points.
+fn b_spline(p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, t: f32) -> Vec3 {
+    let (t2, t3) = (t * t, t * t * t);
+    let b0 = (1.0 - t).powi(3);
+    let b1 = 3.0 * t3 - 6.0 * t2 + 4.0;
+    let b2 = -3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0;
+    (p0 * b0 + p1 * b1 + p2 * b2 + p3 * t3) / 6.0
+}
+
 /// Twice the signed area: positive when counter-clockwise.
 fn area(polygon: &[Vec2]) -> f32 {
     let n = polygon.len();
@@ -1308,5 +1561,134 @@ mod tests {
         assert!(turn(63, 0) > 0.95, "no jump at the seam: {}", turn(63, 0));
         assert!((1..63).all(|k| turn(k - 1, k) > 0.9));
         assert!((0..64).all(|k| width(k) >= 19.99));
+    }
+
+    fn lifted(points: Vec<Vec3>, z: f32) -> Vec<Vec3> {
+        points.into_iter().map(|p| p + Vec3::Z * z).collect()
+    }
+
+    #[test]
+    fn two_circles_make_a_capped_frustum_facing_outwards() {
+        for (a, b) in [(true, true), (true, false), (false, true)] {
+            let mut bottom = circle(100.0, 64);
+            let mut top = lifted(circle(50.0, 64), 200.0);
+            if !a {
+                bottom[1..].reverse();
+            }
+            if !b {
+                top[1..].reverse();
+            }
+            let sections = [polyline(&[(&bottom, true)]), polyline(&[(&top, true)])];
+            let mesh = loft(&sections, &Loft::default());
+            assert_eq!(mesh.point_count(), 29 * 10, "U − 1 around, V rings");
+            assert!(is_closed(&mesh), "{a} {b}");
+            // A frustum: π h (R² + R r + r²) / 3, polygonal.
+            let expected = std::f32::consts::PI * 200.0 * (100.0f32 * 100.0 + 100.0 * 50.0 + 50.0 * 50.0) / 3.0;
+            let got = volume(&mesh);
+            assert!((got - expected).abs() < expected * 0.03, "{a} {b}: {got} vs {expected}");
+        }
+    }
+
+    #[test]
+    fn the_skin_passes_through_every_section_unless_organic() {
+        let sections: Vec<Polyline> = [(100.0, 0.0), (30.0, 100.0), (100.0, 200.0)]
+            .iter()
+            .map(|&(r, z)| polyline(&[(&lifted(circle(r, 32), z), true)]))
+            .collect();
+        let radius_at_middle = |mesh: &PolyMesh| {
+            mesh.points()
+                .iter()
+                .filter(|p| (p.z - 100.0).abs() < 1e-3)
+                .map(|p| p.truncate().length())
+                .fold(f32::MAX, f32::min)
+        };
+        let options = Loft {
+            subdivision_v: 9,
+            per_segment: true,
+            ..Loft::default()
+        };
+        let through = loft(&sections, &options);
+        assert!(
+            (radius_at_middle(&through) - 30.0).abs() < 0.5,
+            "{}",
+            radius_at_middle(&through)
+        );
+        let organic = loft(
+            &sections,
+            &Loft {
+                organic: true,
+                ..options
+            },
+        );
+        assert!(radius_at_middle(&organic) > 40.0, "{}", radius_at_middle(&organic));
+        let (min, max) = organic.bounds().unwrap();
+        assert!(
+            min.z.abs() < 1e-3 && (max.z - 200.0).abs() < 1e-3,
+            "ends on the first and last"
+        );
+        // Linear: halfway between two sections is halfway in radius.
+        let linear = loft(
+            &sections[..2],
+            &Loft {
+                linear: true,
+                subdivision_v: 3,
+                ..Loft::default()
+            },
+        );
+        let middle: Vec<f32> = linear
+            .points()
+            .iter()
+            .filter(|p| (p.z - 50.0).abs() < 1e-3)
+            .map(|p| p.truncate().length())
+            .collect();
+        assert!(
+            !middle.is_empty() && middle.iter().all(|r| (r - 65.0).abs() < 1.0),
+            "{middle:?}"
+        );
+    }
+
+    #[test]
+    fn counts_loop_and_a_single_section() {
+        let sections: Vec<Polyline> = (0..4u16)
+            .map(|i| {
+                // Four circles round the Y axis, like slices of a torus.
+                let a = std::f32::consts::FRAC_PI_2 * f32::from(i);
+                let turn = glam::Quat::from_rotation_y(a);
+                let points = circle(20.0, 16)
+                    .into_iter()
+                    .map(|p| turn * (Vec3::new(p.x + 100.0, p.y, 0.0)))
+                    .collect::<Vec<_>>();
+                polyline(&[(&points, true)])
+            })
+            .collect();
+        let ring = loft(
+            &sections,
+            &Loft {
+                looped: true,
+                subdivision_u: 17,
+                subdivision_v: 8,
+                per_segment: true,
+                ..Loft::default()
+            },
+        );
+        assert_eq!(ring.point_count(), 16 * 8);
+        assert_eq!(ring.face_count(), 16 * 8, "closed round, no caps");
+        assert!(is_closed(&ring));
+        let open = [
+            polyline(&[(&[Vec3::ZERO, Vec3::X * 100.0], false)]),
+            polyline(&[(&[Vec3::Z * 50.0, Vec3::new(100.0, 0.0, 50.0)], false)]),
+        ];
+        let sheet = loft(
+            &open,
+            &Loft {
+                subdivision_u: 5,
+                subdivision_v: 4,
+                ..Loft::default()
+            },
+        );
+        assert_eq!((sheet.point_count(), sheet.face_count()), (5 * 4, 4 * 3));
+        let lid = loft(&[closed_circle(50.0, 12)], &Loft::default());
+        assert_eq!(lid.face_count(), 1, "one section: a cap");
+        assert_eq!(loft(&[], &Loft::default()).face_count(), 0);
     }
 }

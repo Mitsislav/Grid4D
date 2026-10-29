@@ -49,7 +49,9 @@ impl FilterItem {
             | ObjectKindTag::Capsule => Some(Self::Generator),
             ObjectKindTag::Polygon => Some(Self::Polygon),
             ObjectKindTag::SubdivisionSurface => Some(Self::SubdivisionSurface),
-            ObjectKindTag::Extrude | ObjectKindTag::Lathe | ObjectKindTag::Sweep => Some(Self::Generator),
+            ObjectKindTag::Extrude | ObjectKindTag::Lathe | ObjectKindTag::Sweep | ObjectKindTag::Loft => {
+                Some(Self::Generator)
+            }
             ObjectKindTag::Camera => Some(Self::Camera),
             ObjectKindTag::Light => Some(Self::Light),
             ObjectKindTag::Circle
