@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
-use grid4d_geom::{BitSet, spline::Polyline, subdivision::SubdivisionOptions};
+use grid4d_geom::{BitSet, spline::Polyline};
 use grid4d_scene::{
     Aabb, Components, LIGHT_MARKER_RADIUS, LightDetails, LightShadow, LightType, MaterialId, MeshHandle, MeshId,
     NodeId, ObjectKind, ObjectKindTag, Scene, SplineHandle, TagKind, Tags, WalkItem,
@@ -11,7 +11,7 @@ use crate::{
     CurveHandle, CurveId, Drawable, MeshKey, Shading, Surface,
     curve::{CachedCurve, CurveSource},
     drawable,
-    generator::{self, Input},
+    generator::{self, Input, Options},
 };
 
 /// How picking tests a ray against a node, in its object space.
@@ -328,8 +328,9 @@ impl EvaluatedScene {
                 }
                 next_cage = scene.children(id).first().copied();
             }
-            if cage_depth.is_some() {
-                // Part of a cage: the generator shows it.
+            if cage_depth.is_some() && !data.kind.is_spline() {
+                // Part of a cage: the generator shows it. (Splines stay drawn:
+                // curves are guides, and an Extrude's input is edited as one.)
                 drawable = None;
                 pick = PickShape::None;
             }
@@ -527,7 +528,7 @@ fn look_rotation(forward: Vec3, up: Vec3) -> Option<glam::Quat> {
 /// A generator's result and what it was built from.
 #[derive(Debug)]
 struct Generated {
-    options: SubdivisionOptions,
+    options: Options,
     inputs: Vec<Input>,
     colour: [f32; 3],
     mesh: MeshHandle,
@@ -544,11 +545,11 @@ fn generated_mesh<'a>(
     stack: &mut Vec<NodeId>,
     scene: &Scene,
     id: NodeId,
-    options: SubdivisionOptions,
+    options: Options,
     revision: u64,
     purpose: Purpose,
 ) -> Option<&'a Generated> {
-    let colour = generator::gather(scene, id, purpose, stack, inputs)?;
+    let colour = generator::gather(scene, id, &options, purpose, stack, inputs)?;
     let fresh = generated
         .get(&id)
         .is_some_and(|entry| entry.options == options && entry.inputs == *inputs);
@@ -625,9 +626,10 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Capsule { .. }
         | ObjectKind::Camera { .. } => PickShape::Bounds,
         // Picked by its result, or its curve (set during evaluation).
-        ObjectKind::SubdivisionSurface { .. } | ObjectKind::SplinePrimitive(_) | ObjectKind::Spline { .. } => {
-            PickShape::None
-        }
+        ObjectKind::SubdivisionSurface { .. }
+        | ObjectKind::Extrude { .. }
+        | ObjectKind::SplinePrimitive(_)
+        | ObjectKind::Spline { .. } => PickShape::None,
     }
 }
 
@@ -1305,5 +1307,83 @@ mod tests {
         assert!(eval.curve(id).is_none(), "the old one is gone");
         let (min, max) = eval.curve(new).unwrap().polyline().bounds().unwrap();
         assert!((max.x - 10.0).abs() < 0.01 && (min.x + 10.0).abs() < 0.01);
+    }
+
+    /// An Extrude with a Circle under it, and a Rectangle under the Circle.
+    /// Returns (doc, extrude, circle, rectangle).
+    fn extrude_scene() -> (Document, NodeId, NodeId, NodeId) {
+        let mut doc = Document::new("extrude");
+        let extrude = doc
+            .scene
+            .insert(Node::new("Extrude", ObjectKindTag::Extrude.default_kind()));
+        let circle = doc
+            .scene
+            .insert_child(extrude, Node::new("Circle", ObjectKindTag::Circle.default_kind()))
+            .unwrap();
+        let mut rectangle = Node::new("Rectangle", ObjectKindTag::Rectangle.default_kind());
+        rectangle.data.transform.position.x = 1000.0;
+        let rectangle = doc.scene.insert_child(circle, rectangle).unwrap();
+        (doc, extrude, circle, rectangle)
+    }
+
+    #[test]
+    fn an_extrude_pushes_its_spline_into_a_solid_and_keeps_the_spline_drawn() {
+        let (mut doc, extrude, circle, rectangle) = extrude_scene();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let result = result_of(&eval, extrude);
+        let bounds = result.bounds().unwrap();
+        assert!((bounds.max.x - 200.0).abs() < 1e-3 && (bounds.max.z - 20.0).abs() < 1e-3);
+        assert!(bounds.max.x < 500.0, "only the first child without Hierarchical");
+        assert_eq!(
+            node(&eval, extrude).drawable.map(|d| d.key),
+            Some(MeshKey::Polygon(result.id()))
+        );
+        for id in [circle, rectangle] {
+            let shown = node(&eval, id);
+            assert!(
+                matches!(shown.drawable.map(|d| d.key), Some(MeshKey::Curve(_))),
+                "splines under a generator stay drawn"
+            );
+            assert!(matches!(shown.pick, PickShape::Curve(_)));
+        }
+        assert_eq!(crate::generator_mesh(&doc.scene, extrude).unwrap(), *result.mesh());
+
+        // Moving the generator or selecting it changes nothing; a parameter does.
+        doc.scene.get_mut(extrude).unwrap().data.transform.position.y = 70.0;
+        eval.update(&doc.scene);
+        assert_eq!(result_of(&eval, extrude).id(), result.id());
+        let ObjectKind::Extrude { hierarchical, .. } = &mut doc.scene.get_mut(extrude).unwrap().data.kind else {
+            unreachable!()
+        };
+        *hierarchical = true;
+        eval.update(&doc.scene);
+        let both = result_of(&eval, extrude);
+        assert_ne!(both.id(), result.id());
+        assert!(both.bounds().unwrap().max.x > 1000.0, "the rectangle too");
+        assert!(both.mesh().face_count() > result.mesh().face_count());
+        // A disabled Extrude makes nothing.
+        doc.scene.get_mut(extrude).unwrap().data.enabled = false;
+        eval.update(&doc.scene);
+        assert_eq!(node(&eval, extrude).drawable, None);
+    }
+
+    #[test]
+    fn an_extrude_of_a_spline_moved_under_it_is_built_in_its_space() {
+        let (mut doc, extrude, circle, _) = extrude_scene();
+        doc.scene.get_mut(circle).unwrap().data.transform.position.y = 300.0;
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let bounds = result_of(&eval, extrude).bounds().unwrap();
+        assert!((bounds.min.y - 100.0).abs() < 1e-3, "{bounds:?}");
+        // Without a spline: nothing.
+        let empty = doc
+            .scene
+            .insert(Node::new("Extrude", ObjectKindTag::Extrude.default_kind()));
+        doc.scene
+            .insert_child(empty, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        eval.update(&doc.scene);
+        assert_eq!(node(&eval, empty).drawable, None);
     }
 }

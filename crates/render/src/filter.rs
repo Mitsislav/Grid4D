@@ -6,7 +6,7 @@ use grid4d_scene::ObjectKindTag;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FilterItem {
     Polygon,
-    /// Parametric objects: the primitives.
+    /// Parametric objects: the primitives and the spline generators.
     Generator,
     SubdivisionSurface,
     /// Splines (curves).
@@ -49,6 +49,7 @@ impl FilterItem {
             | ObjectKindTag::Capsule => Some(Self::Generator),
             ObjectKindTag::Polygon => Some(Self::Polygon),
             ObjectKindTag::SubdivisionSurface => Some(Self::SubdivisionSurface),
+            ObjectKindTag::Extrude => Some(Self::Generator),
             ObjectKindTag::Camera => Some(Self::Camera),
             ObjectKindTag::Light => Some(Self::Light),
             ObjectKindTag::Circle

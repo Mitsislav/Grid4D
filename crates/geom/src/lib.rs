@@ -29,6 +29,7 @@ pub mod primitives;
 pub mod selection;
 pub mod spline;
 pub mod subdivision;
+pub mod surface;
 mod topology;
 mod triangulate;
 
@@ -41,7 +42,7 @@ pub use mesh::{MeshError, PolyMesh};
 pub use normals::Smoothing;
 pub use selection::{Component, ComponentSet};
 pub use topology::Topology;
-pub use triangulate::{TriMesh, Triangulator};
+pub use triangulate::{TriMesh, Triangulator, triangulate_outlines};
 
 /// `u32` index → `usize`. Lossless on every platform Grid4D supports (≥ 32-bit).
 pub(crate) fn us(index: u32) -> usize {

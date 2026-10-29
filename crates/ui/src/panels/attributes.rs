@@ -11,6 +11,7 @@ use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdi
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_geom::spline::{ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape, SplineType};
+use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion};
 use grid4d_scene::{
     Axis, Document, Falloff, KeyState, LightDetails, LightShadow, LightType, Material, MaterialId, NodeData, NodeId,
     ObjectKind, Param, Scene, SceneEdit, SplineHandle, Tag, TagKind, TimeSettings,
@@ -696,6 +697,10 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 ui.label(RichText::new("Smooths its first child (the cage)").color(p::TEXT_DIM));
                 ui.end_row();
             }
+            ObjectKind::Extrude {
+                extrusion,
+                hierarchical,
+            } => extrude_rows(ui, extrusion, hierarchical),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, primitive),
             ObjectKind::Spline {
                 spline, interpolation, ..
@@ -1297,6 +1302,57 @@ fn percent_row(ui: &mut Ui, label: &str, value: &mut f32) {
     {
         *value = percent / 100.0;
     }
+    ui.end_row();
+}
+
+/// The Extrude generator's Object and Caps parameters.
+fn extrude_rows(ui: &mut Ui, extrusion: &mut Extrusion, hierarchical: &mut bool) {
+    attr_label(ui, "Direction", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.extrude.direction")
+        .selected_text(extrusion.direction.label())
+        .show_ui(ui, |ui| {
+            for option in ExtrudeDirection::ALL {
+                ui.selectable_value(&mut extrusion.direction, option, option.label());
+            }
+        });
+    ui.end_row();
+    if extrusion.direction != ExtrudeDirection::Absolute {
+        offset_row(ui, "Offset", &mut extrusion.offset);
+    }
+    if matches!(
+        extrusion.direction,
+        ExtrudeDirection::Custom | ExtrudeDirection::Absolute
+    ) {
+        for (axis, label) in ["Movement . X", "Movement . Y", "Movement . Z"].into_iter().enumerate() {
+            offset_row(ui, label, &mut extrusion.movement[axis]);
+        }
+    }
+    attr_label(ui, "Subdivision", LABEL_WIDTH);
+    ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        DragValue::new(&mut extrusion.subdivision)
+            .speed(0.1)
+            .range(1..=Extrusion::MAX_SUBDIVISION),
+    );
+    ui.end_row();
+    check_row(ui, "Reverse Normals", &mut extrusion.reverse_normals);
+    check_row(ui, "Hierarchical", hierarchical);
+    ui.label("");
+    ui.label(RichText::new("Caps").strong());
+    ui.end_row();
+    check_row(ui, "Start Cap", &mut extrusion.start_cap);
+    check_row(ui, "End Cap", &mut extrusion.end_cap);
+    attr_label(ui, "Caps Type", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.extrude.caps")
+        .selected_text(extrusion.cap_type.label())
+        .show_ui(ui, |ui| {
+            for option in CapType::ALL {
+                ui.selectable_value(&mut extrusion.cap_type, option, option.label());
+            }
+        });
+    ui.end_row();
+    ui.label("");
+    ui.label(RichText::new("Extrudes its first child spline").color(p::TEXT_DIM));
     ui.end_row();
 }
 

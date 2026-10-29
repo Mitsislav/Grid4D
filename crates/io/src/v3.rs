@@ -25,6 +25,7 @@ use grid4d_geom::{
         SplineType,
     },
     subdivision::{Boundary, MAX_LEVEL},
+    surface::{CapType, ExtrudeDirection, Extrusion},
 };
 use grid4d_scene::{
     Axis, ComponentState, Components, Curve, Document, Falloff, FrameNaming, FrameRange, ImageFormat, Interpolation,
@@ -621,6 +622,24 @@ enum KindDto {
         linear_pre: u32,
         boundary: BoundaryDto,
     },
+    /// An Extrude generator (added in step 9.4); defaults omitted.
+    Extrude {
+        #[serde(default, skip_serializing_if = "ExtrudeDirectionDto::is_auto")]
+        direction: ExtrudeDirectionDto,
+        offset: f32,
+        movement: [f32; 3],
+        subdivision: u32,
+        #[serde(default, skip_serializing_if = "is_false")]
+        reverse_normals: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        hierarchical: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        start_cap: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        end_cap: bool,
+        #[serde(default, skip_serializing_if = "CapTypeDto::is_ngons")]
+        cap_type: CapTypeDto,
+    },
     /// A spline primitive (added in step 9.1). Angles in radians.
     Spline {
         spline: SplineShapeDto,
@@ -672,6 +691,58 @@ struct SegmentDto {
 )]
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+const fn yes() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ExtrudeDirectionDto {
+    #[default]
+    Auto,
+    X,
+    Y,
+    Z,
+    Custom,
+    Absolute,
+}
+
+impl ExtrudeDirectionDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_auto(&self) -> bool {
+        *self == Self::Auto
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CapTypeDto {
+    #[default]
+    NGons,
+    Triangles,
+}
+
+impl CapTypeDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_ngons(&self) -> bool {
+        *self == Self::NGons
+    }
 }
 
 /// A spline primitive's shape; optional parts (an ellipse's second radius, a
@@ -1620,6 +1691,30 @@ impl KindDto {
                 linear_pre,
                 boundary: boundary.into(),
             },
+            ObjectKind::Extrude {
+                extrusion,
+                hierarchical,
+            } => Self::Extrude {
+                direction: match extrusion.direction {
+                    ExtrudeDirection::Auto => ExtrudeDirectionDto::Auto,
+                    ExtrudeDirection::X => ExtrudeDirectionDto::X,
+                    ExtrudeDirection::Y => ExtrudeDirectionDto::Y,
+                    ExtrudeDirection::Z => ExtrudeDirectionDto::Z,
+                    ExtrudeDirection::Custom => ExtrudeDirectionDto::Custom,
+                    ExtrudeDirection::Absolute => ExtrudeDirectionDto::Absolute,
+                },
+                offset: extrusion.offset,
+                movement: extrusion.movement.to_array(),
+                subdivision: extrusion.subdivision,
+                reverse_normals: extrusion.reverse_normals,
+                hierarchical,
+                start_cap: extrusion.start_cap,
+                end_cap: extrusion.end_cap,
+                cap_type: match extrusion.cap_type {
+                    CapType::NGons => CapTypeDto::NGons,
+                    CapType::Triangles => CapTypeDto::Triangles,
+                },
+            },
             ObjectKind::Spline {
                 ref spline,
                 interpolation,
@@ -1791,6 +1886,40 @@ impl KindDto {
                 linear_pre: linear_pre.min(MAX_LEVEL),
                 boundary: boundary.into(),
             },
+            Self::Extrude {
+                direction,
+                offset,
+                movement,
+                subdivision,
+                reverse_normals,
+                hierarchical,
+                start_cap,
+                end_cap,
+                cap_type,
+            } => ObjectKind::Extrude {
+                extrusion: Extrusion {
+                    direction: match direction {
+                        ExtrudeDirectionDto::Auto => ExtrudeDirection::Auto,
+                        ExtrudeDirectionDto::X => ExtrudeDirection::X,
+                        ExtrudeDirectionDto::Y => ExtrudeDirection::Y,
+                        ExtrudeDirectionDto::Z => ExtrudeDirection::Z,
+                        ExtrudeDirectionDto::Custom => ExtrudeDirection::Custom,
+                        ExtrudeDirectionDto::Absolute => ExtrudeDirection::Absolute,
+                    },
+                    offset,
+                    movement: Vec3::from_array(movement),
+                    // Never trust a count a file claims: each ring adds a shell.
+                    subdivision: subdivision.clamp(1, Extrusion::MAX_SUBDIVISION),
+                    reverse_normals,
+                    start_cap,
+                    end_cap,
+                    cap_type: match cap_type {
+                        CapTypeDto::NGons => CapType::NGons,
+                        CapTypeDto::Triangles => CapType::Triangles,
+                    },
+                },
+                hierarchical,
+            },
             Self::Spline {
                 spline,
                 plane,
@@ -1872,6 +2001,7 @@ impl KindDto {
     fn parameters(&self) -> Vec<f32> {
         match *self {
             Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } => Vec::new(),
+            Self::Extrude { offset, movement, .. } => vec![offset, movement[0], movement[1], movement[2]],
             Self::EditableSpline {
                 ref points,
                 ref tangents,
@@ -2317,6 +2447,47 @@ mod tests {
             (viewport_levels, render_levels, linear_pre),
             (MAX_LEVEL, MAX_LEVEL, MAX_LEVEL)
         );
+    }
+
+    #[test]
+    fn extrude_generators_round_trip_and_defaults_are_omitted() {
+        let mut doc = Document::new("extrude");
+        let plain = ObjectKindTag::Extrude.default_kind();
+        let custom = ObjectKind::Extrude {
+            extrusion: Extrusion {
+                direction: ExtrudeDirection::Custom,
+                offset: -35.0,
+                movement: Vec3::new(1.0, 2.0, 3.0),
+                subdivision: 7,
+                reverse_normals: true,
+                start_cap: false,
+                end_cap: true,
+                cap_type: CapType::Triangles,
+            },
+            hierarchical: true,
+        };
+        doc.scene.insert(Node::new("Extrude", plain.clone()));
+        doc.scene.insert(Node::new("Extrude.1", custom.clone()));
+        let loaded = round_trip(&doc);
+        let kinds: Vec<&ObjectKind> = loaded
+            .scene
+            .roots()
+            .iter()
+            .map(|&id| &loaded.scene.get(id).unwrap().data.kind)
+            .collect();
+        assert_eq!(kinds, [&plain, &custom]);
+        let json = serde_json::to_string(&KindDto::new(&plain, "Extrude", &mut MeshTable::default())).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"extrude","offset":20.0,"movement":[0.0,0.0,20.0],"subdivision":1}"#
+        );
+        // Never trust a subdivision a file claims.
+        let json = r#"{"type": "extrude", "offset": 1.0, "movement": [0, 0, 1], "subdivision": 4000000}"#;
+        let dto: KindDto = serde_json::from_str(json).unwrap();
+        let ObjectKind::Extrude { extrusion, .. } = dto.into_kind(&[], "test").unwrap() else {
+            panic!("not an extrude")
+        };
+        assert_eq!(extrusion.subdivision, Extrusion::MAX_SUBDIVISION);
     }
 
     #[test]

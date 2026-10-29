@@ -110,6 +110,13 @@ pub enum ObjectKind {
         linear_pre: u32,
         boundary: grid4d_geom::subdivision::Boundary,
     },
+    /// Extrude generator: pushes its first child spline (with `hierarchical`,
+    /// every spline below the first child, each on its own) along a movement
+    /// into a solid with caps.
+    Extrude {
+        extrusion: grid4d_geom::surface::Extrusion,
+        hierarchical: bool,
+    },
     /// A parametric spline (Circle, Rectangle, Arc, n-Side, Star, Helix,
     /// Flower): a curve, drawn as lines, not rendered.
     SplinePrimitive(SplinePrimitive),
@@ -139,6 +146,7 @@ pub enum ObjectKindTag {
     Light,
     Polygon,
     SubdivisionSurface,
+    Extrude,
     Circle,
     Rectangle,
     Arc,
@@ -150,7 +158,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -164,6 +172,7 @@ impl ObjectKindTag {
         Self::Light,
         Self::Polygon,
         Self::SubdivisionSurface,
+        Self::Extrude,
         Self::Circle,
         Self::Rectangle,
         Self::Arc,
@@ -186,7 +195,7 @@ impl ObjectKindTag {
     ];
 
     /// Generators: objects that build their geometry from their children.
-    pub const GENERATORS: [Self; 1] = [Self::SubdivisionSurface];
+    pub const GENERATORS: [Self; 2] = [Self::SubdivisionSurface, Self::Extrude];
 
     /// Geometric primitives (the "Create ▸ Object" family).
     pub const PRIMITIVES: [Self; 8] = [
@@ -216,6 +225,7 @@ impl ObjectKindTag {
             Self::Light => "Light",
             Self::Polygon => "Polygon",
             Self::SubdivisionSurface => "Subdivision Surface",
+            Self::Extrude => "Extrude",
             Self::Circle => "Circle",
             Self::Rectangle => "Rectangle",
             Self::Arc => "Arc",
@@ -289,6 +299,11 @@ impl ObjectKindTag {
                 render_levels: 3,
                 linear_pre: 0,
                 boundary: grid4d_geom::subdivision::Boundary::EdgeAndCorner,
+            },
+            // docs/reference/generator-extrude.md: Auto, 20 cm, both caps.
+            Self::Extrude => ObjectKind::Extrude {
+                extrusion: grid4d_geom::surface::Extrusion::default(),
+                hierarchical: false,
             },
             // The manual states no defaults: these are ours (docs/reference/object-spline.md).
             Self::Circle => spline(SplineShape::Circle {
@@ -412,6 +427,7 @@ impl ObjectKind {
             Self::Light { .. } => ObjectKindTag::Light,
             Self::Polygon { .. } => ObjectKindTag::Polygon,
             Self::SubdivisionSurface { .. } => ObjectKindTag::SubdivisionSurface,
+            Self::Extrude { .. } => ObjectKindTag::Extrude,
             Self::SplinePrimitive(primitive) => match primitive.shape {
                 SplineShape::Circle { .. } => ObjectKindTag::Circle,
                 SplineShape::Rectangle { .. } => ObjectKindTag::Rectangle,
@@ -434,7 +450,7 @@ impl ObjectKind {
     /// Builds its geometry from its children (see [`ObjectKindTag::GENERATORS`]).
     #[must_use]
     pub const fn is_generator(&self) -> bool {
-        matches!(self, Self::SubdivisionSurface { .. })
+        matches!(self, Self::SubdivisionSurface { .. } | Self::Extrude { .. })
     }
 
     #[must_use]
@@ -448,7 +464,7 @@ impl ObjectKind {
     pub fn local_bounds(&self) -> Option<Aabb> {
         let half = match *self {
             // A generator's extent is its result's: evaluation knows it.
-            Self::Null | Self::SubdivisionSurface { .. } => return None,
+            Self::Null | Self::SubdivisionSurface { .. } | Self::Extrude { .. } => return None,
             Self::Cube { size, .. } => size * 0.5,
             Self::Sphere { radius, .. } => Vec3::splat(radius),
             Self::Cylinder { radius, height, .. } => Vec3::new(radius, height * 0.5, radius),

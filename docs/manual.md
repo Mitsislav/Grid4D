@@ -298,9 +298,10 @@ the selected object. These are **parametric** objects: change their parameters a
 any time. To edit their points and polygons, make them editable
 ([§11.1](#111-make-editable)).
 
-**Generators** (Create ▸ Generator, or the green button at the right end of the
+**Generators** (Create ▸ Generator, or the green buttons at the right end of the
 command palette) build their shape from their children. The Subdivision Surface
-smooths a polygon mesh ([§12](#12-generators-subdivision-surface)).
+smooths a polygon mesh ([§12](#12-generators-subdivision-surface)); the Extrude
+turns a spline into a solid ([§13.4](#134-extrude-from-outline-to-solid)).
 
 **Splines** (Create ▸ Spline, or the circle button) are curves: Circle,
 Rectangle, Arc, n-Side, Star, Helix and Flower ([§13](#13-splines)).
@@ -1096,6 +1097,47 @@ in Points mode:
 
 The selection stays on the same points, and each command is one undo step.
 
+### 13.4 Extrude: from outline to solid
+
+The **Extrude** generator pushes a spline along a direction and closes it with
+lids, so a flat outline becomes a solid: a Circle becomes a disc, a Circle with
+a Ring a tube, a Star a star-shaped block.
+
+![Five splines extruded: a ring, a rounded rectangle, a star, a flower and an open arc; the Extrude's Object properties](images/manual/spline-extrude.png)
+
+1. Select the spline and hold **Alt** while you choose **Create ▸ Generator ▸
+   Extrude** (or the Extrude button in the toolbar). The Extrude takes the
+   spline's place and the spline becomes its child. Without Alt you get an
+   empty Extrude: drag a spline onto it in the Object Manager.
+2. The spline stays visible as a line: click it to select it, edit its points
+   or change its parameters, and the solid follows.
+
+The Attribute Manager's **Object** tab:
+
+- **Direction**: **Auto** pushes the spline straight out of its plane (a spline
+  in the XY plane goes along Z). **X**, **Y** and **Z** push along that axis of
+  the Extrude. **Custom** pushes along the **Movement** vector's direction;
+  **Absolute** moves the spline by exactly the **Movement** vector.
+- **Offset**: how far (20 cm by default). A negative offset goes the other way.
+- **Subdivision**: how many rings of polygons the walls have along the way.
+- **Reverse Normals**: turns the walls inside out (for open splines, whose
+  outside the Extrude cannot know). The lids are not affected.
+- **Hierarchical**: off, only the Extrude's first child is extruded; on, every
+  spline under it is, each on its own (put several splines under a Null).
+- **Start Cap** / **End Cap**: the lids at the start and at the end. Only closed
+  splines get lids; an open one (an Arc) gives just a wall.
+- **Caps Type**: **N-Gons** makes each lid one polygon, **Triangles** cuts it into
+  triangles.
+
+**Holes**: a spline with an outline inside another (a Circle with **Ring**, a
+Rectangle and a smaller one in one editable spline) gets lids with the inner
+outline cut out; an outline inside a hole is filled again. Whichever way the
+outlines were drawn, the solid faces outwards.
+
+As with every generator, **Q** switches it on and off, and **Make Editable** (C)
+turns the solid into one polygon object (the spline goes with it). Renders show
+the solid; the spline itself is never rendered.
+
 ## 14. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
@@ -1455,8 +1497,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Modelling**:
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
   Solid, Proportional and Radial modes; Bridge point by point.
-- **Generators**: only the Subdivision Surface, with one type (Catmull-Clark) and
-  without edge weights (creases) or UV options. Extrude, Lathe, Loft, Sweep and
+- **Generators**: the Subdivision Surface has one type (Catmull-Clark) and no
+  edge weights (creases) or UV options. The Extrude has no bevels (fillets),
+  Delaunay or grid caps, UVs or selections for its caps. Lathe, Sweep, Loft and
   Cloner are planned.
 - **Splines**: Text comes next; hiding points, Grow/Shrink on points,
   snapping to spline points and the Pen snapping to objects; editing points

@@ -237,6 +237,7 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
             | ObjectKind::Camera { .. }
             | ObjectKind::Light { .. }
             | ObjectKind::SubdivisionSurface { .. }
+            | ObjectKind::Extrude { .. }
             | ObjectKind::SplinePrimitive(_)
             | ObjectKind::Spline { .. } => continue,
         };

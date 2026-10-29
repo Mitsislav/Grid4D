@@ -402,6 +402,18 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
                 c.disc(corner, 0.07);
             }
         }
+        ObjectKindTag::Extrude => {
+            // A flat outline pushed back into a solid: its front face, the face
+            // it was pushed to, and the edges joining them.
+            let front = [(0.08, 0.42), (0.36, 0.42), (0.62, 0.62), (0.62, 0.92), (0.08, 0.92)];
+            let back = front.map(|(x, y)| (x + 0.3, y - 0.32));
+            c.polyline(&back, true);
+            for (a, b) in front.iter().zip(&back) {
+                c.line(*a, *b);
+            }
+            c.fill_with(&front, soft);
+            c.polyline(&front, true);
+        }
         ObjectKindTag::Light => {
             c.disc((0.5, 0.5), 0.19);
             for i in 0..8 {

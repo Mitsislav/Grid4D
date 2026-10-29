@@ -237,7 +237,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
             shaded(MeshKey::Polygon(mesh.id()), Vec3::ONE)
         }
         // A generator draws its result, which evaluation builds.
-        ObjectKind::SubdivisionSurface { .. } => None,
+        ObjectKind::SubdivisionSurface { .. } | ObjectKind::Extrude { .. } => None,
     }
 }
 
@@ -268,6 +268,7 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
         | ObjectKind::Light { .. }
         | ObjectKind::Polygon { .. }
         | ObjectKind::SubdivisionSurface { .. }
+        | ObjectKind::Extrude { .. }
         // Curves, not surfaces (a spline primitive is made editable as a spline).
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Spline { .. } => None,
@@ -304,7 +305,10 @@ mod tests {
             // spline's curve is named during evaluation.
             let expected = !matches!(
                 tag,
-                ObjectKindTag::Null | ObjectKindTag::Polygon | ObjectKindTag::SubdivisionSurface
+                ObjectKindTag::Null
+                    | ObjectKindTag::Polygon
+                    | ObjectKindTag::SubdivisionSurface
+                    | ObjectKindTag::Extrude
             ) && !tag.is_spline();
             assert_eq!(style.is_some(), expected, "{tag:?}");
         }

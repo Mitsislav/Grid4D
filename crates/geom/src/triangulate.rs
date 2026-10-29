@@ -167,10 +167,128 @@ fn is_convex(polygon: &[Vec2]) -> bool {
 fn ear_clip(polygon: &[Vec2], remaining: &mut Vec<u32>, out: &mut Vec<[u32; 3]>) {
     remaining.clear();
     remaining.extend((0..polygon.len()).map(u32_index));
+    ear_clip_ring(polygon, remaining, out);
+}
+
+/// Triangulates the region inside `outline` and outside every one of `holes`
+/// (2D; either may run either way round, holes must lie inside the outline).
+/// Returns counter-clockwise triangles of indices into the outline's points
+/// followed by each hole's, in order. Holes are joined to the outline by
+/// bridges (Eberly's method), then the one ring is ear-clipped; holes the
+/// outline does not reach are left out. Never fails: overlapping or crossing
+/// input gives some triangulation.
+#[must_use]
+pub fn triangulate_outlines(outline: &[Vec2], holes: &[&[Vec2]]) -> Vec<[u32; 3]> {
+    let mut points: Vec<Vec2> = outline.to_vec();
+    let mut ring: Vec<u32> = (0..outline.len()).map(u32_index).collect();
+    if signed_area(outline) < 0.0 {
+        ring.reverse();
+    }
+    // Each hole clockwise, with its point indices; the rightmost holes first.
+    let mut hole_rings: Vec<Vec<u32>> = Vec::with_capacity(holes.len());
+    for hole in holes {
+        let start = u32_index(points.len());
+        points.extend_from_slice(hole);
+        let mut indices: Vec<u32> = (start..start + u32_index(hole.len())).collect();
+        if signed_area(hole) > 0.0 {
+            indices.reverse();
+        }
+        if indices.len() >= 3 {
+            hole_rings.push(indices);
+        }
+    }
+    let max_x = |indices: &Vec<u32>| indices.iter().map(|&i| points[us(i)].x).fold(f32::MIN, f32::max);
+    hole_rings.sort_by(|a, b| max_x(b).total_cmp(&max_x(a)));
+    for hole in hole_rings {
+        bridge(&points, &mut ring, &hole);
+    }
+    let mut out = Vec::new();
+    if ring.len() >= 3 {
+        ear_clip_ring(&points, &mut ring, &mut out);
+    }
+    out
+}
+
+/// Twice the signed area of a polygon: positive when counter-clockwise.
+fn signed_area(polygon: &[Vec2]) -> f32 {
+    let n = polygon.len();
+    (0..n).map(|i| polygon[i].perp_dot(polygon[(i + 1) % n])).sum()
+}
+
+/// Joins the clockwise `hole` into the counter-clockwise `ring` by a bridge
+/// from the hole's rightmost point to a ring point it can see.
+fn bridge(points: &[Vec2], ring: &mut Vec<u32>, hole: &[u32]) {
+    let Some(m) = (0..hole.len()).max_by(|&a, &b| points[us(hole[a])].x.total_cmp(&points[us(hole[b])].x)) else {
+        return;
+    };
+    let from = points[us(hole[m])];
+    // The nearest ring edge a ray to +X from the hole's point crosses.
+    let n = ring.len();
+    let mut best: Option<(f32, usize)> = None;
+    for i in 0..n {
+        let (a, b) = (points[us(ring[i])], points[us(ring[(i + 1) % n])]);
+        if (a.y - from.y) * (b.y - from.y) > 0.0 || a.y == b.y {
+            continue;
+        }
+        let x = a.x + (from.y - a.y) / (b.y - a.y) * (b.x - a.x);
+        if x >= from.x && best.is_none_or(|(bx, _)| x < bx) {
+            best = Some((x, i));
+        }
+    }
+    let Some((x, edge)) = best else {
+        return; // outside the outline: nothing to join
+    };
+    let hit = Vec2::new(x, from.y);
+    // The edge's end further right is visible unless ring points lie inside
+    // the triangle (point, hit, that end); then the one closest in angle is.
+    let mut at = if points[us(ring[edge])].x >= points[us(ring[(edge + 1) % n])].x {
+        edge
+    } else {
+        (edge + 1) % n
+    };
+    let candidate = points[us(ring[at])];
+    let mut best_angle = f32::MIN;
+    for j in 0..n {
+        let p = points[us(ring[j])];
+        if p == candidate || p == from {
+            continue;
+        }
+        let reflex = {
+            let (prev, next) = (points[us(ring[(j + n - 1) % n])], points[us(ring[(j + 1) % n])]);
+            (p - prev).perp_dot(next - p) <= 0.0
+        };
+        if reflex && inside_either_way(p, from, hit, candidate) {
+            let to = p - from;
+            let cosine = to.x / to.length().max(f32::MIN_POSITIVE);
+            if cosine > best_angle {
+                best_angle = cosine;
+                at = j;
+            }
+        }
+    }
+    // ring … P, M, hole …, M, P …
+    let mut joined = Vec::with_capacity(ring.len() + hole.len() + 2);
+    joined.extend_from_slice(&ring[..=at]);
+    joined.extend((0..=hole.len()).map(|k| hole[(m + k) % hole.len()]));
+    joined.extend_from_slice(&ring[at..]);
+    *ring = joined;
+}
+
+/// Inside or on the border of the triangle `a b c`, whichever way it runs.
+fn inside_either_way(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
+    in_triangle(p, a, b, c) || in_triangle(p, a, c, b)
+}
+
+/// Ear clipping of the counter-clockwise ring `remaining` (indices into
+/// `polygon`, which may repeat where holes are bridged), consumed.
+fn ear_clip_ring(polygon: &[Vec2], remaining: &mut Vec<u32>, out: &mut Vec<[u32; 3]>) {
     // Turns smaller than this count as straight (relative to the polygon's size).
-    let (min, max) = polygon
+    let (min, max) = remaining
         .iter()
-        .fold((polygon[0], polygon[0]), |(lo, hi), &p| (lo.min(p), hi.max(p)));
+        .map(|&i| polygon[us(i)])
+        .fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), p| {
+            (lo.min(p), hi.max(p))
+        });
     let epsilon = (max - min).length_squared() * 1e-10;
 
     while remaining.len() > 3 {

@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 9 — Splines & spline generators (v0.9) |
-| Last step done | 9.3 — Spline commands and the Pen (2026-10-29) |
-| Next step | 9.4 — Extrude generator |
-| Tests | 552, all passing; clippy and rustfmt clean |
+| Last step done | 9.4 — Extrude generator (2026-10-29) |
+| Next step | 9.5 — Lathe generator |
+| Tests | 564, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -895,6 +895,7 @@ Phase 8 is complete.
 | 9.1 | Spline primitives: Circle, Rectangle, Arc, n-Side, Star, Helix and Flower — curves with a plane, Reverse and intermediate points; drawn as lines in every display mode, picked near their line, framed, filtered, undone and saved | 540 |
 | 9.2 | Editable splines: Make Editable on spline primitives; Points mode on a spline — click, rectangle and brush selection, the gizmo on points (tangents along), Bezier handle drags (Shift breaks them), Delete, Select All / Invert; Type and Close Spline in the Attribute Manager | 548 |
 | 9.3 | Spline commands and the Pen: Mesh ▸ Spline — Hard / Soft Interpolation, Reverse Sequence, Set First Point (selection follows the points); the Pen tool — click adds a point on the grid's plane, a drag pulls its tangents, a click on the first point closes, Esc / Enter finish, Type option; one undo step per point | 552 |
+| 9.4 | Extrude generator: a spline pushed along Auto / X / Y / Z / Custom / Absolute by an offset, subdivided; start and end caps (N-Gons or Triangles) with holes cut out (even-odd nesting, hole bridging), outward whichever way the outlines run; Reverse Normals, Hierarchical; Alt wraps the selected spline, Make Editable bakes the solid; saved; rendered | 564 |
 
 **9.1 — Spline primitives**
 
@@ -999,6 +1000,38 @@ Phase 8 is complete.
   corners into a smooth curve with handles; Mode ▸ Tool showed the Pen's Type
   option. The preview line follows hover, which posted mouse moves do not
   produce in egui; a headless test checks where the cursor meets the floor.
+
+**9.4 — Extrude generator**
+
+*Problems and solutions:*
+- **Generators with spline inputs.** The generator code knew only the
+  Subdivision Surface (its options were `SubdivisionOptions`, its inputs
+  meshes). It now carries `Options::{Subdivision, Extrude}` and `Source` gained
+  spline primitives (by parameters) and editable splines (by id and
+  interpolation), so the same cache decides when an Extrude is rebuilt: moving
+  the Extrude or selecting points changes nothing, a parameter or the spline's
+  placement under it does.
+- **Which way is out.** A spline can be drawn either way round, and an outline
+  can hold holes. The solid projects every closed segment onto the plane across
+  the movement, counts how many other segments contain it (even: an outline,
+  odd: a hole) and turns outlines counter-clockwise and holes clockwise around
+  the movement. Walls built from that order face outwards, and so do caps
+  triangulated in the same plane; tests check the enclosed volume for all four
+  combinations of outline and hole directions.
+- **Caps with holes.** The triangulator only cut simple polygons. Holes are now
+  joined to their outline by a bridge from the hole's rightmost point to a
+  point of the outline it can see (Eberly's method), and the ear clipper runs
+  on the resulting ring, whose bridge points repeat; it already skipped points
+  equal to the ear's corners. Triangles that would repeat a point are dropped.
+- **The input stays visible.** Generators hide their cage. A spline under an
+  Extrude must stay drawn and pickable (it is what you edit), so curves inside a
+  generator keep their line and pick shape.
+- **On-screen testing:** a document with five Extrudes (a Circle with Ring, a
+  rounded Rectangle, a Star, a Flower with three subdivisions and an open Arc)
+  showed a tube with a hole, solid shapes and a wall without caps; selecting an
+  Extrude showed its Object properties. The same file rendered with the path
+  tracer (3110 triangles). Posted drags still do not move egui's panel
+  dividers, so the lower Attribute Manager rows were checked headless.
 
 ---
 

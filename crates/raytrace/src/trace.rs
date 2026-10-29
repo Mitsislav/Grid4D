@@ -589,4 +589,17 @@ mod tests {
             .insert(Node::new("Circle", ObjectKindTag::Circle.default_kind()));
         assert_eq!(scene_of(&doc).triangle_count(), 0, "a curve has no surface");
     }
+
+    #[test]
+    fn an_extruded_spline_is_rendered_as_a_solid() {
+        let mut doc = Document::new("t");
+        let extrude = doc
+            .scene
+            .insert(Node::new("Extrude", ObjectKindTag::Extrude.default_kind()));
+        doc.scene
+            .insert_child(extrude, Node::new("Rectangle", ObjectKindTag::Rectangle.default_kind()))
+            .unwrap();
+        // Four walls of two triangles and two square caps of two: the curve itself adds none.
+        assert_eq!(scene_of(&doc).triangle_count(), 12);
+    }
 }

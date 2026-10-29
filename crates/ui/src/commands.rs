@@ -1656,7 +1656,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Disc
         | ObjectKindTag::Capsule
         | ObjectKindTag::Polygon
-        | ObjectKindTag::SubdivisionSurface => {}
+        | ObjectKindTag::SubdivisionSurface
+        | ObjectKindTag::Extrude => {}
     }
     data
 }
@@ -1696,7 +1697,7 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         ObjectKindTag::Null => palette::ICON_NULL,
         ObjectKindTag::Camera => palette::ICON_CAMERA,
         ObjectKindTag::Light => palette::ICON_LIGHT,
-        ObjectKindTag::SubdivisionSurface => palette::ICON_GENERATOR,
+        ObjectKindTag::SubdivisionSurface | ObjectKindTag::Extrude => palette::ICON_GENERATOR,
         ObjectKindTag::Circle
         | ObjectKindTag::Rectangle
         | ObjectKindTag::Arc
@@ -3532,5 +3533,39 @@ mod tests {
         assert_eq!(spline.segments.len(), 2);
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
         assert_eq!(spline_of(&doc, first).0.points.len(), 3);
+    }
+
+    #[test]
+    fn an_extrude_wraps_a_spline_and_make_editable_bakes_the_solid() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Rectangle)],
+        );
+        let rectangle = editor.selection.active().unwrap();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::WrapInGenerator(ObjectKindTag::Extrude)],
+        );
+        let extrude = editor.selection.active().unwrap();
+        assert_eq!(doc.scene.get(extrude).unwrap().data.name, "Extrude");
+        assert_eq!(doc.scene.get(rectangle).unwrap().parent(), Some(extrude));
+        let solid = grid4d_eval::generator_mesh(&doc.scene, extrude).unwrap();
+        assert_eq!(solid.face_count(), 4 + 2, "four walls and two caps");
+        assert!(can_make_editable(&doc, &editor.selection));
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let ObjectKind::Polygon { mesh, .. } = &doc.scene.get(extrude).unwrap().data.kind else {
+            panic!("not baked")
+        };
+        assert_eq!(mesh.mesh(), &solid);
+        assert!(!doc.scene.contains(rectangle), "the spline went with it");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(extrude).unwrap().data.kind.tag(), ObjectKindTag::Extrude);
+        assert_eq!(doc.scene.get(rectangle).unwrap().parent(), Some(extrude));
     }
 }
