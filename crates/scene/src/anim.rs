@@ -8,7 +8,9 @@
 //! [`NodeData::set_transform_at`], which writes keys (Autokeying) or temporary
 //! values (see `docs/reference/animation-recording.md`).
 
-use crate::{NodeData, Transform};
+use std::borrow::Cow;
+
+use crate::{NodeData, ObjectKind, ObjectParam, Transform};
 
 /// An axis of a vector parameter (H, P, B for rotations).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -39,6 +41,8 @@ pub enum Param {
     /// Radians: X = heading, Y = pitch, Z = bank.
     Rotation(Axis),
     Scale(Axis),
+    /// One of the object's own numbers (a radius, an offset, …).
+    Object(ObjectParam),
 }
 
 impl Param {
@@ -67,35 +71,40 @@ impl Param {
             Self::Scale(Axis::X) => "Scale . X",
             Self::Scale(Axis::Y) => "Scale . Y",
             Self::Scale(Axis::Z) => "Scale . Z",
+            Self::Object(param) => param.label(),
         }
     }
 
-    /// Position in [`Param::TRANSFORM`].
+    /// A distinct number: the position in [`Param::TRANSFORM`], then the object
+    /// parameters after them.
     #[must_use]
     pub const fn index(self) -> usize {
         match self {
             Self::Position(axis) => axis.index(),
             Self::Rotation(axis) => 3 + axis.index(),
             Self::Scale(axis) => 6 + axis.index(),
+            Self::Object(param) => 9 + param.index(),
         }
     }
 
-    /// This parameter's value in `transform`.
+    /// This parameter's value in `transform`; `None` for object parameters.
     #[must_use]
-    pub fn get(self, transform: &Transform) -> f32 {
+    pub fn get(self, transform: &Transform) -> Option<f32> {
         match self {
-            Self::Position(axis) => transform.position[axis.index()],
-            Self::Rotation(axis) => transform.rotation[axis.index()],
-            Self::Scale(axis) => transform.scale[axis.index()],
+            Self::Position(axis) => Some(transform.position[axis.index()]),
+            Self::Rotation(axis) => Some(transform.rotation[axis.index()]),
+            Self::Scale(axis) => Some(transform.scale[axis.index()]),
+            Self::Object(_) => None,
         }
     }
 
-    /// Sets this parameter in `transform`.
+    /// Sets this parameter in `transform` (object parameters are not in it).
     pub fn set(self, transform: &mut Transform, value: f32) {
         match self {
             Self::Position(axis) => transform.position[axis.index()] = value,
             Self::Rotation(axis) => transform.rotation[axis.index()] = value,
             Self::Scale(axis) => transform.scale[axis.index()] = value,
+            Self::Object(_) => {}
         }
     }
 }
@@ -452,7 +461,7 @@ impl Tracks for [Track] {
 
 /// A set of [`Param`]s.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct ParamSet(u16);
+pub struct ParamSet(u128);
 
 impl ParamSet {
     #[must_use]
@@ -497,11 +506,28 @@ pub enum KeyState {
 }
 
 impl NodeData {
+    /// `param`'s value without animation: in the base transform or the
+    /// object's own parameters (0 for a parameter it does not have).
+    #[must_use]
+    pub fn base_value(&self, param: Param) -> f32 {
+        match param {
+            Param::Object(p) => self.kind.param(p).unwrap_or(0.0),
+            Param::Position(_) | Param::Rotation(_) | Param::Scale(_) => param.get(&self.transform).unwrap_or(0.0),
+        }
+    }
+
+    fn set_base_value(&mut self, param: Param, value: f32) {
+        match param {
+            Param::Object(p) => self.kind.set_param(p, value),
+            Param::Position(_) | Param::Rotation(_) | Param::Scale(_) => param.set(&mut self.transform, value),
+        }
+    }
+
     /// `param`'s value at `frame`: its curve's, unless it was changed at that
-    /// frame without recording (then the base transform's).
+    /// frame without recording (then the base value).
     #[must_use]
     pub fn value_at(&self, param: Param, frame: f64) -> f32 {
-        let base = param.get(&self.transform);
+        let base = self.base_value(param);
         if self.is_unkeyed(param, frame) {
             return base;
         }
@@ -526,6 +552,26 @@ impl NodeData {
         transform
     }
 
+    /// The object's own parameters at `frame` (what the viewport, generators
+    /// and the Attribute Manager work with). Borrowed — no copy — when none is
+    /// animated.
+    #[must_use]
+    pub fn kind_at(&self, frame: f64) -> Cow<'_, ObjectKind> {
+        if !self.tracks.iter().any(|t| matches!(t.param, Param::Object(_))) {
+            return Cow::Borrowed(&self.kind);
+        }
+        let mut kind = self.kind.clone();
+        for track in &self.tracks {
+            if let Param::Object(param) = track.param
+                && !self.is_unkeyed(track.param, frame)
+                && let Some(value) = track.curve.value_at(frame)
+            {
+                kind.set_param(param, value);
+            }
+        }
+        Cow::Owned(kind)
+    }
+
     /// Writes `shown`, the transform as edited at `frame`, back: each parameter
     /// whose shown value changed is set — an unanimated one in the base
     /// transform; an animated one as a key at `frame` with `autokey`, else as a
@@ -533,9 +579,41 @@ impl NodeData {
     pub fn set_transform_at(&mut self, shown: &Transform, frame: f64, autokey: bool) {
         let current = self.transform_at(frame);
         for param in Param::TRANSFORM {
-            let value = param.get(shown);
-            if value != param.get(&current) {
+            if let Some(value) = param.get(shown)
+                && Some(value) != param.get(&current)
+            {
                 self.set_value_at(param, value, frame, autokey);
+            }
+        }
+    }
+
+    /// Writes `edited`, the object's parameters as edited at `frame`, back like
+    /// [`set_transform_at`](Self::set_transform_at): changed animated parameters
+    /// become keys (with `autokey`) or temporary values; everything else —
+    /// unanimated numbers, choices, counts, text — is set for all frames.
+    pub fn set_kind_at(&mut self, edited: &ObjectKind, frame: f64, autokey: bool) {
+        let shown = self.kind_at(frame).into_owned();
+        let animated: Vec<ObjectParam> = self
+            .tracks
+            .iter()
+            .filter_map(|t| match t.param {
+                Param::Object(p) => Some(p),
+                Param::Position(_) | Param::Rotation(_) | Param::Scale(_) => None,
+            })
+            .collect();
+        let mut base = edited.clone();
+        // Animated parameters keep their base values; changes go through keys.
+        for &p in &animated {
+            if let Some(value) = self.kind.param(p) {
+                base.set_param(p, value);
+            }
+        }
+        self.kind = base;
+        for p in animated {
+            if let Some(value) = edited.param(p)
+                && Some(value) != shown.param(p)
+            {
+                self.set_value_at(Param::Object(p), value, frame, autokey);
             }
         }
     }
@@ -543,14 +621,14 @@ impl NodeData {
     /// Sets one parameter as [`set_transform_at`](Self::set_transform_at) does.
     pub fn set_value_at(&mut self, param: Param, value: f32, frame: f64, autokey: bool) {
         let Some(track) = self.tracks.iter_mut().find(|t| t.param == param) else {
-            param.set(&mut self.transform, value);
+            self.set_base_value(param, value);
             return;
         };
         if autokey {
             track.curve.record(frame, value);
             self.forget_unkeyed(param);
         } else {
-            param.set(&mut self.transform, value);
+            self.set_base_value(param, value);
             let mut params = self
                 .unkeyed
                 .filter(|u| u.frame == frame)
@@ -567,7 +645,7 @@ impl NodeData {
             return KeyState::Unanimated;
         };
         let key = track.curve.key_at(frame).is_some();
-        if self.is_unkeyed(param, frame) && track.curve.value_at(frame) != Some(param.get(&self.transform)) {
+        if self.is_unkeyed(param, frame) && track.curve.value_at(frame) != Some(self.base_value(param)) {
             KeyState::Changed { key }
         } else if key {
             KeyState::Key
@@ -611,15 +689,19 @@ impl NodeData {
     /// without keys goes, and its parameter keeps the value shown at `current`.
     /// Returns whether anything was removed.
     pub fn remove_keys(&mut self, selected: impl Fn(Param, f64) -> bool, current: f64) -> bool {
-        let shown = self.transform_at(current);
+        let shown: Vec<(Param, f32)> = self
+            .tracks
+            .iter()
+            .map(|t| (t.param, self.value_at(t.param, current)))
+            .collect();
         let mut removed = false;
         for track in &mut self.tracks {
             let param = track.param;
             removed |= track.curve.remove_keys(|f| selected(param, f));
         }
-        for param in Param::TRANSFORM {
+        for (param, value) in shown {
             if self.tracks.track(param).is_some_and(|t| t.curve.is_empty()) {
-                param.set(&mut self.transform, param.get(&shown));
+                self.set_base_value(param, value);
                 self.forget_unkeyed(param);
             }
         }
@@ -762,7 +844,7 @@ mod tests {
         for p in Param::TRANSFORM {
             let mut t = base;
             p.set(&mut t, 0.5);
-            assert_eq!(p.get(&t), 0.5, "{}", p.label());
+            assert_eq!(p.get(&t), Some(0.5), "{}", p.label());
             assert_eq!(Param::TRANSFORM[p.index()], p);
         }
     }
@@ -772,7 +854,7 @@ mod tests {
 
     /// An object whose position X goes 0 → 100 over frames 0–10 (linear).
     fn animated() -> NodeData {
-        let mut data = NodeData::new("a", crate::ObjectKind::Null);
+        let mut data = NodeData::new("a", ObjectKind::Null);
         data.tracks.push(Track {
             param: PX,
             curve: curve(&[(0.0, 0.0), (10.0, 100.0)], Interpolation::Linear),
@@ -893,5 +975,56 @@ mod tests {
         assert!(close(c.value_at(2.5).unwrap(), 25.0));
         c.apply_tangent_preset(0.0, TangentPreset::Auto);
         assert_eq!(c.keys()[0].tangents, Tangents::Auto);
+    }
+
+    #[test]
+    fn object_parameters_key_and_stay_temporary_like_transforms() {
+        use crate::ObjectParam::Radius;
+        let mut data = NodeData::new(
+            "s",
+            ObjectKind::Sphere {
+                radius: 100.0,
+                segments: 24,
+            },
+        );
+        let r = Param::Object(Radius);
+        assert!(
+            matches!(data.kind_at(3.0), Cow::Borrowed(_)),
+            "nothing animated: no copy"
+        );
+        assert_eq!(data.key_state(r, 0.0), KeyState::Unanimated);
+        data.record([r], 0.0, 0.0);
+        data.set_value_at(r, 200.0, 10.0, true);
+        assert_eq!(data.kind_at(0.0).param(Radius), Some(100.0));
+        assert_eq!(data.kind_at(10.0).param(Radius), Some(200.0));
+        assert_eq!(data.key_state(r, 10.0), KeyState::Key);
+        assert_eq!(data.value_at(r, 10.0), 200.0);
+
+        // Without Autokeying an edit is temporary: shown at its frame only.
+        let mut edited = data.kind_at(5.0).into_owned();
+        edited.set_param(Radius, 999.0);
+        data.set_kind_at(&edited, 5.0, false);
+        assert_eq!(data.kind_at(5.0).param(Radius), Some(999.0));
+        assert_eq!(data.key_state(r, 5.0), KeyState::Changed { key: false });
+        assert_ne!(data.kind_at(6.0).param(Radius), Some(999.0));
+
+        // Choices and counts are set for all frames; animated values keep their keys.
+        let mut edited = data.kind_at(5.0).into_owned();
+        let ObjectKind::Sphere { segments, .. } = &mut edited else {
+            unreachable!()
+        };
+        *segments = 8;
+        data.set_kind_at(&edited, 5.0, true);
+        assert!(matches!(data.kind, ObjectKind::Sphere { segments: 8, .. }));
+        assert_eq!(
+            data.tracks[0].curve.keys().len(),
+            2,
+            "no key added for an unchanged value"
+        );
+
+        // Removing every key leaves the value shown at the current frame.
+        data.remove_keys(|_, _| true, 10.0);
+        assert!(data.tracks.is_empty());
+        assert_eq!(data.kind.param(Radius), Some(200.0));
     }
 }

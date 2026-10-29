@@ -71,6 +71,8 @@ pub mod palette {
     pub const SNAP: Color32 = Color32::from_rgb(0xff, 0xd8, 0x3d);
 
     pub const AXIS: [Color32; 3] = [AXIS_X, AXIS_Y, AXIS_Z];
+    /// Curves of an object's own parameters (F-Curve editor), in turn.
+    pub const PARAM_CURVES: [Color32; 4] = [HIGHLIGHT, ICON_CAMERA, ICON_SPLINE, ICON_LIGHT];
 }
 
 use palette as p;

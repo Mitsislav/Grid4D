@@ -30,7 +30,7 @@ use grid4d_geom::{
 use grid4d_scene::{
     Axis, ComponentState, Components, Curve, Document, Falloff, FrameNaming, FrameRange, ImageFormat, Interpolation,
     Key, LightDetails, LightShadow, LightType, Material, MaterialId, MeshHandle, MeshId, NodeData, NodeId, ObjectKind,
-    Param, RenderSettings, SplineHandle, Tag, Tangents, TimeSettings, Track, Transform,
+    ObjectParam, Param, RenderSettings, SplineHandle, Tag, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -322,6 +322,46 @@ enum ParamDto {
     ScaleX,
     ScaleY,
     ScaleZ,
+    // An object's own parameters (added in step 10.1), named by meaning.
+    SizeX,
+    SizeY,
+    SizeZ,
+    Radius,
+    Height,
+    Width,
+    TopRadius,
+    BottomRadius,
+    InnerRadius,
+    OuterRadius,
+    RingRadius,
+    PipeRadius,
+    EllipseRadius,
+    RoundingRadius,
+    StartRadius,
+    EndRadius,
+    StartAngle,
+    EndAngle,
+    Twist,
+    RadialBias,
+    HeightBias,
+    HorizontalSpacing,
+    VerticalSpacing,
+    FieldOfView,
+    Intensity,
+    InnerAngle,
+    OuterAngle,
+    FalloffRadius,
+    Offset,
+    MovementX,
+    MovementY,
+    MovementZ,
+    Angle,
+    Rise,
+    Scaling,
+    EndScale,
+    EndRotation,
+    StartGrowth,
+    EndGrowth,
 }
 
 impl From<Param> for ParamDto {
@@ -336,6 +376,45 @@ impl From<Param> for ParamDto {
             Param::Scale(Axis::X) => Self::ScaleX,
             Param::Scale(Axis::Y) => Self::ScaleY,
             Param::Scale(Axis::Z) => Self::ScaleZ,
+            Param::Object(ObjectParam::Size(Axis::X)) => Self::SizeX,
+            Param::Object(ObjectParam::Size(Axis::Y)) => Self::SizeY,
+            Param::Object(ObjectParam::Size(Axis::Z)) => Self::SizeZ,
+            Param::Object(ObjectParam::Radius) => Self::Radius,
+            Param::Object(ObjectParam::Height) => Self::Height,
+            Param::Object(ObjectParam::Width) => Self::Width,
+            Param::Object(ObjectParam::TopRadius) => Self::TopRadius,
+            Param::Object(ObjectParam::BottomRadius) => Self::BottomRadius,
+            Param::Object(ObjectParam::InnerRadius) => Self::InnerRadius,
+            Param::Object(ObjectParam::OuterRadius) => Self::OuterRadius,
+            Param::Object(ObjectParam::RingRadius) => Self::RingRadius,
+            Param::Object(ObjectParam::PipeRadius) => Self::PipeRadius,
+            Param::Object(ObjectParam::EllipseRadius) => Self::EllipseRadius,
+            Param::Object(ObjectParam::RoundingRadius) => Self::RoundingRadius,
+            Param::Object(ObjectParam::StartRadius) => Self::StartRadius,
+            Param::Object(ObjectParam::EndRadius) => Self::EndRadius,
+            Param::Object(ObjectParam::StartAngle) => Self::StartAngle,
+            Param::Object(ObjectParam::EndAngle) => Self::EndAngle,
+            Param::Object(ObjectParam::Twist) => Self::Twist,
+            Param::Object(ObjectParam::RadialBias) => Self::RadialBias,
+            Param::Object(ObjectParam::HeightBias) => Self::HeightBias,
+            Param::Object(ObjectParam::HorizontalSpacing) => Self::HorizontalSpacing,
+            Param::Object(ObjectParam::VerticalSpacing) => Self::VerticalSpacing,
+            Param::Object(ObjectParam::FieldOfView) => Self::FieldOfView,
+            Param::Object(ObjectParam::Intensity) => Self::Intensity,
+            Param::Object(ObjectParam::InnerAngle) => Self::InnerAngle,
+            Param::Object(ObjectParam::OuterAngle) => Self::OuterAngle,
+            Param::Object(ObjectParam::FalloffRadius) => Self::FalloffRadius,
+            Param::Object(ObjectParam::Offset) => Self::Offset,
+            Param::Object(ObjectParam::Movement(Axis::X)) => Self::MovementX,
+            Param::Object(ObjectParam::Movement(Axis::Y)) => Self::MovementY,
+            Param::Object(ObjectParam::Movement(Axis::Z)) => Self::MovementZ,
+            Param::Object(ObjectParam::Angle) => Self::Angle,
+            Param::Object(ObjectParam::Rise) => Self::Rise,
+            Param::Object(ObjectParam::Scaling) => Self::Scaling,
+            Param::Object(ObjectParam::EndScale) => Self::EndScale,
+            Param::Object(ObjectParam::EndRotation) => Self::EndRotation,
+            Param::Object(ObjectParam::StartGrowth) => Self::StartGrowth,
+            Param::Object(ObjectParam::EndGrowth) => Self::EndGrowth,
         }
     }
 }
@@ -352,6 +431,45 @@ impl From<ParamDto> for Param {
             ParamDto::ScaleX => Self::Scale(Axis::X),
             ParamDto::ScaleY => Self::Scale(Axis::Y),
             ParamDto::ScaleZ => Self::Scale(Axis::Z),
+            ParamDto::SizeX => Self::Object(ObjectParam::Size(Axis::X)),
+            ParamDto::SizeY => Self::Object(ObjectParam::Size(Axis::Y)),
+            ParamDto::SizeZ => Self::Object(ObjectParam::Size(Axis::Z)),
+            ParamDto::Radius => Self::Object(ObjectParam::Radius),
+            ParamDto::Height => Self::Object(ObjectParam::Height),
+            ParamDto::Width => Self::Object(ObjectParam::Width),
+            ParamDto::TopRadius => Self::Object(ObjectParam::TopRadius),
+            ParamDto::BottomRadius => Self::Object(ObjectParam::BottomRadius),
+            ParamDto::InnerRadius => Self::Object(ObjectParam::InnerRadius),
+            ParamDto::OuterRadius => Self::Object(ObjectParam::OuterRadius),
+            ParamDto::RingRadius => Self::Object(ObjectParam::RingRadius),
+            ParamDto::PipeRadius => Self::Object(ObjectParam::PipeRadius),
+            ParamDto::EllipseRadius => Self::Object(ObjectParam::EllipseRadius),
+            ParamDto::RoundingRadius => Self::Object(ObjectParam::RoundingRadius),
+            ParamDto::StartRadius => Self::Object(ObjectParam::StartRadius),
+            ParamDto::EndRadius => Self::Object(ObjectParam::EndRadius),
+            ParamDto::StartAngle => Self::Object(ObjectParam::StartAngle),
+            ParamDto::EndAngle => Self::Object(ObjectParam::EndAngle),
+            ParamDto::Twist => Self::Object(ObjectParam::Twist),
+            ParamDto::RadialBias => Self::Object(ObjectParam::RadialBias),
+            ParamDto::HeightBias => Self::Object(ObjectParam::HeightBias),
+            ParamDto::HorizontalSpacing => Self::Object(ObjectParam::HorizontalSpacing),
+            ParamDto::VerticalSpacing => Self::Object(ObjectParam::VerticalSpacing),
+            ParamDto::FieldOfView => Self::Object(ObjectParam::FieldOfView),
+            ParamDto::Intensity => Self::Object(ObjectParam::Intensity),
+            ParamDto::InnerAngle => Self::Object(ObjectParam::InnerAngle),
+            ParamDto::OuterAngle => Self::Object(ObjectParam::OuterAngle),
+            ParamDto::FalloffRadius => Self::Object(ObjectParam::FalloffRadius),
+            ParamDto::Offset => Self::Object(ObjectParam::Offset),
+            ParamDto::MovementX => Self::Object(ObjectParam::Movement(Axis::X)),
+            ParamDto::MovementY => Self::Object(ObjectParam::Movement(Axis::Y)),
+            ParamDto::MovementZ => Self::Object(ObjectParam::Movement(Axis::Z)),
+            ParamDto::Angle => Self::Object(ObjectParam::Angle),
+            ParamDto::Rise => Self::Object(ObjectParam::Rise),
+            ParamDto::Scaling => Self::Object(ObjectParam::Scaling),
+            ParamDto::EndScale => Self::Object(ObjectParam::EndScale),
+            ParamDto::EndRotation => Self::Object(ObjectParam::EndRotation),
+            ParamDto::StartGrowth => Self::Object(ObjectParam::StartGrowth),
+            ParamDto::EndGrowth => Self::Object(ObjectParam::EndGrowth),
         }
     }
 }
@@ -2941,6 +3059,30 @@ mod tests {
             panic!("not a text")
         };
         assert_eq!((text.text.chars().count(), text.height), (Text::MAX_CHARS, 0.0));
+    }
+
+    #[test]
+    fn parameter_tracks_round_trip_by_name() {
+        let mut doc = Document::new("params");
+        let mut node = Node::new("Cube", ObjectKindTag::Cube.default_kind());
+        for (param, value) in [
+            (Param::Object(ObjectParam::Size(Axis::Y)), 300.0),
+            (Param::Object(ObjectParam::Radius), 5.0),
+            (Param::Position(Axis::X), 1.0),
+        ] {
+            node.data.tracks.push(Track {
+                param,
+                curve: Curve::from_keys([Key::new(0.0, value), Key::new(10.0, value * 2.0)]),
+            });
+        }
+        doc.scene.insert(node);
+        let loaded = round_trip(&doc);
+        let original = &doc.scene.iter().next().unwrap().1.data.tracks;
+        assert_eq!(&loaded.scene.iter().next().unwrap().1.data.tracks, original);
+        let json = serde_json::to_string(&ParamDto::from(Param::Object(ObjectParam::Size(Axis::Y)))).unwrap();
+        assert_eq!(json, r#""size_y""#);
+        let json = serde_json::to_string(&ParamDto::from(Param::Object(ObjectParam::Rise))).unwrap();
+        assert_eq!(json, r#""rise""#);
     }
 
     #[test]

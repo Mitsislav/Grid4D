@@ -640,7 +640,7 @@ pub fn exportable(doc: &Document) -> Objects {
                 }
                 None => data.kind = ObjectKind::Null,
             }
-        } else if let Some(mesh) = grid4d_eval::editable_mesh(&data.kind) {
+        } else if let Some(mesh) = grid4d_eval::editable_mesh(&data.kind_at(f64::from(doc.time.frame()))) {
             data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
         }
         // A generator without a material shows its cage's.

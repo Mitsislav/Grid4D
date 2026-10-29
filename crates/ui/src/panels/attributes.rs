@@ -16,7 +16,7 @@ use grid4d_geom::spline::{
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
     Axis, Document, Falloff, KeyState, LightDetails, LightShadow, LightType, Material, MaterialId, NodeData, NodeId,
-    ObjectKind, Param, Scene, SceneEdit, SplineHandle, Tag, TagKind, TimeSettings,
+    ObjectKind, ObjectParam, Param, Scene, SceneEdit, SplineHandle, Tag, TagKind, TimeSettings,
 };
 
 use crate::{
@@ -278,7 +278,7 @@ impl AttributesPanel {
         match self.tab {
             Tab::Basic => basic_tab(ui, &mut data),
             Tab::Coord => label = coord_tab(ui, &mut data, keying).unwrap_or(label),
-            Tab::Object => object_tab(ui, &mut data),
+            Tab::Object => label = object_tab_at(ui, &mut data, keying).unwrap_or(label),
         }
         self.finish_node_edit(ui, doc, id, &data, label, commands);
     }
@@ -509,12 +509,74 @@ struct Shown {
     keying: Keying,
 }
 
-fn object_tab(ui: &mut Ui, data: &mut NodeData) {
+/// The Object tab at the current frame (`keying`): the parameters as they are
+/// there, edits written back as keys, temporary values or base values (like
+/// the Coordinates fields), and the key buttons. Returns an undo label when a
+/// key button was used.
+fn object_tab_at(ui: &mut Ui, data: &mut NodeData, keying: Keying) -> Option<&'static str> {
+    let frame = keying.frame;
+    let shown = data.kind_at(frame).into_owned();
+    let mut edited = shown.clone();
+    let mut keys = KeyRows::new(data, &shown, frame);
+    object_tab(ui, &mut edited, &mut keys);
+    if edited != shown {
+        data.set_kind_at(&edited, frame, keying.autokey);
+    }
+    let (param, click) = keys.clicked?;
+    let param = Param::Object(param);
+    Some(match click {
+        KeyClick::Toggle => {
+            data.toggle_key(param, frame);
+            "Set Key"
+        }
+        KeyClick::DeleteTrack => {
+            data.delete_track(param, frame);
+            "Delete Track"
+        }
+    })
+}
+
+/// The key buttons of the Object tab: which of the shown object's parameters a
+/// row edits (found by the row's label), their states, the buttons drawn and
+/// the one clicked. Off (`default`) on other tabs.
+#[derive(Debug, Default)]
+struct KeyRows {
+    states: Vec<(ObjectParam, KeyState)>,
+    drawn: Vec<ObjectParam>,
+    clicked: Option<(ObjectParam, KeyClick)>,
+}
+
+impl KeyRows {
+    fn new(data: &NodeData, shown: &ObjectKind, frame: f64) -> Self {
+        Self {
+            states: shown
+                .params()
+                .into_iter()
+                .map(|p| (p, data.key_state(Param::Object(p), frame)))
+                .collect(),
+            ..Self::default()
+        }
+    }
+
+    /// The key button of the row labelled `label`, after its field; nothing
+    /// for rows that are not an animatable parameter.
+    fn button(&mut self, ui: &mut Ui, label: &str) {
+        let Some(&(param, state)) = self.states.iter().find(|(p, _)| p.label() == label) else {
+            return;
+        };
+        self.drawn.push(param);
+        if let Some(click) = key_button(ui, state) {
+            self.clicked = Some((param, click));
+        }
+    }
+}
+
+fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows) {
     section_heading(ui, "Object Properties");
     Grid::new("grid4d.attr.object")
-        .num_columns(2)
+        .num_columns(3)
         .spacing([6.0, 4.0])
-        .show(ui, |ui| match &mut data.kind {
+        .show(ui, |ui| match kind {
             ObjectKind::Null => {
                 ui.label(
                     RichText::new("A Null groups objects. Drag objects onto it in the Object Manager.")
@@ -524,14 +586,14 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
             }
             ObjectKind::Cube { size, segments } => {
                 for (axis, label) in ["Size . X", "Size . Y", "Size . Z"].into_iter().enumerate() {
-                    length_row(ui, label, &mut size[axis]);
+                    length_row(ui, k, label, &mut size[axis]);
                 }
                 for (axis, label) in ["Segments X", "Segments Y", "Segments Z"].into_iter().enumerate() {
                     segments_row(ui, label, &mut segments[axis], 1);
                 }
             }
             ObjectKind::Sphere { radius, segments } => {
-                length_row(ui, "Radius", radius);
+                length_row(ui, k, "Radius", radius);
                 segments_row(ui, "Segments", segments, 3);
             }
             ObjectKind::Cylinder {
@@ -540,8 +602,8 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 rotation_segments,
                 height_segments,
             } => {
-                length_row(ui, "Radius", radius);
-                length_row(ui, "Height", height);
+                length_row(ui, k, "Radius", radius);
+                length_row(ui, k, "Height", height);
                 segments_row(ui, "Height Segments", height_segments, 1);
                 segments_row(ui, "Rotation Segments", rotation_segments, 3);
             }
@@ -551,8 +613,8 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 width_segments,
                 depth_segments,
             } => {
-                length_row(ui, "Width", width);
-                length_row(ui, "Height", depth);
+                length_row(ui, k, "Width", width);
+                length_row(ui, k, "Height", depth);
                 segments_row(ui, "Width Segments", width_segments, 1);
                 segments_row(ui, "Height Segments", depth_segments, 1);
             }
@@ -563,9 +625,9 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 rotation_segments,
                 height_segments,
             } => {
-                length_row(ui, "Top Radius", top_radius);
-                length_row(ui, "Bottom Radius", bottom_radius);
-                length_row(ui, "Height", height);
+                length_row(ui, k, "Top Radius", top_radius);
+                length_row(ui, k, "Bottom Radius", bottom_radius);
+                length_row(ui, k, "Height", height);
                 segments_row(ui, "Height Segments", height_segments, 1);
                 segments_row(ui, "Rotation Segments", rotation_segments, 3);
             }
@@ -575,9 +637,9 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 ring_segments,
                 pipe_segments,
             } => {
-                length_row(ui, "Ring Radius", ring_radius);
+                length_row(ui, k, "Ring Radius", ring_radius);
                 segments_row(ui, "Ring Segments", ring_segments, 3);
-                length_row(ui, "Pipe Radius", pipe_radius);
+                length_row(ui, k, "Pipe Radius", pipe_radius);
                 segments_row(ui, "Pipe Segments", pipe_segments, 3);
             }
             ObjectKind::Disc {
@@ -586,8 +648,8 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 rotation_segments,
                 disc_segments,
             } => {
-                length_row(ui, "Inner Radius", inner_radius);
-                length_row(ui, "Outer Radius", outer_radius);
+                length_row(ui, k, "Inner Radius", inner_radius);
+                length_row(ui, k, "Outer Radius", outer_radius);
                 segments_row(ui, "Disc Segments", disc_segments, 1);
                 segments_row(ui, "Rotation Segments", rotation_segments, 3);
             }
@@ -598,8 +660,8 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 height_segments,
                 cap_segments,
             } => {
-                length_row(ui, "Radius", radius);
-                length_row(ui, "Height", height);
+                length_row(ui, k, "Radius", radius);
+                length_row(ui, k, "Height", height);
                 segments_row(ui, "Height Segments", height_segments, 1);
                 segments_row(ui, "Cap Segments", cap_segments, 1);
                 segments_row(ui, "Rotation Segments", rotation_segments, 3);
@@ -610,6 +672,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                     [FIELD_WIDTH, 19.0],
                     DragValue::new(fov_y_deg).speed(0.25).range(1.0..=170.0).suffix("°"),
                 );
+                k.button(ui, "Field of View (Vertical)");
                 ui.end_row();
             }
             ObjectKind::Light {
@@ -636,6 +699,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 {
                     *intensity = percent / 100.0;
                 }
+                k.button(ui, "Intensity");
                 ui.end_row();
                 attr_label(ui, "Type", LABEL_WIDTH);
                 egui::ComboBox::from_id_salt("grid4d.attr.light.type")
@@ -655,7 +719,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                         }
                     });
                 ui.end_row();
-                light_details(ui, *light_type, details);
+                light_details(ui, k, *light_type, details);
             }
             ObjectKind::SubdivisionSurface {
                 viewport_levels,
@@ -702,12 +766,12 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
             ObjectKind::Extrude {
                 extrusion,
                 hierarchical,
-            } => extrude_rows(ui, extrusion, hierarchical),
-            ObjectKind::Lathe(lathe) => lathe_rows(ui, lathe),
-            ObjectKind::Sweep(sweep) => sweep_rows(ui, sweep),
+            } => extrude_rows(ui, k, extrusion, hierarchical),
+            ObjectKind::Lathe(lathe) => lathe_rows(ui, k, lathe),
+            ObjectKind::Sweep(sweep) => sweep_rows(ui, k, sweep),
             ObjectKind::Loft(loft) => loft_rows(ui, loft),
-            ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, primitive),
-            ObjectKind::Text(text) => text_rows(ui, text),
+            ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, k, primitive),
+            ObjectKind::Text(text) => text_rows(ui, k, text),
             ObjectKind::Spline {
                 spline, interpolation, ..
             } => editable_spline_rows(ui, spline, interpolation),
@@ -725,6 +789,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
 
 /// The active tool's options (editor state: no undo, not saved).
 fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
+    let k = &mut KeyRows::default();
     let tool = editor.tool;
     ui.label(
         RichText::new(format!("{} [Tool]", tool.label()))
@@ -776,21 +841,21 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
             }
             Tool::Extrude => {
                 let m = &mut editor.modeling_settings;
-                offset_row(ui, "Offset", &mut m.extrude.offset);
+                offset_row(ui, k, "Offset", &mut m.extrude.offset);
                 count_row(ui, "Subdivision", &mut m.extrude.subdivision, 0);
                 check_row(ui, "Create N-gons", &mut m.extrude.create_ngons);
                 check_row(ui, "Create Caps", &mut m.extrude.create_caps);
                 check_row(ui, "Preserve Groups", &mut m.extrude.preserve_groups);
-                angle_row(ui, "Maximum Angle", &mut m.extrude.max_angle, 0.0..=180.0);
-                angle_row(ui, "Rotation (Edges)", &mut m.edge_rotation, -180.0..=180.0);
+                angle_row(ui, k, "Maximum Angle", &mut m.extrude.max_angle, 0.0..=180.0);
+                angle_row(ui, k, "Rotation (Edges)", &mut m.edge_rotation, -180.0..=180.0);
             }
             Tool::Inset => {
                 let m = &mut editor.modeling_settings;
-                offset_row(ui, "Offset", &mut m.inset.offset);
+                offset_row(ui, k, "Offset", &mut m.inset.offset);
                 count_row(ui, "Subdivision", &mut m.inset.subdivision, 1);
                 check_row(ui, "Create N-gons", &mut m.inset.create_ngons);
                 check_row(ui, "Preserve Groups", &mut m.inset.preserve_groups);
-                angle_row(ui, "Maximum Angle", &mut m.inset.max_angle, 0.0..=180.0);
+                angle_row(ui, k, "Maximum Angle", &mut m.inset.max_angle, 0.0..=180.0);
             }
             Tool::LoopCut => {
                 let m = &mut editor.modeling_settings.loop_cut;
@@ -812,7 +877,7 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
             }
             Tool::Bevel => {
                 let m = &mut editor.modeling_settings.bevel;
-                offset_row(ui, "Offset", &mut m.offset);
+                offset_row(ui, k, "Offset", &mut m.offset);
                 count_row(ui, "Subdivision", &mut m.subdivision, 0);
                 attr_label(ui, "Depth", LABEL_WIDTH);
                 let mut percent = m.depth * 100.0;
@@ -918,6 +983,7 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
 
 /// A tag's settings (Attribute Manager, Mode ▸ Tags); `owner` is the tagged object.
 fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
+    let k = &mut KeyRows::default();
     section_heading(ui, "Tag Properties");
     Grid::new("grid4d.attr.tag")
         .num_columns(2)
@@ -926,7 +992,7 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
             Tag::Phong { angle_limit, angle } => {
                 check_row(ui, "Angle Limit", angle_limit);
                 if *angle_limit {
-                    angle_row(ui, "Phong Angle", angle, 0.0..=180.0);
+                    angle_row(ui, k, "Phong Angle", angle, 0.0..=180.0);
                 } else {
                     attr_label(ui, "Phong Angle", LABEL_WIDTH);
                     ui.label(RichText::new("no limit (180°)").color(p::TEXT_DIM));
@@ -1037,12 +1103,13 @@ fn snap_section(ui: &mut Ui, snap: &mut crate::SnapSettings) {
 }
 
 /// A length that may be negative (a tool's offset).
-fn offset_row(ui: &mut Ui, label: &str, value: &mut f32) {
+fn offset_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
     attr_label(ui, label, LABEL_WIDTH);
     ui.add_sized(
         [FIELD_WIDTH, 19.0],
         DragValue::new(value).speed(0.5).suffix(" cm").max_decimals(2),
     );
+    k.button(ui, label);
     ui.end_row();
 }
 
@@ -1053,7 +1120,7 @@ fn count_row(ui: &mut Ui, label: &str, value: &mut u32, min: u32) {
 }
 
 /// An angle stored in radians, edited in degrees.
-fn angle_row(ui: &mut Ui, label: &str, radians: &mut f32, degrees: std::ops::RangeInclusive<f32>) {
+fn angle_row(ui: &mut Ui, k: &mut KeyRows, label: &str, radians: &mut f32, degrees: std::ops::RangeInclusive<f32>) {
     attr_label(ui, label, LABEL_WIDTH);
     let mut value = radians.to_degrees();
     if ui
@@ -1065,26 +1132,27 @@ fn angle_row(ui: &mut Ui, label: &str, radians: &mut f32, degrees: std::ops::Ran
     {
         *radians = value.to_radians();
     }
+    k.button(ui, label);
     ui.end_row();
 }
 
 /// A spline primitive's shape, then its plane, direction and intermediate points.
-fn spline_rows(ui: &mut Ui, primitive: &mut SplinePrimitive) {
+fn spline_rows(ui: &mut Ui, k: &mut KeyRows, primitive: &mut SplinePrimitive) {
     match &mut primitive.shape {
         SplineShape::Circle { radius, ellipse, ring } => {
-            length_row(ui, "Radius", radius);
+            length_row(ui, k, "Radius", radius);
             let r = *radius;
-            optional_length_row(ui, "Ellipse", "Radius Y", ellipse, r);
-            optional_length_row(ui, "Ring", "Inner Radius", ring, r * 0.5);
+            optional_length_row(ui, k, "Ellipse", "Radius Y", ellipse, r);
+            optional_length_row(ui, k, "Ring", "Inner Radius", ring, r * 0.5);
         }
         SplineShape::Rectangle {
             width,
             height,
             rounding,
         } => {
-            length_row(ui, "Width", width);
-            length_row(ui, "Height", height);
-            optional_length_row(ui, "Rounding", "Radius", rounding, 50.0);
+            length_row(ui, k, "Width", width);
+            length_row(ui, k, "Height", height);
+            optional_length_row(ui, k, "Rounding", "Rounding Radius", rounding, 50.0);
         }
         SplineShape::Arc {
             kind,
@@ -1102,21 +1170,21 @@ fn spline_rows(ui: &mut Ui, primitive: &mut SplinePrimitive) {
                     }
                 });
             ui.end_row();
-            length_row(ui, "Radius", radius);
+            length_row(ui, k, "Radius", radius);
             if *kind == ArcType::Ring {
-                length_row(ui, "Inner Radius", inner_radius);
+                length_row(ui, k, "Inner Radius", inner_radius);
             }
-            angle_row(ui, "Start Angle", start, -360.0..=360.0);
-            angle_row(ui, "End Angle", end, -360.0..=360.0);
+            angle_row(ui, k, "Start Angle", start, -360.0..=360.0);
+            angle_row(ui, k, "End Angle", end, -360.0..=360.0);
         }
         SplineShape::NSide {
             radius,
             sides,
             rounding,
         } => {
-            length_row(ui, "Radius", radius);
+            length_row(ui, k, "Radius", radius);
             bounded_count_row(ui, "Sides", sides, 3, SplineShape::MAX_SIDES);
-            optional_length_row(ui, "Rounding", "Radius", rounding, 50.0);
+            optional_length_row(ui, k, "Rounding", "Rounding Radius", rounding, 50.0);
         }
         SplineShape::Star {
             inner_radius,
@@ -1124,9 +1192,9 @@ fn spline_rows(ui: &mut Ui, primitive: &mut SplinePrimitive) {
             twist,
             points,
         } => {
-            length_row(ui, "Inner Radius", inner_radius);
-            length_row(ui, "Outer Radius", outer_radius);
-            angle_row(ui, "Twist", twist, -360.0..=360.0);
+            length_row(ui, k, "Inner Radius", inner_radius);
+            length_row(ui, k, "Outer Radius", outer_radius);
+            angle_row(ui, k, "Twist", twist, -360.0..=360.0);
             bounded_count_row(ui, "Points", points, 3, SplineShape::MAX_SIDES);
         }
         SplineShape::Helix {
@@ -1139,13 +1207,13 @@ fn spline_rows(ui: &mut Ui, primitive: &mut SplinePrimitive) {
             height_bias,
             subdivision,
         } => {
-            length_row(ui, "Start Radius", start_radius);
-            angle_row(ui, "Start Angle", start_angle, -36_000.0..=36_000.0);
-            length_row(ui, "End Radius", end_radius);
-            angle_row(ui, "End Angle", end_angle, -36_000.0..=36_000.0);
-            percent_row(ui, "Radial Bias", radial_bias);
-            length_row(ui, "Height", height);
-            percent_row(ui, "Height Bias", height_bias);
+            length_row(ui, k, "Start Radius", start_radius);
+            angle_row(ui, k, "Start Angle", start_angle, -36_000.0..=36_000.0);
+            length_row(ui, k, "End Radius", end_radius);
+            angle_row(ui, k, "End Angle", end_angle, -36_000.0..=36_000.0);
+            percent_row(ui, k, "Radial Bias", radial_bias);
+            length_row(ui, k, "Height", height);
+            percent_row(ui, k, "Height Bias", height_bias);
             bounded_count_row(ui, "Subdivision", subdivision, 3, SplineShape::MAX_SUBDIVISION);
         }
         SplineShape::Flower {
@@ -1153,8 +1221,8 @@ fn spline_rows(ui: &mut Ui, primitive: &mut SplinePrimitive) {
             outer_radius,
             petals,
         } => {
-            length_row(ui, "Inner Radius", inner_radius);
-            length_row(ui, "Outer Radius", outer_radius);
+            length_row(ui, k, "Inner Radius", inner_radius);
+            length_row(ui, k, "Outer Radius", outer_radius);
             bounded_count_row(ui, "Petals", petals, 1, SplineShape::MAX_SIDES);
         }
     }
@@ -1168,7 +1236,7 @@ fn spline_rows(ui: &mut Ui, primitive: &mut SplinePrimitive) {
 
 /// A Text spline's parameters: the text itself (several lines), its size,
 /// alignment and spacing, then plane, direction and sampling.
-fn text_rows(ui: &mut Ui, text: &mut Text) {
+fn text_rows(ui: &mut Ui, k: &mut KeyRows, text: &mut Text) {
     attr_label(ui, "Text", LABEL_WIDTH);
     let mut written = text.text.to_string();
     if ui
@@ -1195,9 +1263,9 @@ fn text_rows(ui: &mut Ui, text: &mut Text) {
             }
         });
     ui.end_row();
-    length_row(ui, "Height", &mut text.height);
-    offset_row(ui, "Horizontal Spacing", &mut text.horizontal_spacing);
-    offset_row(ui, "Vertical Spacing", &mut text.vertical_spacing);
+    length_row(ui, k, "Height", &mut text.height);
+    offset_row(ui, k, "Horizontal Spacing", &mut text.horizontal_spacing);
+    offset_row(ui, k, "Vertical Spacing", &mut text.vertical_spacing);
     placement_rows(ui, &mut text.plane, &mut text.reverse, &mut text.interpolation);
 }
 
@@ -1262,6 +1330,8 @@ fn editable_spline_rows(ui: &mut Ui, spline: &mut SplineHandle, interpolation: &
 
 /// Intermediate Points and the value its mode uses.
 fn interpolation_rows(ui: &mut Ui, interpolation: &mut Interpolation) {
+    // Sampling settings are not animatable: no key buttons.
+    let k = &mut KeyRows::default();
     const MODES: [&str; 5] = ["None", "Natural", "Uniform", "Adaptive", "Subdivided"];
     let current = match interpolation {
         Interpolation::None => 0,
@@ -1303,9 +1373,9 @@ fn interpolation_rows(ui: &mut Ui, interpolation: &mut Interpolation) {
         Interpolation::Natural { number } | Interpolation::Uniform { number } => {
             bounded_count_row(ui, "Number", number, 0, Interpolation::MAX_NUMBER);
         }
-        Interpolation::Adaptive { angle } => angle_row(ui, "Angle", angle, 0.1..=90.0),
+        Interpolation::Adaptive { angle } => angle_row(ui, k, "Angle", angle, 0.1..=90.0),
         Interpolation::Subdivided { angle, max_length } => {
-            angle_row(ui, "Angle", angle, 0.1..=90.0);
+            angle_row(ui, k, "Angle", angle, 0.1..=90.0);
             attr_label(ui, "Maximum Length", LABEL_WIDTH);
             ui.add_sized(
                 [FIELD_WIDTH, 19.0],
@@ -1322,7 +1392,14 @@ fn interpolation_rows(ui: &mut Ui, interpolation: &mut Interpolation) {
 
 /// A checkbox turning an optional length on (at `fallback`) or off, and the
 /// length's own row while on.
-fn optional_length_row(ui: &mut Ui, label: &str, length_label: &str, value: &mut Option<f32>, fallback: f32) {
+fn optional_length_row(
+    ui: &mut Ui,
+    k: &mut KeyRows,
+    label: &str,
+    length_label: &str,
+    value: &mut Option<f32>,
+    fallback: f32,
+) {
     let mut on = value.is_some();
     attr_label(ui, label, LABEL_WIDTH);
     if ui.checkbox(&mut on, "").changed() {
@@ -1330,7 +1407,7 @@ fn optional_length_row(ui: &mut Ui, label: &str, length_label: &str, value: &mut
     }
     ui.end_row();
     if let Some(length) = value {
-        length_row(ui, length_label, length);
+        length_row(ui, k, length_label, length);
     }
 }
 
@@ -1341,7 +1418,7 @@ fn bounded_count_row(ui: &mut Ui, label: &str, value: &mut u32, min: u32, max: u
 }
 
 /// A 0…1 value shown as 0…100 %.
-fn percent_row(ui: &mut Ui, label: &str, value: &mut f32) {
+fn percent_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
     attr_label(ui, label, LABEL_WIDTH);
     let mut percent = *value * 100.0;
     if ui
@@ -1353,11 +1430,12 @@ fn percent_row(ui: &mut Ui, label: &str, value: &mut f32) {
     {
         *value = percent / 100.0;
     }
+    k.button(ui, label);
     ui.end_row();
 }
 
 /// The Extrude generator's Object and Caps parameters.
-fn extrude_rows(ui: &mut Ui, extrusion: &mut Extrusion, hierarchical: &mut bool) {
+fn extrude_rows(ui: &mut Ui, k: &mut KeyRows, extrusion: &mut Extrusion, hierarchical: &mut bool) {
     attr_label(ui, "Direction", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.extrude.direction")
         .selected_text(extrusion.direction.label())
@@ -1368,14 +1446,14 @@ fn extrude_rows(ui: &mut Ui, extrusion: &mut Extrusion, hierarchical: &mut bool)
         });
     ui.end_row();
     if extrusion.direction != ExtrudeDirection::Absolute {
-        offset_row(ui, "Offset", &mut extrusion.offset);
+        offset_row(ui, k, "Offset", &mut extrusion.offset);
     }
     if matches!(
         extrusion.direction,
         ExtrudeDirection::Custom | ExtrudeDirection::Absolute
     ) {
         for (axis, label) in ["Movement . X", "Movement . Y", "Movement . Z"].into_iter().enumerate() {
-            offset_row(ui, label, &mut extrusion.movement[axis]);
+            offset_row(ui, k, label, &mut extrusion.movement[axis]);
         }
     }
     attr_label(ui, "Subdivision", LABEL_WIDTH);
@@ -1403,8 +1481,8 @@ fn extrude_rows(ui: &mut Ui, extrusion: &mut Extrusion, hierarchical: &mut bool)
 }
 
 /// The Lathe generator's Object and Caps parameters.
-fn lathe_rows(ui: &mut Ui, lathe: &mut Lathe) {
-    angle_row(ui, "Angle", &mut lathe.angle, -36_000.0..=36_000.0);
+fn lathe_rows(ui: &mut Ui, k: &mut KeyRows, lathe: &mut Lathe) {
+    angle_row(ui, k, "Angle", &mut lathe.angle, -36_000.0..=36_000.0);
     attr_label(ui, "Subdivision", LABEL_WIDTH);
     ui.add_sized(
         [FIELD_WIDTH, 19.0],
@@ -1413,8 +1491,8 @@ fn lathe_rows(ui: &mut Ui, lathe: &mut Lathe) {
             .range(Lathe::MIN_SUBDIVISION..=Lathe::MAX_SUBDIVISION),
     );
     ui.end_row();
-    offset_row(ui, "Movement", &mut lathe.movement);
-    scale_row(ui, "Scaling", &mut lathe.scaling);
+    offset_row(ui, k, "Movement", &mut lathe.movement);
+    scale_row(ui, k, "Scaling", &mut lathe.scaling);
     check_row(ui, "Reverse Normals", &mut lathe.reverse_normals);
     ui.label("");
     ui.label(RichText::new("Caps").strong());
@@ -1426,11 +1504,11 @@ fn lathe_rows(ui: &mut Ui, lathe: &mut Lathe) {
 }
 
 /// The Sweep generator's Object and Caps parameters.
-fn sweep_rows(ui: &mut Ui, sweep: &mut Sweep) {
-    scale_row(ui, "End Scale", &mut sweep.end_scale);
-    angle_row(ui, "End Rotation", &mut sweep.end_rotation, -36_000.0..=36_000.0);
-    percent_row(ui, "Start Growth", &mut sweep.start_growth);
-    percent_row(ui, "End Growth", &mut sweep.end_growth);
+fn sweep_rows(ui: &mut Ui, k: &mut KeyRows, sweep: &mut Sweep) {
+    scale_row(ui, k, "End Scale", &mut sweep.end_scale);
+    angle_row(ui, k, "End Rotation", &mut sweep.end_rotation, -36_000.0..=36_000.0);
+    percent_row(ui, k, "Start Growth", &mut sweep.start_growth);
+    percent_row(ui, k, "End Growth", &mut sweep.end_growth);
     check_row(ui, "Parallel Movement", &mut sweep.parallel_movement);
     check_row(ui, "Constant Cross Section", &mut sweep.constant_cross_section);
     check_row(ui, "Banking", &mut sweep.banking);
@@ -1467,7 +1545,7 @@ fn loft_rows(ui: &mut Ui, loft: &mut Loft) {
 }
 
 /// A scale factor (1.0 = 100 %, never negative) edited in percent.
-fn scale_row(ui: &mut Ui, label: &str, value: &mut f32) {
+fn scale_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
     attr_label(ui, label, LABEL_WIDTH);
     let mut shown = *value * 100.0;
     if ui
@@ -1482,6 +1560,7 @@ fn scale_row(ui: &mut Ui, label: &str, value: &mut f32) {
     {
         *value = shown / 100.0;
     }
+    k.button(ui, label);
     ui.end_row();
 }
 
@@ -1579,7 +1658,7 @@ fn colour_button(ui: &mut Ui, colour: &mut [f32; 3]) -> egui::Response {
 }
 
 /// A light's Details: the cone of a spot, the falloff of a light with a position.
-fn light_details(ui: &mut Ui, light_type: LightType, details: &mut LightDetails) {
+fn light_details(ui: &mut Ui, k: &mut KeyRows, light_type: LightType, details: &mut LightDetails) {
     if light_type == LightType::Spot {
         attr_label(ui, "Use Inner", LABEL_WIDTH);
         ui.checkbox(&mut details.use_inner, "");
@@ -1597,6 +1676,7 @@ fn light_details(ui: &mut Ui, light_type: LightType, details: &mut LightDetails)
                     .range(0.0..=LightDetails::MAX_ANGLE_DEG)
                     .suffix("°"),
             );
+            k.button(ui, label);
             ui.end_row();
         }
     }
@@ -1619,6 +1699,7 @@ fn light_details(ui: &mut Ui, light_type: LightType, details: &mut LightDetails)
                     .range(LightDetails::MIN_RADIUS..=1_000_000.0)
                     .suffix(" cm"),
             );
+            k.button(ui, "Radius/Decay");
             ui.end_row();
         }
     }
@@ -1633,7 +1714,7 @@ fn segments_row(ui: &mut Ui, label: &str, value: &mut u32, min: u32) {
     ui.end_row();
 }
 
-fn length_row(ui: &mut Ui, label: &str, value: &mut f32) {
+fn length_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
     attr_label(ui, label, LABEL_WIDTH);
     ui.add_sized(
         [FIELD_WIDTH, 19.0],
@@ -1643,6 +1724,7 @@ fn length_row(ui: &mut Ui, label: &str, value: &mut f32) {
             .suffix(" cm")
             .max_decimals(2),
     );
+    k.button(ui, label);
     ui.end_row();
 }
 
@@ -1677,8 +1759,10 @@ mod tests {
                 );
                 let before = data.clone();
                 for _ in 0..3 {
-                    ctx.run_ui(egui::RawInput::default(), |ui| object_tab(ui, &mut data))
-                        .drop_without_applying_deltas();
+                    ctx.run_ui(egui::RawInput::default(), |ui| {
+                        object_tab(ui, &mut data.kind, &mut KeyRows::default());
+                    })
+                    .drop_without_applying_deltas();
                 }
                 assert_eq!(data, before, "{light_type:?} with {falloff:?}");
             }
@@ -1696,5 +1780,80 @@ mod tests {
             .drop_without_applying_deltas();
         }
         assert_eq!(colour, [0.9, 0.62, 0.64]);
+    }
+
+    /// Every animatable parameter of every object has exactly one key button
+    /// on the Object tab (labels map rows to parameters, so this guards them).
+    #[test]
+    fn every_animatable_parameter_has_one_key_button() {
+        use grid4d_geom::spline::SplineShape;
+        let mut kinds: Vec<ObjectKind> = grid4d_scene::ObjectKindTag::ALL
+            .into_iter()
+            .map(grid4d_scene::ObjectKindTag::default_kind)
+            .collect();
+        // Optional values switched on, and a spot light's cone.
+        for shape in [
+            SplineShape::Circle {
+                radius: 100.0,
+                ellipse: Some(50.0),
+                ring: Some(20.0),
+            },
+            SplineShape::Rectangle {
+                width: 100.0,
+                height: 50.0,
+                rounding: Some(10.0),
+            },
+            SplineShape::NSide {
+                radius: 100.0,
+                sides: 6,
+                rounding: Some(10.0),
+            },
+        ] {
+            kinds.push(ObjectKind::SplinePrimitive(SplinePrimitive::new(shape)));
+        }
+        if let ObjectKind::Light { light_type, .. } = kinds
+            .iter_mut()
+            .find(|k| matches!(k, ObjectKind::Light { .. }))
+            .unwrap()
+        {
+            *light_type = LightType::Spot;
+        }
+        let ctx = egui::Context::default();
+        for kind in kinds {
+            let data = NodeData::new("o", kind.clone());
+            let mut keys = KeyRows::new(&data, &kind, 0.0);
+            let mut shown = kind.clone();
+            ctx.run_ui(egui::RawInput::default(), |ui| object_tab(ui, &mut shown, &mut keys))
+                .drop_without_applying_deltas();
+            let mut drawn = keys.drawn.clone();
+            drawn.sort_by_key(|p| p.index());
+            let mut wanted = kind.params();
+            wanted.sort_by_key(|p| p.index());
+            assert_eq!(drawn, wanted, "{:?}", kind.tag());
+            assert_eq!(shown, kind, "showing changes nothing");
+        }
+    }
+
+    #[test]
+    fn the_object_tab_shows_animated_values_and_idles_without_writing() {
+        use grid4d_scene::{Key, ObjectParam, Track};
+        let mut data = NodeData::new("s", grid4d_scene::ObjectKindTag::Sphere.default_kind());
+        data.tracks.push(Track {
+            param: Param::Object(ObjectParam::Radius),
+            curve: grid4d_scene::Curve::from_keys([Key::new(0.0, 10.0), Key::new(10.0, 30.0)]),
+        });
+        let before = data.clone();
+        let ctx = egui::Context::default();
+        let keying = Keying {
+            frame: 10.0,
+            autokey: false,
+        };
+        for _ in 0..3 {
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                assert_eq!(object_tab_at(ui, &mut data, keying), None);
+            })
+            .drop_without_applying_deltas();
+        }
+        assert_eq!(data, before);
     }
 }

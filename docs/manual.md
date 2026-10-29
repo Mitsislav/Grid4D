@@ -707,6 +707,37 @@ the top edge of the panel to make it taller.
 
 Every drag, typed value and menu command is one undo step.
 
+### 10.5 Animating an object's parameters
+
+Not only position, rotation and scale can change over time: an object's own
+numbers can too — a sphere's radius, an Extrude's offset, a Lathe's angle, a
+Sweep's growth, a light's intensity or a camera's field of view.
+
+![A sphere's radius keyed at frames 0, 15 and 30: the key button beside the field is filled at frame 15, and the F-Curve editor shows the Radius curve](images/manual/animation_parameters.png)
+
+In the Attribute Manager's **Object** tab, every parameter that can be animated
+has a small **key button** after its field — the same as beside the
+Coordinates fields:
+
+- **Click** it to set a key at the current frame with the value shown (or to
+  remove the key that is there). **Shift+Ctrl+click** deletes the parameter's
+  whole track. Each click is one undo step.
+- The button shows the state: grey ring (not animated), red ring (animated, no
+  key here), red disc (a key at this frame), yellow (changed but not recorded).
+- With **Autokeying** on, changing an animated parameter writes a key at the
+  current frame. With it off, the change is temporary: it shows only at that
+  frame and is dropped when the frame changes (the yellow button) — click the
+  button to keep it.
+
+The fields always show the values at the current frame. Parameter tracks
+appear in the **F-Curve editor** under the object, after its position,
+rotation and scale (angles in degrees, percentages in percent), and their keys
+on the timeline's key strip, where they move and delete like the others.
+**Record** (F9) still records only position, scale and rotation.
+
+Counts (segments, sides, subdivisions) and choices (types, check boxes) cannot
+be animated yet. **Make Editable** bakes the shape at the current frame.
+
 ## 11. Polygon modelling
 
 Modelling works on **polygon objects**: meshes of points, edges and polygons that
@@ -1011,9 +1042,9 @@ and is selected.
 | Spline | Parameters (Attribute Manager ▸ Object) |
 |--------|-------------------------------------------|
 | Circle | Radius; **Ellipse** (a second radius, along Y); **Ring** (an inner circle, Inner Radius) |
-| Rectangle | Width, Height; **Rounding** with its Radius |
+| Rectangle | Width, Height; **Rounding** with its Rounding Radius |
 | Arc | **Type**: Arc (the open curve), Sector (closed through the centre), Segment (closed by a straight line), Ring (the band between Radius and Inner Radius); Start and End Angle (0° points along +X) |
-| n-Side | Radius, Sides; Rounding with its Radius |
+| n-Side | Radius, Sides; Rounding with its Rounding Radius |
 | Star | Inner and Outer Radius, Twist (turns the inner points), Points |
 | Helix | Start and End Radius, Start and End Angle (the difference sets the turns: 720° = two), Radial Bias and Height Bias (50 % = even), Height, Subdivision (points along the coil) |
 | Flower | Inner and Outer Radius, Petals |
@@ -1659,7 +1690,7 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   textures, rendered previews; the viewport shows only the colour.
 - **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's
   angle or length while dragging it (Ctrl / Alt), normalised curves, copying and
-  pasting keys, animating object parameters such as a cube's size, Frame
+  pasting keys, animating counts (segments, sides) and choices, Frame
   Scene/Selected following the animation.
 - **Coordinate Manager**: frozen coordinates (Object Abs), changing primitives'
   size parameters rather than their scale, editing several objects at once.

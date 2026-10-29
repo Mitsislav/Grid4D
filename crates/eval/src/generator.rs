@@ -132,7 +132,8 @@ pub(crate) fn gather(
         if !purpose.shows(data) || !data.enabled || data.kind.is_generator() {
             continue; // hidden parts are left out; nested generators are not merged
         }
-        let source = match (&data.kind, options) {
+        let kind = data.kind_at(frame);
+        let source = match (&*kind, options) {
             (ObjectKind::Polygon { mesh, .. }, Options::Subdivision(_)) => Some(Source::Mesh(mesh.clone())),
             (kind, Options::Subdivision(_)) if editable_mesh_exists(kind) => Some(Source::Primitive(kind.clone())),
             (ObjectKind::SplinePrimitive(primitive), Options::Extrude { .. } | Options::Lathe(_)) => {
@@ -170,7 +171,8 @@ fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs:
         let Some(data) = scene.get(child).map(|node| &node.data) else {
             break;
         };
-        let source = match &data.kind {
+        let kind = data.kind_at(frame);
+        let source = match &*kind {
             ObjectKind::SplinePrimitive(primitive) => Source::SplinePrimitive(*primitive),
             ObjectKind::Text(text) => Source::Text(text.clone()),
             ObjectKind::Spline {
@@ -203,7 +205,8 @@ fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs: 
         let Some(data) = scene.get(child).map(|node| &node.data) else {
             continue;
         };
-        let source = match &data.kind {
+        let kind = data.kind_at(frame);
+        let source = match &*kind {
             ObjectKind::SplinePrimitive(primitive) => Source::SplinePrimitive(*primitive),
             ObjectKind::Text(text) => Source::Text(text.clone()),
             ObjectKind::Spline {
@@ -347,7 +350,7 @@ pub fn generator_color(scene: &Scene, id: NodeId) -> Option<[f32; 3]> {
 /// generator or has no children.
 #[must_use]
 pub fn generator_mesh(scene: &Scene, id: NodeId, frame: f64) -> Option<PolyMesh> {
-    let options = options(&scene.get(id)?.data.kind, Purpose::Editor)?;
+    let options = options(&scene.get(id)?.data.kind_at(frame), Purpose::Editor)?;
     let mut inputs = Vec::new();
     gather(
         scene,

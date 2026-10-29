@@ -411,6 +411,8 @@ impl AnimationSettings {
             grid4d_scene::Param::Position(_) => self.position,
             grid4d_scene::Param::Scale(_) => self.scale,
             grid4d_scene::Param::Rotation(_) => self.rotation,
+            // Parameters are keyed with their buttons or Autokeying.
+            grid4d_scene::Param::Object(_) => false,
         }
     }
 }

@@ -354,7 +354,10 @@ fn read_object(scene: &Scene, id: NodeId, frame: f64, Mode { space, middle }: Mo
     };
     let middle = match middle {
         Middle::Scale => Some(scale),
-        Middle::Size => data.kind.local_bounds().map(|b| (b.max - b.min) * world_scale.abs()),
+        Middle::Size => data
+            .kind_at(frame)
+            .local_bounds()
+            .map(|b| (b.max - b.min) * world_scale.abs()),
         Middle::SizePlus => subtree_bounds(scene, id, frame).map(|b| (b.max - b.min) * world_scale.abs()),
     };
     Some(Fields {
@@ -371,7 +374,7 @@ fn subtree_bounds(scene: &Scene, id: NodeId, frame: f64) -> Option<Aabb> {
     let mut pending = vec![id];
     while let Some(current) = pending.pop() {
         if let Some(node) = scene.get(current)
-            && let Some(local) = node.data.kind.local_bounds()
+            && let Some(local) = node.data.kind_at(frame).local_bounds()
         {
             let relative = into * scene.world_matrix_at(current, frame);
             bounds = bounds.union(local.transformed(&relative));

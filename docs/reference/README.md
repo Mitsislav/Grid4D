@@ -86,7 +86,7 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 9.6 | [`generator-sweep.md`](generator-sweep.md) — the Sweep generator: profile along a path, banking, growth, end scale and rotation | implemented 2026-10-29 |
 | 9.7 | [`generator-loft.md`](generator-loft.md) — the Loft generator: a skin over sections, U / V, organic, loop, linear | implemented 2026-10-29 |
 | 9.8 | [`object-text.md`](object-text.md) — the Text spline: outlines from the built-in font, lines, alignment, spacing | implemented 2026-10-29 |
-| 10.1 | `animation-parameters.md` — keys on object parameters | todo |
+| 10.1 | [`animation-parameters.md`](animation-parameters.md) — keys on object parameters | implemented 2026-10-29 |
 | 10.2 | `deformer-basics.md`, `deformer-bend.md` — who a deformer deforms, the box and its modes; the Bend | todo |
 | 10.3 | `deformer-twist-taper-bulge.md` — Twist, Taper, Bulge; strength handles | todo |
 | 10.4 | `deformer-ffd.md` — the FFD lattice | todo |

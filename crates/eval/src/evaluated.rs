@@ -212,7 +212,9 @@ impl EvaluatedScene {
                 cage_depth = None;
             }
             let data = &node.data;
-            let generator = generator::options(&data.kind, purpose);
+            // Its own parameters at the frame (borrowed unless animated).
+            let kind = data.kind_at(frame);
+            let generator = generator::options(&kind, purpose);
             // A disabled generator is a plain group: its children show as they are.
             if !purpose.shows(data) || (!data.enabled && generator.is_none()) {
                 return false;
@@ -230,7 +232,7 @@ impl EvaluatedScene {
             material_stack.push((depth, material));
             // Markers (cameras, lights) keep their own colour and surface.
             let own_material = material.and_then(|m| materials.get(m));
-            let mut drawable = drawable(&data.kind, data.display_color).map(|d| {
+            let mut drawable = drawable(&kind, data.display_color).map(|d| {
                 let material = own_material.filter(|_| !d.marker);
                 Drawable {
                     shading: Shading::from_angle(data.tags.smoothing_angle()),
@@ -239,8 +241,8 @@ impl EvaluatedScene {
                     ..d
                 }
             });
-            let mut pick = pick_shape(&data.kind);
-            if let ObjectKind::Polygon { mesh, components } = &data.kind {
+            let mut pick = pick_shape(&kind);
+            if let ObjectKind::Polygon { mesh, components } = &*kind {
                 polygons.insert(id, (mesh.clone(), components.clone()));
                 let hidden = &components.hidden().polygons;
                 let mesh = if hidden.is_empty() {
@@ -256,7 +258,7 @@ impl EvaluatedScene {
                 });
             }
             let mut bounds_of_curve = None;
-            let source = match &data.kind {
+            let source = match &*kind {
                 ObjectKind::SplinePrimitive(primitive) => Some(CurveSource::Primitive(*primitive)),
                 ObjectKind::Text(text) => Some(CurveSource::Text(text.clone())),
                 ObjectKind::Spline {
@@ -270,7 +272,7 @@ impl EvaluatedScene {
                 _ => None,
             };
             if let Some(source) = source {
-                let sample = || curve_of(&data.kind);
+                let sample = || curve_of(&kind);
                 let cached = match curve_cache.entry(id) {
                     std::collections::hash_map::Entry::Occupied(entry) => {
                         let cached = entry.into_mut();
@@ -300,10 +302,10 @@ impl EvaluatedScene {
                 });
                 curves.insert(handle.id(), handle);
             }
-            let mut bounds = if data.kind.is_spline() {
+            let mut bounds = if kind.is_spline() {
                 bounds_of_curve
             } else {
-                data.kind.local_bounds()
+                kind.local_bounds()
             };
             if let Some(options) = generator.filter(|_| data.enabled) {
                 if let Some(result) = generated_mesh(
@@ -344,7 +346,7 @@ impl EvaluatedScene {
                     next_cage = scene.children(id).first().copied();
                 }
             }
-            if cage_depth.is_some() && !data.kind.is_spline() {
+            if cage_depth.is_some() && !kind.is_spline() {
                 // Part of a cage: the generator shows it. (Splines stay drawn:
                 // curves are guides, and an Extrude's input is edited as one.)
                 drawable = None;
@@ -352,7 +354,7 @@ impl EvaluatedScene {
             }
             nodes.push(EvaluatedNode {
                 id,
-                kind: data.kind.tag(),
+                kind: kind.tag(),
                 depth,
                 world: *world,
                 bounds,
@@ -378,13 +380,16 @@ impl EvaluatedScene {
         // The lights where animation and Target tags put them.
         self.lights.clear();
         for node in &self.nodes {
-            let Some(&ObjectKind::Light {
+            let Some(kind) = scene.get(node.id).map(|n| n.data.kind_at(self.frame)) else {
+                continue;
+            };
+            let ObjectKind::Light {
                 color,
                 intensity,
                 light_type,
                 details,
                 shadow,
-            }) = scene.get(node.id).map(|n| &n.data.kind)
+            } = *kind
             else {
                 continue;
             };
@@ -1635,5 +1640,42 @@ mod tests {
         let ring = result_of(&eval, extrude);
         let topology = grid4d_geom::Topology::build(ring.mesh());
         assert!(topology.is_closed(), "a closed solid");
+    }
+
+    #[test]
+    fn animated_parameters_change_shapes_and_generators_with_the_frame() {
+        use grid4d_scene::{Interpolation, Key, ObjectParam, Param, Track};
+        let linear = |keys: [(f64, f32); 2]| {
+            grid4d_scene::Curve::from_keys(keys.into_iter().map(|(f, v)| Key {
+                interpolation: Interpolation::Linear,
+                ..Key::new(f, v)
+            }))
+        };
+        let mut doc = Document::new("params");
+        let mut sphere = Node::new("Sphere", ObjectKindTag::Sphere.default_kind());
+        sphere.data.tracks.push(Track {
+            param: Param::Object(ObjectParam::Radius),
+            curve: linear([(0.0, 100.0), (10.0, 200.0)]),
+        });
+        let sphere = doc.scene.insert(sphere);
+        let extrude = doc
+            .scene
+            .insert(Node::new("Extrude", ObjectKindTag::Extrude.default_kind()));
+        doc.scene.get_mut(extrude).unwrap().data.tracks.push(Track {
+            param: Param::Object(ObjectParam::Offset),
+            curve: linear([(0.0, 20.0), (10.0, 120.0)]),
+        });
+        doc.scene
+            .insert_child(extrude, Node::new("Circle", ObjectKindTag::Circle.default_kind()))
+            .unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.set_frame(5.0);
+        eval.update(&doc.scene);
+        assert_eq!(node(&eval, sphere).drawable.unwrap().scale, Vec3::splat(150.0));
+        assert!((result_of(&eval, extrude).bounds().unwrap().max.z - 70.0).abs() < 1e-3);
+        eval.set_frame(10.0);
+        assert!(eval.update(&doc.scene), "a new frame re-evaluates animated parameters");
+        assert_eq!(node(&eval, sphere).drawable.unwrap().scale, Vec3::splat(200.0));
+        assert!((result_of(&eval, extrude).bounds().unwrap().max.z - 120.0).abs() < 1e-3);
     }
 }

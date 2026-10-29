@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 10 — Deformers & MoGraph (v0.10) |
-| Last step done | 9.8 — Text spline (2026-10-29); Phase 9 complete |
-| Next step | 10.1 — Animated parameters |
-| Tests | 600, all passing; clippy and rustfmt clean |
+| Last step done | 10.1 — Animated parameters (2026-10-29) |
+| Next step | 10.2 — Deformer framework and Bend |
+| Tests | 609, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1190,6 +1190,46 @@ Phase 9 is complete.
 | Step | Built | Tests |
 |------|-------|-------|
 | — | Phase 10 planned in detail: animated parameters, Bend / Twist / Taper / Bulge / FFD, Current State to Object, Cloner (Linear, Radial, Grid, Object) and Plain / Random effectors; Phases 11–13 (simulation, workspace, extensibility) sketched (`IMPLEMENTATION_PLAN.md`) | 600 |
+| 10.1 | Animated parameters: every real-valued Object-tab parameter keyable — key buttons beside the fields, Autokeying and temporary values, F-Curve editor and key strip; evaluated at the frame everywhere (viewport, generators, renders); Make Editable bakes the frame; saved by name | 609 |
+
+**10.1 — Animated parameters**
+
+*Problems and solutions:*
+- **Naming parameters.** Tracks needed to name "the radius" of any object
+  without a field index that would break when kinds change. `ObjectParam` is
+  one closed enum named by meaning (39 values; Radius, Height, Offset, …), with
+  `ObjectKind::slot` mapping a (kind, parameter) pair to its field; files store
+  the names (`"radius"`, `"size_y"`). A track an object does not have a
+  parameter for is ignored.
+- **A set of parameters outgrew its bits.** Temporary values are marked in a
+  `ParamSet`, a 16-bit mask over the nine transform channels; with 39 object
+  parameters after them it became a `u128`. That made `NodeData` larger, and
+  clippy then flagged the F-Curve editor's drag enum for very unequal variant
+  sizes; the tangent drag now boxes its saved `NodeData`.
+- **Evaluation without copies.** Every update reads each object's kind at the
+  frame; `NodeData::kind_at` returns the stored kind borrowed (`Cow`) unless a
+  parameter is animated, so the hot path still allocates nothing.
+- **Which rows get key buttons.** The Object tab is drawn by shared row helpers;
+  they now take a `KeyRows` that finds a row's parameter by its label and draws
+  the key button after the field (so the label column keeps its alignment).
+  A test draws the Object tab of every object and requires exactly one button
+  per parameter. It found three real mismatches — a light's falloff radius
+  exists only with a falloff, an Extrude's offset and movement depend on its
+  Direction, an Arc's inner radius exists only as a Ring — and one label
+  clash: the rounding radius row was also labelled "Radius" (now "Rounding
+  Radius").
+- **Writing edits back.** `NodeData::set_kind_at` keeps animated parameters'
+  base values and sends their changes through keys (Autokeying) or temporary
+  values, while choices, counts and unanimated numbers are set for all frames.
+- **A cut that took too much.** Restricting the falloff radius first went
+  through a scripted edit whose end marker matched too late and removed a
+  stretch of `param.rs`; the compiler caught it and the code was restored.
+- **On-screen testing:** a document with a sphere whose radius is keyed 30 → 110
+  over 30 frames, an Extrude of a Star with an animated offset and a Lathe with
+  an animated angle: at frame 15 all three were half way, the Radius field read
+  70 cm beside a red ring; a click on the ring set a key (red disc, the title
+  marked unsaved) and the F-Curve editor showed the Radius curve through three
+  keys.
 
 ---
 

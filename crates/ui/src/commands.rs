@@ -12,7 +12,7 @@ use grid4d_geom::{
 };
 use grid4d_render::{DisplayStyle, OrbitCamera, ShadingMode};
 use grid4d_scene::{
-    ComponentState, Components, Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene,
+    ComponentState, Components, Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, ObjectKindTag, Param, Scene,
     SceneEdit, SplineHandle, Transform,
 };
 
@@ -1629,31 +1629,40 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
     };
     let mut edits = Vec::new();
     let mut cages = Vec::new();
+    // Shapes are baked as they are at the current frame.
+    let frame = f64::from(doc.time.frame());
     for &id in selection {
         let Some(node) = doc.scene.get(id).filter(|_| !in_cage(id)) else {
             continue;
         };
+        let kind = node.data.kind_at(frame);
         // A spline primitive becomes an editable spline: the same curve, its
         // plane and direction baked into the points.
-        if let ObjectKind::SplinePrimitive(primitive) = &node.data.kind {
+        if let ObjectKind::SplinePrimitive(primitive) = &*kind {
             let mut data = node.data.clone();
             data.kind = ObjectKind::Spline {
                 spline: SplineHandle::new(primitive.spline()),
                 interpolation: primitive.interpolation,
                 components: Components::default(),
             };
-            edits.push(SceneEdit::SetData { id, data });
+            edits.push(SceneEdit::SetData {
+                id,
+                data: without_lost_tracks(data),
+            });
             continue;
         }
         // A text becomes an editable spline of its outlines.
-        if let ObjectKind::Text(text) = &node.data.kind {
+        if let ObjectKind::Text(text) = &*kind {
             let mut data = node.data.clone();
             data.kind = ObjectKind::Spline {
                 spline: SplineHandle::new(grid4d_text::text_spline(text)),
                 interpolation: text.interpolation,
                 components: Components::default(),
             };
-            edits.push(SceneEdit::SetData { id, data });
+            edits.push(SceneEdit::SetData {
+                id,
+                data: without_lost_tracks(data),
+            });
             continue;
         }
         let mesh = if node.data.kind.is_generator() {
@@ -1661,23 +1670,36 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
             if enabled_generator(id).is_none() {
                 continue;
             }
-            let Some(mesh) = grid4d_eval::generator_mesh(&doc.scene, id, f64::from(doc.time.frame())) else {
+            let Some(mesh) = grid4d_eval::generator_mesh(&doc.scene, id, frame) else {
                 continue;
             };
             cages.extend(inputs(node));
             mesh
         } else {
-            let Some(mesh) = grid4d_eval::editable_mesh(&node.data.kind) else {
+            let Some(mesh) = grid4d_eval::editable_mesh(&kind) else {
                 continue;
             };
             mesh
         };
         let mut data = node.data.clone();
         data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
-        edits.push(SceneEdit::SetData { id, data });
+        edits.push(SceneEdit::SetData {
+            id,
+            data: without_lost_tracks(data),
+        });
     }
     edits.extend(cages.into_iter().map(|root| SceneEdit::Detach { root }));
     edits
+}
+
+/// `data` without the tracks of parameters its (new) kind does not have.
+fn without_lost_tracks(mut data: NodeData) -> NodeData {
+    let kept = data.kind.params();
+    data.tracks.retain(|t| match t.param {
+        Param::Object(p) => kept.contains(&p),
+        Param::Position(_) | Param::Rotation(_) | Param::Scale(_) => true,
+    });
+    data
 }
 
 /// Default data for a new object, named uniquely, C4D-style.
@@ -3795,5 +3817,36 @@ mod tests {
         );
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
         assert_eq!(doc.scene.get(id).unwrap().data.kind, ObjectKind::Text(text));
+    }
+
+    #[test]
+    fn make_editable_bakes_animated_parameters_at_the_frame_and_drops_their_tracks() {
+        use grid4d_scene::{Axis, Key, ObjectParam, Track};
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Sphere)],
+        );
+        let id = editor.selection.active().unwrap();
+        let tracks = &mut doc.scene.get_mut(id).unwrap().data.tracks;
+        tracks.push(Track {
+            param: Param::Object(ObjectParam::Radius),
+            curve: grid4d_scene::Curve::from_keys([Key::new(0.0, 10.0), Key::new(10.0, 50.0)]),
+        });
+        tracks.push(Track {
+            param: Param::Position(Axis::X),
+            curve: grid4d_scene::Curve::from_keys([Key::new(0.0, 0.0), Key::new(10.0, 5.0)]),
+        });
+        doc.time.set_frame(10);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let data = &doc.scene.get(id).unwrap().data;
+        let ObjectKind::Polygon { mesh, .. } = &data.kind else {
+            panic!("not baked")
+        };
+        let (_, max) = mesh.mesh().bounds().unwrap();
+        assert!((max.y - 50.0).abs() < 0.5, "the radius at frame 10: {max}");
+        assert_eq!(data.tracks.len(), 1, "the radius track goes, the position track stays");
     }
 }

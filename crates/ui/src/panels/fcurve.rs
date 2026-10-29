@@ -31,25 +31,45 @@ const PICK: f32 = 6.0;
 /// A curve is hit within this many points.
 const CURVE_PICK: f32 = 4.0;
 
-/// The unit a parameter is shown in: rotations in degrees.
+/// The unit a parameter is shown in: rotations and stored angles in degrees,
+/// fractions in percent.
 fn display_scale(param: Param) -> f64 {
     match param {
         Param::Rotation(_) => f64::from(180.0_f32 / std::f32::consts::PI),
         Param::Position(_) | Param::Scale(_) => 1.0,
+        Param::Object(p) => p.unit().display_scale(),
     }
 }
 
 fn color(param: Param) -> Color32 {
     let axis = match param {
         Param::Position(a) | Param::Rotation(a) | Param::Scale(a) => a,
+        Param::Object(p) => return p::PARAM_CURVES[p.index() % p::PARAM_CURVES.len()],
     };
     let base = p::AXIS[axis.index()];
     match param {
-        Param::Position(_) => base,
         // Lighter / darker shades keep the channels apart.
         Param::Rotation(_) => base.lerp_to_gamma(Color32::WHITE, 0.35),
         Param::Scale(_) => base.lerp_to_gamma(Color32::BLACK, 0.3),
+        Param::Position(_) | Param::Object(_) => base,
     }
+}
+
+/// `data`'s animated parameters in the order the editor lists them: the
+/// transform first, then the object's own in Attribute Manager order, then any
+/// others it has tracks for.
+fn track_order(data: &NodeData) -> Vec<Param> {
+    let mut order: Vec<Param> = Param::TRANSFORM
+        .into_iter()
+        .chain(data.kind.params().into_iter().map(Param::Object))
+        .filter(|&param| data.tracks.iter().any(|t| t.param == param))
+        .collect();
+    for track in &data.tracks {
+        if !order.contains(&track.param) {
+            order.push(track.param);
+        }
+    }
+    order
 }
 
 /// Which side of a key a tangent handle is on.
@@ -143,11 +163,11 @@ enum CurveDrag {
         keys: Vec<CurveKey>,
         start: Pos2,
     },
-    /// A tangent handle of one key.
+    /// A tangent handle of one key (the object's data boxed: it is large).
     Handle {
         key: CurveKey,
         side: Side,
-        before: NodeData,
+        before: Box<NodeData>,
     },
     /// Selecting the keys in a box; `toggle` with Ctrl.
     Box { from: Pos2, to: Pos2, toggle: bool },
@@ -438,7 +458,7 @@ impl FCurvePanel {
                     Some(node) => CurveDrag::Handle {
                         key,
                         side,
-                        before: node.data.clone(),
+                        before: Box::new(node.data.clone()),
                     },
                     None => return,
                 },
@@ -499,7 +519,7 @@ impl FCurvePanel {
                         self.view.frame_at(plot, pointer.x),
                         self.view.value_at(plot, pointer.y) / display_scale(key.param),
                     );
-                    let mut data = before.clone();
+                    let mut data = NodeData::clone(before);
                     if let Some(track) = data.tracks.iter_mut().find(|t| t.param == key.param) {
                         drag_handle(&mut track.curve, key.frame, *side, at, !shift);
                     }
@@ -526,7 +546,7 @@ impl FCurvePanel {
                 CurveDrag::Handle { key, before, .. } => editor.commands.push(EditorCommand::CommitLiveAll {
                     inverses: vec![SceneEdit::SetData {
                         id: key.node,
-                        data: before,
+                        data: *before,
                     }],
                     label: "Edit Tangents",
                 }),
@@ -819,10 +839,8 @@ fn shown_tracks(doc: &Document, editor: &EditorState) -> Vec<Shown> {
     let mut shown = Vec::new();
     for &node in editor.selection.as_slice() {
         let Some(n) = doc.scene.get(node) else { continue };
-        for param in Param::TRANSFORM {
-            if n.data.tracks.iter().any(|t| t.param == param)
-                && (editor.curves.tracks.is_empty() || editor.curves.tracks.contains(&(node, param)))
-            {
+        for param in track_order(&n.data) {
+            if editor.curves.tracks.is_empty() || editor.curves.tracks.contains(&(node, param)) {
                 shown.push(Shown { node, param });
             }
         }
@@ -960,10 +978,7 @@ fn track_list(ui: &mut Ui, rect: Rect, doc: &Document, editor: &mut EditorState)
                     if name.clicked() {
                         editor.curves.tracks.clear();
                     }
-                    for param in Param::TRANSFORM {
-                        if !n.data.tracks.iter().any(|t| t.param == param) {
-                            continue;
-                        }
+                    for param in track_order(&n.data) {
                         let picked = editor.curves.tracks.contains(&(node, param));
                         let (row, response) = ui
                             .allocate_exact_size(vec2(ui.available_width(), metrics::ROW_HEIGHT - 3.0), Sense::click());
@@ -1242,5 +1257,31 @@ mod tests {
         assert!((nice_step(0.03) - 0.05).abs() < 1e-12);
         assert_eq!(format_value(-1e-12, 10.0), "0");
         assert_eq!(format_value(0.25, 0.05), "0.25");
+    }
+
+    #[test]
+    fn object_parameter_tracks_follow_the_transform_ones() {
+        use grid4d_scene::{Key, ObjectParam, Track};
+        let mut data = NodeData::new("c", grid4d_scene::ObjectKindTag::Cylinder.default_kind());
+        for param in [
+            Param::Object(ObjectParam::Height),
+            Param::Scale(Axis::Y),
+            Param::Object(ObjectParam::Radius),
+        ] {
+            data.tracks.push(Track {
+                param,
+                curve: Curve::from_keys([Key::new(0.0, 1.0)]),
+            });
+        }
+        assert_eq!(
+            track_order(&data),
+            [
+                Param::Scale(Axis::Y),
+                Param::Object(ObjectParam::Radius),
+                Param::Object(ObjectParam::Height),
+            ]
+        );
+        assert!((display_scale(Param::Object(ObjectParam::EndRotation)) - 57.29578).abs() < 1e-3);
+        assert_eq!(display_scale(Param::Object(ObjectParam::EndGrowth)), 100.0);
     }
 }
