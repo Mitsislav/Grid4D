@@ -20,6 +20,7 @@
 mod anim;
 mod bounds;
 mod document;
+mod dynamics;
 mod edit;
 mod light;
 mod material;
@@ -41,6 +42,7 @@ pub use anim::{
 };
 pub use bounds::Aabb;
 pub use document::Document;
+pub use dynamics::{Body, CollisionShape, Inherit, MassMode, Motion, SimulationSettings};
 pub use edit::SceneEdit;
 pub use light::{Falloff, LightDetails, LightShadow, LightType};
 pub use material::{Material, MaterialId, Materials};

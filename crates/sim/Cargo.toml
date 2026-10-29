@@ -1,0 +1,16 @@
+[package]
+name = "grid4d-sim"
+description = "Grid4D rigid body simulation: rapier3d behind plain arrays, metres inside. No GPU, no UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+grid4d-scene.workspace = true
+glam.workspace = true
+rapier3d.workspace = true
+
+[lints]
+workspace = true

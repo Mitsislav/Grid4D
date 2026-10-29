@@ -55,6 +55,8 @@ pub enum SceneEdit {
     SetMaterials(Materials),
     /// Replaces the document's render settings (validated).
     SetRender(RenderSettings),
+    /// Replaces the document's simulation settings (validated).
+    SetSimulation(crate::SimulationSettings),
 }
 
 impl SceneEdit {
@@ -66,9 +68,12 @@ impl SceneEdit {
         match *self {
             Self::Detach { root } | Self::Attach { root, .. } => Some(root),
             Self::Move { id, .. } | Self::SetData { id, .. } => Some(id),
-            Self::Insert { .. } | Self::SetTime(_) | Self::SetName(_) | Self::SetMaterials(_) | Self::SetRender(_) => {
-                None
-            }
+            Self::Insert { .. }
+            | Self::SetTime(_)
+            | Self::SetName(_)
+            | Self::SetMaterials(_)
+            | Self::SetRender(_)
+            | Self::SetSimulation(_) => None,
         }
     }
 }
@@ -132,6 +137,10 @@ impl Document {
                 &mut self.render,
                 settings.validated(),
             ))),
+            SceneEdit::SetSimulation(settings) => Ok(SceneEdit::SetSimulation(std::mem::replace(
+                &mut self.simulation,
+                settings.validated(),
+            ))),
         }
     }
 
@@ -175,6 +184,7 @@ mod tests {
         time: TimeSettings,
         materials: Materials,
         render: RenderSettings,
+        simulation: crate::SimulationSettings,
         nodes: Vec<(NodeId, Option<NodeId>, u32, NodeData)>,
     }
 
@@ -190,6 +200,7 @@ mod tests {
             time: doc.time.settings(),
             materials: doc.scene.materials().clone(),
             render: doc.render.clone(),
+            simulation: doc.simulation,
             nodes,
         }
     }
@@ -312,6 +323,14 @@ mod tests {
             }),
         );
         assert_round_trip(&mut doc, SceneEdit::SetName("Shot 010".to_owned()));
+        assert_round_trip(
+            &mut doc,
+            SceneEdit::SetSimulation(crate::SimulationSettings {
+                steps_per_frame: 12,
+                gravity: Vec3::new(0.0, -100.0, 0.0),
+                ..crate::SimulationSettings::default()
+            }),
+        );
         assert_round_trip(
             &mut doc,
             SceneEdit::SetRender(RenderSettings {
@@ -541,6 +560,12 @@ mod tests {
                 },
                 naming: crate::FrameNaming::ALL[rng.below(3)],
                 ..RenderSettings::default()
+            }),
+            (9, _) if rng.chance(2) => SceneEdit::SetSimulation(crate::SimulationSettings {
+                enabled: rng.chance(2),
+                steps_per_frame: u32::try_from(rng.below(300)).unwrap(),
+                time_scale: f32::from(u8::try_from(rng.below(200)).unwrap()) * 0.1,
+                ..crate::SimulationSettings::default()
             }),
             _ => SceneEdit::Insert {
                 parent,

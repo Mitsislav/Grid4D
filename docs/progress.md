@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 11 — Simulation (v0.11) |
-| Last step done | Phase 11 planned (2026-10-30) |
-| Next step | 11.1 — Scene data and the physics crate |
-| Tests | 658, all passing; clippy and rustfmt clean |
+| Last step done | 11.1 — Scene data and the physics crate (2026-10-30) |
+| Next step | 11.2 — Simulation core |
+| Tests | 665, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1456,6 +1456,7 @@ parameters, are undoable, saved, picked, exported and rendered.
 | Step | What was built | Tests |
 |------|----------------|-------|
 | — | Phase 11 planned in detail: rigid and collider bodies as a Dynamics tag, `rapier3d` 0.36 in a new `grid4d-sim` crate (metres inside, arrays at its edge), a per-frame cache in editor state keyed by the simulation's inputs, evaluation overrides, clones as bodies, saved caches (`IMPLEMENTATION_PLAN.md`) | 658 |
+| 11.1 | Rigid Body / Collider Body (one Dynamics tag: motion, shape, bounce, friction, mass, damping, start velocity) from the Tags menus, edited, saved; Simulation settings in the Project settings, undoable, saved; the `grid4d-sim` crate on `rapier3d` 0.36: a ball falls ½ g t² and rests on a collider, deterministically | 665 |
 
 **Planning notes:**
 - **The engine's maths library.** `rapier3d` 0.36 (the latest, 2026-10) uses
@@ -1466,6 +1467,28 @@ parameters, are undoable, saved, picked, exported and rendered.
   and evaluation must show simulated poses; a general override hook in
   `grid4d-eval` (world matrices by node or clone) keeps the arrow one way:
   eval ◀ sim ◀ ui.
+
+**11.1 — Scene data and the physics crate**
+
+*Problems and solutions:*
+- **Two glam versions.** Rapier 0.36 builds on glam 0.33 (via `glamx`); ours
+  is 0.34. The engine lives in `grid4d-sim` and every value crosses its edge
+  as an array (`convert.rs`), converting centimetres to metres on the way; a
+  test checks the round trip.
+- **Less glue than expected.** Rapier 0.36 ships a `PhysicsWorld` holding the
+  pipeline, sets and solvers, so the crate's `World` is a thin layer: bodies
+  from a `Body` (dynamic or kinematic, restitution, friction, density or mass,
+  start velocity), a frame of sub-steps, poses back in centimetres.
+- **Presets of one tag kind.** Rigid Body and Collider Body are one Dynamics
+  tag (an object has at most one of each kind), so `EditorCommand::AddTag`
+  now carries the tag to add rather than its kind; the Object Manager's
+  right-click menu passes menu entries by index, since its actions are `Copy`.
+- **Clippy:** a helper placed after the test module was moved above it.
+- **On-screen testing:** a sphere with a Rigid Body tag above a floor with a
+  Collider Body tag: the tag icons in the Object Manager, the tag's settings
+  in the Attribute Manager, the Project settings. (Scrolling to the Simulation
+  section does not reach the app through posted messages; it is covered by
+  the undo test.)
 
 ---
 

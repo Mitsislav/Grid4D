@@ -11,7 +11,7 @@ use egui::{
     Align2, Button, CornerRadius, FontId, Id, Key, LayerId, Margin, Order, Rect, RichText, ScrollArea, Sense, Stroke,
     StrokeKind, TextEdit, TextStyle, Ui, Vec2, pos2, vec2,
 };
-use grid4d_scene::{Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit, TagKind};
+use grid4d_scene::{Body, Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit, Tag, TagKind};
 
 use crate::{
     EditorCommand, EditorState, SelectMode, TagRef,
@@ -42,7 +42,8 @@ enum RowAction {
     SelectTag(NodeId, TagKind),
     DeleteTag(NodeId, TagKind),
     /// Context menu: add a tag to the (just selected) object.
-    AddTag(TagKind),
+    /// An entry of [`tag_menu`], by index.
+    AddTag(usize),
     /// A material dropped on the object.
     AssignMaterial(NodeId, grid4d_scene::MaterialId),
     /// A double-click on a Material tag: show its material.
@@ -144,13 +145,13 @@ impl OutlinerPanel {
                 });
                 ui.menu_button("Tags", |ui| {
                     let any = !editor.selection.is_empty();
-                    for kind in TagKind::ALL {
+                    for (label, tag) in tag_menu() {
                         if ui
-                            .add_enabled(any, Button::new(format!("{} Tag", kind.label())))
+                            .add_enabled(any, Button::new(label))
                             .on_disabled_hover_text("Select the objects to tag first")
                             .clicked()
                         {
-                            editor.commands.push(EditorCommand::AddTag(kind));
+                            editor.commands.push(EditorCommand::AddTag(tag));
                             ui.close();
                         }
                     }
@@ -309,12 +310,8 @@ impl OutlinerPanel {
             let color = if hit.hovered() { p::TEXT_STRONG } else { p::TAG };
             // A Material tag shows its material's colour.
             let material = match tag {
-                grid4d_scene::Tag::Material { material } => {
-                    material.and_then(|m| scene.materials().get(m).map(|mat| (m, mat)))
-                }
-                grid4d_scene::Tag::Phong { .. }
-                | grid4d_scene::Tag::Protection { .. }
-                | grid4d_scene::Tag::Target { .. } => None,
+                Tag::Material { material } => material.and_then(|m| scene.materials().get(m).map(|mat| (m, mat))),
+                Tag::Phong { .. } | Tag::Protection { .. } | Tag::Target { .. } | Tag::Dynamics(_) => None,
             };
             match material {
                 Some((_, mat)) => icons::paint_material_ball(&painter, icon_rect.shrink(2.0), mat.color),
@@ -437,10 +434,10 @@ impl OutlinerPanel {
                 ui.close();
             }
             ui.menu_button("Add Tag", |ui| {
-                for kind in TagKind::ALL {
-                    if ui.button(format!("{} Tag", kind.label())).clicked() {
+                for (index, (label, _)) in tag_menu().enumerate() {
+                    if ui.button(label).clicked() {
                         actions.push(RowAction::Select(id, SelectMode::Replace));
-                        actions.push(RowAction::AddTag(kind));
+                        actions.push(RowAction::AddTag(index));
                         ui.close();
                     }
                 }
@@ -519,7 +516,11 @@ impl OutlinerPanel {
                     editor.tag_selection = Some(TagRef { node: id, kind });
                 }
                 RowAction::DeleteTag(node, kind) => editor.commands.push(EditorCommand::DeleteTag { node, kind }),
-                RowAction::AddTag(kind) => editor.commands.push(EditorCommand::AddTag(kind)),
+                RowAction::AddTag(index) => {
+                    if let Some((_, tag)) = tag_menu().nth(index) {
+                        editor.commands.push(EditorCommand::AddTag(tag));
+                    }
+                }
                 RowAction::AssignMaterial(node, material) => editor.commands.push(EditorCommand::AssignMaterial {
                     material,
                     nodes: vec![node],
@@ -615,6 +616,18 @@ fn edit_data(
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
     let (h, n) = (haystack.as_bytes(), needle.as_bytes());
     n.is_empty() || h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
+}
+
+/// The Tags menus' entries: every kind with its defaults, and the Dynamics
+/// tag twice — as a Rigid Body and as a Collider Body.
+fn tag_menu() -> impl Iterator<Item = (String, Tag)> {
+    TagKind::ALL
+        .into_iter()
+        .map(|kind| (format!("{} Tag", kind.label()), kind.default_tag()))
+        .chain(std::iter::once((
+            "Collider Body Tag".to_owned(),
+            Tag::Dynamics(Body::collider()),
+        )))
 }
 
 #[cfg(test)]

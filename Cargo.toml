@@ -11,13 +11,14 @@
 #                            └─────────────────  grid4d-io  ◀─────────────────┘   (.g4d files)
 #
 #  grid4d-text (text splines' glyph outlines) depends only on grid4d-geom; eval and ui use it.
+#  grid4d-sim (rigid bodies, rapier3d) depends on grid4d-scene; ui uses it.
 #
 #  See ARCHITECTURE.md for the architectural rules.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [workspace]
 resolver = "3"
-members = ["crates/geom", "crates/text", "crates/scene", "crates/eval", "crates/render", "crates/raytrace", "crates/io", "crates/ui"]
+members = ["crates/geom", "crates/text", "crates/scene", "crates/eval", "crates/render", "crates/raytrace", "crates/sim", "crates/io", "crates/ui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -34,6 +35,7 @@ grid4d-scene = { path = "crates/scene" }
 grid4d-eval = { path = "crates/eval" }
 grid4d-render = { path = "crates/render" }
 grid4d-raytrace = { path = "crates/raytrace" }
+grid4d-sim = { path = "crates/sim" }
 grid4d-io = { path = "crates/io" }
 grid4d-ui = { path = "crates/ui" }
 
@@ -68,6 +70,10 @@ tobj = { version = "4.0.5", default-features = false }
 
 # Final rendering: tiles in parallel (grid4d-raytrace).
 rayon = "1.10"
+# Rigid body simulation (grid4d-sim only): single-threaded (no `parallel`) so a
+# run is deterministic. It brings glam 0.33 (through glamx) beside our 0.34;
+# grid4d-sim converts through plain arrays (IMPLEMENTATION_PLAN.md, D10).
+rapier3d = "0.36"
 # Rendered pictures (grid4d-io): PNG; OpenEXR written by hand with zlib (the
 # backend zip already uses) and half floats. `exr` (dev only) reads them back in tests.
 png = "0.18"

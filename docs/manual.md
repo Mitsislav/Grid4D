@@ -1671,6 +1671,41 @@ Turns the object to face another object.
 
 Links a material to the object; see [§18](#18-materials).
 
+### 17.5 Rigid Body and Collider Body
+
+Make an object part of the rigid body simulation: a **Rigid Body** falls under
+gravity, collides, bounces and comes to rest; a **Collider Body** is something
+rigid bodies hit — a floor, a bowl, a moving paddle — and is never pushed
+itself. Both are the same tag (*Dynamics*; one per object): choose **Rigid
+Body Tag** or **Collider Body Tag** in the Tags menu, or switch **Dynamic**
+between *Dynamic* and *Collider* later.
+
+![A sphere with a Rigid Body tag above a floor with a Collider Body tag; the Rigid Body tag's settings](images/manual/tags_dynamics.png)
+
+- **Enabled**: off, the object takes no part.
+- **Inherit Tag**: *Compound* makes the object and its visible children one
+  body.
+- **Shape**: what collides — *Automatic* (a convex hull for a rigid body, the
+  exact mesh for a collider), *Box*, *Sphere*, *Convex Hull* or *Static Mesh*
+  (colliders only). Shapes come from the object as it is shown, deformers and
+  generators included.
+- **Bounce** and **Friction**: how much speed survives a hit, and how much
+  sliding is resisted.
+- **Mass** (rigid bodies): *Global Density* (a 100 cm cube weighs 1 kg),
+  *Custom Density* or *Custom Mass*; **Rotational Mass** makes it harder or
+  easier to set spinning; **Linear / Angular Damping** slow it down as air
+  would.
+- **Velocity** and **Spin**: how it is moving at the start frame.
+
+The document's **Simulation** settings are in the Project settings (click an
+empty spot in the Object Manager): **Enabled**, **Gravity** (cm/s², 981 down
+by default), **Steps per Frame** (more for fast or small objects), **Solver
+Iterations** (steadier stacks) and **Time Scale** (below 1: slow motion).
+
+The simulation itself — objects actually falling as the frame advances — is
+being built: for now the tags and settings are kept and saved with the
+document.
+
 ## 18. Materials
 
 A **material** gives objects their surface. Materials live in the **Material
@@ -1921,6 +1956,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Modelling**:
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
   Solid, Proportional and Radial modes; Bridge point by point.
+- **Simulation**: rigid bodies do not move yet (the tags and settings are
+  stored); soft bodies, cloth, particles, forces and connectors are not
+  planned for the first simulation release.
 - **Deformers**: splines are not deformed; component modes show the
   undeformed points; no handles for size and angle (only strength has one);
   an FFD's lattice cannot be animated.

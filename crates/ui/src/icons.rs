@@ -802,7 +802,8 @@ impl Canvas<'_> {
 }
 
 /// Tag icons: a smooth curve over a faceted one (Phong), a padlock (Protection),
-/// a sight (Target), a lit ball (Material; painted in the material's colour).
+/// a sight (Target), a lit ball (Material; painted in the material's colour), a
+/// ball over a floor (Dynamics).
 fn paint_tag(c: &Canvas<'_>, kind: TagKind, soft: Color32) {
     match kind {
         TagKind::Phong => {
@@ -842,6 +843,14 @@ fn paint_tag(c: &Canvas<'_>, kind: TagKind, soft: Color32) {
         TagKind::Material => {
             c.disc((0.5, 0.5), 0.42);
             c.disc_with((0.38, 0.36), 0.12, Color32::from_white_alpha(150));
+        }
+        TagKind::Dynamics => {
+            // A ball falling onto a floor, with speed lines.
+            c.fill_with(&[(0.08, 0.82), (0.92, 0.82), (0.92, 0.94), (0.08, 0.94)], soft);
+            c.disc((0.5, 0.5), 0.2);
+            for x in [0.38, 0.5, 0.62] {
+                c.line((x, 0.06), (x, 0.22));
+            }
         }
     }
 }

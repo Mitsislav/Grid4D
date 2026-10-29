@@ -31,9 +31,10 @@ use grid4d_geom::{
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
 use grid4d_scene::{
-    Axis, ComponentState, Components, Curve, Document, Falloff, FrameNaming, FrameRange, ImageFormat, Interpolation,
-    Key, LightDetails, LightShadow, LightType, Material, MaterialId, MeshHandle, MeshId, NodeData, NodeId, ObjectKind,
-    ObjectParam, Param, RenderSettings, SplineHandle, Tag, Tangents, TimeSettings, Track, Transform,
+    Axis, Body, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming, FrameRange,
+    ImageFormat, Inherit, Interpolation, Key, LightDetails, LightShadow, LightType, MassMode, Material, MaterialId,
+    MeshHandle, MeshId, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, RenderSettings, SimulationSettings,
+    SplineHandle, Tag, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -73,6 +74,10 @@ struct DocumentDto {
     /// defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     render: Option<RenderDto>,
+    /// Added in the course of version 3 (step 11.1); absent while they are the
+    /// defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    simulation: Option<SimulationDto>,
 }
 
 /// A material; colours are linear RGB.
@@ -580,6 +585,211 @@ impl TrackDto {
 }
 
 /// A tag; objects it refers to are given by their index in `objects`.
+/// A Dynamics tag's body (added in step 11.1); defaults omitted.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct BodyDto {
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    enabled: bool,
+    motion: MotionDto,
+    #[serde(default, skip_serializing_if = "is_false")]
+    compound: bool,
+    #[serde(default, skip_serializing_if = "ShapeDto::is_automatic")]
+    shape: ShapeDto,
+    bounce: f32,
+    friction: f32,
+    #[serde(default, skip_serializing_if = "MassModeDto::is_global")]
+    mass_mode: MassModeDto,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    density: f32,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    mass: f32,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    rotational_mass: f32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    linear_damping: f32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    angular_damping: f32,
+    /// cm/s.
+    #[serde(default, skip_serializing_if = "is_zero_vector")]
+    initial_velocity: [f32; 3],
+    /// Radians/s.
+    #[serde(default, skip_serializing_if = "is_zero_vector")]
+    initial_spin: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MotionDto {
+    Dynamic,
+    Collider,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ShapeDto {
+    #[default]
+    Automatic,
+    Box,
+    Sphere,
+    ConvexHull,
+    StaticMesh,
+}
+
+impl ShapeDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_automatic(&self) -> bool {
+        *self == Self::Automatic
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MassModeDto {
+    #[default]
+    GlobalDensity,
+    CustomDensity,
+    CustomMass,
+}
+
+impl MassModeDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_global(&self) -> bool {
+        *self == Self::GlobalDensity
+    }
+}
+
+impl BodyDto {
+    fn new(body: &Body) -> Self {
+        Self {
+            enabled: body.enabled,
+            motion: match body.motion {
+                Motion::Dynamic => MotionDto::Dynamic,
+                Motion::Collider => MotionDto::Collider,
+            },
+            compound: body.inherit == Inherit::Compound,
+            shape: match body.shape {
+                CollisionShape::Automatic => ShapeDto::Automatic,
+                CollisionShape::Box => ShapeDto::Box,
+                CollisionShape::Sphere => ShapeDto::Sphere,
+                CollisionShape::ConvexHull => ShapeDto::ConvexHull,
+                CollisionShape::StaticMesh => ShapeDto::StaticMesh,
+            },
+            bounce: body.bounce,
+            friction: body.friction,
+            mass_mode: match body.mass_mode {
+                MassMode::GlobalDensity => MassModeDto::GlobalDensity,
+                MassMode::CustomDensity => MassModeDto::CustomDensity,
+                MassMode::CustomMass => MassModeDto::CustomMass,
+            },
+            density: body.density,
+            mass: body.mass,
+            rotational_mass: body.rotational_mass,
+            linear_damping: body.linear_damping,
+            angular_damping: body.angular_damping,
+            initial_velocity: body.initial_velocity.to_array(),
+            initial_spin: body.initial_spin.to_array(),
+        }
+    }
+
+    fn into_body(self) -> Body {
+        Body {
+            enabled: self.enabled,
+            motion: match self.motion {
+                MotionDto::Dynamic => Motion::Dynamic,
+                MotionDto::Collider => Motion::Collider,
+            },
+            inherit: if self.compound {
+                Inherit::Compound
+            } else {
+                Inherit::None
+            },
+            shape: match self.shape {
+                ShapeDto::Automatic => CollisionShape::Automatic,
+                ShapeDto::Box => CollisionShape::Box,
+                ShapeDto::Sphere => CollisionShape::Sphere,
+                ShapeDto::ConvexHull => CollisionShape::ConvexHull,
+                ShapeDto::StaticMesh => CollisionShape::StaticMesh,
+            },
+            bounce: self.bounce,
+            friction: self.friction,
+            mass_mode: match self.mass_mode {
+                MassModeDto::GlobalDensity => MassMode::GlobalDensity,
+                MassModeDto::CustomDensity => MassMode::CustomDensity,
+                MassModeDto::CustomMass => MassMode::CustomMass,
+            },
+            density: self.density,
+            mass: self.mass,
+            rotational_mass: self.rotational_mass,
+            linear_damping: self.linear_damping,
+            angular_damping: self.angular_damping,
+            initial_velocity: Vec3::from_array(self.initial_velocity),
+            initial_spin: Vec3::from_array(self.initial_spin),
+        }
+        .validated()
+    }
+
+    fn parameters(&self) -> Vec<f32> {
+        let mut numbers = vec![
+            self.bounce,
+            self.friction,
+            self.density,
+            self.mass,
+            self.rotational_mass,
+            self.linear_damping,
+            self.angular_damping,
+        ];
+        numbers.extend(self.initial_velocity);
+        numbers.extend(self.initial_spin);
+        numbers
+    }
+}
+
+/// The document's simulation settings (added in step 11.1); absent while they
+/// are the defaults. Gravity in cm/s².
+#[derive(Debug, Serialize, Deserialize)]
+struct SimulationDto {
+    enabled: bool,
+    gravity: [f32; 3],
+    steps_per_frame: u32,
+    solver_iterations: u32,
+    time_scale: f32,
+}
+
+impl SimulationDto {
+    /// `None` for the defaults, which files leave out.
+    fn new(settings: &SimulationSettings) -> Option<Self> {
+        (*settings != SimulationSettings::default()).then(|| Self {
+            enabled: settings.enabled,
+            gravity: settings.gravity.to_array(),
+            steps_per_frame: settings.steps_per_frame,
+            solver_iterations: settings.solver_iterations,
+            time_scale: settings.time_scale,
+        })
+    }
+
+    fn into_settings(self) -> Result<SimulationSettings, IoError> {
+        if !self.gravity.iter().chain([&self.time_scale]).all(|v| v.is_finite()) {
+            return Err(IoError::Invalid(
+                "the simulation settings hold a number that is not finite".to_owned(),
+            ));
+        }
+        Ok(SimulationSettings {
+            enabled: self.enabled,
+            gravity: Vec3::from_array(self.gravity),
+            steps_per_frame: self.steps_per_frame,
+            solver_iterations: self.solver_iterations,
+            time_scale: self.time_scale,
+        }
+        .validated())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum TagDto {
@@ -605,6 +815,8 @@ enum TagDto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         material: Option<usize>,
     },
+    /// A rigid or collider body (step 11.1).
+    Dynamics(BodyDto),
 }
 
 impl TagDto {
@@ -629,6 +841,7 @@ impl TagDto {
             Tag::Material { material } => Self::Material {
                 material: material.and_then(|m| refs.materials.get(&m).copied()),
             },
+            Tag::Dynamics(ref body) => Self::Dynamics(BodyDto::new(body)),
         }
     }
 
@@ -659,6 +872,7 @@ impl TagDto {
             Self::Material { material } => Tag::Material {
                 material: material.and_then(|i| materials.get(i).copied()),
             },
+            Self::Dynamics(body) => Tag::Dynamics(body.into_body()),
         }
     }
 
@@ -666,6 +880,7 @@ impl TagDto {
         match self {
             Self::Phong { angle, .. } => vec![*angle],
             Self::Protection { .. } | Self::Target { .. } | Self::Material { .. } => Vec::new(),
+            Self::Dynamics(body) => body.parameters(),
         }
     }
 }
@@ -2169,6 +2384,7 @@ pub(crate) fn write(doc: &Document) -> Result<Vec<u8>, IoError> {
             objects,
             materials: doc.scene.materials().iter().map(|(_, m)| MaterialDto::new(m)).collect(),
             render: RenderDto::new(&doc.render),
+            simulation: SimulationDto::new(&doc.simulation),
         },
         meshes: table.meshes.iter().map(|(mesh, _)| MeshDto::of(mesh.mesh())).collect(),
     };
@@ -2225,6 +2441,7 @@ impl File {
             objects,
             materials,
             render,
+            simulation,
         } = self.document;
         let materials = materials
             .into_iter()
@@ -2254,6 +2471,10 @@ impl File {
         };
         let (mut doc, ids) = assemble_with_ids(name, time, objects)?;
         doc.render = render.map(RenderDto::into_settings).unwrap_or_default();
+        doc.simulation = simulation
+            .map(SimulationDto::into_settings)
+            .transpose()?
+            .unwrap_or_default();
         let material_ids: Vec<MaterialId> = materials
             .into_iter()
             .map(|material| doc.scene.materials_mut().insert(material))
@@ -3896,6 +4117,70 @@ mod tests {
             let json = serde_json::to_string(&ParamDto::from(Param::Object(param))).unwrap();
             assert_eq!(json, format!("\"{name}\""));
         }
+    }
+
+    #[test]
+    fn dynamics_tags_and_simulation_settings_round_trip() {
+        let mut doc = Document::new("bodies");
+        let rigid = Tag::Dynamics(Body::rigid());
+        let custom = Tag::Dynamics(Body {
+            enabled: false,
+            inherit: Inherit::Compound,
+            shape: CollisionShape::ConvexHull,
+            bounce: 0.9,
+            friction: 0.1,
+            mass_mode: MassMode::CustomMass,
+            mass: 12.5,
+            rotational_mass: 2.0,
+            linear_damping: 0.25,
+            initial_velocity: Vec3::new(100.0, 0.0, -50.0),
+            initial_spin: Vec3::new(0.0, 3.0, 0.0),
+            ..Body::collider()
+        });
+        let mut ball = NodeData::new("Ball", ObjectKindTag::Sphere.default_kind());
+        ball.tags.push(rigid.clone());
+        let mut floor = NodeData::new("Floor", ObjectKindTag::Plane.default_kind());
+        floor.tags.push(custom.clone());
+        doc.scene.insert(Node::from_data(ball));
+        doc.scene.insert(Node::from_data(floor));
+        doc.simulation = SimulationSettings {
+            enabled: false,
+            gravity: Vec3::new(0.0, -100.0, 0.0),
+            steps_per_frame: 10,
+            solver_iterations: 8,
+            time_scale: 0.5,
+        };
+        let loaded = round_trip(&doc);
+        let roots = loaded.scene.roots();
+        let tags = |i: usize| loaded.scene.get(roots[i]).unwrap().data.tags.clone();
+        assert_eq!((tags(0), tags(1)), (vec![rigid.clone()], vec![custom]));
+        assert_eq!(loaded.simulation, doc.simulation);
+        assert_eq!(
+            round_trip(&Document::new("plain")).simulation,
+            SimulationSettings::default()
+        );
+
+        let refs = Refs {
+            objects: HashMap::new(),
+            materials: HashMap::new(),
+        };
+        let json = serde_json::to_string(&TagDto::new(&rigid, &refs)).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"dynamics","motion":"dynamic","bounce":0.5,"friction":0.3}"#
+        );
+        assert!(
+            SimulationDto::new(&SimulationSettings::default()).is_none(),
+            "defaults are left out"
+        );
+        let bad = SimulationDto {
+            enabled: true,
+            gravity: [f32::NAN, 0.0, 0.0],
+            steps_per_frame: 5,
+            solver_iterations: 4,
+            time_scale: 1.0,
+        };
+        assert!(bad.into_settings().is_err());
     }
 
     #[test]

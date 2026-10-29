@@ -30,6 +30,8 @@ pub enum Tag {
     },
     /// Links a material to the object (and its children without their own).
     Material { material: Option<MaterialId> },
+    /// Makes the object a rigid or collider body in the simulation.
+    Dynamics(crate::Body),
 }
 
 /// The kinds of tag, for menus and icons.
@@ -39,10 +41,17 @@ pub enum TagKind {
     Protection,
     Target,
     Material,
+    Dynamics,
 }
 
 impl TagKind {
-    pub const ALL: [Self; 4] = [Self::Phong, Self::Protection, Self::Target, Self::Material];
+    pub const ALL: [Self; 5] = [
+        Self::Phong,
+        Self::Protection,
+        Self::Target,
+        Self::Material,
+        Self::Dynamics,
+    ];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
@@ -51,6 +60,7 @@ impl TagKind {
             Self::Protection => "Protection",
             Self::Target => "Target",
             Self::Material => "Material",
+            Self::Dynamics => "Rigid Body",
         }
     }
 
@@ -73,6 +83,7 @@ impl TagKind {
                 pitch: true,
             },
             Self::Material => Tag::Material { material: None },
+            Self::Dynamics => Tag::Dynamics(crate::Body::rigid()),
         }
     }
 }
@@ -85,6 +96,7 @@ impl Tag {
             Self::Protection { .. } => TagKind::Protection,
             Self::Target { .. } => TagKind::Target,
             Self::Material { .. } => TagKind::Material,
+            Self::Dynamics(_) => TagKind::Dynamics,
         }
     }
 }
@@ -128,7 +140,7 @@ impl Tags for [Tag] {
                 } else {
                     std::f32::consts::PI
                 }),
-                Tag::Protection { .. } | Tag::Target { .. } | Tag::Material { .. } => None,
+                Tag::Protection { .. } | Tag::Target { .. } | Tag::Material { .. } | Tag::Dynamics(_) => None,
             })
             .unwrap_or(DEFAULT_PHONG_ANGLE)
     }
@@ -144,14 +156,14 @@ impl Tags for [Tag] {
                 scale: p.scale || scale,
                 rotation: p.rotation || rotation,
             },
-            Tag::Phong { .. } | Tag::Target { .. } | Tag::Material { .. } => p,
+            Tag::Phong { .. } | Tag::Target { .. } | Tag::Material { .. } | Tag::Dynamics(_) => p,
         })
     }
 
     fn aim(&self) -> Option<Aim> {
         self.iter().find_map(|tag| match *tag {
             Tag::Target { target, up, pitch } => target.map(|target| Aim { target, up, pitch }),
-            Tag::Phong { .. } | Tag::Protection { .. } | Tag::Material { .. } => None,
+            Tag::Phong { .. } | Tag::Protection { .. } | Tag::Material { .. } | Tag::Dynamics(_) => None,
         })
     }
 
@@ -162,7 +174,7 @@ impl Tags for [Tag] {
     fn material(&self) -> Option<MaterialId> {
         self.iter().find_map(|tag| match *tag {
             Tag::Material { material } => material,
-            Tag::Phong { .. } | Tag::Protection { .. } | Tag::Target { .. } => None,
+            Tag::Phong { .. } | Tag::Protection { .. } | Tag::Target { .. } | Tag::Dynamics(_) => None,
         })
     }
 }

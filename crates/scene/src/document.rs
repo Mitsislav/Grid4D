@@ -10,6 +10,8 @@ pub struct Document {
     pub time: TimeState,
     /// How the document is rendered.
     pub render: RenderSettings,
+    /// How its rigid bodies are simulated.
+    pub simulation: crate::SimulationSettings,
 }
 
 impl Default for Document {
@@ -27,6 +29,7 @@ impl Document {
             scene: Scene::new(),
             time: TimeState::default(),
             render: RenderSettings::default(),
+            simulation: crate::SimulationSettings::default(),
         }
     }
 

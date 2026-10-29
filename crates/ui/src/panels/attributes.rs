@@ -18,8 +18,9 @@ use grid4d_geom::spline::{
 };
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
-    Axis, Document, Falloff, KeyState, LightDetails, LightShadow, LightType, Material, MaterialId, NodeData, NodeId,
-    ObjectKind, ObjectParam, Param, Scene, SceneEdit, SplineHandle, Tag, TagKind, TimeSettings,
+    Axis, Body, CollisionShape, Document, Falloff, Inherit, KeyState, LightDetails, LightShadow, LightType, MassMode,
+    Material, MaterialId, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, Scene, SceneEdit,
+    SimulationSettings, SplineHandle, Tag, TagKind, TimeSettings,
 };
 
 use crate::{
@@ -73,6 +74,7 @@ pub struct AttributesPanel {
     material_edit: LiveEdit<MaterialId, Material>,
     name_edit: LiveEdit<(), String>,
     time_edit: LiveEdit<(), TimeSettings>,
+    simulation_edit: LiveEdit<(), SimulationSettings>,
 }
 
 impl AttributesPanel {
@@ -319,6 +321,7 @@ impl AttributesPanel {
     fn project_ui(&mut self, ui: &mut Ui, doc: &mut Document, commands: &mut CommandQueue) {
         self.name_edit.begin((), &doc.name);
         self.time_edit.begin((), &doc.time.settings());
+        self.simulation_edit.begin((), &doc.simulation);
         project_settings(ui, doc);
 
         let ongoing = interaction_ongoing(ui);
@@ -332,6 +335,12 @@ impl AttributesPanel {
             commands.push(EditorCommand::CommitLive {
                 inverse: SceneEdit::SetTime(before),
                 label: "Project Settings",
+            });
+        }
+        if let Some(((), before)) = self.simulation_edit.end((), &doc.simulation, ongoing) {
+            commands.push(EditorCommand::CommitLive {
+                inverse: SceneEdit::SetSimulation(before),
+                label: "Simulation Settings",
             });
         }
     }
@@ -1069,6 +1078,7 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
                 check_row(ui, "Pitch", pitch);
             }
             Tag::Material { material } => material_row(ui, material, scene),
+            Tag::Dynamics(body) => body_rows(ui, body),
         });
     let hint = match tag {
         Tag::Phong { .. } => "Edges sharper than the angle stay hard; with Angle Limit off everything is smooth",
@@ -1077,9 +1087,120 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
         Tag::Material { .. } => {
             "The object and its children without a Material tag of their own show this material; drag a material onto an object to assign it"
         }
+        Tag::Dynamics(body) => match body.motion {
+            Motion::Dynamic => "A rigid body: it falls, collides and bounces from the start frame on",
+            Motion::Collider => "A collider: rigid bodies hit it; it moves only by its own animation",
+        },
     };
     ui.add_space(4.0);
     ui.label(RichText::new(hint).color(p::TEXT_DIM));
+}
+
+/// A Dynamics tag: how the body moves, its shape, its surface and mass, its
+/// start velocity.
+fn body_rows(ui: &mut Ui, body: &mut Body) {
+    check_row(ui, "Enabled", &mut body.enabled);
+    choice_row(ui, "Dynamic", &mut body.motion, &Motion::ALL, Motion::label);
+    choice_row(ui, "Inherit Tag", &mut body.inherit, &Inherit::ALL, Inherit::label);
+    choice_row(
+        ui,
+        "Shape",
+        &mut body.shape,
+        &CollisionShape::ALL,
+        CollisionShape::label,
+    );
+    unbounded_percent_row(ui, "Bounce", &mut body.bounce, 0.0);
+    unbounded_percent_row(ui, "Friction", &mut body.friction, 0.0);
+    if body.motion == Motion::Collider {
+        return;
+    }
+    choice_row(ui, "Mass", &mut body.mass_mode, &MassMode::ALL, MassMode::label);
+    match body.mass_mode {
+        MassMode::GlobalDensity => {}
+        MassMode::CustomDensity => amount_row(ui, "Density", &mut body.density, ""),
+        MassMode::CustomMass => amount_row(ui, "Mass", &mut body.mass, " kg"),
+    }
+    unbounded_percent_row(
+        ui,
+        "Rotational Mass",
+        &mut body.rotational_mass,
+        Body::MIN_ROTATIONAL_MASS,
+    );
+    unbounded_percent_row(ui, "Linear Damping", &mut body.linear_damping, 0.0);
+    unbounded_percent_row(ui, "Angular Damping", &mut body.angular_damping, 0.0);
+    for (axis, label) in ["Velocity . X", "Velocity . Y", "Velocity . Z"].into_iter().enumerate() {
+        attr_label(ui, label, LABEL_WIDTH);
+        ui.add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut body.initial_velocity[axis])
+                .speed(1.0)
+                .suffix(" cm/s"),
+        );
+        ui.end_row();
+    }
+    for (axis, label) in ["Spin . X", "Spin . Y", "Spin . Z"].into_iter().enumerate() {
+        attr_label(ui, label, LABEL_WIDTH);
+        let mut degrees = body.initial_spin[axis].to_degrees();
+        if ui
+            .add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut degrees).speed(1.0).suffix(" °/s"),
+            )
+            .changed()
+        {
+            body.initial_spin[axis] = degrees.to_radians();
+        }
+        ui.end_row();
+    }
+    *body = body.validated();
+}
+
+/// A choice among `options`, shown by `label`.
+fn choice_row<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    name: &str,
+    value: &mut T,
+    options: &[T],
+    label: fn(T) -> &'static str,
+) {
+    attr_label(ui, name, LABEL_WIDTH);
+    egui::ComboBox::from_id_salt(("grid4d.attr.choice", name))
+        .selected_text(label(*value))
+        .show_ui(ui, |ui| {
+            for &option in options {
+                ui.selectable_value(value, option, label(option));
+            }
+        });
+    ui.end_row();
+}
+
+/// A fraction shown in percent, from `min` up (no upper limit).
+fn unbounded_percent_row(ui: &mut Ui, label: &str, value: &mut f32, min: f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let mut percent = *value * 100.0;
+    if ui
+        .add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut percent)
+                .speed(0.5)
+                .range(min * 100.0..=1_000_000.0)
+                .suffix(" %"),
+        )
+        .changed()
+    {
+        *value = percent / 100.0;
+    }
+    ui.end_row();
+}
+
+/// A non-negative amount with a unit.
+fn amount_row(ui: &mut Ui, label: &str, value: &mut f32, unit: &str) {
+    attr_label(ui, label, LABEL_WIDTH);
+    ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        DragValue::new(value).speed(0.01).range(0.0..=1_000_000.0).suffix(unit),
+    );
+    ui.end_row();
 }
 
 /// A Material tag's link: a list of the document's materials, `None` first.
@@ -2034,6 +2155,46 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
 
             attr_label(ui, "Objects", LABEL_WIDTH);
             ui.label(doc.scene.len().to_string());
+            ui.end_row();
+        });
+    section_heading(ui, "Simulation");
+    let simulation = &mut doc.simulation;
+    Grid::new("grid4d.attr.simulation")
+        .num_columns(2)
+        .spacing([6.0, 4.0])
+        .show(ui, |ui| {
+            check_row(ui, "Enabled", &mut simulation.enabled);
+            for (axis, label) in ["Gravity . X", "Gravity . Y", "Gravity . Z"].into_iter().enumerate() {
+                attr_label(ui, label, LABEL_WIDTH);
+                ui.add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    DragValue::new(&mut simulation.gravity[axis])
+                        .speed(1.0)
+                        .suffix(" cm/s²"),
+                );
+                ui.end_row();
+            }
+            bounded_count_row(
+                ui,
+                "Steps per Frame",
+                &mut simulation.steps_per_frame,
+                1,
+                SimulationSettings::MAX_STEPS,
+            );
+            bounded_count_row(
+                ui,
+                "Solver Iterations",
+                &mut simulation.solver_iterations,
+                1,
+                SimulationSettings::MAX_ITERATIONS,
+            );
+            attr_label(ui, "Time Scale", LABEL_WIDTH);
+            ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut simulation.time_scale)
+                    .speed(0.01)
+                    .range(SimulationSettings::MIN_TIME_SCALE..=SimulationSettings::MAX_TIME_SCALE),
+            );
             ui.end_row();
         });
     ui.add_space(8.0);

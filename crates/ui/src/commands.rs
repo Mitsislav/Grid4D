@@ -128,7 +128,9 @@ pub enum EditorCommand {
     SaveRenderAs,
     /// Adds a tag of this kind to every selected object that has none (one undo
     /// step) and selects it on the active object.
-    AddTag(grid4d_scene::TagKind),
+    /// Adds `tag` (a kind's default, or a preset such as Collider Body) to
+    /// the selected objects that have no tag of its kind.
+    AddTag(grid4d_scene::Tag),
     /// Removes the tag of this kind from the object (one undo step).
     DeleteTag {
         node: NodeId,
@@ -450,7 +452,8 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 }
             }
         }
-        EditorCommand::AddTag(kind) => {
+        EditorCommand::AddTag(tag) => {
+            let kind = tag.kind();
             let edits = editor
                 .selection
                 .as_slice()
@@ -461,7 +464,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                         return None;
                     }
                     let mut data = data.clone();
-                    data.tags.push(kind.default_tag());
+                    data.tags.push(tag.clone());
                     Some(SceneEdit::SetData { id, data })
                 })
                 .collect();
@@ -1986,6 +1989,7 @@ fn is_current_state(doc: &Document, edit: &SceneEdit) -> bool {
         SceneEdit::SetName(name) => doc.name == *name,
         SceneEdit::SetMaterials(materials) => doc.scene.materials() == materials,
         SceneEdit::SetRender(settings) => doc.render == *settings,
+        SceneEdit::SetSimulation(settings) => doc.simulation == *settings,
         // Structural changes are never made live; record them as given.
         SceneEdit::Insert { .. } | SceneEdit::Detach { .. } | SceneEdit::Attach { .. } | SceneEdit::Move { .. } => {
             false
@@ -3538,7 +3542,12 @@ mod tests {
         let (mut doc, mut editor, mut vp) = demo();
         let (cube, sphere) = (id_of(&doc, "Cube"), id_of(&doc, "Sphere"));
         editor.selection.set_all([sphere, cube]);
-        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::AddTag(TagKind::Phong)]);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AddTag(TagKind::Phong.default_tag())],
+        );
         for id in [cube, sphere] {
             assert_eq!(doc.scene.get(id).unwrap().data.tags, [TagKind::Phong.default_tag()]);
         }
@@ -3550,13 +3559,18 @@ mod tests {
 
         // A second Phong tag is not added; another kind is.
         let steps = editor.history.undo_len();
-        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::AddTag(TagKind::Phong)]);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AddTag(TagKind::Phong.default_tag())],
+        );
         assert_eq!(editor.history.undo_len(), steps, "nothing to add");
         run(
             &mut doc,
             &mut editor,
             &mut vp,
-            &[EditorCommand::AddTag(TagKind::Protection)],
+            &[EditorCommand::AddTag(TagKind::Protection.default_tag())],
         );
         assert_eq!(doc.scene.get(cube).unwrap().data.tags.len(), 2);
 
@@ -3608,7 +3622,7 @@ mod tests {
             &mut doc,
             &mut editor,
             &mut vp,
-            &[EditorCommand::AddTag(TagKind::Target)],
+            &[EditorCommand::AddTag(TagKind::Target.default_tag())],
         );
         assert!(editor.selected_tag(&doc).is_some());
         editor.selection.set_single(sphere);
@@ -4386,5 +4400,60 @@ mod tests {
             &[EditorCommand::CreateObject(ObjectKindTag::RandomEffector)],
         );
         assert_eq!(list(&doc), [effector]);
+    }
+
+    #[test]
+    fn rigid_and_collider_bodies_are_one_tag_kind_added_in_one_step() {
+        use grid4d_scene::{Body, Motion, Tag, TagKind};
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Cube)],
+        );
+        let cube = editor.selection.active().unwrap();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AddTag(Tag::Dynamics(Body::collider()))],
+        );
+        let tags = |doc: &Document| doc.scene.get(cube).unwrap().data.tags.clone();
+        assert_eq!(tags(&doc), [Tag::Dynamics(Body::collider())]);
+        assert_eq!(editor.tag_selection.map(|t| t.kind), Some(TagKind::Dynamics));
+        // A Rigid Body is the same kind: the object keeps its one Dynamics tag.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AddTag(TagKind::Dynamics.default_tag())],
+        );
+        let [Tag::Dynamics(body)] = tags(&doc)[..] else {
+            panic!("{:?}", tags(&doc))
+        };
+        assert_eq!(body.motion, Motion::Collider);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert!(tags(&doc).is_empty());
+    }
+
+    #[test]
+    fn simulation_settings_are_one_undo_step() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        let before = doc.simulation;
+        doc.simulation.steps_per_frame = 20;
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CommitLive {
+                inverse: SceneEdit::SetSimulation(before),
+                label: "Simulation Settings",
+            }],
+        );
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.simulation, before);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        assert_eq!(doc.simulation.steps_per_frame, 20);
     }
 }
