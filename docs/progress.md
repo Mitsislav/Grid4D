@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 9 — Splines & spline generators (v0.9) |
-| Last step done | 9.1 — Spline primitives (2026-10-29) |
-| Next step | 9.2 — Editable splines: Make Editable, Points mode on splines |
-| Tests | 540, all passing; clippy and rustfmt clean |
+| Last step done | 9.2 — Editable splines (2026-10-29) |
+| Next step | 9.3 — Spline commands and the Pen tool |
+| Tests | 548, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -893,6 +893,7 @@ Phase 8 is complete.
 |------|-------|-------|
 | — | Phase 9 planned in detail: splines, point editing and the Pen, Extrude / Lathe / Sweep / Loft, Text (`IMPLEMENTATION_PLAN.md`) | 521 |
 | 9.1 | Spline primitives: Circle, Rectangle, Arc, n-Side, Star, Helix and Flower — curves with a plane, Reverse and intermediate points; drawn as lines in every display mode, picked near their line, framed, filtered, undone and saved | 540 |
+| 9.2 | Editable splines: Make Editable on spline primitives; Points mode on a spline — click, rectangle and brush selection, the gizmo on points (tangents along), Bezier handle drags (Shift breaks them), Delete, Select All / Invert; Type and Close Spline in the Attribute Manager | 548 |
 
 **9.1 — Spline primitives**
 
@@ -932,6 +933,40 @@ Phase 8 is complete.
   Greek layout) showed every curve, their icons in the Object Manager, the Star
   in the selection colour with its gizmo and its parameters, and the toolbar's
   spline list.
+
+**9.2 — Editable splines**
+
+*Problems and solutions:*
+- **Polygon tools everywhere.** Points mode, its picking, the GPU overlay, the
+  selection tools and the commands were all written around polygon meshes.
+  Rather than threading splines through every mesh tool, splines got a small
+  parallel path: `spline_target` (Points mode on an editable spline), points and
+  handles picked and drawn on screen in 2D, and spline branches in the few
+  commands that apply (selection, Select All / Invert, Delete). Clicks, frames
+  and brush strokes still end in the same `SelectComponents` command, so undo
+  and the stored selection work as for polygon points.
+- **One point edit for meshes and splines.** The gizmo's `PointEdit` kept the
+  original `MeshHandle`; it now keeps either that or a `SplineHandle`. A
+  spline's moved points take their tangents along — transformed by the edit's
+  linear part — so rotating or scaling points keeps the curve's shape around
+  them.
+- **Handles that stay smooth.** Dragging a handle moves it in the plane through
+  it facing the view; the opposite handle turns to stay in line and keeps its
+  own length (Shift breaks the pair). The drag writes live and records one
+  "Move Tangent" step; Esc restores the spline as it was.
+- **Hot path discipline.** The first version boxed a sampling closure in
+  `EvaluatedScene::update`, which the rules forbid on the per-frame path; the
+  curve source is now a small enum, sampled by a plain function only when it
+  changed.
+- **Make Editable keeps the curve exactly.** A primitive's control spline (with
+  its plane and Reverse applied) becomes the editable spline, so its samples
+  are identical — a test compares them.
+- **On-screen testing:** the Circle in the spline test document became a
+  "Spline Object" with four points in Points mode; a click selected one, which
+  showed its two handles and the gizmo; the Object tab showed Type (Bezier) and
+  Close Spline; Delete removed the point and the curve closed through the other
+  three. Handle drags, frames and the gizmo's rotation of tangents are checked
+  by headless tests (posted drags do not reach egui).
 
 ---
 

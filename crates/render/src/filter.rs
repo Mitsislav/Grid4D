@@ -57,7 +57,8 @@ impl FilterItem {
             | ObjectKindTag::NSide
             | ObjectKindTag::Star
             | ObjectKindTag::Helix
-            | ObjectKindTag::Flower => Some(Self::Spline),
+            | ObjectKindTag::Flower
+            | ObjectKindTag::Spline => Some(Self::Spline),
         }
     }
 

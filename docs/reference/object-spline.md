@@ -13,8 +13,9 @@
 > Reverse: the opposite point order). Written in our own words. The pages give
 > no default values; ours are listed below.
 >
-> Covers implementation-plan step **9.1** (spline primitives, drawing); 9.2
-> (editable splines, point editing) and 9.3 (spline commands, the Pen) extend it.
+> Covers implementation-plan steps **9.1** (spline primitives, drawing) and
+> **9.2** (editable splines, point editing); 9.3 (spline commands, the Pen)
+> extends it.
 
 ## Purpose
 
@@ -77,6 +78,30 @@ degrees; defaults are ours.
   centre); radii, sides, points and subdivisions are clamped to sensible
   ranges; a Star's inner radius may exceed the outer one (spiky inside out).
 
+## Editing a spline (step 9.2)
+
+- **Make Editable** (C) turns a spline primitive into an editable **Spline**
+  object with the same control points, tangents, type, segments and
+  intermediate points (the plane and Reverse are baked in); one undo step.
+- **Points mode** on the active editable spline shows its control points; a
+  **Bezier** spline also shows each selected point's two **tangent handles**.
+  - A click on a point selects it (Shift adds, Ctrl removes, empty space
+    clears); the Rectangle and Live Selection tools select the points inside
+    the frame or under the brush; Select All, Deselect All and Invert work on
+    the points.
+  - The **gizmo** sits at the centre of the selected points; Move, Scale and
+    Rotate act on them, turning and scaling their tangents with them.
+  - **Dragging a tangent handle** sets that tangent in the view's plane; the
+    opposite one turns to stay in line, keeping its length, so the curve stays
+    smooth. With **Shift** only the dragged one moves (a corner). Esc cancels.
+  - **Delete** removes the selected points; a segment left without points
+    disappears.
+- **Object tab** of an editable spline: **Type** (changing to Bezier gives
+  points without tangents smooth ones, leaving others; changing away keeps the
+  tangents for a later return), **Close Spline** (every segment), the
+  Intermediate Points, and the number of points and segments.
+- Every edit is one undo step; the selected points are saved with the document.
+
 ## Grid4D mapping
 
 | Piece | Where |
@@ -87,6 +112,9 @@ degrees; defaults are ours.
 | Line lists per curve drawn with the instanced line pipeline; `FilterItem::Spline` | `grid4d-render` |
 | `KindDto` spline primitives (additive) | `grid4d-io` (`v3.rs`) |
 | Create ▸ Spline, toolbar, icons, Attribute Manager | `grid4d-ui` |
+| `SplineHandle` (shared, unique id) and `ObjectKind::Spline { spline, interpolation, components }`; Make Editable | `grid4d-scene`, `grid4d-ui` (`commands.rs`) |
+| Spline points in Points mode: picking and the overlay of points and handles (2D), selection commands, gizmo point edits, tangent drags, Delete | `grid4d-ui` (`panels/viewport/spline_tools.rs`, `gizmo.rs`, `commands.rs`) |
+| `editable_spline` kind (points, tangents, segments, selection) | `grid4d-io` (`v3.rs`) |
 
 Deliberate differences: no Cissoid, Cogwheel, Cycloid, Formula, Profile,
 4-Side or Spiral primitives yet; splines are not exported to glTF or OBJ.
@@ -100,3 +128,8 @@ Deliberate differences: no Cissoid, Cogwheel, Cycloid, Formula, Profile,
 - [x] Splines are created from the menu and toolbar, drawn, picked, framed,
       filtered, undone and saved.
 - [x] Idle frames with splines change nothing; the path tracer ignores them.
+- [x] Make Editable keeps the curve exactly (same samples) and is one undo step.
+- [x] Points are selected by click, rectangle and brush; the gizmo moves, scales
+      and rotates them (tangents along); handles drag mirrored or broken.
+- [x] Delete removes points; Type and Close Spline change the curve; all
+      undoable and saved.

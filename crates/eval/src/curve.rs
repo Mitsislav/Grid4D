@@ -7,7 +7,8 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use grid4d_geom::spline::{Polyline, SplinePrimitive};
+use grid4d_geom::spline::{Interpolation, Polyline, SplinePrimitive};
+use grid4d_scene::SplineId;
 
 /// Names one sampled curve; a changed spline gets a new id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -55,28 +56,36 @@ impl PartialEq for CurveHandle {
     }
 }
 
+/// What a curve is sampled from: an unchanged source means an unchanged curve.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum CurveSource {
+    Primitive(SplinePrimitive),
+    /// An editable spline's content and sampling.
+    Editable(SplineId, Interpolation),
+}
+
 /// A node's sampled curve and what it was sampled from.
 #[derive(Debug)]
 pub(crate) struct CachedCurve {
-    source: SplinePrimitive,
+    source: CurveSource,
     pub(crate) handle: CurveHandle,
     /// The scene revision of the last update that used it.
     pub(crate) seen: u64,
 }
 
 impl CachedCurve {
-    pub(crate) fn new(source: SplinePrimitive, seen: u64) -> Self {
+    pub(crate) fn new(source: CurveSource, polyline: Polyline, seen: u64) -> Self {
         Self {
-            handle: CurveHandle::new(source.polyline()),
+            handle: CurveHandle::new(polyline),
             source,
             seen,
         }
     }
 
-    /// Keeps the curve if `source` is unchanged, else samples it again.
-    pub(crate) fn refresh(&mut self, source: &SplinePrimitive, seen: u64) {
-        if self.source != *source {
-            *self = Self::new(*source, seen);
+    /// Keeps the curve if `source` is unchanged, else samples it again with `sample`.
+    pub(crate) fn refresh(&mut self, source: CurveSource, sample: impl FnOnce() -> Polyline, seen: u64) {
+        if self.source != source {
+            *self = Self::new(source, sample(), seen);
         }
         self.seen = seen;
     }

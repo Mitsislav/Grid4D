@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
-use grid4d_geom::{BitSet, subdivision::SubdivisionOptions};
+use grid4d_geom::{BitSet, spline::Polyline, subdivision::SubdivisionOptions};
 use grid4d_scene::{
     Aabb, Components, LIGHT_MARKER_RADIUS, LightDetails, LightShadow, LightType, MaterialId, MeshHandle, MeshId,
-    NodeId, ObjectKind, ObjectKindTag, Scene, TagKind, Tags, WalkItem,
+    NodeId, ObjectKind, ObjectKindTag, Scene, SplineHandle, TagKind, Tags, WalkItem,
 };
 
 use crate::{
     CurveHandle, CurveId, Drawable, MeshKey, Shading, Surface,
-    curve::CachedCurve,
+    curve::{CachedCurve, CurveSource},
     drawable,
     generator::{self, Input},
 };
@@ -118,6 +118,8 @@ pub struct EvaluatedScene {
     curves: HashMap<CurveId, CurveHandle>,
     /// Each spline's curve, sampled again only when the spline changes.
     curve_cache: HashMap<NodeId, CachedCurve>,
+    /// The visible editable splines and their components (Points mode).
+    splines: HashMap<NodeId, (SplineHandle, Components)>,
     /// Scratch space for gathering a generator's inputs.
     inputs: Vec<Input>,
     cage_stack: Vec<NodeId>,
@@ -193,10 +195,11 @@ impl EvaluatedScene {
         self.meshes.clear();
         self.polygons.clear();
         self.curves.clear();
+        self.splines.clear();
         let revision = scene.revision();
         let purpose = self.purpose;
         let (nodes, meshes, polygons, shown) = (&mut self.nodes, &mut self.meshes, &mut self.polygons, &mut self.shown);
-        let (curves, curve_cache) = (&mut self.curves, &mut self.curve_cache);
+        let (curves, curve_cache, splines) = (&mut self.curves, &mut self.curve_cache, &mut self.splines);
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
         let material_stack = &mut self.material_stack;
         material_stack.clear();
@@ -252,11 +255,30 @@ impl EvaluatedScene {
                     ..d
                 });
             }
-            if let ObjectKind::SplinePrimitive(primitive) = &data.kind {
-                let cached = curve_cache
-                    .entry(id)
-                    .and_modify(|c| c.refresh(primitive, revision))
-                    .or_insert_with(|| CachedCurve::new(*primitive, revision));
+            let source = match &data.kind {
+                ObjectKind::SplinePrimitive(primitive) => Some(CurveSource::Primitive(*primitive)),
+                ObjectKind::Spline {
+                    spline,
+                    interpolation,
+                    components,
+                } => {
+                    splines.insert(id, (spline.clone(), components.clone()));
+                    Some(CurveSource::Editable(spline.id(), *interpolation))
+                }
+                _ => None,
+            };
+            if let Some(source) = source {
+                let sample = || curve_of(&data.kind);
+                let cached = match curve_cache.entry(id) {
+                    std::collections::hash_map::Entry::Occupied(entry) => {
+                        let cached = entry.into_mut();
+                        cached.refresh(source, sample, revision);
+                        cached
+                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert(CachedCurve::new(source, sample(), revision))
+                    }
+                };
                 let handle = cached.handle.clone();
                 pick = PickShape::Curve(handle.id());
                 // Lines in the display colour: a curve has no surface or material.
@@ -384,6 +406,15 @@ impl EvaluatedScene {
     #[must_use]
     pub fn mesh(&self, id: MeshId) -> Option<&MeshHandle> {
         self.meshes.get(&id)
+    }
+
+    /// A visible editable spline's node, curve and components; `None` for
+    /// anything else (hidden, not an editable spline).
+    #[must_use]
+    pub fn spline(&self, id: NodeId) -> Option<(&EvaluatedNode, &SplineHandle, &Components)> {
+        let (spline, components) = self.splines.get(&id)?;
+        let node = self.nodes.iter().find(|n| n.id == id)?;
+        Some((node, spline, components))
     }
 
     /// A visible spline's sampled curve, by the id its drawable and pick shape
@@ -566,6 +597,17 @@ fn shown_mesh<'a>(shown: &'a mut HashMap<NodeId, Shown>, id: NodeId, mesh: &Mesh
         .or_insert_with(build)
 }
 
+/// A spline's curve cut into pieces; empty for other kinds.
+fn curve_of(kind: &ObjectKind) -> Polyline {
+    match kind {
+        ObjectKind::SplinePrimitive(primitive) => primitive.polyline(),
+        ObjectKind::Spline {
+            spline, interpolation, ..
+        } => spline.spline().sample(*interpolation),
+        _ => Polyline::default(),
+    }
+}
+
 fn pick_shape(kind: &ObjectKind) -> PickShape {
     match *kind {
         ObjectKind::Null => PickShape::None,
@@ -583,7 +625,9 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Capsule { .. }
         | ObjectKind::Camera { .. } => PickShape::Bounds,
         // Picked by its result, or its curve (set during evaluation).
-        ObjectKind::SubdivisionSurface { .. } | ObjectKind::SplinePrimitive(_) => PickShape::None,
+        ObjectKind::SubdivisionSurface { .. } | ObjectKind::SplinePrimitive(_) | ObjectKind::Spline { .. } => {
+            PickShape::None
+        }
     }
 }
 

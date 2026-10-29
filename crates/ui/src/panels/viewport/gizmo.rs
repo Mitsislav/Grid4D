@@ -10,7 +10,7 @@ use egui::{Color32, CornerRadius, PointerButton, Pos2, Rect, Response, Shape, St
 use glam::{Mat3, Mat4, Quat, Vec3};
 use grid4d_geom::{BitSet, Component, selection};
 use grid4d_render::OrbitCamera;
-use grid4d_scene::{MeshHandle, NodeData, NodeId, ObjectKind, Scene, SceneEdit, Tags};
+use grid4d_scene::{MeshHandle, NodeData, NodeId, ObjectKind, Scene, SceneEdit, SplineHandle, Tags};
 
 use super::{
     project,
@@ -99,11 +99,17 @@ impl GizmoGeometry {
         let (origin, target) = match editor.mode.component() {
             None => (translation, Target::Object),
             Some(component) => {
-                let ObjectKind::Polygon { mesh, components } = &node.data.kind else {
-                    return None;
+                let centre = match &node.data.kind {
+                    ObjectKind::Polygon { mesh, components } => {
+                        let points = selection::points_of(mesh.mesh(), components.selected().get(component), component);
+                        centre_of(mesh, &points)?
+                    }
+                    // An editable spline in Points mode: its selected control points.
+                    ObjectKind::Spline { spline, components, .. } if component == Component::Point => {
+                        spline_centre(spline, &components.selected().points)?
+                    }
+                    _ => return None,
                 };
-                let points = selection::points_of(mesh.mesh(), components.selected().get(component), component);
-                let centre = centre_of(mesh, &points)?;
                 (world.transform_point3(centre), Target::Components { component, world })
             }
         };
@@ -251,12 +257,22 @@ struct Drag {
     skip: Vec<NodeId>,
 }
 
-/// A transform of some of a polygon object's points, accumulated over a drag and
-/// applied to the points as they were when it started — so nothing drifts, and
-/// each frame writes a new mesh (new `MeshId`) whose selection is untouched.
+/// What a point edit changes: a polygon object's mesh or a spline's curve, as
+/// it was when the edit started.
+#[derive(Debug, Clone)]
+enum Original {
+    Mesh(MeshHandle),
+    Spline(SplineHandle),
+}
+
+/// A transform of some of a polygon object's (or editable spline's) points,
+/// accumulated over a drag and applied to the points as they were when it
+/// started — so nothing drifts, and each frame writes a new mesh (new `MeshId`)
+/// or spline whose selection is untouched. A spline's moved points take their
+/// tangents along (turned and scaled with them).
 #[derive(Debug, Clone)]
 pub(super) struct PointEdit {
-    original: MeshHandle,
+    original: Original,
     points: Vec<u32>,
     /// The object's world matrix (unchanged by the edit).
     world: Mat4,
@@ -275,8 +291,17 @@ pub(super) struct PointEdit {
 impl PointEdit {
     /// An edit of `points` of `mesh` (object world matrix `world`) around `pivot`.
     pub(super) fn new(mesh: &MeshHandle, points: &BitSet, world: Mat4, pivot: Vec3) -> Self {
+        Self::of(Original::Mesh(mesh.clone()), points, world, pivot)
+    }
+
+    /// An edit of control points `points` of `spline`.
+    pub(super) fn spline(spline: &SplineHandle, points: &BitSet, world: Mat4, pivot: Vec3) -> Self {
+        Self::of(Original::Spline(spline.clone()), points, world, pivot)
+    }
+
+    fn of(original: Original, points: &BitSet, world: Mat4, pivot: Vec3) -> Self {
         Self {
-            original: mesh.clone(),
+            original,
             points: points.iter().filter_map(|p| u32::try_from(p).ok()).collect(),
             world,
             pivot,
@@ -325,19 +350,52 @@ impl PointEdit {
             return;
         }
         let local = self.world.inverse() * delta * self.world;
-        let mut points = self.original.mesh().points().to_vec();
-        for &p in &self.points {
-            if let Some(point) = usize::try_from(p).ok().and_then(|p| points.get_mut(p)) {
-                *point = local.transform_point3(*point);
+        match &self.original {
+            Original::Mesh(original) => {
+                let mut points = original.mesh().points().to_vec();
+                for &p in &self.points {
+                    if let Some(point) = usize::try_from(p).ok().and_then(|p| points.get_mut(p)) {
+                        *point = local.transform_point3(*point);
+                    }
+                }
+                let moved = original.with_points(&points);
+                if let Some(node) = scene.get_mut(node)
+                    && let ObjectKind::Polygon { mesh, .. } = &mut node.data.kind
+                {
+                    *mesh = moved;
+                }
+            }
+            Original::Spline(original) => {
+                let mut points = original.spline().points.clone();
+                let mut tangents = original.spline().tangents.clone();
+                for &p in &self.points {
+                    let Ok(p) = usize::try_from(p) else { continue };
+                    if let Some(point) = points.get_mut(p) {
+                        *point = local.transform_point3(*point);
+                    }
+                    if let Some(pair) = tangents.get_mut(p) {
+                        *pair = pair.map(|t| local.transform_vector3(t));
+                    }
+                }
+                let moved = original.with_points(&points, &tangents);
+                if let Some(node) = scene.get_mut(node)
+                    && let ObjectKind::Spline { spline, .. } = &mut node.data.kind
+                {
+                    *spline = moved;
+                }
             }
         }
-        let moved = self.original.with_points(&points);
-        if let Some(node) = scene.get_mut(node)
-            && let ObjectKind::Polygon { mesh, .. } = &mut node.data.kind
-        {
-            *mesh = moved;
-        }
     }
+}
+
+/// Centre of the bounding box of control points `points` of `spline` (object
+/// space); `None` if none is selected.
+pub(super) fn spline_centre(spline: &SplineHandle, points: &BitSet) -> Option<Vec3> {
+    let positions = &spline.spline().points;
+    let mut found = points.iter().filter_map(|p| positions.get(p).copied());
+    let first = found.next()?;
+    let (min, max) = found.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p)));
+    Some((min + max) * 0.5)
 }
 
 /// Centre of the bounding box of `points` of `mesh` (object space); `None` if empty.
@@ -460,6 +518,9 @@ impl GizmoState {
                         let points = selection::points_of(mesh.mesh(), components.selected().get(component), component);
                         Some(PointEdit::new(mesh, &points, world, geo.origin))
                     }
+                    (Target::Components { world, .. }, ObjectKind::Spline { spline, components, .. }) => Some(
+                        PointEdit::spline(spline, &components.selected().points, world, geo.origin),
+                    ),
                     _ => None,
                 };
                 // An object takes its children along; generators above change too.

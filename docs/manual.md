@@ -1029,6 +1029,36 @@ the selection colour, with the gizmo at its axis. Splines can be moved, rotated
 and scaled, framed (H, O), hidden from a view with **Filter ▸ Spline**, undone
 and saved like every other object.
 
+### 13.1 Editing a spline's points
+
+**Make Editable** (**C**, or the top button of the mode palette) turns a spline
+into an editable **Spline** object: the same curve, now made of its own points
+(a circle has four, with Bezier tangents). The plane and Reverse are built into
+the points; the intermediate points stay.
+
+![An editable circle in Points mode: the selected point with its two tangent handles and the gizmo; Type and Close Spline in the Attribute Manager](images/manual/spline-points.png)
+
+In **Points mode** the spline's points show as small squares:
+
+- **Click** a point to select it; **Shift** adds, **Ctrl** removes, a click on
+  empty space clears. The **Rectangle Selection** tool takes the points inside
+  its frame; the **Live Selection** tool those its brush passes over.
+  **Select ▸ Select All**, **Deselect All** and **Invert** work on the points.
+- The **gizmo** sits at the centre of the selected points: **Move**, **Scale**
+  and **Rotate** them; their tangents turn and scale with them.
+- On a **Bezier** spline each selected point shows its two **tangent handles**
+  (the small dots at the ends of the thin lines). **Drag a handle** to bend the
+  curve: the opposite handle turns with it so the curve stays smooth. Hold
+  **Shift** while dragging to move one handle alone and make a corner. **Esc**
+  cancels a drag.
+- **Delete** removes the selected points; the curve closes through the others.
+
+The **Object** tab of an editable spline has **Type** (Linear, Cubic, Akima,
+B-Spline, Bezier — changing to Bezier gives points without handles smooth ones),
+**Close Spline**, the Intermediate Points, and the number of points and
+segments. Every change is one undo step, and the selected points are saved with
+the document.
+
 ## 14. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
@@ -1391,8 +1421,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Generators**: only the Subdivision Surface, with one type (Catmull-Clark) and
   without edge weights (creases) or UV options. Extrude, Lathe, Loft, Sweep and
   Cloner are planned.
-- **Splines**: editing a spline's points (Make Editable), the Pen, spline
-  commands and Text come next; the Cissoid, Cogwheel, Cycloid, Formula, Profile,
+- **Splines**: the Pen, spline commands (Reverse, Set First Point, Hard and Soft
+  Interpolation) and Text come next; hiding points, Grow/Shrink on points and
+  snapping to spline points; the Cissoid, Cogwheel, Cycloid, Formula, Profile,
   4-Side and Spiral primitives; splines in glTF and OBJ files; drawing splines in
   renders.
 - **Tags**: Protection limits, Phong edge breaks, copying tags between objects.

@@ -1,9 +1,9 @@
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use glam::Vec3;
-use grid4d_geom::spline::{ArcType, SplinePrimitive, SplineShape};
+use grid4d_geom::spline::{ArcType, Interpolation, SplinePrimitive, SplineShape};
 
-use crate::{Aabb, Components, LightDetails, LightShadow, LightType, MeshHandle, Transform};
+use crate::{Aabb, Components, LightDetails, LightShadow, LightType, MeshHandle, SplineHandle, Transform};
 
 slotmap::new_key_type! {
     /// Stable, generational handle to a node in a [`Scene`](crate::Scene).
@@ -113,6 +113,14 @@ pub enum ObjectKind {
     /// A parametric spline (Circle, Rectangle, Arc, n-Side, Star, Helix,
     /// Flower): a curve, drawn as lines, not rendered.
     SplinePrimitive(SplinePrimitive),
+    /// An editable spline (Make Editable on a spline primitive): its own control
+    /// points and tangents, how it is cut into pieces, and its selected and
+    /// hidden points (the `points` sets of `components`).
+    Spline {
+        spline: SplineHandle,
+        interpolation: Interpolation,
+        components: Components,
+    },
 }
 
 /// Field-less discriminant of [`ObjectKind`] — for icons, menus and dispatch tables.
@@ -138,10 +146,11 @@ pub enum ObjectKindTag {
     Star,
     Helix,
     Flower,
+    Spline,
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -162,6 +171,7 @@ impl ObjectKindTag {
         Self::Star,
         Self::Helix,
         Self::Flower,
+        Self::Spline,
     ];
 
     /// Spline primitives (the "Create ▸ Spline" family).
@@ -213,6 +223,7 @@ impl ObjectKindTag {
             Self::Star => "Star",
             Self::Helix => "Helix",
             Self::Flower => "Flower",
+            Self::Spline => "Spline",
         }
     }
 
@@ -323,17 +334,39 @@ impl ObjectKindTag {
                 outer_radius: 200.0,
                 petals: 6,
             }),
+            // Empty, like a new polygon object.
+            Self::Spline => ObjectKind::Spline {
+                spline: SplineHandle::empty(),
+                interpolation: Interpolation::default(),
+                components: Components::default(),
+            },
         }
     }
 
-    /// A spline primitive (see [`ObjectKindTag::SPLINES`]).
+    /// A spline: a primitive (see [`ObjectKindTag::SPLINES`]) or an editable one.
     #[must_use]
     pub const fn is_spline(self) -> bool {
         matches!(
             self,
-            Self::Circle | Self::Rectangle | Self::Arc | Self::NSide | Self::Star | Self::Helix | Self::Flower
+            Self::Circle
+                | Self::Rectangle
+                | Self::Arc
+                | Self::NSide
+                | Self::Star
+                | Self::Helix
+                | Self::Flower
+                | Self::Spline
         )
     }
+}
+
+/// A curve's bounds, half a centimetre thicker so flat ones can be hit.
+fn curve_bounds(polyline: &grid4d_geom::spline::Polyline) -> Option<Aabb> {
+    let (min, max) = polyline.bounds()?;
+    Some(Aabb {
+        min: min - Vec3::splat(0.5),
+        max: max + Vec3::splat(0.5),
+    })
 }
 
 /// A spline primitive of `shape` with the default plane and sampling.
@@ -388,13 +421,14 @@ impl ObjectKind {
                 SplineShape::Helix { .. } => ObjectKindTag::Helix,
                 SplineShape::Flower { .. } => ObjectKindTag::Flower,
             },
+            Self::Spline { .. } => ObjectKindTag::Spline,
         }
     }
 
     /// A curve rather than a surface (drawn as lines, not rendered).
     #[must_use]
     pub const fn is_spline(&self) -> bool {
-        matches!(self, Self::SplinePrimitive(_))
+        matches!(self, Self::SplinePrimitive(_) | Self::Spline { .. })
     }
 
     /// Builds its geometry from its children (see [`ObjectKindTag::GENERATORS`]).
@@ -445,13 +479,12 @@ impl ObjectKind {
             // Exact and not centred: the mesh's own (cached) bounds.
             Self::Polygon { ref mesh, .. } => return mesh.bounds(),
             // The curve's, half a centimetre thicker so flat ones can be hit.
-            Self::SplinePrimitive(ref primitive) => {
-                let (min, max) = primitive.polyline().bounds()?;
-                return Some(Aabb {
-                    min: min - Vec3::splat(0.5),
-                    max: max + Vec3::splat(0.5),
-                });
-            }
+            Self::SplinePrimitive(ref primitive) => return curve_bounds(&primitive.polyline()),
+            Self::Spline {
+                ref spline,
+                interpolation,
+                ..
+            } => return curve_bounds(&spline.spline().sample(interpolation)),
         };
         Some(Aabb::from_half_extents(half.abs()))
     }

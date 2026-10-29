@@ -121,6 +121,15 @@ impl ViewportPanel {
             return true;
         }
 
+        // An editable spline in Points mode: brush strokes over its points here,
+        // frames below (`select_in_frame`); the other tools do not apply.
+        if let Some(node) = self.spline_target(editor) {
+            match editor.tool {
+                Tool::LiveSelection => return self.spline_stroke(ui, response, rect, editor, node),
+                Tool::RectangleSelection => {}
+                _ => return false,
+            }
+        }
         let target = self.component_target(editor);
         match (editor.tool, target) {
             (Tool::LiveSelection, Some((node, component))) => self.live_selection(
@@ -431,7 +440,15 @@ impl ViewportPanel {
         modifiers: Modifiers,
     ) {
         let mode = SelectMode::for_components(modifiers);
-        if let Some((node, component)) = target {
+        if let Some(node) = self.spline_target(editor) {
+            let hits = self.spline_points_in(rect, node, frame);
+            editor.commands.push(EditorCommand::SelectComponents {
+                node,
+                component: Component::Point,
+                hits,
+                mode,
+            });
+        } else if let Some((node, component)) = target {
             let settings = editor.selection_settings;
             let hits = components_in_rect(
                 &self.evaluated,

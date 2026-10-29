@@ -10,10 +10,10 @@
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
-use grid4d_geom::spline::{ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape};
+use grid4d_geom::spline::{ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape, SplineType};
 use grid4d_scene::{
     Axis, Document, Falloff, KeyState, LightDetails, LightShadow, LightType, Material, MaterialId, NodeData, NodeId,
-    ObjectKind, Param, Scene, SceneEdit, Tag, TagKind, TimeSettings,
+    ObjectKind, Param, Scene, SceneEdit, SplineHandle, Tag, TagKind, TimeSettings,
 };
 
 use crate::{
@@ -697,6 +697,9 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 ui.end_row();
             }
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, primitive),
+            ObjectKind::Spline {
+                spline, interpolation, ..
+            } => editable_spline_rows(ui, spline, interpolation),
             ObjectKind::Polygon { mesh, .. } => {
                 // The geometry is edited in the viewport (Points / Edges / Polygons).
                 let mesh = mesh.mesh();
@@ -1141,6 +1144,50 @@ fn spline_rows(ui: &mut Ui, primitive: &mut SplinePrimitive) {
     ui.end_row();
     check_row(ui, "Reverse", &mut primitive.reverse);
     interpolation_rows(ui, &mut primitive.interpolation);
+}
+
+/// An editable spline: its type, closing and sampling; the points themselves are
+/// edited in the viewport (Points mode).
+fn editable_spline_rows(ui: &mut Ui, spline: &mut SplineHandle, interpolation: &mut Interpolation) {
+    let current = spline.spline().kind;
+    attr_label(ui, "Type", LABEL_WIDTH);
+    let mut kind = current;
+    egui::ComboBox::from_id_salt("grid4d.attr.spline.type")
+        .selected_text(kind.label())
+        .show_ui(ui, |ui| {
+            for option in SplineType::ALL {
+                ui.selectable_value(&mut kind, option, option.label());
+            }
+        });
+    ui.end_row();
+    if kind != current {
+        *spline = spline.edited(|s| {
+            s.kind = kind;
+            // A spline turned into Bezier gets smooth handles where it has none.
+            if kind == SplineType::Bezier {
+                s.smooth_tangents();
+            }
+        });
+    }
+    let segments = &spline.spline().segments;
+    let all_closed = !segments.is_empty() && segments.iter().all(|s| s.closed);
+    let mut closed = all_closed;
+    attr_label(ui, "Close Spline", LABEL_WIDTH);
+    if ui.checkbox(&mut closed, "").changed() {
+        *spline = spline.edited(|s| {
+            for segment in &mut s.segments {
+                segment.closed = closed;
+            }
+        });
+    }
+    ui.end_row();
+    interpolation_rows(ui, interpolation);
+    let s = spline.spline();
+    for (label, count) in [("Points", s.points.len()), ("Segments", s.segments.len())] {
+        attr_label(ui, label, LABEL_WIDTH);
+        ui.label(count.to_string());
+        ui.end_row();
+    }
 }
 
 /// Intermediate Points and the value its mode uses.

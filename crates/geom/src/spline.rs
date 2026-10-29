@@ -204,6 +204,80 @@ impl Spline {
         self
     }
 
+    /// The spline without the points `remove` flags, and where each old point
+    /// went (`None`: removed). A segment left without points disappears; one
+    /// left with a single point stays open.
+    #[must_use]
+    pub fn without_points(&self, remove: &crate::BitSet) -> (Self, Vec<Option<u32>>) {
+        let mut out = Self {
+            kind: self.kind,
+            points: Vec::new(),
+            tangents: Vec::new(),
+            segments: Vec::new(),
+        };
+        let mut map = Vec::with_capacity(self.points.len());
+        let mut start = 0usize;
+        for segment in &self.segments {
+            let count = usize::try_from(segment.count).unwrap_or(0);
+            let end = (start + count).min(self.points.len());
+            let before = out.points.len();
+            for i in start..end {
+                if remove.contains(i) {
+                    map.push(None);
+                    continue;
+                }
+                map.push(u32::try_from(out.points.len()).ok());
+                out.points.push(self.points[i]);
+                out.tangents
+                    .push(self.tangents.get(i).copied().unwrap_or([Vec3::ZERO; 2]));
+            }
+            let kept = out.points.len() - before;
+            if kept > 0 {
+                out.segments.push(Segment {
+                    count: u32::try_from(kept).unwrap_or(u32::MAX),
+                    closed: segment.closed && kept > 1,
+                });
+            }
+            start = end;
+        }
+        (out, map)
+    }
+
+    /// Gives every point without tangents smooth ones (the direction from its
+    /// neighbour before to its neighbour after, a third of the way, like a
+    /// Cubic spline's), leaving set tangents alone: what turning a spline into
+    /// a Bezier one does.
+    pub fn smooth_tangents(&mut self) {
+        let mut start = 0usize;
+        for segment in &self.segments {
+            let count = usize::try_from(segment.count).unwrap_or(0);
+            let end = (start + count).min(self.points.len());
+            let points = &self.points[start..end];
+            let n = points.len();
+            for i in 0..n {
+                if self.tangents[start + i] != [Vec3::ZERO; 2] || n < 2 {
+                    continue;
+                }
+                let before = if i > 0 || segment.closed {
+                    points[(i + n - 1) % n]
+                } else {
+                    points[i]
+                };
+                let after = if i + 1 < n || segment.closed {
+                    points[(i + 1) % n]
+                } else {
+                    points[i]
+                };
+                // Half the neighbours' difference is the Hermite tangent; a third of that the handle.
+                // An open segment's end has one neighbour: the whole third towards it.
+                let end_point = !segment.closed && (i == 0 || i + 1 == n);
+                let d = (after - before) / if end_point { 3.0 } else { 6.0 };
+                self.tangents[start + i] = [-d, d];
+            }
+            start = end;
+        }
+    }
+
     /// The cubic Bezier spans of each segment, as `[start, control, control, end]`.
     pub fn spans(&self) -> impl Iterator<Item = (Vec<[Vec3; 4]>, bool)> + '_ {
         let tangents = runs(&self.tangents, &self.segments).map(|(t, _)| t);
@@ -1159,6 +1233,54 @@ mod tests {
         assert!(line.points[0].abs_diff_eq(step[0], EPS));
         assert!(line.points.last().unwrap().abs_diff_eq(step[5], 0.01));
         assert_eq!(b.points.len(), 7 + 1, "spans + 1 for an open B-spline");
+    }
+
+    #[test]
+    fn removing_points_keeps_the_rest_in_order_and_drops_empty_segments() {
+        let mut spline = Spline::new(SplineType::Linear, vec![Vec3::X, Vec3::Y, Vec3::Z], true);
+        spline.append(Spline::new(SplineType::Linear, vec![Vec3::ONE, Vec3::NEG_ONE], false));
+        let remove: crate::BitSet = [1, 3, 4].into_iter().collect();
+        let (left, map) = spline.without_points(&remove);
+        assert_eq!(left.points, [Vec3::X, Vec3::Z]);
+        assert_eq!(
+            left.segments,
+            [Segment { count: 2, closed: true }],
+            "the emptied segment is gone"
+        );
+        assert_eq!(map, [Some(0), None, Some(1), None, None]);
+        let (single, _) = left.without_points(&[0].into_iter().collect());
+        assert_eq!(
+            single.segments,
+            [Segment {
+                count: 1,
+                closed: false
+            }]
+        );
+    }
+
+    #[test]
+    fn smooth_tangents_fill_only_missing_ones() {
+        let mut spline = Spline::new(
+            SplineType::Linear,
+            vec![Vec3::ZERO, Vec3::new(100.0, 100.0, 0.0), Vec3::new(200.0, 0.0, 0.0)],
+            false,
+        );
+        spline.tangents[2] = [Vec3::new(-5.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0)];
+        spline.smooth_tangents();
+        let [left, right] = spline.tangents[1];
+        assert!(
+            right.abs_diff_eq(Vec3::new(200.0 / 6.0, 0.0, 0.0), EPS),
+            "level at the top: {right}"
+        );
+        assert_eq!(left, -right, "in line");
+        assert_eq!(spline.tangents[2][1], Vec3::new(5.0, 0.0, 0.0), "set tangents stay");
+        assert!(spline.tangents[0][1].x > 0.0, "the first point points onwards");
+        spline.kind = SplineType::Bezier;
+        let line = spline.sample(Interpolation::Natural { number: 8 });
+        assert!(
+            line.points.iter().all(|p| p.y <= 100.5),
+            "a smooth arch through the points"
+        );
     }
 
     #[test]

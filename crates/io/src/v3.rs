@@ -20,13 +20,16 @@ use std::{
 use glam::{Vec2, Vec3};
 use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
-    spline::{ArcType, Interpolation as SplineInterpolation, SplinePlane, SplinePrimitive, SplineShape},
+    spline::{
+        ArcType, Interpolation as SplineInterpolation, Segment, Spline, SplinePlane, SplinePrimitive, SplineShape,
+        SplineType,
+    },
     subdivision::{Boundary, MAX_LEVEL},
 };
 use grid4d_scene::{
     Axis, ComponentState, Components, Curve, Document, Falloff, FrameNaming, FrameRange, ImageFormat, Interpolation,
     Key, LightDetails, LightShadow, LightType, Material, MaterialId, MeshHandle, MeshId, NodeData, NodeId, ObjectKind,
-    Param, RenderSettings, Tag, Tangents, TimeSettings, Track, Transform,
+    Param, RenderSettings, SplineHandle, Tag, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -629,6 +632,38 @@ enum KindDto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         intermediate_points: Option<SplinePointsDto>,
     },
+    /// An editable spline (added in step 9.2), its arrays inline.
+    EditableSpline {
+        spline_type: SplineTypeDto,
+        points: Vec<[f32; 3]>,
+        /// Per point: incoming and outgoing tangent. Absent when all are zero.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tangents: Vec<[[f32; 3]; 2]>,
+        segments: Vec<SegmentDto>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intermediate_points: Option<SplinePointsDto>,
+        /// Selected and hidden points (`points` ranges only).
+        #[serde(default, skip_serializing_if = "SetDto::is_empty")]
+        selected: SetDto,
+        #[serde(default, skip_serializing_if = "SetDto::is_empty")]
+        hidden: SetDto,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SplineTypeDto {
+    Linear,
+    Cubic,
+    Akima,
+    BSpline,
+    Bezier,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct SegmentDto {
+    count: u32,
+    closed: bool,
 }
 
 #[expect(
@@ -1169,6 +1204,18 @@ impl SetDto {
 
     /// The flags, checked against `mesh` (`what`/`object` name them in errors).
     fn into_set(self, mesh: &PolyMesh, object: &str, what: &str) -> Result<ComponentSet, IoError> {
+        self.into_counts(mesh.point_count(), mesh.corner_count(), mesh.face_count(), object, what)
+    }
+
+    /// The flags, checked against counts of points, corners and polygons.
+    fn into_counts(
+        self,
+        points: usize,
+        corners: usize,
+        polygons: usize,
+        object: &str,
+        what: &str,
+    ) -> Result<ComponentSet, IoError> {
         let bits = |ranges: Vec<[u32; 2]>, count: usize, kind: &str| {
             let mut bits = BitSet::new();
             for [first, last] in ranges {
@@ -1186,9 +1233,9 @@ impl SetDto {
             Ok(bits)
         };
         Ok(ComponentSet {
-            points: bits(self.points, mesh.point_count(), "points")?,
-            edges: bits(self.edges, mesh.corner_count(), "corners")?,
-            polygons: bits(self.polygons, mesh.face_count(), "polygons")?,
+            points: bits(self.points, points, "points")?,
+            edges: bits(self.edges, corners, "corners")?,
+            polygons: bits(self.polygons, polygons, "polygons")?,
         })
     }
 }
@@ -1573,6 +1620,44 @@ impl KindDto {
                 linear_pre,
                 boundary: boundary.into(),
             },
+            ObjectKind::Spline {
+                ref spline,
+                interpolation,
+                ref components,
+            } => {
+                let spline = spline.spline();
+                let tangents = if spline.tangents.iter().all(|t| *t == [Vec3::ZERO; 2]) {
+                    Vec::new()
+                } else {
+                    spline
+                        .tangents
+                        .iter()
+                        .map(|[l, r]| [l.to_array(), r.to_array()])
+                        .collect()
+                };
+                Self::EditableSpline {
+                    spline_type: match spline.kind {
+                        SplineType::Linear => SplineTypeDto::Linear,
+                        SplineType::Cubic => SplineTypeDto::Cubic,
+                        SplineType::Akima => SplineTypeDto::Akima,
+                        SplineType::BSpline => SplineTypeDto::BSpline,
+                        SplineType::Bezier => SplineTypeDto::Bezier,
+                    },
+                    points: spline.points.iter().map(|p| p.to_array()).collect(),
+                    tangents,
+                    segments: spline
+                        .segments
+                        .iter()
+                        .map(|s| SegmentDto {
+                            count: s.count,
+                            closed: s.closed,
+                        })
+                        .collect(),
+                    intermediate_points: SplinePointsDto::new(interpolation),
+                    selected: SetDto::new(components.selected()),
+                    hidden: SetDto::new(components.hidden()),
+                }
+            }
             ObjectKind::SplinePrimitive(primitive) => Self::Spline {
                 spline: SplineShapeDto::new(primitive.shape),
                 plane: match primitive.plane {
@@ -1722,6 +1807,64 @@ impl KindDto {
                 interpolation: intermediate_points
                     .map_or_else(SplineInterpolation::default, SplinePointsDto::into_interpolation),
             }),
+            Self::EditableSpline {
+                spline_type,
+                points,
+                tangents,
+                segments,
+                intermediate_points,
+                selected,
+                hidden,
+            } => {
+                let count = points.len();
+                if !tangents.is_empty() && tangents.len() != count {
+                    return Err(IoError::Invalid(format!(
+                        "spline \"{object}\" has {} tangents for {count} points",
+                        tangents.len()
+                    )));
+                }
+                let claimed: u64 = segments.iter().map(|s| u64::from(s.count)).sum();
+                if u64::try_from(count).ok() != Some(claimed) {
+                    return Err(IoError::Invalid(format!(
+                        "spline \"{object}\": its segments count {claimed} points, it has {count}"
+                    )));
+                }
+                let spline = Spline {
+                    kind: match spline_type {
+                        SplineTypeDto::Linear => SplineType::Linear,
+                        SplineTypeDto::Cubic => SplineType::Cubic,
+                        SplineTypeDto::Akima => SplineType::Akima,
+                        SplineTypeDto::BSpline => SplineType::BSpline,
+                        SplineTypeDto::Bezier => SplineType::Bezier,
+                    },
+                    points: points.into_iter().map(Vec3::from_array).collect(),
+                    tangents: if tangents.is_empty() {
+                        vec![[Vec3::ZERO; 2]; count]
+                    } else {
+                        tangents
+                            .into_iter()
+                            .map(|[l, r]| [Vec3::from_array(l), Vec3::from_array(r)])
+                            .collect()
+                    },
+                    segments: segments
+                        .into_iter()
+                        .map(|s| Segment {
+                            count: s.count,
+                            closed: s.closed,
+                        })
+                        .collect(),
+                };
+                let state = ComponentState {
+                    selected: selected.into_counts(count, 0, 0, object, "selected")?,
+                    hidden: hidden.into_counts(count, 0, 0, object, "hidden")?,
+                };
+                ObjectKind::Spline {
+                    spline: SplineHandle::new(spline),
+                    interpolation: intermediate_points
+                        .map_or_else(SplineInterpolation::default, SplinePointsDto::into_interpolation),
+                    components: Components::new(state),
+                }
+            }
         })
     }
 
@@ -1729,6 +1872,17 @@ impl KindDto {
     fn parameters(&self) -> Vec<f32> {
         match *self {
             Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } => Vec::new(),
+            Self::EditableSpline {
+                ref points,
+                ref tangents,
+                intermediate_points,
+                ..
+            } => {
+                let mut numbers: Vec<f32> = points.iter().flatten().copied().collect();
+                numbers.extend(tangents.iter().flatten().flatten().copied());
+                numbers.extend(intermediate_points.map(SplinePointsDto::parameters).unwrap_or_default());
+                numbers
+            }
             Self::Spline {
                 spline,
                 intermediate_points,
@@ -2601,5 +2755,49 @@ mod tests {
             panic!()
         };
         assert_eq!(points, SplineShape::MAX_SIDES);
+    }
+
+    #[test]
+    fn editable_splines_round_trip_with_their_selection() {
+        use grid4d_geom::spline::{Interpolation as Points, Spline, SplineType};
+        let mut spline = Spline::new(
+            SplineType::Bezier,
+            vec![Vec3::ZERO, Vec3::new(100.0, 50.0, 0.0), Vec3::new(200.0, 0.0, 30.0)],
+            false,
+        );
+        spline.smooth_tangents();
+        spline.append(Spline::new(SplineType::Linear, vec![Vec3::X, Vec3::Y], true));
+        let mut state = ComponentState::default();
+        state.selected.points.extend([1, 3]);
+        state.hidden.points.insert(4);
+        let mut doc = Document::new("t");
+        doc.scene.insert(Node::new(
+            "Spline",
+            ObjectKind::Spline {
+                spline: SplineHandle::new(spline),
+                interpolation: Points::Uniform { number: 4 },
+                components: Components::new(state),
+            },
+        ));
+        let kinds = |d: &Document| d.scene.iter().map(|(_, n)| n.data.kind.clone()).collect::<Vec<_>>();
+        assert_eq!(kinds(&round_trip(&doc)), kinds(&doc));
+
+        // A linear spline writes no tangents.
+        let mut plain = Document::new("t");
+        plain.scene.insert(Node::new(
+            "Line",
+            ObjectKind::Spline {
+                spline: SplineHandle::new(Spline::new(SplineType::Linear, vec![Vec3::ZERO, Vec3::X], false)),
+                interpolation: Points::default(),
+                components: Components::default(),
+            },
+        ));
+        let json = document_json(&plain);
+        assert!(json.contains("\"type\": \"editable_spline\"") && !json.contains("tangents"));
+        assert_eq!(kinds(&round_trip(&plain)), kinds(&plain));
+
+        // Segments that do not add up to the points are an error.
+        let broken = json.replacen("\"count\": 2", "\"count\": 3", 1);
+        assert!(from_bytes(&archive(&[(DOCUMENT_ENTRY, broken.as_bytes())])).is_err());
     }
 }

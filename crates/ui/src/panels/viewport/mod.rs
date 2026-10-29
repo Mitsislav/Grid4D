@@ -9,6 +9,7 @@ mod mesh_tools;
 mod overlay;
 mod select_tools;
 mod snapping;
+mod spline_tools;
 
 use egui::{Align, Align2, Layout, Margin, PointerButton, Pos2, Rect, Response, Sense, Ui, pos2};
 use glam::{Mat4, Vec2 as GVec2, Vec3};
@@ -232,6 +233,10 @@ pub struct ViewportPanel {
     pixels_per_point: f32,
     /// The Render View's picture on the GPU.
     render_view: Option<RenderViewTexture>,
+    /// A spline's Bezier handle being dragged (Points mode).
+    handle_dragging: Option<spline_tools::HandleDrag>,
+    /// A Live Selection stroke over a spline's points.
+    point_stroke: Option<spline_tools::PointStroke>,
 }
 
 /// The Render View's picture as a texture, with the version it was made from.
@@ -292,6 +297,8 @@ impl ViewportPanel {
             camera_edit: None,
             pixels_per_point: 1.0,
             render_view: None,
+            handle_dragging: None,
+            point_stroke: None,
         }
     }
 
@@ -623,7 +630,8 @@ impl ViewportPanel {
         if !navigating && !gizmo_owns_pointer {
             self.evaluated.set_frame(f64::from(doc.time.frame()));
             self.evaluated.update(&doc.scene);
-            if !self.mesh_tools(ui, &response, rect, doc, editor)
+            if !self.handle_drag(ui, &response, rect, doc, editor)
+                && !self.mesh_tools(ui, &response, rect, doc, editor)
                 && !self.cut_tools(ui, &response, rect, editor)
                 && !self.join_tools(ui, &response, rect, editor)
                 && !self.selection_tools(ui, &response, rect, doc, editor)
@@ -656,7 +664,7 @@ impl ViewportPanel {
         if let Some(hit) = &self.snap_hit {
             overlay::snap_target(&painter, rect, &view_proj, hit);
         }
-        if target.is_some()
+        if (target.is_some() || self.spline_target(editor).is_some())
             && editor.tool == Tool::LiveSelection
             && let Some(pos) = response.hover_pos()
         {
@@ -728,6 +736,9 @@ impl ViewportPanel {
         let label = linked
             .and_then(|id| doc.scene.get(id))
             .map_or_else(|| self.kind.label().to_owned(), |n| n.data.name.clone());
+        if interactive && let Some(node) = self.spline_target(editor) {
+            self.paint_spline_points(ui, painter, rect, node);
+        }
         overlay::view_label(painter, rect, &label);
         if editor.animation.autokey {
             overlay::autokey_frame(painter, rect);
@@ -1215,6 +1226,17 @@ impl ViewportPanel {
         let Some(pointer) = response.interact_pointer_pos() else {
             return;
         };
+        // Points mode on an editable spline picks its control points.
+        if let Some(node) = self.spline_target(editor) {
+            let hit = self.spline_point_at(rect, node, pointer);
+            editor.commands.push(EditorCommand::SelectComponents {
+                node,
+                component: Component::Point,
+                hits: hit.into_iter().collect(),
+                mode: SelectMode::for_components(modifiers),
+            });
+            return;
+        }
         // A component mode on a polygon object picks its components, never objects.
         if let Some((node, component)) = self.component_target(editor) {
             let hit = pick_component(
@@ -1448,7 +1470,7 @@ const fn component_hint(component: Component, tool: Tool, active: bool) -> &'sta
 }
 
 /// Window position → normalised device coordinates (`[-1, 1]`, Y up).
-fn to_ndc(pos: Pos2, rect: Rect) -> GVec2 {
+pub(super) fn to_ndc(pos: Pos2, rect: Rect) -> GVec2 {
     GVec2::new(
         (pos.x - rect.left()) / rect.width() * 2.0 - 1.0,
         1.0 - (pos.y - rect.top()) / rect.height() * 2.0,
@@ -2976,5 +2998,103 @@ mod tests {
         h.frame(vec![Event::PointerMoved(at), click(true)]);
         h.frame(vec![click(false)]);
         assert!(h.editor.selection.contains(circle), "picked by its line");
+    }
+
+    /// A Circle made editable, in Points mode, its id; and the screen position
+    /// of a point of it (object space, the circle at the origin).
+    fn editable_circle(h: &mut Harness) -> NodeId {
+        h.editor
+            .commands
+            .push(EditorCommand::CreateObject(ObjectKindTag::Circle));
+        h.frame(Vec::new());
+        h.editor.commands.push(EditorCommand::MakeEditable);
+        h.frame(Vec::new());
+        h.editor.mode = EditMode::Points;
+        h.frame(Vec::new());
+        h.editor.selection.active().unwrap()
+    }
+
+    fn on_screen(h: &Harness, point: Vec3) -> Pos2 {
+        let rect = h.viewport.view_rect;
+        project(&h.viewport.camera.view_projection(rect.aspect_ratio()), rect, point).unwrap()
+    }
+
+    fn spline_state(h: &Harness, id: NodeId) -> (grid4d_geom::spline::Spline, Vec<usize>) {
+        let ObjectKind::Spline { spline, components, .. } = &h.doc.scene.get(id).unwrap().data.kind else {
+            panic!("an editable spline");
+        };
+        (spline.spline().clone(), components.selected().points.iter().collect())
+    }
+
+    #[test]
+    fn spline_points_are_clicked_framed_and_their_handles_dragged() {
+        let mut h = Harness::new();
+        let id = editable_circle(&mut h);
+        let (right, top) = (
+            on_screen(&h, Vec3::new(200.0, 0.0, 0.0)),
+            on_screen(&h, Vec3::new(0.0, 200.0, 0.0)),
+        );
+
+        // A click selects the point under the cursor.
+        h.frame(vec![Event::PointerMoved(right), Harness::button(right, true)]);
+        h.frame(vec![Harness::button(right, false)]);
+        h.frame(Vec::new());
+        assert_eq!(spline_state(&h, id).1, [0]);
+
+        // A rectangle frame takes the points inside it.
+        h.editor.tool = Tool::RectangleSelection;
+        let (min, max) = (right.min(top) - Vec2::splat(12.0), right.max(top) + Vec2::splat(12.0));
+        h.drag(min, max);
+        assert_eq!(spline_state(&h, id).1, [0, 1]);
+
+        // Back to point 0 alone; drag its lower (incoming) handle to the right.
+        h.editor.tool = Tool::Move;
+        h.frame(vec![Event::PointerMoved(right), Harness::button(right, true)]);
+        h.frame(vec![Harness::button(right, false)]);
+        h.frame(Vec::new());
+        assert_eq!(spline_state(&h, id).1, [0]);
+        let [left, outgoing] = spline_state(&h, id).0.tangents[0];
+        let handle = on_screen(&h, Vec3::new(200.0, 0.0, 0.0) + left);
+        h.drag(handle, handle + Vec2::new(60.0, 0.0));
+        let [moved_left, moved_right] = spline_state(&h, id).0.tangents[0];
+        assert!(moved_left.x > 1.0, "the dragged handle followed: {moved_left}");
+        assert!(
+            (moved_right.length() - outgoing.length()).abs() < 1e-3,
+            "the other keeps its length"
+        );
+        assert!(
+            moved_right.normalize().dot(-moved_left.normalize()) > 0.9999,
+            "and stays in line"
+        );
+        assert_eq!(h.editor.history.undo_label(), Some("Move Tangent"));
+        h.editor.commands.push(EditorCommand::Undo);
+        h.frame(Vec::new());
+        assert_eq!(spline_state(&h, id).0.tangents[0], [left, outgoing]);
+    }
+
+    #[test]
+    fn transforming_spline_points_turns_their_tangents() {
+        let mut h = Harness::new();
+        let id = editable_circle(&mut h);
+        let (spline, _) = spline_state(&h, id);
+        let ObjectKind::Spline { spline: handle, .. } = h.doc.scene.get(id).unwrap().data.kind.clone() else {
+            panic!()
+        };
+        let points: grid4d_geom::BitSet = [0].into_iter().collect();
+        let pivot = spline.points[0];
+        let edit = gizmo::PointEdit::spline(&handle, &points, Mat4::IDENTITY, pivot);
+        let quarter = Mat4::from_translation(pivot)
+            * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2)
+            * Mat4::from_translation(-pivot);
+        edit.apply(quarter, &mut h.doc.scene, id);
+        let (turned, _) = spline_state(&h, id);
+        assert!(turned.points[0].abs_diff_eq(pivot, 1e-4), "rotated about itself");
+        let expected = Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2).transform_vector3(spline.tangents[0][1]);
+        assert!(
+            turned.tangents[0][1].abs_diff_eq(expected, 1e-3),
+            "{}",
+            turned.tangents[0][1]
+        );
+        assert_eq!(turned.points[1], spline.points[1], "other points stay");
     }
 }

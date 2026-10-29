@@ -12,8 +12,8 @@ use grid4d_geom::{
 };
 use grid4d_render::{DisplayStyle, OrbitCamera, ShadingMode};
 use grid4d_scene::{
-    ComponentState, Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, SceneEdit,
-    Transform,
+    ComponentState, Components, Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene,
+    SceneEdit, SplineHandle, Transform,
 };
 
 use crate::{
@@ -407,6 +407,8 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 delete_tag(doc, editor, tag.node, tag.kind);
             }
         }
+        // On an editable spline in Points mode: its selected points.
+        EditorCommand::DeleteSelected if spline_target(doc, editor).is_some() => delete_spline_points(doc, editor),
         // In a component mode Delete removes components, never objects.
         EditorCommand::DeleteSelected if editor.mode != EditMode::Model => {
             let label = match editor.mode {
@@ -656,6 +658,38 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 }
             }
         }
+        EditorCommand::SelectComponents { node, hits, mode, .. } if is_spline(doc, node) => {
+            edit_spline_points(doc, editor, node, "Select Points", |state, _| {
+                let picked: Vec<usize> = hits
+                    .iter()
+                    .map(|&i| idx(i))
+                    .filter(|&i| !state.hidden.points.contains(i))
+                    .collect();
+                let bits = &mut state.selected.points;
+                match mode {
+                    SelectMode::Replace => {
+                        bits.clear();
+                        bits.extend(picked);
+                    }
+                    SelectMode::Add => bits.extend(picked),
+                    SelectMode::Remove => {
+                        for i in picked {
+                            bits.remove(i);
+                        }
+                    }
+                    SelectMode::Toggle => {
+                        let on = picked.iter().any(|&i| bits.contains(i));
+                        for i in picked {
+                            if on {
+                                bits.remove(i);
+                            } else {
+                                bits.insert(i);
+                            }
+                        }
+                    }
+                }
+            });
+        }
         EditorCommand::SelectComponents {
             node,
             component,
@@ -717,6 +751,14 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 set_selected(state, mesh, component, shrunk);
             });
         }
+        EditorCommand::InvertSelection if spline_target(doc, editor).is_some() => {
+            on_spline_target(doc, editor, "Invert Selection", |state, count| {
+                let mut inverted = BitSet::new();
+                inverted.extend((0..count).filter(|&i| !state.selected.points.contains(i)));
+                inverted.remove_all(&state.hidden.points);
+                state.selected.points = inverted;
+            });
+        }
         EditorCommand::InvertSelection => {
             in_component_mode(doc, editor, "Invert Selection", |state, mesh, component| {
                 let hidden = hidden_mask(state, mesh, component);
@@ -773,6 +815,17 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 });
             }
             editor.mode = to;
+        }
+        EditorCommand::SelectAll if spline_target(doc, editor).is_some() => {
+            on_spline_target(doc, editor, "Select All", |state, count| {
+                let mut all = BitSet::new();
+                all.insert_range(0..count);
+                all.remove_all(&state.hidden.points);
+                state.selected.points = all;
+            });
+        }
+        EditorCommand::DeselectAll if spline_target(doc, editor).is_some() => {
+            on_spline_target(doc, editor, "Deselect All", |state, _| state.selected.points.clear());
         }
         EditorCommand::SelectAll if editor.mode != EditMode::Model => {
             in_component_mode(doc, editor, "Select All", |state, mesh, component| {
@@ -1121,6 +1174,111 @@ fn stored(bits: BitSet, component: Component, mesh: &MeshHandle) -> BitSet {
     }
 }
 
+/// The active object in Points mode, when it is an editable spline.
+#[must_use]
+pub fn spline_target(doc: &Document, editor: &EditorState) -> Option<NodeId> {
+    (editor.mode == EditMode::Points)
+        .then(|| editor.selection.active())
+        .flatten()
+        .filter(|&id| is_spline(doc, id))
+}
+
+/// Whether `id` is an editable spline.
+fn is_spline(doc: &Document, id: NodeId) -> bool {
+    doc.scene
+        .get(id)
+        .is_some_and(|n| matches!(n.data.kind, ObjectKind::Spline { .. }))
+}
+
+/// Runs `change` on the spline target's components (with its point count) as
+/// one undo step named `label`.
+fn on_spline_target(
+    doc: &mut Document,
+    editor: &mut EditorState,
+    label: &'static str,
+    change: impl FnOnce(&mut ComponentState, usize),
+) {
+    if let Some(id) = spline_target(doc, editor) {
+        edit_spline_points(doc, editor, id, label, |state, spline| {
+            change(state, spline.points.len())
+        });
+    }
+}
+
+/// Changes the components of editable spline `id` with `change` as one undo
+/// step named `label`; records nothing if they end up unchanged.
+fn edit_spline_points(
+    doc: &mut Document,
+    editor: &mut EditorState,
+    id: NodeId,
+    label: &'static str,
+    change: impl FnOnce(&mut ComponentState, &grid4d_geom::spline::Spline),
+) {
+    let Some(node) = doc.scene.get(id) else { return };
+    let ObjectKind::Spline {
+        spline,
+        interpolation,
+        components,
+    } = &node.data.kind
+    else {
+        return;
+    };
+    let mut updated = components.clone();
+    change(updated.make_mut(), spline.spline());
+    if updated == *components {
+        return;
+    }
+    let mut data = node.data.clone();
+    data.kind = ObjectKind::Spline {
+        spline: spline.clone(),
+        interpolation: *interpolation,
+        components: updated,
+    };
+    commit(doc, editor, label, vec![SceneEdit::SetData { id, data }], |_, _| {});
+}
+
+/// Delete in Points mode on an editable spline: its selected points go, hidden
+/// flags follow the points that stay. One undo step.
+fn delete_spline_points(doc: &mut Document, editor: &mut EditorState) {
+    let Some(id) = spline_target(doc, editor) else { return };
+    let Some(node) = doc.scene.get(id) else { return };
+    let ObjectKind::Spline {
+        spline,
+        interpolation,
+        components,
+    } = &node.data.kind
+    else {
+        return;
+    };
+    let selected = &components.selected().points;
+    if selected.is_empty() {
+        return;
+    }
+    let (kept, map) = spline.spline().without_points(selected);
+    let mut state = ComponentState::default();
+    state.hidden.points.extend(
+        components
+            .hidden()
+            .points
+            .iter()
+            .filter_map(|old| map.get(old).copied().flatten())
+            .map(idx),
+    );
+    let mut data = node.data.clone();
+    data.kind = ObjectKind::Spline {
+        spline: SplineHandle::new(kept),
+        interpolation: *interpolation,
+        components: Components::new(state),
+    };
+    commit(
+        doc,
+        editor,
+        "Delete Points",
+        vec![SceneEdit::SetData { id, data }],
+        |_, _| {},
+    );
+}
+
 /// Changes the components of polygon object `id` with `change` as one undo step
 /// named `label`; records nothing if they end up unchanged.
 fn edit_components(
@@ -1204,6 +1362,18 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
         let Some(node) = doc.scene.get(id).filter(|_| !in_cage(id)) else {
             continue;
         };
+        // A spline primitive becomes an editable spline: the same curve, its
+        // plane and direction baked into the points.
+        if let ObjectKind::SplinePrimitive(primitive) = &node.data.kind {
+            let mut data = node.data.clone();
+            data.kind = ObjectKind::Spline {
+                spline: SplineHandle::new(primitive.spline()),
+                interpolation: primitive.interpolation,
+                components: Components::default(),
+            };
+            edits.push(SceneEdit::SetData { id, data });
+            continue;
+        }
         let mesh = if node.data.kind.is_generator() {
             // A disabled generator shows its children as they are: nothing to bake.
             if enabled_generator(id).is_none() {
@@ -1251,7 +1421,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::NSide
         | ObjectKindTag::Star
         | ObjectKindTag::Helix
-        | ObjectKindTag::Flower => data.display_color = [0.9, 0.9, 0.92],
+        | ObjectKindTag::Flower
+        | ObjectKindTag::Spline => data.display_color = [0.9, 0.9, 0.92],
         ObjectKindTag::Null
         | ObjectKindTag::Cube
         | ObjectKindTag::Sphere
@@ -1309,7 +1480,8 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::NSide
         | ObjectKindTag::Star
         | ObjectKindTag::Helix
-        | ObjectKindTag::Flower => palette::ICON_SPLINE,
+        | ObjectKindTag::Flower
+        | ObjectKindTag::Spline => palette::ICON_SPLINE,
         ObjectKindTag::Cube
         | ObjectKindTag::Sphere
         | ObjectKindTag::Cylinder
@@ -2895,5 +3067,103 @@ mod tests {
         assert!(editor.selected_tag(&doc).is_some());
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
         assert_eq!(editor.selected_tag(&doc), None, "the tag is gone");
+    }
+
+    /// The spline object's control points and selected points.
+    fn spline_of(doc: &Document, id: NodeId) -> (grid4d_geom::spline::Spline, Vec<usize>) {
+        let ObjectKind::Spline { spline, components, .. } = &doc.scene.get(id).unwrap().data.kind else {
+            panic!("not an editable spline");
+        };
+        (spline.spline().clone(), components.selected().points.iter().collect())
+    }
+
+    #[test]
+    fn make_editable_turns_a_spline_primitive_into_the_same_spline() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Star)],
+        );
+        let id = editor.selection.active().unwrap();
+        let ObjectKind::SplinePrimitive(primitive) = doc.scene.get(id).unwrap().data.kind.clone() else {
+            panic!()
+        };
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let ObjectKind::Spline {
+            spline, interpolation, ..
+        } = &doc.scene.get(id).unwrap().data.kind
+        else {
+            panic!("an editable spline")
+        };
+        assert_eq!(
+            spline.spline().sample(*interpolation),
+            primitive.polyline(),
+            "the same curve"
+        );
+        assert_eq!(editor.history.undo_label(), Some("Make Editable"));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert!(matches!(
+            doc.scene.get(id).unwrap().data.kind,
+            ObjectKind::SplinePrimitive(_)
+        ));
+    }
+
+    #[test]
+    fn spline_points_are_selected_inverted_and_deleted_as_undo_steps() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[
+                EditorCommand::CreateObject(ObjectKindTag::NSide),
+                EditorCommand::MakeEditable,
+            ],
+        );
+        let id = editor.selection.active().unwrap();
+        editor.mode = EditMode::Points;
+        let select = |hits: Vec<u32>, mode| EditorCommand::SelectComponents {
+            node: id,
+            component: Component::Point,
+            hits,
+            mode,
+        };
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[select(vec![1, 3], SelectMode::Replace)],
+        );
+        assert_eq!(spline_of(&doc, id).1, [1, 3]);
+        assert_eq!(editor.history.undo_label(), Some("Select Points"));
+        run(&mut doc, &mut editor, &mut vp, &[select(vec![3], SelectMode::Remove)]);
+        assert_eq!(spline_of(&doc, id).1, [1]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::InvertSelection]);
+        assert_eq!(spline_of(&doc, id).1, [0, 2, 3, 4, 5]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeselectAll]);
+        assert!(spline_of(&doc, id).1.is_empty());
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SelectAll]);
+        assert_eq!(spline_of(&doc, id).1.len(), 6);
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[select(vec![0, 2], SelectMode::Replace)],
+        );
+        let before = spline_of(&doc, id).0;
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
+        let (after, selected) = spline_of(&doc, id);
+        assert_eq!(
+            after.points,
+            [before.points[1], before.points[3], before.points[4], before.points[5]]
+        );
+        assert!(selected.is_empty());
+        assert!(doc.scene.get(id).is_some(), "Delete in Points mode keeps the object");
+        assert_eq!(editor.history.undo_label(), Some("Delete Points"));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(spline_of(&doc, id).0, before);
     }
 }

@@ -479,6 +479,22 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
                 .collect();
             c.polyline(&flower, true);
         }
+        ObjectKindTag::Spline => {
+            // A free curve through three points, the middle one's tangent shown.
+            let curve: Vec<P> = (0..=24)
+                .map(|i| {
+                    let t = i as f32 / 24.0;
+                    (0.12 + 0.76 * t, 0.62 - 0.34 * (t * PI).sin() + 0.16 * (t * TAU).sin())
+                })
+                .collect();
+            c.polyline(&curve, false);
+            c.line((0.24, 0.22), (0.76, 0.42));
+            for p in [(0.12, 0.62), (0.5, 0.32), (0.88, 0.62)] {
+                c.disc(p, 0.065);
+            }
+            c.disc((0.24, 0.22), 0.045);
+            c.disc((0.76, 0.42), 0.045);
+        }
     }
 }
 
