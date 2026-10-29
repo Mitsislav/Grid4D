@@ -13,9 +13,9 @@
 > Reverse: the opposite point order). Written in our own words. The pages give
 > no default values; ours are listed below.
 >
-> Covers implementation-plan steps **9.1** (spline primitives, drawing) and
-> **9.2** (editable splines, point editing); 9.3 (spline commands, the Pen)
-> extends it.
+> Covers implementation-plan steps **9.1** (spline primitives, drawing),
+> **9.2** (editable splines, point editing) and **9.3** (spline commands, the
+> Pen).
 
 ## Purpose
 
@@ -102,6 +102,33 @@ degrees; defaults are ours.
   Intermediate Points, and the number of points and segments.
 - Every edit is one undo step; the selected points are saved with the document.
 
+## Spline commands and the Pen (step 9.3)
+
+- **Mesh ▸ Spline** (on the active editable spline; the point commands work on
+  its selected points):
+  - **Hard Interpolation**: the points lose their tangents — sharp corners.
+  - **Soft Interpolation**: the points get smooth tangents again (from their
+    neighbours), whatever they had.
+  - **Reverse Sequence**: the segments with selected points (all segments
+    when none is selected) run the other way; the curve looks the same.
+  - **Set First Point**: in a closed segment, the selected point becomes its
+    first (the curve is unchanged; generators start there).
+  - The selection follows the points; each command is one undo step.
+- **The Pen** (Create ▸ Spline ▸ Pen; a tool with a **Type** option, Bezier
+  by default):
+  - With an editable spline active it adds points to its end; otherwise the
+    first click makes a new Spline object (selected) at the origin.
+  - A **click** adds a point (for Bezier: without tangents, a corner); a
+    **click and drag** adds a point and pulls its tangents (smooth, the dragged
+    one outgoing).
+  - Points go on the **grid's plane**: the floor (XZ) in perspective views,
+    the view's own plane through the origin in front, side and top views.
+  - A click on the first point of the open segment being drawn (with at least
+    three points) **closes** it and finishes; **Esc** or **Enter** finishes;
+    so does choosing another tool or object. A line from the last point to the
+    cursor shows where the next segment goes.
+  - Each added point is one undo step.
+
 ## Grid4D mapping
 
 | Piece | Where |
@@ -115,6 +142,8 @@ degrees; defaults are ours.
 | `SplineHandle` (shared, unique id) and `ObjectKind::Spline { spline, interpolation, components }`; Make Editable | `grid4d-scene`, `grid4d-ui` (`commands.rs`) |
 | Spline points in Points mode: picking and the overlay of points and handles (2D), selection commands, gizmo point edits, tangent drags, Delete | `grid4d-ui` (`panels/viewport/spline_tools.rs`, `gizmo.rs`, `commands.rs`) |
 | `editable_spline` kind (points, tangents, segments, selection) | `grid4d-io` (`v3.rs`) |
+| `Spline::{hard, soft, reverse_segments, set_first_points}` (pure, with index maps) | `grid4d-geom` (`spline.rs`) |
+| `EditorCommand::{SplineCommand, PenPoint, PenClose, PenFinish}`, `SplineOp`, `Tool::Pen`, `PenSettings` | `grid4d-ui` (`commands.rs`, `editor.rs`, `panels/viewport/pen_tool.rs`) |
 
 Deliberate differences: no Cissoid, Cogwheel, Cycloid, Formula, Profile,
 4-Side or Spiral primitives yet; splines are not exported to glTF or OBJ.
@@ -133,3 +162,7 @@ Deliberate differences: no Cissoid, Cogwheel, Cycloid, Formula, Profile,
       and rotates them (tangents along); handles drag mirrored or broken.
 - [x] Delete removes points; Type and Close Spline change the curve; all
       undoable and saved.
+- [x] Hard, Soft, Reverse Sequence and Set First Point change the spline as
+      described, keep the selection on the same points and are undoable.
+- [x] The Pen makes a spline from clicks and drags on the grid's plane, adds
+      to an active spline, closes on its first point and finishes with Esc.

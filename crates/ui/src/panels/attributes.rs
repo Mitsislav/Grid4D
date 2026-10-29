@@ -835,6 +835,20 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 ui.label(RichText::new("No options").color(p::TEXT_DIM));
                 ui.end_row();
             }
+            Tool::Pen => {
+                attr_label(ui, "Type", LABEL_WIDTH);
+                let kind = &mut editor.pen.kind;
+                egui::ComboBox::from_id_salt("grid4d.attr.pen.type")
+                    .selected_text(kind.label())
+                    .show_ui(ui, |ui| {
+                        for option in SplineType::ALL {
+                            ui.selectable_value(kind, option, option.label());
+                        }
+                    })
+                    .response
+                    .on_hover_text("The type of a new spline; points added to a spline keep its type");
+                ui.end_row();
+            }
             Tool::LineCut => {
                 let m = &mut editor.modeling_settings.line_cut;
                 check_row(ui, "Visible Only", &mut m.visible_only);

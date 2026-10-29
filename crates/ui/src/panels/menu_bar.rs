@@ -65,7 +65,14 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 }
             });
             ui.menu_button("Spline", |ui| {
-                planned(ui, "Pen", "");
+                if ui
+                    .add(Button::new(Tool::Pen.label()).selected(editor.tool == Tool::Pen))
+                    .on_hover_text("Click in the viewport to add points, drag to pull tangents")
+                    .clicked()
+                {
+                    editor.tool = Tool::Pen;
+                    ui.close();
+                }
                 ui.separator();
                 for tag in ObjectKindTag::SPLINES {
                     create(ui, editor, tag);
@@ -180,6 +187,21 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 {
                     editor.commands.push(EditorCommand::MakeEditable);
                     ui.close();
+                }
+            });
+            ui.menu_button("Spline", |ui| {
+                let spline = crate::commands::active_spline(doc, editor).is_some();
+                for op in crate::commands::SplineOp::ALL {
+                    if ui
+                        .add_enabled(spline, Button::new(op.label()))
+                        .on_disabled_hover_text(
+                            "Select an editable spline (Make Editable turns a spline primitive into one)",
+                        )
+                        .clicked()
+                    {
+                        editor.commands.push(EditorCommand::SplineCommand(op));
+                        ui.close();
+                    }
                 }
             });
             ui.separator();

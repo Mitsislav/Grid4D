@@ -248,6 +248,13 @@ impl Spline {
     /// Cubic spline's), leaving set tangents alone: what turning a spline into
     /// a Bezier one does.
     pub fn smooth_tangents(&mut self) {
+        let unset: Vec<bool> = self.tangents.iter().map(|t| *t == [Vec3::ZERO; 2]).collect();
+        self.smooth_tangents_where(|i| unset.get(i).copied().unwrap_or(false));
+    }
+
+    /// Gives the points `pick` chooses (by index) smooth tangents, replacing
+    /// theirs (Soft Interpolation).
+    pub fn smooth_tangents_where(&mut self, pick: impl Fn(usize) -> bool) {
         let mut start = 0usize;
         for segment in &self.segments {
             let count = usize::try_from(segment.count).unwrap_or(0);
@@ -255,7 +262,7 @@ impl Spline {
             let points = &self.points[start..end];
             let n = points.len();
             for i in 0..n {
-                if self.tangents[start + i] != [Vec3::ZERO; 2] || n < 2 {
+                if !pick(start + i) || n < 2 {
                     continue;
                 }
                 let before = if i > 0 || segment.closed {
@@ -276,6 +283,86 @@ impl Spline {
             }
             start = end;
         }
+    }
+
+    /// Hard Interpolation: the points `points` lose their tangents (corners).
+    pub fn hard(&mut self, points: &crate::BitSet) {
+        for i in points.iter() {
+            if let Some(t) = self.tangents.get_mut(i) {
+                *t = [Vec3::ZERO; 2];
+            }
+        }
+    }
+
+    /// Soft Interpolation: the points `points` get smooth tangents.
+    pub fn soft(&mut self, points: &crate::BitSet) {
+        self.smooth_tangents_where(|i| points.contains(i));
+    }
+
+    /// The segments `pick` chooses (by segment index) run the other way; the
+    /// curve is the same. Returns where each old point went.
+    #[must_use]
+    pub fn reverse_segments(&self, pick: impl Fn(usize) -> bool) -> (Self, Vec<u32>) {
+        let mut out = self.clone();
+        let mut map: Vec<u32> = (0..self.points.len())
+            .map(|i| u32::try_from(i).unwrap_or(u32::MAX))
+            .collect();
+        for (index, (start, end)) in self.segment_ranges().enumerate() {
+            if !pick(index) {
+                continue;
+            }
+            for (k, old) in (start..end).enumerate() {
+                let new = end - 1 - k;
+                out.points[new] = self.points[old];
+                let [left, right] = self.tangents.get(old).copied().unwrap_or([Vec3::ZERO; 2]);
+                if let Some(t) = out.tangents.get_mut(new) {
+                    *t = [right, left];
+                }
+                map[old] = u32::try_from(new).unwrap_or(u32::MAX);
+            }
+        }
+        (out, map)
+    }
+
+    /// Set First Point: in each closed segment holding one of `points`, the
+    /// first of them becomes the segment's first point (the curve is the same).
+    /// Returns where each old point went.
+    #[must_use]
+    pub fn set_first_points(&self, points: &crate::BitSet) -> (Self, Vec<u32>) {
+        let mut out = self.clone();
+        let mut map: Vec<u32> = (0..self.points.len())
+            .map(|i| u32::try_from(i).unwrap_or(u32::MAX))
+            .collect();
+        for ((start, end), segment) in self.segment_ranges().zip(&self.segments) {
+            let Some(first) = (start..end).find(|&i| points.contains(i)) else {
+                continue;
+            };
+            if !segment.closed || first == start {
+                continue;
+            }
+            let n = end - start;
+            for (offset, slot) in map[start..end].iter_mut().enumerate() {
+                let (old, new) = (start + offset, start + (offset + n - (first - start)) % n);
+                out.points[new] = self.points[old];
+                if let (Some(t), Some(&from)) = (out.tangents.get_mut(new), self.tangents.get(old)) {
+                    *t = from;
+                }
+                *slot = u32::try_from(new).unwrap_or(u32::MAX);
+            }
+        }
+        (out, map)
+    }
+
+    /// The index range of each segment's points.
+    pub fn segment_ranges(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        let mut start = 0usize;
+        self.segments.iter().map(move |segment| {
+            let count = usize::try_from(segment.count).unwrap_or(0);
+            let end = (start + count).min(self.points.len());
+            let range = (start, end);
+            start = end;
+            range
+        })
     }
 
     /// The cubic Bezier spans of each segment, as `[start, control, control, end]`.
@@ -1255,6 +1342,56 @@ mod tests {
                 count: 1,
                 closed: false
             }]
+        );
+    }
+
+    #[test]
+    fn hard_soft_reverse_and_first_point() {
+        let square = SplineShape::Rectangle {
+            width: 100.0,
+            height: 100.0,
+            rounding: None,
+        }
+        .spline();
+        let mut spline = Spline {
+            kind: SplineType::Bezier,
+            ..square
+        };
+        let picked: crate::BitSet = [1, 2].into_iter().collect();
+        spline.soft(&picked);
+        assert!(spline.tangents[1][1] != Vec3::ZERO && spline.tangents[0] == [Vec3::ZERO; 2]);
+        spline.hard(&[1].into_iter().collect());
+        assert_eq!(spline.tangents[1], [Vec3::ZERO; 2]);
+        assert!(spline.tangents[2] != [Vec3::ZERO; 2], "only the hardened one");
+
+        let before = spline.sample(Interpolation::Natural { number: 4 });
+        let (reversed, map) = spline.reverse_segments(|_| true);
+        assert_eq!(map, [3, 2, 1, 0]);
+        assert_eq!(reversed.points[3], spline.points[0]);
+        assert_eq!(
+            reversed.tangents[1],
+            [spline.tangents[2][1], spline.tangents[2][0]],
+            "swapped"
+        );
+        let after = reversed.sample(Interpolation::Natural { number: 4 }).points;
+        assert_eq!(before.points.len(), after.len());
+        // The same curve: every sample of one lies on the other.
+        assert!(
+            after
+                .iter()
+                .all(|p| before.points.iter().any(|q| q.distance(*p) < 1e-3))
+        );
+
+        let (rotated, map) = spline.set_first_points(&[2].into_iter().collect());
+        assert_eq!(map, [2, 3, 0, 1]);
+        assert_eq!(rotated.points[0], spline.points[2]);
+        assert_eq!(rotated.tangents[0], spline.tangents[2]);
+        let mut open = spline.clone();
+        open.segments[0].closed = false;
+        assert_eq!(
+            open.set_first_points(&[2].into_iter().collect()).1,
+            [0, 1, 2, 3],
+            "open: unchanged"
         );
     }
 

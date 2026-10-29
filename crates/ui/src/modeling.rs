@@ -39,7 +39,8 @@ pub(crate) fn offset_mut(tool: Tool, settings: &mut ModelingSettings) -> Option<
         | Tool::LoopCut
         | Tool::LineCut
         | Tool::Bridge
-        | Tool::Weld => None,
+        | Tool::Weld
+        | Tool::Pen => None,
     }
 }
 

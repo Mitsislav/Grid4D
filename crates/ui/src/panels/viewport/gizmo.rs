@@ -87,7 +87,8 @@ impl GizmoGeometry {
                 | Tool::LineCut
                 | Tool::Bevel
                 | Tool::Bridge
-                | Tool::Weld => false,
+                | Tool::Weld
+                | Tool::Pen => false,
             };
             if locked {
                 return None;
@@ -231,7 +232,8 @@ impl GizmoGeometry {
                 | Tool::LineCut
                 | Tool::Bevel
                 | Tool::Bridge
-                | Tool::Weld => {}
+                | Tool::Weld
+                | Tool::Pen => {}
             }
         }
         painter.circle_filled(self.origin_px, 3.5, p::TEXT_STRONG);
@@ -339,7 +341,8 @@ impl PointEdit {
             | Tool::LineCut
             | Tool::Bevel
             | Tool::Bridge
-            | Tool::Weld => Mat4::from_translation(self.moved),
+            | Tool::Weld
+            | Tool::Pen => Mat4::from_translation(self.moved),
         }
     }
 
@@ -624,7 +627,8 @@ fn apply_component_drag(
         | Tool::LineCut
         | Tool::Bevel
         | Tool::Bridge
-        | Tool::Weld => return,
+        | Tool::Weld
+        | Tool::Pen => return,
     }
     edit.apply(edit.delta(geo.tool, geo.axes[axis]), scene, node);
 }
@@ -693,7 +697,8 @@ fn apply_drag(
         | Tool::LineCut
         | Tool::Bevel
         | Tool::Bridge
-        | Tool::Weld => return,
+        | Tool::Weld
+        | Tool::Pen => return,
     }
     node.data.set_transform_at(&shown, keying.frame, keying.autokey);
 }

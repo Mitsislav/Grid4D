@@ -1059,6 +1059,43 @@ B-Spline, Bezier — changing to Bezier gives points without handles smooth ones
 segments. Every change is one undo step, and the selected points are saved with
 the document.
 
+### 13.2 Drawing splines with the Pen
+
+**Create ▸ Spline ▸ Pen** picks the **Pen** tool. Its option, in the Attribute
+Manager's **Mode ▸ Tool**, is the **Type** of the spline it starts (Bezier,
+unless you choose Linear, Cubic, Akima or B-Spline).
+
+![A spline drawn with the Pen and smoothed with Soft Interpolation; the Pen's Type option in the Attribute Manager](images/manual/spline-pen.png)
+
+- **Click** in the viewport to add a point. The first click makes a new
+  **Spline** object (selected, at the origin); every click after it adds a
+  point to its end.
+- **Click and drag** to add a point and pull out its tangents: the curve leaves
+  the point in the direction you drag.
+- Points land on the **grid**: the floor in the perspective view, the view's own
+  plane in the Top, Front and Right views.
+- **Click the first point** (with at least three points drawn) to close the
+  spline. **Esc** or **Enter** finishes an open spline; so does choosing another
+  tool. The next click then starts a new spline.
+- With an editable spline selected, the Pen adds to it: a new segment if it is
+  closed.
+- Each point is one undo step (**Ctrl+Z** removes the last one).
+
+### 13.3 Spline commands
+
+**Mesh ▸ Spline** works on the selected editable spline, on the points selected
+in Points mode:
+
+- **Hard Interpolation** removes the points' tangents: sharp corners.
+- **Soft Interpolation** gives the points smooth tangents, following their
+  neighbours.
+- **Reverse Sequence** runs the spline the other way (only the segments with
+  selected points, or all of them when no point is selected). The curve looks
+  the same; its direction matters to generators such as Sweep.
+- **Set First Point** makes the selected point the first of its closed segment.
+
+The selection stays on the same points, and each command is one undo step.
+
 ## 14. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
@@ -1421,9 +1458,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Generators**: only the Subdivision Surface, with one type (Catmull-Clark) and
   without edge weights (creases) or UV options. Extrude, Lathe, Loft, Sweep and
   Cloner are planned.
-- **Splines**: the Pen, spline commands (Reverse, Set First Point, Hard and Soft
-  Interpolation) and Text come next; hiding points, Grow/Shrink on points and
-  snapping to spline points; the Cissoid, Cogwheel, Cycloid, Formula, Profile,
+- **Splines**: Text comes next; hiding points, Grow/Shrink on points,
+  snapping to spline points and the Pen snapping to objects; editing points
+  inside the Pen (moving them while drawing); the Cissoid, Cogwheel, Cycloid, Formula, Profile,
   4-Side and Spiral primitives; splines in glTF and OBJ files; drawing splines in
   renders.
 - **Tags**: Protection limits, Phong edge breaks, copying tags between objects.

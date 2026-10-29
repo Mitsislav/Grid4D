@@ -31,7 +31,7 @@ pub mod theme;
 mod widgets;
 pub mod window;
 
-pub use commands::{CommandQueue, EditorCommand, SelectMode};
+pub use commands::{CommandQueue, EditorCommand, SelectMode, SplineOp};
 pub use editor::{
     AnimationSettings, BottomPanel, CurveKey, CurveSelection, EditMode, EditorState, FrameCurves, KeySelection,
     ManagerTab, MaterialDrag, MaterialSelection, ModelingSettings, Selection, SelectionSettings, SnapSettings,

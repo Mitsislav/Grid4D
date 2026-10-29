@@ -35,6 +35,8 @@ pub enum Tool {
     Bridge,
     /// Mesh ▸ Weld: click to weld the selected points into one.
     Weld,
+    /// Create ▸ Spline ▸ Pen: click to add spline points, drag to pull tangents.
+    Pen,
 }
 
 impl Tool {
@@ -66,6 +68,7 @@ impl Tool {
             Self::Bevel => "Bevel",
             Self::Bridge => "Bridge",
             Self::Weld => "Weld",
+            Self::Pen => "Pen",
         }
     }
 
@@ -82,7 +85,7 @@ impl Tool {
             Self::LineCut => "K~K",
             Self::Bevel => "M~S",
             Self::Bridge => "B",
-            Self::Weld => "",
+            Self::Weld | Self::Pen => "",
             Self::Move => "E",
             Self::Scale => "T",
             Self::Rotate => "R",
@@ -111,6 +114,9 @@ impl Tool {
             Self::Bevel => "Bevel works on the selected edges or points of a polygon object",
             Self::Bridge => "Bridge: in Polygons or Edges mode, drag from one polygon or border edge to another",
             Self::Weld => "Weld: select points, then click one of them (or anywhere else for their centre)",
+            Self::Pen => {
+                "Pen: click to add a point · drag to pull its tangents · click the first point to close · Esc finishes"
+            }
         }
     }
 
@@ -149,7 +155,11 @@ impl Tool {
     /// The tool's options are worth showing in the Attribute Manager as it is picked.
     #[must_use]
     pub const fn shows_options(self) -> bool {
-        self.is_selection_tool() || self.is_mesh_tool() || self.is_cut_tool() || self.is_join_tool()
+        self.is_selection_tool()
+            || self.is_mesh_tool()
+            || self.is_cut_tool()
+            || self.is_join_tool()
+            || matches!(self, Self::Pen)
     }
 }
 
@@ -221,6 +231,21 @@ impl Default for SnapSettings {
             kind: SnapType::Auto,
             radius: 10.0,
             targets: grid4d_render::SnapTargets::default(),
+        }
+    }
+}
+
+/// Options of the Pen (Attribute Manager, Tool mode). Editor state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PenSettings {
+    /// The type of a spline the Pen starts.
+    pub kind: grid4d_geom::spline::SplineType,
+}
+
+impl Default for PenSettings {
+    fn default() -> Self {
+        Self {
+            kind: grid4d_geom::spline::SplineType::Bezier,
         }
     }
 }
@@ -698,6 +723,10 @@ pub struct EditorState {
     pub selection_settings: SelectionSettings,
     pub transform_settings: TransformSettings,
     pub modeling_settings: ModelingSettings,
+    pub pen: PenSettings,
+    /// The spline the Pen finished (Esc, Enter, closing it): the next Pen click
+    /// starts a new spline even while it is active.
+    pub pen_finished: Option<NodeId>,
     /// The first key of a two-key shortcut, waiting for the second (`U`, then `L`).
     pub chord: Option<crate::shortcuts::Chord>,
     /// X / Y / Z axis buttons. `true` = the axis is enabled (C4D semantics).
@@ -769,6 +798,8 @@ impl Default for EditorState {
             selection_settings: SelectionSettings::default(),
             transform_settings: TransformSettings::default(),
             modeling_settings: ModelingSettings::default(),
+            pen: PenSettings::default(),
+            pen_finished: None,
             chord: None,
             axes: [true; 3],
             world_coordinates: false,

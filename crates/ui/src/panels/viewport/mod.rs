@@ -7,6 +7,7 @@ mod gpu_view;
 mod join_tools;
 mod mesh_tools;
 mod overlay;
+mod pen_tool;
 mod select_tools;
 mod snapping;
 mod spline_tools;
@@ -237,6 +238,8 @@ pub struct ViewportPanel {
     handle_dragging: Option<spline_tools::HandleDrag>,
     /// A Live Selection stroke over a spline's points.
     point_stroke: Option<spline_tools::PointStroke>,
+    /// The Pen's press, pull and preview.
+    pen: pen_tool::PenState,
 }
 
 /// The Render View's picture as a texture, with the version it was made from.
@@ -299,6 +302,7 @@ impl ViewportPanel {
             render_view: None,
             handle_dragging: None,
             point_stroke: None,
+            pen: pen_tool::PenState::default(),
         }
     }
 
@@ -630,7 +634,8 @@ impl ViewportPanel {
         if !navigating && !gizmo_owns_pointer {
             self.evaluated.set_frame(f64::from(doc.time.frame()));
             self.evaluated.update(&doc.scene);
-            if !self.handle_drag(ui, &response, rect, doc, editor)
+            if !self.pen_tool(ui, &response, rect, doc, editor)
+                && !self.handle_drag(ui, &response, rect, doc, editor)
                 && !self.mesh_tools(ui, &response, rect, doc, editor)
                 && !self.cut_tools(ui, &response, rect, editor)
                 && !self.join_tools(ui, &response, rect, editor)
@@ -739,6 +744,9 @@ impl ViewportPanel {
         if interactive && let Some(node) = self.spline_target(editor) {
             self.paint_spline_points(ui, painter, rect, node);
         }
+        if interactive {
+            self.paint_pen(painter, rect, doc, editor);
+        }
         overlay::view_label(painter, rect, &label);
         if editor.animation.autokey {
             overlay::autokey_frame(painter, rect);
@@ -824,7 +832,7 @@ impl ViewportPanel {
             }
             // The brush circle shows what Live Selection will paint; the cut
             // tools draw their own preview.
-            Tool::LiveSelection | Tool::LoopCut | Tool::LineCut => {}
+            Tool::LiveSelection | Tool::LoopCut | Tool::LineCut | Tool::Pen => {}
             // A click with Bevel/Bridge/Weld still selects; show what it would pick.
             Tool::Bevel | Tool::Bridge | Tool::Weld => {
                 let view = self.screen_view(rect);
@@ -1456,6 +1464,7 @@ const fn component_hint(component: Component, tool: Tool, active: bool) -> &'sta
             };
         }
         Tool::Weld => return "Weld: click a selected point to weld onto it, or anywhere else to weld at the centre",
+        Tool::Pen => return Tool::Pen.hint(),
         Tool::Move | Tool::Scale | Tool::Rotate => {}
     }
     match component {
@@ -3096,5 +3105,65 @@ mod tests {
             turned.tangents[0][1]
         );
         assert_eq!(turned.points[1], spline.points[1], "other points stay");
+    }
+
+    #[test]
+    fn the_pen_draws_on_the_floor_and_closes_on_the_first_point() {
+        let mut h = Harness::new();
+        h.editor.selection.clear();
+        h.editor.tool = Tool::Pen;
+        h.frame(Vec::new());
+        let floor = [
+            Vec3::new(-300.0, 0.0, 200.0),
+            Vec3::new(300.0, 0.0, 200.0),
+            Vec3::new(0.0, 0.0, 400.0),
+        ];
+        let click = |h: &mut Harness, at: Pos2| {
+            h.frame(vec![Event::PointerMoved(at)]);
+            h.frame(vec![Harness::button(at, true)]);
+            h.frame(vec![Harness::button(at, false)]);
+            h.frame(Vec::new());
+        };
+        let first = on_screen(&h, floor[0]);
+        click(&mut h, first);
+        let id = h.editor.selection.active().expect("a new spline");
+        let second = on_screen(&h, floor[1]);
+        click(&mut h, second);
+        // The preview line ends where the cursor meets the floor.
+        let third = on_screen(&h, floor[2]);
+        h.frame(vec![Event::PointerMoved(third)]);
+        let hover = h.viewport.pen.hover.expect("the cursor on the floor");
+        assert!(hover.abs_diff_eq(floor[2], 0.5), "{hover}");
+        // A drag pulls the third point's tangents towards the pointer.
+        h.drag(third, third + Vec2::new(80.0, 0.0));
+        let (spline, _) = spline_state(&h, id);
+        assert_eq!(spline.points.len(), 3);
+        for (point, expected) in spline.points.iter().zip(floor) {
+            assert!(point.abs_diff_eq(expected, 0.5), "{point} on the floor at {expected}");
+        }
+        assert_eq!(spline.tangents[0], [Vec3::ZERO; 2]);
+        let [incoming, outgoing] = spline.tangents[2];
+        assert!(
+            outgoing.x > 10.0 && outgoing.y.abs() < 1e-3,
+            "pulled right along the floor: {outgoing}"
+        );
+        assert_eq!(incoming, -outgoing);
+
+        // A click on the first point closes the spline and finishes it.
+        click(&mut h, first);
+        let (spline, _) = spline_state(&h, id);
+        assert!(spline.segments[0].closed && spline.points.len() == 3);
+        assert_eq!(h.editor.history.undo_label(), Some("Close Spline"));
+        // The next click starts a new spline, even pressed and released in one frame.
+        let next = on_screen(&h, Vec3::new(0.0, 0.0, 300.0));
+        h.frame(vec![
+            Event::PointerMoved(next),
+            Harness::button(next, true),
+            Harness::button(next, false),
+        ]);
+        h.frame(Vec::new());
+        let other = h.editor.selection.active().expect("a second spline");
+        assert_ne!(other, id);
+        assert_eq!(spline_state(&h, other).0.points.len(), 1);
     }
 }

@@ -42,7 +42,8 @@ impl ViewportPanel {
             | Tool::Inset
             | Tool::Bevel
             | Tool::Bridge
-            | Tool::Weld => {
+            | Tool::Weld
+            | Tool::Pen => {
                 self.loop_preview = None;
                 false
             }

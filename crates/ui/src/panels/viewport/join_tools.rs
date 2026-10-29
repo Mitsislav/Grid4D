@@ -25,7 +25,8 @@ impl ViewportPanel {
             | Tool::Inset
             | Tool::LoopCut
             | Tool::LineCut
-            | Tool::Bevel => false,
+            | Tool::Bevel
+            | Tool::Pen => false,
         }
     }
 

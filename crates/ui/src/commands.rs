@@ -58,6 +58,33 @@ impl SelectMode {
     }
 }
 
+/// Mesh ▸ Spline: commands on the active editable spline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SplineOp {
+    /// The selected points lose their tangents.
+    Hard,
+    /// The selected points get smooth tangents.
+    Soft,
+    /// The segments with selected points (all without a selection) run backwards.
+    Reverse,
+    /// In closed segments, the selected point becomes the first.
+    SetFirstPoint,
+}
+
+impl SplineOp {
+    pub const ALL: [Self; 4] = [Self::Hard, Self::Soft, Self::Reverse, Self::SetFirstPoint];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Hard => "Hard Interpolation",
+            Self::Soft => "Soft Interpolation",
+            Self::Reverse => "Reverse Sequence",
+            Self::SetFirstPoint => "Set First Point",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum EditorCommand {
     /// Replaces the document with an empty one (asks to save unsaved changes first).
@@ -76,6 +103,19 @@ pub enum EditorCommand {
     /// Asks where renders are saved and sets the render settings' File (one
     /// undo step).
     BrowseRenderOutput,
+    /// A Mesh ▸ Spline command on the active editable spline (one undo step).
+    SplineCommand(SplineOp),
+    /// The Pen: a point at world `position` with outgoing tangent `tangent`
+    /// (world, zero for a corner), added to the active editable spline, or to a
+    /// new spline. One undo step.
+    PenPoint {
+        position: Vec3,
+        tangent: Vec3,
+    },
+    /// The Pen: closes the segment being drawn and finishes (one undo step).
+    PenClose,
+    /// The Pen: finishes the spline being drawn (the next click starts a new one).
+    PenFinish,
     /// Renders the scene at the current frame through the active view, in the
     /// background, and opens the Picture Viewer (Shift+R). Stops a render that runs.
     RenderToPictureViewer,
@@ -314,6 +354,13 @@ pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mu
     }
     // Hand the (now empty) buffer back so its capacity is reused next frame.
     editor.commands.pending = pending;
+    // Another object chosen: the Pen adds to the active spline again.
+    if editor
+        .pen_finished
+        .is_some_and(|id| editor.selection.active() != Some(id))
+    {
+        editor.pen_finished = None;
+    }
     true
 }
 
@@ -346,6 +393,38 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         }
         EditorCommand::StopRender => editor.renders.stop(),
         EditorCommand::SaveRenderAs => file::save_render_as(doc, editor),
+        EditorCommand::SplineCommand(op) => spline_command(doc, editor, op),
+        EditorCommand::PenPoint { position, tangent } => pen_point(doc, editor, position, tangent),
+        EditorCommand::PenClose => {
+            if let Some(id) = pen_spline(doc, editor) {
+                let data = doc.scene.get(id).and_then(|node| {
+                    let ObjectKind::Spline { spline, .. } = &node.data.kind else {
+                        return None;
+                    };
+                    let closed = spline.edited(|s| {
+                        if let Some(last) = s.segments.last_mut() {
+                            last.closed = true;
+                        }
+                    });
+                    let mut data = node.data.clone();
+                    if let ObjectKind::Spline { spline, .. } = &mut data.kind {
+                        *spline = closed;
+                    }
+                    Some(data)
+                });
+                if let Some(data) = data {
+                    commit(
+                        doc,
+                        editor,
+                        "Close Spline",
+                        vec![SceneEdit::SetData { id, data }],
+                        |_, _| {},
+                    );
+                }
+                editor.pen_finished = Some(id);
+            }
+        }
+        EditorCommand::PenFinish => editor.pen_finished = editor.selection.active(),
         EditorCommand::BrowseRenderOutput => {
             if let Some(output) = file::pick_render_output(doc, editor) {
                 let mut settings = doc.render.clone();
@@ -1172,6 +1251,150 @@ fn stored(bits: BitSet, component: Component, mesh: &MeshHandle) -> BitSet {
         Component::Edge => corners_from_edges(&bits, mesh.topology()),
         Component::Point | Component::Polygon => bits,
     }
+}
+
+/// The active object when it is an editable spline (any mode).
+pub(crate) fn active_spline(doc: &Document, editor: &EditorState) -> Option<NodeId> {
+    editor.selection.active().filter(|&id| is_spline(doc, id))
+}
+
+/// The spline the Pen adds to: the active editable spline, unless the Pen
+/// finished it.
+pub(crate) fn pen_spline(doc: &Document, editor: &EditorState) -> Option<NodeId> {
+    active_spline(doc, editor).filter(|&id| editor.pen_finished != Some(id))
+}
+
+/// Maps a component state's point flags through `map` (old index → new).
+fn remap_points(state: &ComponentState, map: &[u32]) -> ComponentState {
+    let through = |bits: &BitSet| -> BitSet { bits.iter().filter_map(|old| map.get(old).copied()).map(idx).collect() };
+    let mut out = ComponentState::default();
+    out.selected.points = through(&state.selected.points);
+    out.hidden.points = through(&state.hidden.points);
+    out
+}
+
+/// Mesh ▸ Spline commands on the active editable spline: one undo step if the
+/// spline changed; the selection follows its points.
+fn spline_command(doc: &mut Document, editor: &mut EditorState, op: SplineOp) {
+    let Some(id) = active_spline(doc, editor) else { return };
+    let Some(node) = doc.scene.get(id) else { return };
+    let ObjectKind::Spline {
+        spline,
+        interpolation,
+        components,
+    } = &node.data.kind
+    else {
+        return;
+    };
+    let selected = &components.selected().points;
+    let current = spline.spline();
+    let (changed, state) = match op {
+        SplineOp::Hard | SplineOp::Soft => {
+            let mut changed = current.clone();
+            if op == SplineOp::Hard {
+                changed.hard(selected);
+            } else {
+                changed.soft(selected);
+            }
+            (changed, components.state().clone())
+        }
+        SplineOp::Reverse => {
+            let ranges: Vec<(usize, usize)> = current.segment_ranges().collect();
+            let picked = |segment: usize| {
+                selected.is_empty()
+                    || ranges
+                        .get(segment)
+                        .is_some_and(|&(start, end)| (start..end).any(|i| selected.contains(i)))
+            };
+            let (changed, map) = current.reverse_segments(picked);
+            (changed, remap_points(components.state(), &map))
+        }
+        SplineOp::SetFirstPoint => {
+            let (changed, map) = current.set_first_points(selected);
+            (changed, remap_points(components.state(), &map))
+        }
+    };
+    if changed == *current && state == *components.state() {
+        return;
+    }
+    let mut data = node.data.clone();
+    data.kind = ObjectKind::Spline {
+        spline: SplineHandle::new(changed),
+        interpolation: *interpolation,
+        components: Components::new(state),
+    };
+    commit(
+        doc,
+        editor,
+        op.label(),
+        vec![SceneEdit::SetData { id, data }],
+        |_, _| {},
+    );
+}
+
+/// The Pen's point: appended to the spline being drawn (a new segment if its
+/// last is closed), or the first point of a new spline, which becomes active.
+fn pen_point(doc: &mut Document, editor: &mut EditorState, position: Vec3, tangent: Vec3) {
+    if let Some(id) = pen_spline(doc, editor) {
+        let world = doc.scene.world_matrix_at(id, f64::from(doc.time.frame()));
+        if world.determinant().abs() <= f32::EPSILON {
+            return;
+        }
+        let local = world.inverse();
+        let (point, tangent) = (local.transform_point3(position), local.transform_vector3(tangent));
+        let Some(node) = doc.scene.get(id) else { return };
+        let mut data = node.data.clone();
+        if let ObjectKind::Spline { spline, .. } = &mut data.kind {
+            *spline = spline.edited(|s| {
+                s.points.push(point);
+                s.tangents.push([-tangent, tangent]);
+                match s.segments.last_mut() {
+                    Some(last) if !last.closed => last.count += 1,
+                    _ => s.segments.push(grid4d_geom::spline::Segment {
+                        count: 1,
+                        closed: false,
+                    }),
+                }
+            });
+        }
+        commit(
+            doc,
+            editor,
+            "Add Point",
+            vec![SceneEdit::SetData { id, data }],
+            |_, _| {},
+        );
+        return;
+    }
+    let spline = grid4d_geom::spline::Spline {
+        kind: editor.pen.kind,
+        points: vec![position],
+        tangents: vec![[-tangent, tangent]],
+        segments: vec![grid4d_geom::spline::Segment {
+            count: 1,
+            closed: false,
+        }],
+    };
+    let mut data = NodeData::new(
+        doc.scene.unique_name(ObjectKindTag::Spline.label()),
+        ObjectKind::Spline {
+            spline: SplineHandle::new(spline),
+            interpolation: grid4d_geom::spline::Interpolation::default(),
+            components: Components::default(),
+        },
+    );
+    data.display_color = [0.9, 0.9, 0.92];
+    let edit = SceneEdit::Insert {
+        parent: None,
+        index: usize::MAX,
+        data,
+    };
+    commit(doc, editor, "Pen", vec![edit], |inverses, selection| {
+        if let Some(SceneEdit::Detach { root }) = inverses.first() {
+            selection.set_single(*root);
+        }
+    });
+    editor.pen_finished = None;
 }
 
 /// The active object in Points mode, when it is an editable spline.
@@ -3165,5 +3388,149 @@ mod tests {
         assert_eq!(editor.history.undo_label(), Some("Delete Points"));
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
         assert_eq!(spline_of(&doc, id).0, before);
+    }
+
+    #[test]
+    fn spline_commands_change_the_active_spline_one_step_each() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[
+                EditorCommand::CreateObject(ObjectKindTag::Circle),
+                EditorCommand::MakeEditable,
+            ],
+        );
+        let id = editor.selection.active().unwrap();
+        editor.mode = EditMode::Points;
+        let select = |hits: Vec<u32>| EditorCommand::SelectComponents {
+            node: id,
+            component: Component::Point,
+            hits,
+            mode: SelectMode::Replace,
+        };
+        run(&mut doc, &mut editor, &mut vp, &[select(vec![1])]);
+        let (before, _) = spline_of(&doc, id);
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::SplineCommand(SplineOp::Hard)],
+        );
+        let (hard, selected) = spline_of(&doc, id);
+        assert_eq!(hard.tangents[1], [Vec3::ZERO; 2], "a corner");
+        assert_eq!(hard.tangents[0], before.tangents[0], "others keep theirs");
+        assert_eq!(selected, [1]);
+        assert_eq!(editor.history.undo_label(), Some("Hard Interpolation"));
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::SplineCommand(SplineOp::Soft)],
+        );
+        let (soft, _) = spline_of(&doc, id);
+        assert!(soft.tangents[1][1].length() > 1.0, "smooth again");
+        assert!(soft.tangents[1][0].dot(soft.tangents[1][1]) < 0.0, "in line");
+        assert_eq!(editor.history.undo_label(), Some("Soft Interpolation"));
+
+        // Set First Point: point 1 becomes the first; the selection follows it.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::SplineCommand(SplineOp::SetFirstPoint)],
+        );
+        let (first, selected) = spline_of(&doc, id);
+        assert_eq!(first.points[0], soft.points[1]);
+        assert_eq!(selected, [0]);
+        assert_eq!(editor.history.undo_label(), Some("Set First Point"));
+        // Again: point 0 is already the first, so nothing changes and no step is made.
+        let steps = editor.history.state_id();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::SplineCommand(SplineOp::SetFirstPoint)],
+        );
+        assert_eq!(editor.history.state_id(), steps);
+
+        // Reverse with nothing selected runs every segment backwards.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[
+                EditorCommand::DeselectAll,
+                EditorCommand::SplineCommand(SplineOp::Reverse),
+            ],
+        );
+        let (reversed, _) = spline_of(&doc, id);
+        assert_eq!(reversed.points.len(), 4);
+        assert_eq!(reversed.points[0], first.points[3]);
+        assert_eq!(reversed.points[3], first.points[0]);
+        assert_eq!(editor.history.undo_label(), Some("Reverse Sequence"));
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Undo, EditorCommand::Undo],
+        );
+        assert_eq!(spline_of(&doc, id).0, first);
+    }
+
+    #[test]
+    fn the_pen_adds_points_closes_and_starts_new_splines() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        let pen = |x: f32, z: f32, tangent: Vec3| EditorCommand::PenPoint {
+            position: Vec3::new(x, 0.0, z),
+            tangent,
+        };
+        run(&mut doc, &mut editor, &mut vp, &[pen(0.0, 0.0, Vec3::ZERO)]);
+        let first = editor.selection.active().unwrap();
+        assert_eq!(doc.scene.get(first).unwrap().data.name, "Spline");
+        assert_eq!(spline_of(&doc, first).0.kind, grid4d_geom::spline::SplineType::Bezier);
+        assert_eq!(editor.history.undo_label(), Some("Pen"));
+
+        let pull = Vec3::new(0.0, 0.0, 50.0);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[pen(100.0, 0.0, pull), pen(100.0, 100.0, Vec3::ZERO)],
+        );
+        let (spline, _) = spline_of(&doc, first);
+        assert_eq!(spline.points.len(), 3);
+        assert_eq!(
+            spline.tangents[1],
+            [-pull, pull],
+            "the dragged tangent is the outgoing one"
+        );
+        assert_eq!(spline.tangents[2], [Vec3::ZERO; 2], "a click makes a corner");
+        assert_eq!(editor.history.undo_label(), Some("Add Point"));
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::PenClose]);
+        assert!(spline_of(&doc, first).0.segments[0].closed);
+        assert_eq!(editor.history.undo_label(), Some("Close Spline"));
+
+        // Finished: the next point starts a new spline, linear this time.
+        editor.pen.kind = grid4d_geom::spline::SplineType::Linear;
+        run(&mut doc, &mut editor, &mut vp, &[pen(500.0, 0.0, Vec3::ZERO)]);
+        let second = editor.selection.active().unwrap();
+        assert_ne!(second, first);
+        assert_eq!(spline_of(&doc, second).0.kind, grid4d_geom::spline::SplineType::Linear);
+
+        // Choosing the first spline again: the Pen adds a new segment to it.
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::PenFinish]);
+        editor.selection.set_single(first);
+        run(&mut doc, &mut editor, &mut vp, &[pen(0.0, -100.0, Vec3::ZERO)]);
+        let (spline, _) = spline_of(&doc, first);
+        assert_eq!(spline.points.len(), 4);
+        assert_eq!(spline.segments.len(), 2);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(spline_of(&doc, first).0.points.len(), 3);
     }
 }

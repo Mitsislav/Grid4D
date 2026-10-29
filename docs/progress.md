@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 9 — Splines & spline generators (v0.9) |
-| Last step done | 9.2 — Editable splines (2026-10-29) |
-| Next step | 9.3 — Spline commands and the Pen tool |
-| Tests | 548, all passing; clippy and rustfmt clean |
+| Last step done | 9.3 — Spline commands and the Pen (2026-10-29) |
+| Next step | 9.4 — Extrude generator |
+| Tests | 552, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -894,6 +894,7 @@ Phase 8 is complete.
 | — | Phase 9 planned in detail: splines, point editing and the Pen, Extrude / Lathe / Sweep / Loft, Text (`IMPLEMENTATION_PLAN.md`) | 521 |
 | 9.1 | Spline primitives: Circle, Rectangle, Arc, n-Side, Star, Helix and Flower — curves with a plane, Reverse and intermediate points; drawn as lines in every display mode, picked near their line, framed, filtered, undone and saved | 540 |
 | 9.2 | Editable splines: Make Editable on spline primitives; Points mode on a spline — click, rectangle and brush selection, the gizmo on points (tangents along), Bezier handle drags (Shift breaks them), Delete, Select All / Invert; Type and Close Spline in the Attribute Manager | 548 |
+| 9.3 | Spline commands and the Pen: Mesh ▸ Spline — Hard / Soft Interpolation, Reverse Sequence, Set First Point (selection follows the points); the Pen tool — click adds a point on the grid's plane, a drag pulls its tangents, a click on the first point closes, Esc / Enter finish, Type option; one undo step per point | 552 |
 
 **9.1 — Spline primitives**
 
@@ -967,6 +968,37 @@ Phase 8 is complete.
   Close Spline; Delete removed the point and the curve closed through the other
   three. Handle drags, frames and the gizmo's rotation of tangents are checked
   by headless tests (posted drags do not reach egui).
+
+**9.3 — Spline commands and the Pen**
+
+*Problems and solutions:*
+- **Selections that follow the points.** Reverse Sequence and Set First Point
+  renumber points. The geometry functions return the new spline together with
+  an old → new index map, and the command moves the selected and hidden flags
+  through it, so the same points stay selected (a test checks it after Set
+  First Point).
+- **Commands that change nothing.** Set First Point on a point that is already
+  first, or Hard on corners, would have made empty undo steps; the command
+  compares the result with the spline and its components and records nothing
+  when they are equal.
+- **Underflow in Set First Point.** `(old - first + n) % n` underflows `usize`
+  for points before the new first one; reordered to `(old + n - first) % n`,
+  and then rewritten over the map's slice to satisfy clippy's range-loop lint.
+- **A click in one frame.** On screen the Pen first added nothing and the click
+  deselected the cube: posted clicks arrive as press and release in the same
+  egui frame, and by then the pointer's press origin is cleared, so the Pen
+  ignored the press and the click fell through to object picking. The Pen now
+  falls back to the pointer position and takes every click in the view while
+  it is the tool; a headless test sends a one-frame click.
+- **When drawing ends.** "Finished" is editor state (`pen_finished`, the spline
+  the Pen will not extend). It is cleared as soon as another object becomes
+  active, so selecting a spline and picking the Pen again continues it.
+- **On-screen testing:** Create ▸ Spline ▸ Pen, four clicks on the floor made a
+  Spline object with four points; a click on the first point closed it. In
+  Points mode, Select All and Mesh ▸ Spline ▸ Soft Interpolation turned the
+  corners into a smooth curve with handles; Mode ▸ Tool showed the Pen's Type
+  option. The preview line follows hover, which posted mouse moves do not
+  produce in egui; a headless test checks where the cursor meets the floor.
 
 ---
 
