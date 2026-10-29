@@ -25,7 +25,7 @@ use grid4d_geom::{
         SplineType,
     },
     subdivision::{Boundary, MAX_LEVEL},
-    surface::{CapType, ExtrudeDirection, Extrusion, Lathe},
+    surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Sweep},
 };
 use grid4d_scene::{
     Axis, ComponentState, Components, Curve, Document, Falloff, FrameNaming, FrameRange, ImageFormat, Interpolation,
@@ -649,6 +649,32 @@ enum KindDto {
         movement: f32,
         #[serde(default = "one", skip_serializing_if = "is_one")]
         scaling: f32,
+        #[serde(default, skip_serializing_if = "is_false")]
+        reverse_normals: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        start_cap: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        end_cap: bool,
+        #[serde(default, skip_serializing_if = "CapTypeDto::is_ngons")]
+        cap_type: CapTypeDto,
+    },
+    /// A Sweep generator (added in step 9.6), the rotation in radians;
+    /// defaults omitted.
+    Sweep {
+        #[serde(default = "one", skip_serializing_if = "is_one")]
+        end_scale: f32,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        end_rotation: f32,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        start_growth: f32,
+        #[serde(default = "one", skip_serializing_if = "is_one")]
+        end_growth: f32,
+        #[serde(default, skip_serializing_if = "is_false")]
+        parallel_movement: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        constant_cross_section: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        banking: bool,
         #[serde(default, skip_serializing_if = "is_false")]
         reverse_normals: bool,
         #[serde(default = "yes", skip_serializing_if = "is_true")]
@@ -1778,6 +1804,19 @@ impl KindDto {
                 end_cap: lathe.end_cap,
                 cap_type: lathe.cap_type.into(),
             },
+            ObjectKind::Sweep(sweep) => Self::Sweep {
+                end_scale: sweep.end_scale,
+                end_rotation: sweep.end_rotation,
+                start_growth: sweep.start_growth,
+                end_growth: sweep.end_growth,
+                parallel_movement: sweep.parallel_movement,
+                constant_cross_section: sweep.constant_cross_section,
+                banking: sweep.banking,
+                reverse_normals: sweep.reverse_normals,
+                start_cap: sweep.start_cap,
+                end_cap: sweep.end_cap,
+                cap_type: sweep.cap_type.into(),
+            },
             ObjectKind::Spline {
                 ref spline,
                 interpolation,
@@ -2000,6 +2039,31 @@ impl KindDto {
                 end_cap,
                 cap_type: cap_type.into(),
             }),
+            Self::Sweep {
+                end_scale,
+                end_rotation,
+                start_growth,
+                end_growth,
+                parallel_movement,
+                constant_cross_section,
+                banking,
+                reverse_normals,
+                start_cap,
+                end_cap,
+                cap_type,
+            } => ObjectKind::Sweep(Sweep {
+                end_scale: end_scale.max(0.0),
+                end_rotation,
+                start_growth: start_growth.clamp(0.0, 1.0),
+                end_growth: end_growth.clamp(0.0, 1.0),
+                parallel_movement,
+                constant_cross_section,
+                banking,
+                reverse_normals,
+                start_cap,
+                end_cap,
+                cap_type: cap_type.into(),
+            }),
             Self::Spline {
                 spline,
                 plane,
@@ -2088,6 +2152,13 @@ impl KindDto {
                 scaling,
                 ..
             } => vec![angle, movement, scaling],
+            Self::Sweep {
+                end_scale,
+                end_rotation,
+                start_growth,
+                end_growth,
+                ..
+            } => vec![end_scale, end_rotation, start_growth, end_growth],
             Self::EditableSpline {
                 ref points,
                 ref tangents,
@@ -2608,6 +2679,43 @@ mod tests {
             panic!("not a lathe")
         };
         assert_eq!((lathe.subdivision, lathe.scaling), (Lathe::MIN_SUBDIVISION, 0.0));
+    }
+
+    #[test]
+    fn sweep_generators_round_trip_and_defaults_are_omitted() {
+        let mut doc = Document::new("sweep");
+        let plain = ObjectKindTag::Sweep.default_kind();
+        let custom = ObjectKind::Sweep(Sweep {
+            end_scale: 0.5,
+            end_rotation: 1.5,
+            start_growth: 0.1,
+            end_growth: 0.9,
+            parallel_movement: true,
+            constant_cross_section: false,
+            banking: false,
+            reverse_normals: true,
+            start_cap: false,
+            end_cap: false,
+            cap_type: CapType::Triangles,
+        });
+        doc.scene.insert(Node::new("Sweep", plain.clone()));
+        doc.scene.insert(Node::new("Sweep.1", custom.clone()));
+        let loaded = round_trip(&doc);
+        let kinds: Vec<&ObjectKind> = loaded
+            .scene
+            .roots()
+            .iter()
+            .map(|&id| &loaded.scene.get(id).unwrap().data.kind)
+            .collect();
+        assert_eq!(kinds, [&plain, &custom]);
+        let json = serde_json::to_string(&KindDto::new(&plain, "Sweep", &mut MeshTable::default())).unwrap();
+        assert_eq!(json, r#"{"type":"sweep"}"#);
+        let json = r#"{"type": "sweep", "end_scale": -1.0, "start_growth": -3.0, "end_growth": 7.0}"#;
+        let dto: KindDto = serde_json::from_str(json).unwrap();
+        let ObjectKind::Sweep(sweep) = dto.into_kind(&[], "test").unwrap() else {
+            panic!("not a sweep")
+        };
+        assert_eq!((sweep.end_scale, sweep.start_growth, sweep.end_growth), (0.0, 0.0, 1.0));
     }
 
     #[test]

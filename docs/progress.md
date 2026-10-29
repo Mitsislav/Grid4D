@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 9 — Splines & spline generators (v0.9) |
-| Last step done | 9.5 — Lathe generator (2026-10-29) |
-| Next step | 9.6 — Sweep generator |
-| Tests | 572, all passing; clippy and rustfmt clean |
+| Last step done | 9.6 — Sweep generator (2026-10-29) |
+| Next step | 9.7 — Loft generator |
+| Tests | 582, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -897,6 +897,7 @@ Phase 8 is complete.
 | 9.3 | Spline commands and the Pen: Mesh ▸ Spline — Hard / Soft Interpolation, Reverse Sequence, Set First Point (selection follows the points); the Pen tool — click adds a point on the grid's plane, a drag pulls its tangents, a click on the first point closes, Esc / Enter finish, Type option; one undo step per point | 552 |
 | 9.4 | Extrude generator: a spline pushed along Auto / X / Y / Z / Custom / Absolute by an offset, subdivided; start and end caps (N-Gons or Triangles) with holes cut out (even-odd nesting, hole bridging), outward whichever way the outlines run; Reverse Normals, Hierarchical; Alt wraps the selected spline, Make Editable bakes the solid; saved; rendered | 564 |
 | 9.5 | Lathe generator: a profile turned around the Lathe's Y axis — angle, subdivision, movement (screws, springs), scaling (spirals), Reverse Normals, caps where a closed profile's turn stays open; a full turn closes and shares the points on the axis; saved; rendered | 572 |
+| 9.6 | Sweep generator: a profile moved along a path — banking (parallel transport), level or parallel movement, constant cross section at corners, end scale and rotation, start / end growth, caps; Alt wraps two selected splines as profile and path; Make Editable removes both; saved; rendered | 582 |
 
 **9.1 — Spline primitives**
 
@@ -1058,6 +1059,41 @@ Phase 8 is complete.
   rounded rectangle with caps, a spiral shrinking to 25 %) showed all five as
   expected, with the profiles still drawn; the path tracer rendered the same
   file (30 568 triangles).
+
+**9.6 — Sweep generator**
+
+*Problems and solutions:*
+- **Two inputs.** Generators took their first child; the Sweep needs the
+  first two (profile, path). `ObjectKind::generator_inputs` says how many, so
+  Make Editable removes both and nothing inside them is baked on its own;
+  `gather_sweep` reads the profile in its own space (moving it changes nothing)
+  and the path in the generator's. Alt + create wraps the first two selected
+  objects in selection order, moved in one undo step.
+- **A frame that does not twist.** Banking transports the profile's X axis from
+  one station to the next by the rotation between the path directions, starting
+  in the path's mean plane (Newell's normal, largest component made positive,
+  so a path on the floor starts level). On a closed path the frame comes back
+  turned; the leftover angle is spread evenly round the loop. A saddle-shaped
+  loop in the tests has no jump at its seam.
+- **Corners.** At a corner the direction is the average of the two edges, and
+  the profile is stretched across the corner by 1 / cos(half the turn), so a
+  bar swept round a square keeps its width (√2 across the corner); a hairpin is
+  limited to 5×.
+- **Growth on a closed path.** Partial growth cuts a loop open (once round, by
+  length) and it gets caps; end scale and rotation keep following the whole
+  path's length.
+- **A test that measured the wrong thing.** The closed-tube test first
+  compared the seam gap with a step *within* the profile; it now compares it
+  with the step between rings, which is what "the seam lines up" means.
+- **A panel that grew.** On screen, selecting a Sweep widened the right panel by
+  about 16 px: the hint line under its parameters was longer than the panel.
+  It now reads "Child 1: profile; child 2: path".
+- **On-screen testing:** a document with four Sweeps (a circle along a helix,
+  a rectangle along a rectangle, a star along an arc tapering to 15 % with half
+  a turn of twist, a ring along a hexagon grown to 70 %) showed a spring, a
+  frame, a horn and an open, capped tube; a probe confirmed the horn's
+  cross-section (57 cm at the start, 8 cm at the end). The path tracer
+  rendered the file (60 296 triangles).
 
 ---
 

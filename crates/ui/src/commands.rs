@@ -1156,13 +1156,31 @@ fn delete_tag(doc: &mut Document, editor: &mut EditorState, node: NodeId, kind: 
 /// transform (the generator sits at the parent's origin). Without an active
 /// object it is an ordinary create. One undo step, the generator selected.
 fn wrap_in_generator(doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel, tag: ObjectKindTag) {
-    let Some(target) = editor.selection.active().filter(|&id| doc.scene.contains(id)) else {
+    let Some(active) = editor.selection.active().filter(|&id| doc.scene.contains(id)) else {
         apply(EditorCommand::CreateObject(tag), doc, editor, viewport);
         return;
     };
+    // The objects that become its inputs: the active one, or for the Sweep the
+    // first two selected (profile, then path), neither inside the other.
+    let mut targets = vec![active];
+    if tag.default_kind().generator_inputs() >= 2 {
+        let selected: Vec<NodeId> = editor
+            .selection
+            .as_slice()
+            .iter()
+            .copied()
+            .filter(|&id| doc.scene.contains(id))
+            .collect();
+        if let [first, second, ..] = selected[..]
+            && !is_inside(&doc.scene, first, second)
+            && !is_inside(&doc.scene, second, first)
+        {
+            targets = vec![first, second];
+        }
+    }
+    let target = targets[0];
     let parent = doc.scene.get(target).and_then(Node::parent);
     let index = doc.scene.index_in_parent(target).unwrap_or(usize::MAX);
-    let transform = doc.scene.get(target).map(|n| n.data.transform).unwrap_or_default();
     let selection_before = editor.selection.clone();
     let insert = SceneEdit::Insert {
         parent,
@@ -1171,29 +1189,47 @@ fn wrap_in_generator(doc: &mut Document, editor: &mut EditorState, viewport: &mu
     };
     let Ok(undo_insert) = doc.apply(insert) else { return };
     let Some(generator) = undo_insert.node() else { return };
-    let mov = SceneEdit::Move {
-        id: target,
-        parent: Some(generator),
-        index: 0,
-        transform,
-    };
-    match doc.apply(mov) {
-        Ok(undo_move) => {
-            editor.selection.set_single(generator);
-            let selection_after = editor.selection.clone();
-            editor.history.record(
-                doc,
-                "Create Generator",
-                vec![undo_move, undo_insert],
-                selection_before,
-                selection_after,
-            );
-        }
-        Err(err) => {
-            log::warn!("Wrapping in a generator rejected: {err}");
-            let _ = doc.apply(undo_insert);
+    let mut undo = Vec::with_capacity(targets.len() + 1);
+    for (index, &id) in targets.iter().enumerate() {
+        let transform = doc.scene.get(id).map(|n| n.data.transform).unwrap_or_default();
+        let mov = SceneEdit::Move {
+            id,
+            parent: Some(generator),
+            index,
+            transform,
+        };
+        match doc.apply(mov) {
+            Ok(undo_move) => undo.push(undo_move),
+            Err(err) => {
+                log::warn!("Wrapping in a generator rejected: {err}");
+                for edit in undo.into_iter().rev() {
+                    let _ = doc.apply(edit);
+                }
+                let _ = doc.apply(undo_insert);
+                return;
+            }
         }
     }
+    // Undone in reverse: the moves back, then the generator removed.
+    undo.reverse();
+    undo.push(undo_insert);
+    editor.selection.set_single(generator);
+    let selection_after = editor.selection.clone();
+    editor
+        .history
+        .record(doc, "Create Generator", undo, selection_before, selection_after);
+}
+
+/// `inner` is `outer` or below it.
+fn is_inside(scene: &Scene, inner: NodeId, outer: NodeId) -> bool {
+    let mut at = Some(inner);
+    while let Some(id) = at {
+        if id == outer {
+            return true;
+        }
+        at = scene.get(id).and_then(Node::parent);
+    }
+    false
 }
 
 /// A Bridge between two faces (Polygons) or two unique edges (Edges) of `mesh`.
@@ -1565,9 +1601,18 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
             .get(id)
             .filter(|node| node.data.kind.is_generator() && node.data.enabled)
     };
+    // A generator's inputs: its first child, or the Sweep's profile and path.
+    let inputs = |node: &Node| -> Vec<NodeId> {
+        node.children()
+            .iter()
+            .take(node.data.kind.generator_inputs())
+            .copied()
+            .collect()
+    };
     let all_cages: Vec<NodeId> = selection
         .iter()
-        .filter_map(|&id| enabled_generator(id)?.children().first().copied())
+        .filter_map(|&id| enabled_generator(id))
+        .flat_map(inputs)
         .collect();
     let in_cage = |id: NodeId| {
         let mut at = Some(id);
@@ -1605,7 +1650,7 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
             let Some(mesh) = grid4d_eval::generator_mesh(&doc.scene, id) else {
                 continue;
             };
-            cages.extend(node.children().first());
+            cages.extend(inputs(node));
             mesh
         } else {
             let Some(mesh) = grid4d_eval::editable_mesh(&node.data.kind) else {
@@ -1658,7 +1703,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Polygon
         | ObjectKindTag::SubdivisionSurface
         | ObjectKindTag::Extrude
-        | ObjectKindTag::Lathe => {}
+        | ObjectKindTag::Lathe
+        | ObjectKindTag::Sweep => {}
     }
     data
 }
@@ -1698,7 +1744,9 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         ObjectKindTag::Null => palette::ICON_NULL,
         ObjectKindTag::Camera => palette::ICON_CAMERA,
         ObjectKindTag::Light => palette::ICON_LIGHT,
-        ObjectKindTag::SubdivisionSurface | ObjectKindTag::Extrude | ObjectKindTag::Lathe => palette::ICON_GENERATOR,
+        ObjectKindTag::SubdivisionSurface | ObjectKindTag::Extrude | ObjectKindTag::Lathe | ObjectKindTag::Sweep => {
+            palette::ICON_GENERATOR
+        }
         ObjectKindTag::Circle
         | ObjectKindTag::Rectangle
         | ObjectKindTag::Arc
@@ -3605,5 +3653,65 @@ mod tests {
             &[EditorCommand::Undo, EditorCommand::Undo],
         );
         assert_eq!(doc.scene.get(circle).unwrap().parent(), None, "back where it was");
+    }
+
+    #[test]
+    fn a_sweep_wraps_two_selected_splines_and_bakes_without_them() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Circle)],
+        );
+        let profile = editor.selection.active().unwrap();
+        let ObjectKind::SplinePrimitive(primitive) = &mut doc.scene.get_mut(profile).unwrap().data.kind else {
+            unreachable!()
+        };
+        primitive.shape = grid4d_geom::spline::SplineShape::Circle {
+            radius: 10.0,
+            ellipse: None,
+            ring: None,
+        };
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Rectangle)],
+        );
+        let path = editor.selection.active().unwrap();
+        editor.selection.set_all([profile, path]);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::WrapInGenerator(ObjectKindTag::Sweep)],
+        );
+        let sweep = editor.selection.active().unwrap();
+        assert_eq!(doc.scene.children(sweep), [profile, path], "profile first, path second");
+        assert_eq!(editor.history.undo_label(), Some("Create Generator"));
+        let solid = grid4d_eval::generator_mesh(&doc.scene, sweep).unwrap();
+        assert!(solid.face_count() > 0);
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        assert!(matches!(
+            doc.scene.get(sweep).unwrap().data.kind,
+            ObjectKind::Polygon { .. }
+        ));
+        assert!(
+            !doc.scene.contains(profile) && !doc.scene.contains(path),
+            "both inputs go"
+        );
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Undo, EditorCommand::Undo],
+        );
+        assert!(!doc.scene.contains(sweep));
+        for id in [profile, path] {
+            assert_eq!(doc.scene.get(id).unwrap().parent(), None, "back at the top");
+        }
+        assert_eq!(doc.scene.roots(), [profile, path], "in their places");
     }
 }

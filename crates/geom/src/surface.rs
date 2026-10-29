@@ -1,6 +1,7 @@
-//! Surfaces made from splines: the Extrude and Lathe generators' bodies (see
-//! `docs/reference/generator-extrude.md`, `generator-lathe.md`). Pure
-//! functions of a sampled [`Polyline`]; Sweep and Loft will join them.
+//! Surfaces made from splines: the Extrude, Lathe and Sweep generators' bodies
+//! (see `docs/reference/generator-extrude.md`, `generator-lathe.md`,
+//! `generator-sweep.md`). Pure functions of sampled [`Polyline`]s; the Loft
+//! will join them.
 
 use glam::{Vec2, Vec3};
 
@@ -429,6 +430,307 @@ pub fn lathe(polyline: &Polyline, lathe: &Lathe) -> PolyMesh {
     assemble(points, &faces)
 }
 
+/// The Sweep generator's options: how a profile travels along a path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sweep {
+    /// The profile's size at the end of the path (1.0 = 100 %).
+    pub end_scale: f32,
+    /// How far the profile has turned about the path at its end (radians).
+    pub end_rotation: f32,
+    /// Where along the path (0 – 1, by length) the sweep starts and ends.
+    pub start_growth: f32,
+    pub end_growth: f32,
+    /// Moves the profile without turning it.
+    pub parallel_movement: bool,
+    /// Stretches the profile across corners so walls keep their thickness.
+    pub constant_cross_section: bool,
+    /// Turns the profile with the path (parallel transport) rather than
+    /// keeping its X axis level.
+    pub banking: bool,
+    /// Turns the shell inside out (caps untouched).
+    pub reverse_normals: bool,
+    pub start_cap: bool,
+    pub end_cap: bool,
+    pub cap_type: CapType,
+}
+
+impl Default for Sweep {
+    fn default() -> Self {
+        Self {
+            end_scale: 1.0,
+            end_rotation: 0.0,
+            start_growth: 0.0,
+            end_growth: 1.0,
+            parallel_movement: false,
+            constant_cross_section: true,
+            banking: true,
+            reverse_normals: false,
+            start_cap: true,
+            end_cap: true,
+            cap_type: CapType::NGons,
+        }
+    }
+}
+
+/// The most a corner stretches the profile (Constant Cross Section).
+const MAX_STRETCH: f32 = 5.0;
+
+/// One place along a swept path.
+#[derive(Clone, Copy, Debug)]
+struct Station {
+    position: Vec3,
+    /// Fraction of the whole path's length (end scale and rotation).
+    t: f32,
+    /// The profile's axes here: X, Y and the path's direction.
+    x: Vec3,
+    y: Vec3,
+    /// Corner stretch: the direction across the corner and the factor.
+    across: Vec3,
+    stretch: f32,
+}
+
+/// The surface `profile` (read in its XY plane) makes as it travels along
+/// each segment of `path`: rings of the profile turned with the path, a shell
+/// between them and caps where the swept path is open. Empty without a profile
+/// or a path of length.
+#[must_use]
+pub fn sweep(profile_line: &Polyline, path: &Polyline, sweep: &Sweep) -> PolyMesh {
+    let runs = profile(profile_line, |p| Vec2::new(p.x, p.y));
+    if runs.is_empty() {
+        return PolyMesh::new();
+    }
+    let mut points = Vec::new();
+    let mut faces: Vec<Vec<u32>> = Vec::new();
+    for (rail, closed) in path.runs() {
+        let Some((stations, closed)) = stations(rail, closed, sweep) else {
+            continue;
+        };
+        let base = u32_index(points.len());
+        let (end_scale, end_rotation) = (sweep.end_scale.max(0.0), sweep.end_rotation);
+        // Each station's ring: every run's points in order.
+        for station in &stations {
+            let (sin, cos) = (end_rotation * station.t).sin_cos();
+            let grow = 1.0 + (end_scale - 1.0) * station.t;
+            let forward = station.x.cross(station.y);
+            for run in &runs {
+                for &p in run.points {
+                    let flat = Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos) * grow;
+                    let mut offset = station.x * flat.x + station.y * flat.y;
+                    offset += station.across * ((station.stretch - 1.0) * offset.dot(station.across));
+                    points.push(station.position + offset + forward * (p.z * grow));
+                }
+            }
+        }
+        let ring = u32_index(runs.iter().map(|r| r.points.len()).sum());
+        let mut first_of = Vec::with_capacity(runs.len());
+        let mut start = 0;
+        for run in &runs {
+            first_of.push(start);
+            start += u32_index(run.points.len());
+        }
+        let count = u32_index(stations.len());
+        let at = |station: u32, run: usize, local: u32| base + (station % count) * ring + first_of[run] + local;
+        let steps = if closed { count } else { count - 1 };
+        for (r, run) in runs.iter().enumerate() {
+            let n = run.order.len();
+            let edges = if run.closed { n } else { n - 1 };
+            for e in 0..edges {
+                let (a, b) = (run.order[e], run.order[(e + 1) % n]);
+                for k in 0..steps {
+                    let mut quad = vec![at(k, r, a), at(k, r, b), at(k + 1, r, b), at(k + 1, r, a)];
+                    if sweep.reverse_normals {
+                        quad.reverse();
+                    }
+                    faces.push(quad);
+                }
+            }
+        }
+        if !closed {
+            // Counter-clockwise in the profile's plane faces along the path.
+            for polygon in caps(&runs, sweep.cap_type) {
+                if sweep.end_cap {
+                    faces.push(polygon.iter().map(|&(run, p)| at(count - 1, run, p)).collect());
+                }
+                if sweep.start_cap {
+                    faces.push(polygon.iter().rev().map(|&(run, p)| at(0, run, p)).collect());
+                }
+            }
+        }
+    }
+    assemble(points, &faces)
+}
+
+/// The stations along one path segment, trimmed to the growth range, and
+/// whether they still close; `None` if nothing of it is swept.
+fn stations(rail: &[Vec3], closed: bool, sweep: &Sweep) -> Option<(Vec<Station>, bool)> {
+    // Without repeated points (a closed segment's end is its start).
+    let mut line: Vec<Vec3> = Vec::with_capacity(rail.len() + 1);
+    for &p in rail {
+        if line.last().is_none_or(|&q: &Vec3| q.distance_squared(p) > 1e-12) {
+            line.push(p);
+        }
+    }
+    let mut closed = closed && line.len() >= 3;
+    if closed
+        && line
+            .first()
+            .zip(line.last())
+            .is_some_and(|(a, b)| a.distance_squared(*b) <= 1e-12)
+    {
+        line.pop();
+    }
+    if line.len() < 2 || !line.iter().all(|p| p.is_finite()) {
+        return None;
+    }
+    let (g0, g1) = (sweep.start_growth.clamp(0.0, 1.0), sweep.end_growth.clamp(0.0, 1.0));
+    if g1 - g0 <= 1e-6 {
+        return None;
+    }
+    if closed && (g0 > 0.0 || g1 < 1.0) {
+        // Cut open: go round once and stop where the growth says.
+        line.push(line[0]);
+        closed = false;
+    }
+    let mut lengths = vec![0.0f32];
+    let n = line.len();
+    let edges = if closed { n } else { n - 1 };
+    for i in 0..edges {
+        let next = lengths[i] + line[i].distance(line[(i + 1) % n]);
+        lengths.push(next);
+    }
+    let total = lengths[edges];
+    if total <= 1e-6 {
+        return None;
+    }
+    // Positions with their fraction of the length, cut to the growth range.
+    let mut kept: Vec<(Vec3, f32)> = Vec::with_capacity(n + 2);
+    if closed {
+        kept.extend(line.iter().zip(&lengths).map(|(&p, &l)| (p, l / total)));
+    } else {
+        let (from, to) = (g0 * total, g1 * total);
+        let at = |length: f32| {
+            let i = lengths.partition_point(|&l| l <= length).clamp(1, n - 1);
+            let span = (lengths[i] - lengths[i - 1]).max(f32::MIN_POSITIVE);
+            line[i - 1].lerp(line[i], ((length - lengths[i - 1]) / span).clamp(0.0, 1.0))
+        };
+        kept.push((at(from), g0));
+        for (i, &l) in lengths.iter().enumerate().take(n) {
+            if l > from + 1e-4 && l < to - 1e-4 {
+                kept.push((line[i], l / total));
+            }
+        }
+        kept.push((at(to), g1));
+    }
+    let m = kept.len();
+    if m < 2 {
+        return None;
+    }
+    // Directions of the edges, and the path's direction at each station.
+    let dir = |i: usize| (kept[(i + 1) % m].0 - kept[i].0).normalize_or_zero();
+    let mut stations = Vec::with_capacity(m);
+    let mut forwards = Vec::with_capacity(m);
+    let mut last_forward = Vec3::Z;
+    for (i, &(position, t)) in kept.iter().enumerate() {
+        let incoming = if i > 0 {
+            dir(i - 1)
+        } else if closed {
+            dir(m - 1)
+        } else {
+            Vec3::ZERO
+        };
+        let outgoing = if i + 1 < m || closed { dir(i) } else { Vec3::ZERO };
+        let forward = (incoming + outgoing)
+            .try_normalize()
+            .or_else(|| outgoing.try_normalize())
+            .or_else(|| incoming.try_normalize())
+            .unwrap_or(last_forward);
+        last_forward = forward;
+        forwards.push(forward);
+        let (across, stretch) = if sweep.constant_cross_section
+            && !sweep.parallel_movement
+            && incoming != Vec3::ZERO
+            && outgoing != Vec3::ZERO
+        {
+            let across = (outgoing - incoming).normalize_or_zero();
+            (across, 1.0 / forward.dot(incoming).max(1.0 / MAX_STRETCH))
+        } else {
+            (Vec3::ZERO, 1.0)
+        };
+        stations.push(Station {
+            position,
+            t,
+            x: Vec3::X,
+            y: Vec3::Y,
+            across,
+            stretch,
+        });
+    }
+    orient(&mut stations, &forwards, closed, sweep);
+    Some((stations, closed))
+}
+
+/// Sets each station's X and Y axes, given the path's direction there:
+/// unturned (Parallel Movement), level (Banking off) or transported along the
+/// path (Banking on).
+fn orient(stations: &mut [Station], forwards: &[Vec3], closed: bool, sweep: &Sweep) {
+    let m = stations.len();
+    if sweep.parallel_movement {
+        return; // X and Y as they are
+    }
+    let level = |forward: Vec3, previous: Vec3| Vec3::Y.cross(forward).try_normalize().unwrap_or(previous);
+    if !sweep.banking {
+        let mut previous = Vec3::X;
+        for (station, &forward) in stations.iter_mut().zip(forwards) {
+            let x = level(forward, previous);
+            previous = x;
+            station.x = x;
+            station.y = forward.cross(x);
+        }
+        return;
+    }
+    // The start: Y along the mean plane's normal, so X lies in that plane.
+    let mut normal = crate::mesh::newell(stations.iter().map(|s| s.position));
+    let largest = if normal.x.abs() >= normal.y.abs() && normal.x.abs() >= normal.z.abs() {
+        normal.x
+    } else if normal.y.abs() >= normal.z.abs() {
+        normal.y
+    } else {
+        normal.z
+    };
+    if largest < 0.0 {
+        normal = -normal;
+    }
+    let first = forwards[0];
+    let mut x = (normal - first * normal.dot(first))
+        .try_normalize()
+        .map_or_else(|| level(first, Vec3::X), |y| y.cross(first));
+    for i in 0..m {
+        if i > 0 {
+            x = glam::Quat::from_rotation_arc(forwards[i - 1], forwards[i]) * x;
+        }
+        let forward = forwards[i];
+        x = (x - forward * x.dot(forward))
+            .try_normalize()
+            .unwrap_or_else(|| level(forward, Vec3::X));
+        stations[i].x = x;
+        stations[i].y = forward.cross(x);
+    }
+    if closed {
+        // Back at the start: spread the leftover twist evenly round the loop.
+        let back = glam::Quat::from_rotation_arc(forwards[m - 1], forwards[0]) * stations[m - 1].x;
+        let (start, axis) = (stations[0].x, forwards[0]);
+        let twist = back.cross(start).dot(axis).atan2(back.dot(start));
+        let steps = f32::from(u16::try_from(m).unwrap_or(u16::MAX));
+        for (i, station) in stations.iter_mut().enumerate() {
+            let k = f32::from(u16::try_from(i).unwrap_or(u16::MAX));
+            let forward = forwards[i];
+            let turn = glam::Quat::from_axis_angle(forward, twist * k / steps);
+            station.x = turn * station.x;
+            station.y = forward.cross(station.x);
+        }
+    }
+}
+
 /// Twice the signed area: positive when counter-clockwise.
 fn area(polygon: &[Vec2]) -> f32 {
     let n = polygon.len();
@@ -831,5 +1133,180 @@ mod tests {
             .face_count(),
             0
         );
+    }
+
+    fn closed_circle(radius: f32, n: u32) -> Polyline {
+        polyline(&[(&circle(radius, n), true)])
+    }
+
+    fn straight(length: f32) -> Polyline {
+        polyline(&[(&[Vec3::ZERO, Vec3::new(0.0, 0.0, length)], false)])
+    }
+
+    #[test]
+    fn a_circle_along_a_line_is_a_capped_cylinder_facing_outwards() {
+        for counter_clockwise in [true, false] {
+            let mut points = circle(10.0, 16);
+            if !counter_clockwise {
+                points.reverse();
+            }
+            let mesh = sweep(&polyline(&[(&points, true)]), &straight(100.0), &Sweep::default());
+            assert_eq!(mesh.point_count(), 32);
+            assert_eq!(mesh.face_count(), 16 + 2);
+            assert!(is_closed(&mesh));
+            let expected = 8.0 * 100.0 * (std::f32::consts::TAU / 16.0).sin() * 100.0;
+            assert!(
+                (volume(&mesh) - expected).abs() < 1.0,
+                "{} vs {expected}",
+                volume(&mesh)
+            );
+            let (min, max) = mesh.bounds().unwrap();
+            assert!((min.z, max.z) == (0.0, 100.0) && (max.x - 10.0).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn along_a_closed_path_it_is_a_closed_tube_without_caps() {
+        let tube = sweep(&closed_circle(10.0, 12), &closed_circle(100.0, 48), &Sweep::default());
+        assert_eq!(tube.point_count(), 12 * 48, "no ring repeated");
+        assert_eq!(tube.face_count(), 12 * 48);
+        assert!(is_closed(&tube));
+        assert!(volume(&tube) > 0.0);
+        // Banking ends where it started: the seam's rings line up.
+        // The seam (last ring to the first) looks like any other step.
+        let ring = |k: usize| &tube.points()[k * 12..k * 12 + 12];
+        for i in 0..12 {
+            let seam = ring(47)[i].distance(ring(0)[i]);
+            let step = ring(0)[i].distance(ring(1)[i]);
+            assert!((seam - step).abs() < step * 0.05, "point {i}: {seam} vs {step}");
+        }
+    }
+
+    #[test]
+    fn banking_off_keeps_x_level_and_parallel_movement_keeps_it_unturned() {
+        let rising = polyline(&[(
+            &[Vec3::ZERO, Vec3::new(100.0, 100.0, 0.0), Vec3::new(200.0, 100.0, 100.0)],
+            false,
+        )]);
+        let bar = polyline(&[(&[Vec3::new(-10.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)], false)]);
+        let level = sweep(
+            &bar,
+            &rising,
+            &Sweep {
+                banking: false,
+                constant_cross_section: false,
+                ..Sweep::default()
+            },
+        );
+        for pair in level.points().chunks(2) {
+            assert!((pair[0].y - pair[1].y).abs() < 1e-3, "level: {pair:?}");
+        }
+        let unturned = sweep(
+            &bar,
+            &rising,
+            &Sweep {
+                parallel_movement: true,
+                ..Sweep::default()
+            },
+        );
+        for pair in unturned.points().chunks(2) {
+            assert!(
+                (pair[1] - pair[0]).abs_diff_eq(Vec3::new(20.0, 0.0, 0.0), 1e-3),
+                "{pair:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn corners_keep_their_thickness() {
+        let square = polyline(&[(&square(200.0, true), true)]);
+        let bar = polyline(&[(&[Vec3::new(-10.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)], false)]);
+        let width_at_corner = |constant| {
+            let mesh = sweep(
+                &bar,
+                &square,
+                &Sweep {
+                    constant_cross_section: constant,
+                    ..Sweep::default()
+                },
+            );
+            mesh.points()[0].distance(mesh.points()[1])
+        };
+        assert!((width_at_corner(true) - 20.0 * std::f32::consts::SQRT_2).abs() < 1e-3);
+        assert!((width_at_corner(false) - 20.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn end_scale_rotation_and_growth() {
+        let bar = polyline(&[(&[Vec3::new(-10.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)], false)]);
+        let path = straight(100.0);
+        let scaled = sweep(
+            &bar,
+            &path,
+            &Sweep {
+                end_scale: 0.5,
+                end_rotation: std::f32::consts::FRAC_PI_2,
+                ..Sweep::default()
+            },
+        );
+        let end = &scaled.points()[2..4];
+        assert!((end[0].distance(end[1]) - 10.0).abs() < 1e-3, "half size");
+        assert!(
+            (end[0].x).abs() < 1e-3 && (end[0].y.abs() - 5.0).abs() < 1e-3,
+            "turned: {end:?}"
+        );
+        let half = sweep(
+            &closed_circle(10.0, 8),
+            &path,
+            &Sweep {
+                start_growth: 0.25,
+                end_growth: 0.75,
+                ..Sweep::default()
+            },
+        );
+        let (min, max) = half.bounds().unwrap();
+        assert!((min.z - 25.0).abs() < 1e-3 && (max.z - 75.0).abs() < 1e-3);
+        assert!(is_closed(&half), "capped");
+        let cut_loop = sweep(
+            &closed_circle(10.0, 8),
+            &closed_circle(100.0, 32),
+            &Sweep {
+                end_growth: 0.5,
+                ..Sweep::default()
+            },
+        );
+        assert!(is_closed(&cut_loop), "a cut loop gets caps");
+        let none = Sweep {
+            start_growth: 0.6,
+            end_growth: 0.4,
+            ..Sweep::default()
+        };
+        assert_eq!(sweep(&bar, &path, &none).face_count(), 0);
+    }
+
+    #[test]
+    fn banking_on_a_twisting_closed_path_spreads_the_twist() {
+        // A saddle-shaped loop: transporting a frame round it leaves a twist.
+        let loop_points: Vec<Vec3> = (0..64u16)
+            .map(|i| {
+                let a = std::f32::consts::TAU * f32::from(i) / 64.0;
+                Vec3::new(
+                    100.0 * a.cos(),
+                    60.0 * (2.0 * a).sin(),
+                    100.0 * a.sin() + 40.0 * (3.0 * a).cos(),
+                )
+            })
+            .collect();
+        let bar = polyline(&[(&[Vec3::new(-10.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)], false)]);
+        let ribbon = sweep(&bar, &polyline(&[(&loop_points, true)]), &Sweep::default());
+        let points = ribbon.points();
+        let width = |k: usize| points[2 * k].distance(points[2 * k + 1]);
+        let turn = |a: usize, b: usize| {
+            let (u, v) = (points[2 * a + 1] - points[2 * a], points[2 * b + 1] - points[2 * b]);
+            u.normalize().dot(v.normalize())
+        };
+        assert!(turn(63, 0) > 0.95, "no jump at the seam: {}", turn(63, 0));
+        assert!((1..63).all(|k| turn(k - 1, k) > 0.9));
+        assert!((0..64).all(|k| width(k) >= 19.99));
     }
 }

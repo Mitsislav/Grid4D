@@ -2,14 +2,15 @@
 //! Subdivision Surface smooths its first child — the *cage*, with the cage's own
 //! descendants merged into one mesh — in the generator's space; the Extrude
 //! pushes its first child spline (or, hierarchical, every spline below it) into
-//! a solid; the Lathe turns its first child spline around its Y axis.
+//! a solid; the Lathe turns its first child spline around its Y axis; the
+//! Sweep moves its first child spline (the profile) along its second (the path).
 
 use glam::Mat4;
 use grid4d_geom::{
     PolyMesh,
     spline::{Interpolation, Polyline, SplinePrimitive},
     subdivision::{self, SubdivisionOptions},
-    surface::{self, Extrusion, Lathe},
+    surface::{self, Extrusion, Lathe, Sweep},
 };
 use grid4d_scene::{MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
 
@@ -21,6 +22,7 @@ pub(crate) enum Options {
     Subdivision(SubdivisionOptions),
     Extrude { extrusion: Extrusion, hierarchical: bool },
     Lathe(Lathe),
+    Sweep(Sweep),
 }
 
 /// One input of a generator, in the generator's space: what decides the result,
@@ -81,6 +83,7 @@ pub(crate) fn options(kind: &ObjectKind, purpose: Purpose) -> Option<Options> {
             hierarchical,
         }),
         ObjectKind::Lathe(lathe) => Some(Options::Lathe(lathe)),
+        ObjectKind::Sweep(sweep) => Some(Options::Sweep(sweep)),
         _ => None,
     }
 }
@@ -99,6 +102,9 @@ pub(crate) fn gather(
 ) -> Option<[f32; 3]> {
     inputs.clear();
     stack.clear();
+    if let Options::Sweep(_) = options {
+        return gather_sweep(scene, id, purpose, inputs);
+    }
     let &first = scene.children(id).first()?;
     let (colour, walk) = match *options {
         // The cage's colour: the smooth surface stands in for it.
@@ -106,6 +112,7 @@ pub(crate) fn gather(
         // Its own: a spline's line colour would not suit a solid.
         Options::Extrude { hierarchical, .. } => (scene.get(id)?.data.display_color, hierarchical),
         Options::Lathe(_) => (scene.get(id)?.data.display_color, false),
+        Options::Sweep(_) => return None,
     };
     let into_generator = scene.world_matrix(id).inverse();
     stack.push(first);
@@ -139,6 +146,38 @@ pub(crate) fn gather(
             // Children in reverse so they pop in order.
             stack.extend(node.children().iter().rev());
         }
+    }
+    Some(colour)
+}
+
+/// The Sweep's inputs: its profile (in the profile's own space) and its path
+/// (in the generator's), both visible, enabled splines; nothing otherwise.
+fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, inputs: &mut Vec<Input>) -> Option<[f32; 3]> {
+    let colour = scene.get(id)?.data.display_color;
+    let into_generator = scene.world_matrix(id).inverse();
+    for (k, &child) in scene.children(id).iter().take(2).enumerate() {
+        let Some(data) = scene.get(child).map(|node| &node.data) else {
+            break;
+        };
+        let source = match &data.kind {
+            ObjectKind::SplinePrimitive(primitive) => Source::SplinePrimitive(*primitive),
+            ObjectKind::Spline {
+                spline, interpolation, ..
+            } => Source::Spline(spline.clone(), *interpolation),
+            _ => break,
+        };
+        if !purpose.shows(data) || !data.enabled {
+            break;
+        }
+        let matrix = if k == 0 {
+            Mat4::IDENTITY
+        } else {
+            into_generator * scene.world_matrix(child)
+        };
+        inputs.push(Input { source, matrix });
+    }
+    if inputs.len() < 2 {
+        inputs.clear();
     }
     Some(colour)
 }
@@ -186,6 +225,18 @@ pub(crate) fn build(inputs: &[Input], options: &Options) -> PolyMesh {
                 merged.add(&surface::lathe(&polyline, lathe), Mat4::IDENTITY);
             }
             merged.finish()
+        }
+        Options::Sweep(sweep) => {
+            let [profile, path] = inputs else {
+                return PolyMesh::new();
+            };
+            let (Some(contour), Some(mut route)) = (profile.source.polyline(), path.source.polyline()) else {
+                return PolyMesh::new();
+            };
+            for point in &mut route.points {
+                *point = path.matrix.transform_point3(*point);
+            }
+            surface::sweep(&contour, &route, sweep)
         }
     }
 }

@@ -615,4 +615,19 @@ mod tests {
         // 24 steps round, four sides of two triangles each.
         assert_eq!(scene_of(&doc).triangle_count(), 24 * 4 * 2);
     }
+
+    #[test]
+    fn a_swept_spline_is_rendered() {
+        let mut doc = Document::new("t");
+        let sweep = doc
+            .scene
+            .insert(Node::new("Sweep", ObjectKindTag::Sweep.default_kind()));
+        doc.scene
+            .insert_child(sweep, Node::new("Rectangle", ObjectKindTag::Rectangle.default_kind()))
+            .unwrap();
+        doc.scene
+            .insert_child(sweep, Node::new("Helix", ObjectKindTag::Helix.default_kind()))
+            .unwrap();
+        assert!(scene_of(&doc).triangle_count() > 100);
+    }
 }

@@ -629,6 +629,7 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         ObjectKind::SubdivisionSurface { .. }
         | ObjectKind::Extrude { .. }
         | ObjectKind::Lathe(_)
+        | ObjectKind::Sweep(_)
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Spline { .. } => PickShape::None,
     }
@@ -1428,5 +1429,54 @@ mod tests {
         let raised = result_of(&eval, lathe);
         assert_ne!(raised.id(), torus.id());
         assert!((raised.bounds().unwrap().max.y - 150.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_sweep_moves_its_profile_along_its_path() {
+        let mut doc = Document::new("sweep");
+        let sweep = doc
+            .scene
+            .insert(Node::new("Sweep", ObjectKindTag::Sweep.default_kind()));
+        let mut profile = Node::new("Circle", ObjectKindTag::Circle.default_kind());
+        let ObjectKind::SplinePrimitive(primitive) = &mut profile.data.kind else {
+            unreachable!()
+        };
+        primitive.shape = grid4d_geom::spline::SplineShape::Circle {
+            radius: 10.0,
+            ellipse: None,
+            ring: None,
+        };
+        let profile = doc.scene.insert_child(sweep, profile).unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        assert_eq!(node(&eval, sweep).drawable, None, "no path yet");
+
+        let path = doc
+            .scene
+            .insert_child(sweep, Node::new("Helix", ObjectKindTag::Helix.default_kind()))
+            .unwrap();
+        eval.update(&doc.scene);
+        let tube = result_of(&eval, sweep);
+        let bounds = tube.bounds().unwrap();
+        // The default helix: radius 200, 200 high along Z; the tube 10 thick.
+        assert!((bounds.max.x - 210.0).abs() < 2.0, "{bounds:?}");
+        assert!(bounds.min.z < 0.0 && bounds.max.z > 200.0, "{bounds:?}");
+        for id in [profile, path] {
+            assert!(matches!(node(&eval, id).pick, PickShape::Curve(_)), "inputs stay drawn");
+        }
+        assert_eq!(crate::generator_mesh(&doc.scene, sweep).unwrap(), *tube.mesh());
+
+        // The profile is read in its own space; the path in the generator's.
+        doc.scene.get_mut(profile).unwrap().data.transform.position.x = 500.0;
+        eval.update(&doc.scene);
+        assert_eq!(
+            result_of(&eval, sweep).mesh(),
+            tube.mesh(),
+            "moving the profile changes nothing"
+        );
+        doc.scene.get_mut(path).unwrap().data.transform.position.y = 300.0;
+        eval.update(&doc.scene);
+        let moved = result_of(&eval, sweep).bounds().unwrap();
+        assert!((moved.min.y - bounds.min.y - 300.0).abs() < 1e-2);
     }
 }

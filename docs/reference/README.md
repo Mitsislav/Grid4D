@@ -83,3 +83,4 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 9.1–9.3 | [`object-spline.md`](object-spline.md) — spline objects: types, intermediate points, primitives, editing points, commands and the Pen | implemented 2026-10-29 |
 | 9.4 | [`generator-extrude.md`](generator-extrude.md) — the Extrude generator: direction, offset, caps with holes, hierarchical | implemented 2026-10-29 |
 | 9.5 | [`generator-lathe.md`](generator-lathe.md) — the Lathe generator: angle, subdivision, movement, scaling, caps | implemented 2026-10-29 |
+| 9.6 | [`generator-sweep.md`](generator-sweep.md) — the Sweep generator: profile along a path, banking, growth, end scale and rotation | implemented 2026-10-29 |

@@ -302,7 +302,8 @@ any time. To edit their points and polygons, make them editable
 command palette) build their shape from their children. The Subdivision Surface
 smooths a polygon mesh ([§12](#12-generators-subdivision-surface)); the Extrude
 turns a spline into a solid ([§13.4](#134-extrude-from-outline-to-solid)) and
-the Lathe turns one around an axis ([§13.5](#135-lathe-turning-a-profile)).
+the Lathe turns one around an axis ([§13.5](#135-lathe-turning-a-profile)) and
+the Sweep moves one along another ([§13.6](#136-sweep-a-profile-along-a-path)).
 
 **Splines** (Create ▸ Spline, or the circle button) are curves: Circle,
 Rectangle, Arc, n-Side, Star, Helix and Flower ([§13](#13-splines)).
@@ -1174,6 +1175,44 @@ A full turn closes on itself and shares the points on the axis, so a vase's
 bottom has one centre point. Q, Make Editable and rendering work as for the
 Extrude.
 
+### 13.6 Sweep: a profile along a path
+
+The **Sweep** generator moves a cross-section (the **profile**) along a
+**path**: a small circle along a helix becomes a spring, a rectangle along a
+larger rectangle a picture frame, a star along an arc a twisted horn.
+
+![A spring, a picture frame, a tapering twisted horn and a partly grown tube, all Sweeps; the Sweep's Object properties](images/manual/spline-sweep.png)
+
+1. Draw the profile in the **XY** plane (the Front view), centred on its own
+   origin, and the path anywhere.
+2. Select the **profile first**, then **Shift+click** the path, and hold **Alt**
+   while you choose **Create ▸ Generator ▸ Sweep** (or the Sweep button in the
+   toolbar). Both become the Sweep's children: the **first child is the
+   profile, the second the path**. You can also drag them onto an empty Sweep in
+   that order.
+3. Both stay visible as lines. Editing or moving the path reshapes the result;
+   moving the profile object does not (only its shape counts).
+
+The Attribute Manager's **Object** tab:
+
+- **End Scale**: the profile's size at the end of the path (it changes evenly
+  from 100 % at the start). Use it to make the shape taper.
+- **End Rotation**: how far the profile has turned about the path by its end:
+  a twist.
+- **Start Growth** / **End Growth**: sweep only part of the path, by length.
+  Animate End Growth from 0 % to 100 % to "draw" a tube along its path.
+- **Parallel Movement**: the profile keeps its orientation and is only moved.
+- **Constant Cross Section**: at sharp corners of the path the profile is
+  stretched so the walls keep their thickness (on by default).
+- **Banking**: on, the profile turns with the path as little as possible from
+  point to point, starting in the path's own plane; off, it stays level (its X
+  axis horizontal), which can twist it where the path rises steeply.
+- **Reverse Normals** and the **Caps**: as for the Extrude. A closed path makes
+  a closed ring without caps (unless only part of it is swept).
+
+Q, Make Editable (the profile and path go with it) and rendering work as for
+the other generators.
+
 ## 14. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
@@ -1535,8 +1574,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   Solid, Proportional and Radial modes; Bridge point by point.
 - **Generators**: the Subdivision Surface has one type (Catmull-Clark) and no
   edge weights (creases) or UV options. The Extrude has no bevels (fillets),
-  Delaunay or grid caps, UVs or selections for its caps; neither has the Lathe
-  (no Isoparm display either). Sweep, Loft and Cloner are planned.
+  Delaunay or grid caps, UVs or selections for its caps; neither have the Lathe
+  and the Sweep (no Isoparm display either). The Sweep has no rail spline, no
+  Scale and Rotation graphs and no Keep Segments. Loft and Cloner are planned.
 - **Splines**: Text comes next; hiding points, Grow/Shrink on points,
   snapping to spline points and the Pen snapping to objects; editing points
   inside the Pen (moving them while drawing); the Cissoid, Cogwheel, Cycloid, Formula, Profile,

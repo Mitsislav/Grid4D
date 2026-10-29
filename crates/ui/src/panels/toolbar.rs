@@ -259,6 +259,7 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::SubdivisionSurface => "Add Subdivision Surface (Alt: around the selected object)",
         ObjectKindTag::Extrude => "Add Extrude (Alt: around the selected spline)",
         ObjectKindTag::Lathe => "Add Lathe (Alt: around the selected spline)",
+        ObjectKindTag::Sweep => "Add Sweep: profile first, path second (Alt: around the selected spline)",
         ObjectKindTag::Circle => "Add Circle",
         ObjectKindTag::Rectangle => "Add Rectangle",
         ObjectKindTag::Arc => "Add Arc",

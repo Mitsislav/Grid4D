@@ -11,7 +11,7 @@ use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdi
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_geom::spline::{ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape, SplineType};
-use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe};
+use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Sweep};
 use grid4d_scene::{
     Axis, Document, Falloff, KeyState, LightDetails, LightShadow, LightType, Material, MaterialId, NodeData, NodeId,
     ObjectKind, Param, Scene, SceneEdit, SplineHandle, Tag, TagKind, TimeSettings,
@@ -702,6 +702,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 hierarchical,
             } => extrude_rows(ui, extrusion, hierarchical),
             ObjectKind::Lathe(lathe) => lathe_rows(ui, lathe),
+            ObjectKind::Sweep(sweep) => sweep_rows(ui, sweep),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, primitive),
             ObjectKind::Spline {
                 spline, interpolation, ..
@@ -1364,21 +1365,7 @@ fn lathe_rows(ui: &mut Ui, lathe: &mut Lathe) {
     );
     ui.end_row();
     offset_row(ui, "Movement", &mut lathe.movement);
-    attr_label(ui, "Scaling", LABEL_WIDTH);
-    let mut percent = lathe.scaling * 100.0;
-    if ui
-        .add_sized(
-            [FIELD_WIDTH, 19.0],
-            DragValue::new(&mut percent)
-                .speed(0.5)
-                .range(0.0..=100_000.0)
-                .suffix(" %"),
-        )
-        .changed()
-    {
-        lathe.scaling = percent / 100.0;
-    }
-    ui.end_row();
+    scale_row(ui, "Scaling", &mut lathe.scaling);
     check_row(ui, "Reverse Normals", &mut lathe.reverse_normals);
     ui.label("");
     ui.label(RichText::new("Caps").strong());
@@ -1389,7 +1376,45 @@ fn lathe_rows(ui: &mut Ui, lathe: &mut Lathe) {
     ui.end_row();
 }
 
-/// Start / End Cap and Caps Type (Extrude, Lathe).
+/// The Sweep generator's Object and Caps parameters.
+fn sweep_rows(ui: &mut Ui, sweep: &mut Sweep) {
+    scale_row(ui, "End Scale", &mut sweep.end_scale);
+    angle_row(ui, "End Rotation", &mut sweep.end_rotation, -36_000.0..=36_000.0);
+    percent_row(ui, "Start Growth", &mut sweep.start_growth);
+    percent_row(ui, "End Growth", &mut sweep.end_growth);
+    check_row(ui, "Parallel Movement", &mut sweep.parallel_movement);
+    check_row(ui, "Constant Cross Section", &mut sweep.constant_cross_section);
+    check_row(ui, "Banking", &mut sweep.banking);
+    check_row(ui, "Reverse Normals", &mut sweep.reverse_normals);
+    ui.label("");
+    ui.label(RichText::new("Caps").strong());
+    ui.end_row();
+    cap_rows(ui, &mut sweep.start_cap, &mut sweep.end_cap, &mut sweep.cap_type);
+    ui.label("");
+    ui.label(RichText::new("Child 1: profile; child 2: path").color(p::TEXT_DIM));
+    ui.end_row();
+}
+
+/// A scale factor (1.0 = 100 %, never negative) edited in percent.
+fn scale_row(ui: &mut Ui, label: &str, value: &mut f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let mut shown = *value * 100.0;
+    if ui
+        .add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut shown)
+                .speed(0.5)
+                .range(0.0..=100_000.0)
+                .suffix(" %"),
+        )
+        .changed()
+    {
+        *value = shown / 100.0;
+    }
+    ui.end_row();
+}
+
+/// Start / End Cap and Caps Type (Extrude, Lathe, Sweep).
 fn cap_rows(ui: &mut Ui, start: &mut bool, end: &mut bool, cap_type: &mut CapType) {
     check_row(ui, "Start Cap", start);
     check_row(ui, "End Cap", end);

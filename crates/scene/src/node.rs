@@ -119,6 +119,9 @@ pub enum ObjectKind {
     },
     /// Lathe generator: turns its first child spline around its Y axis.
     Lathe(grid4d_geom::surface::Lathe),
+    /// Sweep generator: moves its first child spline (the profile) along its
+    /// second (the path).
+    Sweep(grid4d_geom::surface::Sweep),
     /// A parametric spline (Circle, Rectangle, Arc, n-Side, Star, Helix,
     /// Flower): a curve, drawn as lines, not rendered.
     SplinePrimitive(SplinePrimitive),
@@ -150,6 +153,7 @@ pub enum ObjectKindTag {
     SubdivisionSurface,
     Extrude,
     Lathe,
+    Sweep,
     Circle,
     Rectangle,
     Arc,
@@ -161,7 +165,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -177,6 +181,7 @@ impl ObjectKindTag {
         Self::SubdivisionSurface,
         Self::Extrude,
         Self::Lathe,
+        Self::Sweep,
         Self::Circle,
         Self::Rectangle,
         Self::Arc,
@@ -199,7 +204,7 @@ impl ObjectKindTag {
     ];
 
     /// Generators: objects that build their geometry from their children.
-    pub const GENERATORS: [Self; 3] = [Self::SubdivisionSurface, Self::Extrude, Self::Lathe];
+    pub const GENERATORS: [Self; 4] = [Self::SubdivisionSurface, Self::Extrude, Self::Lathe, Self::Sweep];
 
     /// Geometric primitives (the "Create ▸ Object" family).
     pub const PRIMITIVES: [Self; 8] = [
@@ -231,6 +236,7 @@ impl ObjectKindTag {
             Self::SubdivisionSurface => "Subdivision Surface",
             Self::Extrude => "Extrude",
             Self::Lathe => "Lathe",
+            Self::Sweep => "Sweep",
             Self::Circle => "Circle",
             Self::Rectangle => "Rectangle",
             Self::Arc => "Arc",
@@ -312,6 +318,8 @@ impl ObjectKindTag {
             },
             // docs/reference/generator-lathe.md: a full turn in 24 steps.
             Self::Lathe => ObjectKind::Lathe(grid4d_geom::surface::Lathe::default()),
+            // docs/reference/generator-sweep.md: the whole path, banking on.
+            Self::Sweep => ObjectKind::Sweep(grid4d_geom::surface::Sweep::default()),
             // The manual states no defaults: these are ours (docs/reference/object-spline.md).
             Self::Circle => spline(SplineShape::Circle {
                 radius: 200.0,
@@ -436,6 +444,7 @@ impl ObjectKind {
             Self::SubdivisionSurface { .. } => ObjectKindTag::SubdivisionSurface,
             Self::Extrude { .. } => ObjectKindTag::Extrude,
             Self::Lathe(_) => ObjectKindTag::Lathe,
+            Self::Sweep(_) => ObjectKindTag::Sweep,
             Self::SplinePrimitive(primitive) => match primitive.shape {
                 SplineShape::Circle { .. } => ObjectKindTag::Circle,
                 SplineShape::Rectangle { .. } => ObjectKindTag::Rectangle,
@@ -455,12 +464,23 @@ impl ObjectKind {
         matches!(self, Self::SplinePrimitive(_) | Self::Spline { .. })
     }
 
+    /// How many of its first children a generator takes as inputs (the Sweep:
+    /// profile and path); 0 for other objects.
+    #[must_use]
+    pub const fn generator_inputs(&self) -> usize {
+        match self {
+            Self::Sweep(_) => 2,
+            Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) => 1,
+            _ => 0,
+        }
+    }
+
     /// Builds its geometry from its children (see [`ObjectKindTag::GENERATORS`]).
     #[must_use]
     pub const fn is_generator(&self) -> bool {
         matches!(
             self,
-            Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_)
+            Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) | Self::Sweep(_)
         )
     }
 
@@ -475,7 +495,9 @@ impl ObjectKind {
     pub fn local_bounds(&self) -> Option<Aabb> {
         let half = match *self {
             // A generator's extent is its result's: evaluation knows it.
-            Self::Null | Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) => return None,
+            Self::Null | Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) | Self::Sweep(_) => {
+                return None;
+            }
             Self::Cube { size, .. } => size * 0.5,
             Self::Sphere { radius, .. } => Vec3::splat(radius),
             Self::Cylinder { radius, height, .. } => Vec3::new(radius, height * 0.5, radius),

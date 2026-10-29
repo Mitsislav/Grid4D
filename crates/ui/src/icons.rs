@@ -434,6 +434,24 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
                 c.line((0.5, y), (0.5, y + 0.1));
             }
         }
+        ObjectKindTag::Sweep => {
+            // A tube following a curve: its two edges and its end opening.
+            let curve = |offset: f32| -> Vec<P> {
+                (0..=12)
+                    .map(|i| {
+                        let t = i as f32 / 12.0;
+                        (0.1 + 0.62 * t, 0.86 - offset - 0.62 * t + 0.28 * (t * PI).sin())
+                    })
+                    .collect()
+            };
+            let (outer, inner) = (curve(0.0), curve(0.2));
+            let mut band = outer.clone();
+            band.extend(inner.iter().rev());
+            c.fill_with(&band, soft);
+            c.polyline(&outer, false);
+            c.polyline(&inner, false);
+            c.ellipse((0.82, 0.3), (0.1, 0.13));
+        }
         ObjectKindTag::Light => {
             c.disc((0.5, 0.5), 0.19);
             for i in 0..8 {
