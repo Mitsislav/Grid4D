@@ -127,7 +127,12 @@ pub enum ObjectKind {
     /// Repeats its children along a line, a circle or a grid
     /// (`docs/reference/mograph-cloner.md`). The clones are instances made by
     /// evaluation, not nodes.
-    Cloner(grid4d_geom::cloner::Cloner),
+    Cloner {
+        cloner: grid4d_geom::cloner::Cloner,
+        /// Object mode: the object whose points or polygons carry the clones
+        /// (a dangling id gives none).
+        object: Option<NodeId>,
+    },
     /// Bend deformer: bends its parent and everything below the parent.
     Bend(grid4d_geom::deform::Bend),
     /// Twist deformer: turns its parent's subtree about Y along the box.
@@ -383,7 +388,7 @@ impl ObjectKindTag {
             // docs/reference/generator-loft.md: 30 × 10, through the sections.
             Self::Loft => ObjectKind::Loft(grid4d_geom::surface::Loft::default()),
             // docs/reference/mograph-cloner.md: three clones in a row, 250 cm apart.
-            Self::Cloner => ObjectKind::Cloner(grid4d_geom::cloner::Cloner::default()),
+            Self::Cloner => ObjectKind::cloner(grid4d_geom::cloner::Cloner::default()),
             // docs/reference/deformer-bend.md: a 250 cm box, no strength yet.
             Self::Bend => ObjectKind::Bend(grid4d_geom::deform::Bend::default()),
             // docs/reference/deformer-twist-taper-bulge.md: a 250 cm box, no effect yet.
@@ -521,7 +526,7 @@ impl ObjectKind {
             Self::Lathe(_) => ObjectKindTag::Lathe,
             Self::Sweep(_) => ObjectKindTag::Sweep,
             Self::Loft(_) => ObjectKindTag::Loft,
-            Self::Cloner(_) => ObjectKindTag::Cloner,
+            Self::Cloner { .. } => ObjectKindTag::Cloner,
             Self::Bend(_) => ObjectKindTag::Bend,
             Self::Twist(_) => ObjectKindTag::Twist,
             Self::Taper(_) => ObjectKindTag::Taper,
@@ -552,7 +557,7 @@ impl ObjectKind {
     #[must_use]
     pub const fn generator_inputs(&self) -> usize {
         match self {
-            Self::Loft(_) | Self::Cloner(_) => usize::MAX,
+            Self::Loft(_) | Self::Cloner { .. } => usize::MAX,
             Self::Sweep(_) => 2,
             Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) => 1,
             Self::Null
@@ -585,6 +590,12 @@ impl ObjectKind {
             self,
             Self::Bend(_) | Self::Twist(_) | Self::Taper(_) | Self::Bulge(_) | Self::Ffd { .. }
         )
+    }
+
+    /// A Cloner with no object linked (Object mode shows no clones until one is).
+    #[must_use]
+    pub const fn cloner(cloner: grid4d_geom::cloner::Cloner) -> Self {
+        Self::Cloner { cloner, object: None }
     }
 
     /// An FFD with its regular lattice, nothing selected.
@@ -650,7 +661,7 @@ impl ObjectKind {
                 | Self::Lathe(_)
                 | Self::Sweep(_)
                 | Self::Loft(_)
-                | Self::Cloner(_)
+                | Self::Cloner { .. }
         )
     }
 
@@ -671,7 +682,7 @@ impl ObjectKind {
             | Self::Lathe(_)
             | Self::Sweep(_)
             | Self::Loft(_)
-            | Self::Cloner(_) => {
+            | Self::Cloner { .. } => {
                 return None;
             }
             Self::Cube { size, .. } => size * 0.5,

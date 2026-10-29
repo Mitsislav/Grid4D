@@ -266,7 +266,7 @@ mod tests {
         let mut doc = Document::new("clones");
         let cloner = doc.scene.insert(Node::new(
             "Cloner",
-            ObjectKind::Cloner(Cloner {
+            ObjectKind::cloner(Cloner {
                 layout: Layout::Linear(Linear {
                     count: 3,
                     position: Vec3::new(500.0, 0.0, 0.0),

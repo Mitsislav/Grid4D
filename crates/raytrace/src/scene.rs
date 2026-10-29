@@ -260,7 +260,7 @@ mod tests {
         let mut doc = Document::new("clones");
         let cloner = doc.scene.insert(Node::new(
             "Cloner",
-            ObjectKind::Cloner(Cloner {
+            ObjectKind::cloner(Cloner {
                 layout: Layout::Radial(Radial {
                     count: 8,
                     ..Radial::default()

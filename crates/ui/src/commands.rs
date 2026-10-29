@@ -1772,7 +1772,7 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
             continue;
         }
         // A Cloner becomes a Null holding its clones as polygon objects.
-        if let ObjectKind::Cloner(_) = &*kind {
+        if let ObjectKind::Cloner { .. } = &*kind {
             if enabled_generator(id).is_none() {
                 continue;
             }
@@ -4261,7 +4261,7 @@ mod tests {
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
         assert!(matches!(
             doc.scene.get(cloner).unwrap().data.kind,
-            ObjectKind::Cloner(_)
+            ObjectKind::Cloner { .. }
         ));
         assert_eq!(doc.scene.children(cloner), [cube]);
     }

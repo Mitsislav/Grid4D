@@ -20,7 +20,7 @@ use std::{
 use glam::{Vec2, Vec3};
 use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
-    cloner::{CloneOrder, Cloner, GridArray, Layout, Linear, Radial, StepMode},
+    cloner::{CloneOrder, Cloner, Distribution, GridArray, Layout, Linear, Radial, StepMode, Surface},
     deform::{Bend, BendOrigin, Bulge, DeformerMode, Ffd, Shape, Taper, Twist},
     spline::{
         ArcType, Interpolation as SplineInterpolation, Segment, Spline, SplinePlane, SplinePrimitive, SplineShape,
@@ -837,6 +837,10 @@ enum KindDto {
     /// A Cloner (added in step 10.6); angles in radians, defaults omitted.
     Cloner {
         layout: ClonerLayoutDto,
+        /// Object mode's object, by index in `objects` (added in step 10.7;
+        /// written by the object, resolved once every object exists).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        object: Option<usize>,
         #[serde(default, skip_serializing_if = "CloneOrderDto::is_iterate")]
         clones: CloneOrderDto,
         seed: u32,
@@ -1073,6 +1077,30 @@ enum ClonerLayoutDto {
         step: StepModeDto,
         size: [f32; 3],
     },
+    /// Added in step 10.7.
+    Object {
+        #[serde(default, skip_serializing_if = "DistributionDto::is_vertex")]
+        distribution: DistributionDto,
+        align: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DistributionDto {
+    #[default]
+    Vertex,
+    PolygonCenter,
+}
+
+impl DistributionDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_vertex(&self) -> bool {
+        *self == Self::Vertex
+    }
 }
 
 impl ClonerLayoutDto {
@@ -1103,6 +1131,13 @@ impl ClonerLayoutDto {
                 count: grid.count,
                 step: grid.mode.into(),
                 size: grid.size.to_array(),
+            },
+            Layout::Object(surface) => Self::Object {
+                distribution: match surface.distribution {
+                    Distribution::Vertex => DistributionDto::Vertex,
+                    Distribution::PolygonCenter => DistributionDto::PolygonCenter,
+                },
+                align: surface.align,
             },
         }
     }
@@ -1152,6 +1187,13 @@ impl ClonerLayoutDto {
                 mode: step.into(),
                 size: Vec3::from_array(size),
             }),
+            Self::Object { distribution, align } => Layout::Object(Surface {
+                distribution: match distribution {
+                    DistributionDto::Vertex => Distribution::Vertex,
+                    DistributionDto::PolygonCenter => Distribution::PolygonCenter,
+                },
+                align,
+            }),
         }
     }
 
@@ -1171,6 +1213,7 @@ impl ClonerLayoutDto {
                 ..
             } => vec![radius, start_angle, end_angle, offset],
             Self::Grid { size, .. } => size.to_vec(),
+            Self::Object { .. } => Vec::new(),
         }
     }
 }
@@ -2062,10 +2105,15 @@ impl File {
             .map(MaterialDto::into_material)
             .collect::<Result<Vec<_>, IoError>>()?;
         let mut tags: Vec<Vec<TagDto>> = Vec::with_capacity(objects.len());
+        let mut links: Vec<Option<usize>> = Vec::with_capacity(objects.len());
         let objects = objects
             .into_iter()
             .map(|object| {
                 object.check_finite()?;
+                links.push(match object.kind {
+                    KindDto::Cloner { object, .. } => object,
+                    _ => None,
+                });
                 let parent = object.parent;
                 let (data, object_tags) = object.into_data(&meshes)?;
                 tags.push(object_tags);
@@ -2084,7 +2132,15 @@ impl File {
             .into_iter()
             .map(|material| doc.scene.materials_mut().insert(material))
             .collect();
-        // Tags last: they may refer to any object.
+        // Object links and tags last: they may refer to any object.
+        for (&id, link) in ids.iter().zip(links) {
+            if let Some(index) = link
+                && let Some(node) = doc.scene.get_mut(id)
+                && let ObjectKind::Cloner { object, .. } = &mut node.data.kind
+            {
+                *object = ids.get(index).copied();
+            }
+        }
         for (&id, object_tags) in ids.iter().zip(tags) {
             if !object_tags.is_empty()
                 && let Some(node) = doc.scene.get_mut(id)
@@ -2105,7 +2161,15 @@ impl ObjectDto {
         Self {
             name: data.name.clone(),
             parent,
-            kind: KindDto::new(&data.kind, &data.name, meshes),
+            kind: {
+                let mut kind = KindDto::new(&data.kind, &data.name, meshes);
+                if let (KindDto::Cloner { object, .. }, ObjectKind::Cloner { object: Some(id), .. }) =
+                    (&mut kind, &data.kind)
+                {
+                    *object = refs.objects.get(id).copied();
+                }
+                kind
+            },
             position: t.position.to_array(),
             rotation_hpb: t.rotation.to_array(),
             scale: t.scale.to_array(),
@@ -2387,8 +2451,9 @@ impl KindDto {
                 end_cap: lathe.end_cap,
                 cap_type: lathe.cap_type.into(),
             },
-            ObjectKind::Cloner(cloner) => Self::Cloner {
+            ObjectKind::Cloner { cloner, .. } => Self::Cloner {
                 layout: ClonerLayoutDto::new(cloner.layout),
+                object: None,
                 clones: match cloner.clones {
                     CloneOrder::Iterate => CloneOrderDto::Iterate,
                     CloneOrder::Random => CloneOrderDto::Random,
@@ -2770,10 +2835,11 @@ impl KindDto {
             }),
             Self::Cloner {
                 layout,
+                object: _,
                 clones,
                 seed,
                 reset_coordinates,
-            } => ObjectKind::Cloner(Cloner {
+            } => ObjectKind::cloner(Cloner {
                 layout: layout.into_layout(),
                 clones: match clones {
                     CloneOrderDto::Iterate => CloneOrder::Iterate,
@@ -3689,12 +3755,42 @@ mod tests {
     }
 
     #[test]
+    fn object_mode_cloners_keep_their_object_link() {
+        use grid4d_geom::cloner::{Cloner, Distribution, Layout, Surface};
+        let mut doc = Document::new("surface");
+        let sphere = doc
+            .scene
+            .insert(Node::new("Sphere", ObjectKindTag::Sphere.default_kind()));
+        let surface = Layout::Object(Surface {
+            distribution: Distribution::PolygonCenter,
+            align: false,
+        });
+        doc.scene.insert(Node::new(
+            "Cloner",
+            ObjectKind::Cloner {
+                cloner: Cloner {
+                    layout: surface,
+                    ..Cloner::default()
+                },
+                object: Some(sphere),
+            },
+        ));
+        let loaded = round_trip(&doc);
+        let roots = loaded.scene.roots();
+        let ObjectKind::Cloner { cloner, object } = &loaded.scene.get(roots[1]).unwrap().data.kind else {
+            panic!("not a Cloner")
+        };
+        assert_eq!(cloner.layout, surface);
+        assert_eq!(*object, Some(roots[0]), "the link points at the loaded sphere");
+    }
+
+    #[test]
     fn cloners_round_trip_and_counts_are_clamped() {
         use grid4d_geom::cloner::{CloneOrder, Cloner, GridArray, Layout, Linear, Radial, StepMode};
         let mut doc = Document::new("clones");
         let kinds = [
             ObjectKindTag::Cloner.default_kind(),
-            ObjectKind::Cloner(Cloner {
+            ObjectKind::cloner(Cloner {
                 layout: Layout::Linear(Linear {
                     count: 7,
                     offset: 2,
@@ -3707,7 +3803,7 @@ mod tests {
                 seed: 42,
                 reset_coordinates: false,
             }),
-            ObjectKind::Cloner(Cloner {
+            ObjectKind::cloner(Cloner {
                 layout: Layout::Radial(Radial {
                     count: 12,
                     plane: SplinePlane::ZY,
@@ -3718,7 +3814,7 @@ mod tests {
                 }),
                 ..Cloner::default()
             }),
-            ObjectKind::Cloner(Cloner {
+            ObjectKind::cloner(Cloner {
                 layout: Layout::Grid(GridArray {
                     count: [2, 3, 4],
                     mode: StepMode::EndPoint,
@@ -3745,7 +3841,7 @@ mod tests {
         );
         let huge = r#"{"type": "cloner", "seed": 1, "layout": {"mode": "grid", "count": [4000000000, 0, 5], "size": [1, 1, 1]}}"#;
         let dto: KindDto = serde_json::from_str(huge).unwrap();
-        let ObjectKind::Cloner(cloner) = dto.into_kind(&[], "test").unwrap() else {
+        let ObjectKind::Cloner { cloner, .. } = dto.into_kind(&[], "test").unwrap() else {
             panic!()
         };
         assert_eq!(

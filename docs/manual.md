@@ -1491,6 +1491,14 @@ Choose the layout in the Object tab's **Mode**:
 - **Grid Array**: a box-shaped grid centred on the Cloner. **Count** along X,
   Y and Z, and **Size**: the distance between neighbours (Per Step) or the
   whole grid's size (End Point).
+- **Object**: on another object's surface. Choose the object in **Object** (a
+  list of the document's objects), then the **Distribution**: a clone on every
+  point (**Vertex**) or on every polygon's centre (**Polygon Center**). With
+  **Align Clone** on, each clone stands up along the surface — a cone's tip
+  points outwards like a spike. The clones follow the object as it moves or
+  changes, even while it is hidden.
+
+![Cones on every polygon of a sphere from a Cloner in Object mode, and a ring of ten small towers: a Linear Cloner of turning, shrinking cubes inside a Radial Cloner](images/manual/mograph-cloner-object.png)
 
 ### 15.2 Which child, and where
 
@@ -1500,6 +1508,12 @@ Choose the layout in the Object tab's **Mode**:
 - **Reset Coordinates** (on): every clone sits exactly where the layout puts
   it. Switch it off to keep the child's own position, rotation and scale on top
   — move a child up and all its clones rise.
+- **Groups**: a child with children of its own is cloned whole — put a cube
+  and a sphere under a Null, the Null under the Cloner, and every clone is the
+  pair.
+- **Cloners inside Cloners**: put a Cloner under another one and the outer
+  Cloner repeats all of the inner one's clones — a row of four cubes inside a
+  ring of ten makes ten towers.
 
 ### 15.3 Working with clones
 
@@ -1884,10 +1898,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   and the Sweep (no Isoparm display either). The Sweep has no rail spline, no
   Scale and Rotation graphs and no Keep Segments. The Loft has no Adapt UV
   (no UVs) and uses only the first segment of each section (no holes).
-- **Cloner**: the Object mode (clones on another object's points), clones of a
-  child's own children, Cloners inside Cloners and effectors are coming next;
-  not planned yet: Honeycomb, Blend and Sort, Step Rotation, Amount, Offset
-  Variation, grid forms and Fill.
+- **Cloner**: effectors are coming next; not planned yet: Honeycomb, Blend and
+  Sort, Step Rotation, Amount, Offset Variation, grid forms and Fill, Object
+  mode on edges, along splines or by surface area, and the Up Vector.
 - **Splines**: other fonts for Text, kerning and Separate Letters; hiding
   points, Grow/Shrink on points,
   snapping to spline points and the Pen snapping to objects; editing points

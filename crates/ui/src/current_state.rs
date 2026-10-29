@@ -66,7 +66,7 @@ pub(crate) fn bake(doc: &Document, selection: &[NodeId]) -> Vec<Baked> {
                 data: copy(&eval, &doc.scene, node, original, frame),
             });
             // A Cloner's copy (a Null) holds its clones as objects.
-            if original.data.enabled && matches!(original.data.kind, ObjectKind::Cloner(_)) {
+            if original.data.enabled && matches!(original.data.kind, ObjectKind::Cloner { .. }) {
                 baked.extend(
                     clone_objects(&eval, &doc.scene, node.id, frame)
                         .into_iter()
@@ -83,9 +83,10 @@ pub(crate) fn bake(doc: &Document, selection: &[NodeId]) -> Vec<Baked> {
 }
 
 /// The clones `eval` shows for `cloner` as plain objects placed in the
-/// Cloner's space, named after the child each repeats (`Cube.0`, `Cube.1`, …):
-/// polygon objects of their shapes; a clone of a curve keeps the curve, a
-/// clone of a Null is a Null. Nothing for a hidden or disabled Cloner.
+/// Cloner's space, one per shape (a cloned group gives its parts), named after
+/// the object shown and the clone's number (`Cube.0`, `Cube.1`, …): polygon
+/// objects of their shapes; a clone of a curve keeps the curve. Nothing for a
+/// hidden or disabled Cloner.
 pub(crate) fn clone_objects(eval: &EvaluatedScene, scene: &Scene, cloner: NodeId, frame: f64) -> Vec<NodeData> {
     let Some(world) = eval.nodes().iter().find(|n| n.id == cloner).map(|n| n.world) else {
         return Vec::new();
@@ -94,11 +95,10 @@ pub(crate) fn clone_objects(eval: &EvaluatedScene, scene: &Scene, cloner: NodeId
     eval.instances()
         .iter()
         .filter(|clone| clone.owner == cloner)
-        .enumerate()
-        .filter_map(|(index, clone)| {
+        .filter_map(|clone| {
             let source = scene.get(clone.source)?;
             let mut data = source.data.clone();
-            data.name = format!("{}.{index}", source.data.name);
+            data.name = format!("{}.{}", source.data.name, clone.index);
             data.transform = Transform::from_matrix(&(inverse * clone.world));
             data.tracks.clear();
             data.unkeyed = None;

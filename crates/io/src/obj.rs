@@ -241,7 +241,7 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
             | ObjectKind::Lathe(_)
             | ObjectKind::Sweep(_)
             | ObjectKind::Loft(_)
-            | ObjectKind::Cloner(_)
+            | ObjectKind::Cloner { .. }
             | ObjectKind::Bend(_)
             | ObjectKind::Twist(_)
             | ObjectKind::Taper(_)

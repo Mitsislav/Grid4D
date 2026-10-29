@@ -398,7 +398,7 @@ pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, v
                 t,
                 grid4d_scene::Tag::Target { target: Some(_), .. } | grid4d_scene::Tag::Target { up: Some(_), .. }
             )
-        });
+        }) || matches!(data.kind, ObjectKind::Cloner { object: Some(_), .. });
         if refers {
             later.push((index, data.clone()));
             grid4d_io::remap_objects(&mut data, |_| None);
@@ -644,7 +644,7 @@ pub fn exportable(doc: &Document) -> Objects {
                 }
                 None => {
                     // A Cloner's children are written as its clones (below).
-                    if data.enabled && matches!(data.kind, ObjectKind::Cloner(_)) {
+                    if data.enabled && matches!(data.kind, ObjectKind::Cloner { .. }) {
                         inputs = node.children();
                     }
                     data.kind = ObjectKind::Null;
@@ -668,7 +668,7 @@ pub fn exportable(doc: &Document) -> Objects {
         let parent = node.parent().and_then(|p| index_of.get(&p).copied());
         let index = nodes.len();
         index_of.insert(id, index);
-        let cloner = node.data.enabled && matches!(node.data.kind, ObjectKind::Cloner(_));
+        let cloner = node.data.enabled && matches!(node.data.kind, ObjectKind::Cloner { .. });
         nodes.push(ObjectEntry { parent, data });
         // A Cloner is written as a group of its clones.
         if cloner {

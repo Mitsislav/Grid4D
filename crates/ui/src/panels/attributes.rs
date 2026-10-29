@@ -8,7 +8,7 @@
 //! typed value, a click) is recorded as one undo step through [`LiveEdit`].
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
-use grid4d_geom::cloner::{CloneOrder, Cloner, Layout, StepMode};
+use grid4d_geom::cloner::{CloneOrder, Cloner, Distribution, Layout, StepMode};
 use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode, Ffd, Shape};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
@@ -282,7 +282,7 @@ impl AttributesPanel {
             Tab::Coord => label = coord_tab(ui, &mut data, keying).unwrap_or(label),
             Tab::Object => {
                 let mut fit = false;
-                label = object_tab_at(ui, &mut data, keying, &mut fit).unwrap_or(label);
+                label = object_tab_at(ui, &mut data, keying, &mut fit, Some((&doc.scene, id))).unwrap_or(label);
                 if fit {
                     commands.push(EditorCommand::FitToParent(id));
                 }
@@ -521,12 +521,18 @@ struct Shown {
 /// there, edits written back as keys, temporary values or base values (like
 /// the Coordinates fields), and the key buttons. Returns an undo label when a
 /// key button was used.
-fn object_tab_at(ui: &mut Ui, data: &mut NodeData, keying: Keying, fit: &mut bool) -> Option<&'static str> {
+fn object_tab_at(
+    ui: &mut Ui,
+    data: &mut NodeData,
+    keying: Keying,
+    fit: &mut bool,
+    links: Option<(&Scene, NodeId)>,
+) -> Option<&'static str> {
     let frame = keying.frame;
     let shown = data.kind_at(frame).into_owned();
     let mut edited = shown.clone();
     let mut keys = KeyRows::new(data, &shown, frame);
-    object_tab(ui, &mut edited, &mut keys);
+    object_tab(ui, &mut edited, &mut keys, links);
     *fit = keys.fit_to_parent;
     if edited != shown {
         data.set_kind_at(&edited, frame, keying.autokey);
@@ -582,7 +588,9 @@ impl KeyRows {
     }
 }
 
-fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows) {
+/// `links`: the document and the object shown, for rows that link another
+/// object (none: such rows are left out).
+fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option<(&Scene, NodeId)>) {
     section_heading(ui, "Object Properties");
     Grid::new("grid4d.attr.object")
         .num_columns(3)
@@ -804,7 +812,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows) {
             }
             ObjectKind::Sweep(sweep) => sweep_rows(ui, k, sweep),
             ObjectKind::Loft(loft) => loft_rows(ui, loft),
-            ObjectKind::Cloner(cloner) => cloner_rows(ui, k, cloner),
+            ObjectKind::Cloner { cloner, object } => cloner_rows(ui, k, cloner, object, links),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, k, primitive),
             ObjectKind::Text(text) => text_rows(ui, k, text),
             ObjectKind::Spline {
@@ -1559,7 +1567,13 @@ fn sweep_rows(ui: &mut Ui, k: &mut KeyRows, sweep: &mut Sweep) {
 
 /// A Cloner's mode and its layout's values, which child each clone repeats and
 /// Reset Coordinates.
-fn cloner_rows(ui: &mut Ui, k: &mut KeyRows, cloner: &mut Cloner) {
+fn cloner_rows(
+    ui: &mut Ui,
+    k: &mut KeyRows,
+    cloner: &mut Cloner,
+    object: &mut Option<NodeId>,
+    links: Option<(&Scene, NodeId)>,
+) {
     attr_label(ui, "Mode", LABEL_WIDTH);
     let mut index = cloner.layout.index();
     egui::ComboBox::from_id_salt("grid4d.attr.cloner.mode")
@@ -1627,6 +1641,21 @@ fn cloner_rows(ui: &mut Ui, k: &mut KeyRows, cloner: &mut Cloner) {
             for (axis, label) in ["Size . X", "Size . Y", "Size . Z"].into_iter().enumerate() {
                 length_row(ui, k, label, &mut grid.size[axis]);
             }
+        }
+        Layout::Object(surface) => {
+            if let Some((scene, owner)) = links {
+                object_row(ui, "Object", object, scene, owner);
+            }
+            attr_label(ui, "Distribution", LABEL_WIDTH);
+            egui::ComboBox::from_id_salt("grid4d.attr.cloner.distribution")
+                .selected_text(surface.distribution.label())
+                .show_ui(ui, |ui| {
+                    for option in Distribution::ALL {
+                        ui.selectable_value(&mut surface.distribution, option, option.label());
+                    }
+                });
+            ui.end_row();
+            check_row(ui, "Align Clone", &mut surface.align);
         }
     }
     ui.label("");
@@ -1998,7 +2027,7 @@ mod tests {
                 let before = data.clone();
                 for _ in 0..3 {
                     ctx.run_ui(egui::RawInput::default(), |ui| {
-                        object_tab(ui, &mut data.kind, &mut KeyRows::default());
+                        object_tab(ui, &mut data.kind, &mut KeyRows::default(), None);
                     })
                     .drop_without_applying_deltas();
                 }
@@ -2061,8 +2090,10 @@ mod tests {
             let data = NodeData::new("o", kind.clone());
             let mut keys = KeyRows::new(&data, &kind, 0.0);
             let mut shown = kind.clone();
-            ctx.run_ui(egui::RawInput::default(), |ui| object_tab(ui, &mut shown, &mut keys))
-                .drop_without_applying_deltas();
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                object_tab(ui, &mut shown, &mut keys, None)
+            })
+            .drop_without_applying_deltas();
             let mut drawn = keys.drawn.clone();
             drawn.sort_by_key(|p| p.index());
             let mut wanted = kind.params();
@@ -2088,7 +2119,7 @@ mod tests {
         };
         for _ in 0..3 {
             ctx.run_ui(egui::RawInput::default(), |ui| {
-                assert_eq!(object_tab_at(ui, &mut data, keying, &mut false), None);
+                assert_eq!(object_tab_at(ui, &mut data, keying, &mut false, None), None);
             })
             .drop_without_applying_deltas();
         }

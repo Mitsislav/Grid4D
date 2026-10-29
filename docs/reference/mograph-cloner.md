@@ -6,9 +6,9 @@
 > Written in our own words — no copied text or images. The manual states few
 > defaults; ours are marked.
 >
-> Covers implementation-plan step **10.6** (the framework: Linear, Radial,
-> Grid Array). Object mode, nested cloners and cloning groups follow in 10.7;
-> effectors in 10.8 (`mograph-effectors.md`).
+> Covers implementation-plan steps **10.6** (the framework: Linear, Radial,
+> Grid Array) and **10.7** (Object mode, cloned groups, Cloners inside
+> Cloners). Effectors follow in 10.8 (`mograph-effectors.md`).
 
 ## Purpose
 
@@ -56,13 +56,33 @@ of it changes.
 | Spacing | Per Step, End Point | Per Step | Per Step: Size is the distance between neighbours. End Point: Size is the whole grid's extent |
 | Size . X / Y / Z | cm | 250 cm | As Spacing says (animatable) |
 
+**Object** (10.7) — clones on another object's surface.
+
+| Name | Range | Default | Effect |
+|------|-------|---------|--------|
+| Object | a link to any object | none (no clones) | The object whose surface carries the clones |
+| Distribution | Vertex, Polygon Center | Vertex | A clone on every point, or on every polygon's centre |
+| Align Clone | on / off | on | Each clone's Y axis along the surface's normal there (a point's normal: the mean of its polygons', weighted by area). Off: clones keep the Cloner's orientation |
+
 ## Behaviour
 
 - **Children are the sources.** Every visible child of an enabled Cloner is
   repeated (deformers among them are not cloned, nor are cameras and lights).
   The children themselves are not drawn: only the clones. They stay in the
-  Object Manager, where they are selected and edited as usual. A child's own
-  children are not cloned yet (10.7).
+  Object Manager, where they are selected and edited as usual.
+- **Groups (10.7):** a child with children of its own is cloned whole: each
+  clone repeats the child and everything below it, keeping their placement
+  relative to the child (Reset Coordinates resets only the child's).
+- **Cloners inside Cloners (10.7):** a Cloner among the children (or inside a
+  cloned group) is cloned with its clones — a Linear Cloner of three inside a
+  Radial one of ten gives thirty. The inner Cloner's clones belong to the
+  outer one (clicking one selects the outer Cloner).
+- **Object mode (10.7):** the linked object's shape as the viewport shows it
+  (a polygon object, a primitive, a generator's result, a deformed shape) at
+  the current frame, wherever it is: the clones follow it when it moves or
+  changes, also while it is hidden (a hidden polygon object or primitive still
+  carries clones; a hidden generator does not). The object may be anywhere in
+  the hierarchy; without one, or with a deleted one, there are no clones.
 - **Clones are not objects.** They are made each time the scene is evaluated,
   so a thousand clones cost no more memory than their shapes, and identical
   clones are drawn together. They take their child's shape as shown (a
@@ -92,6 +112,9 @@ of it changes.
 | `EvaluatedScene::instances()` → `EvaluatedInstance { owner, source, kind, world, bounds, drawable, pick }`, built after animation and Target tags; the Cloner's bounds are its clones'; `PickShape::Clones` | `grid4d-eval` |
 | Instances drawn with the objects (same batches), picked (→ the Cloner), filtered as Generators | `grid4d-render` (`frame.rs`, `picking.rs`, `filter.rs`) |
 | Instances baked into the render scene | `grid4d-raytrace` |
+| Object mode: `Layout::Object(Surface)` (`Distribution`, align), `Cloner::placements(surface, …)`; `ObjectKind::Cloner { cloner, object }`; the object's mesh from the evaluation (or, hidden, its own polygons / a cached primitive mesh) | `grid4d-geom::cloner`, `grid4d-eval` |
+| Groups and nested Cloners: every object inside an enabled Cloner is a source (`top` for its children); Cloners built deepest first, an inner Cloner's instances carried into the outer one's and then dropped | `grid4d-eval` |
+| The object link saved by index (`"object"`), resolved after every object exists; Merge remaps it (`remap_objects`) | `grid4d-io` |
 | `.g4d` v3 `cloner` kind (layout by mode, defaults omitted, counts clamped) | `grid4d-io::v3` |
 | Make Editable, Current State to Object, export: `current_state::clone_objects` | `grid4d-ui` |
 | Icon, Create ▸ Generator, toolbar, Attribute Manager rows | `grid4d-ui` |
@@ -108,10 +131,14 @@ of it changes.
 4. **Defaults are ours** where the manual states none (250 cm steps for the
    200 cm default cube; a 400 cm ring on the floor).
 5. **Limits:** at most 10 000 clones per Cloner.
-6. **Later:** Honeycomb, Blend and Sort, Step Mode / Step Size / Step Rotation,
+6. **Align Clone turns the clone's Y axis** along the normal (ours: a cone
+   stands on the surface like a spike), from the clone's unturned orientation.
+7. **Later:** Honeycomb, Blend and Sort, Step Mode / Step Size / Step Rotation,
    Amount, Offset Variation, Instance Mode choices, grid forms and Fill.
 
 ## Acceptance criteria
+
+10.6:
 
 - [x] Linear, Radial and Grid Array place clones as described (per step and end
       point); Iterate alternates children, Random follows the seed.
@@ -123,3 +150,12 @@ of it changes.
 - [x] Make Editable, Current State to Object and export give one object per
       clone; the path tracer renders them.
 - [x] The instance list reuses its capacity (hot-path test).
+
+10.7:
+
+- [x] Object mode puts a clone on every point or polygon centre of a polygon
+      object, primitive or generator result, aligned to the normals or not;
+      a hidden object still carries them; no object, no clones.
+- [x] A child group is cloned whole; a Cloner inside a Cloner is cloned with
+      its clones, all selected as the outer Cloner.
+- [x] The object link is saved, loaded and remapped by Merge.

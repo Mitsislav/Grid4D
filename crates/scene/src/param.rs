@@ -348,8 +348,8 @@ impl ObjectKind {
                 P::Amount,
                 P::Curvature,
             ],
-            Self::Cloner(cloner) => match cloner.layout {
-                Layout::Linear(_) => &[],
+            Self::Cloner { cloner, .. } => match cloner.layout {
+                Layout::Linear(_) | Layout::Object(_) => &[],
                 Layout::Radial(_) => &[P::Radius, P::StartAngle, P::EndAngle],
                 Layout::Grid(_) => &[P::Size(Axis::X), P::Size(Axis::Y), P::Size(Axis::Z)],
             },
@@ -486,7 +486,7 @@ impl ObjectKind {
             (Self::Bulge(d), P::Size(axis)) => Some(&mut d.size[axis.index()]),
             (Self::Bulge(d), P::Amount) => Some(&mut d.strength),
             (Self::Bulge(d), P::Curvature) => Some(&mut d.shape.curvature),
-            (Self::Cloner(cloner), param) => match (&mut cloner.layout, param) {
+            (Self::Cloner { cloner, .. }, param) => match (&mut cloner.layout, param) {
                 (Layout::Radial(radial), P::Radius) => Some(&mut radial.radius),
                 (Layout::Radial(radial), P::StartAngle) => Some(&mut radial.start_angle),
                 (Layout::Radial(radial), P::EndAngle) => Some(&mut radial.end_angle),

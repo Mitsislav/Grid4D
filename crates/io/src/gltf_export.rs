@@ -211,7 +211,7 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
             | ObjectKind::Lathe(_)
             | ObjectKind::Sweep(_)
             | ObjectKind::Loft(_)
-            | ObjectKind::Cloner(_)
+            | ObjectKind::Cloner { .. }
             | ObjectKind::Bend(_)
             | ObjectKind::Twist(_)
             | ObjectKind::Taper(_)

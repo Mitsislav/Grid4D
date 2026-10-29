@@ -5,7 +5,7 @@
 
 use std::{collections::HashMap, fs, path::Path};
 
-use grid4d_scene::{Document, MaterialId, Materials, Node, NodeData, NodeId, Tag};
+use grid4d_scene::{Document, MaterialId, Materials, Node, NodeData, NodeId, ObjectKind, Tag};
 
 use crate::{IoError, OPEN_EXTENSIONS, gltf_export, gltf_import, load, obj};
 
@@ -113,7 +113,7 @@ pub(crate) enum Look {
     Colour([u32; 3]),
 }
 
-/// Rewrites the object references in `data`'s tags through `map` (a reference
+/// Rewrites the object references in `data` (tags, a Cloner's object) through `map` (a reference
 /// `map` does not know is dropped).
 pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>) {
     for tag in &mut data.tags {
@@ -121,6 +121,9 @@ pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>
             *target = target.and_then(&map);
             *up = up.and_then(&map);
         }
+    }
+    if let ObjectKind::Cloner { object, .. } = &mut data.kind {
+        *object = object.and_then(&map);
     }
 }
 

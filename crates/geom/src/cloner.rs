@@ -3,9 +3,9 @@
 
 use std::f32::consts::TAU;
 
-use glam::{EulerRot, Mat4, Quat, Vec3};
+use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 
-use crate::spline::SplinePlane;
+use crate::{PolyMesh, spline::SplinePlane};
 
 /// How Linear and Grid Array values are read.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -107,17 +107,57 @@ impl Default for GridArray {
     }
 }
 
+/// Where on an object Object mode puts the clones.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Distribution {
+    /// On every point.
+    #[default]
+    Vertex,
+    /// On every polygon's centre.
+    PolygonCenter,
+}
+
+impl Distribution {
+    pub const ALL: [Self; 2] = [Self::Vertex, Self::PolygonCenter];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Vertex => "Vertex",
+            Self::PolygonCenter => "Polygon Center",
+        }
+    }
+}
+
+/// Clones on another object's surface (which object is the scene's business).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Surface {
+    pub distribution: Distribution,
+    /// Each clone's Y axis turned along the surface's normal there.
+    pub align: bool,
+}
+
+impl Default for Surface {
+    fn default() -> Self {
+        Self {
+            distribution: Distribution::Vertex,
+            align: true,
+        }
+    }
+}
+
 /// The layout.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Layout {
     Linear(Linear),
     Radial(Radial),
     Grid(GridArray),
+    Object(Surface),
 }
 
 impl Layout {
     /// The labels the Mode menu shows, in order.
-    pub const LABELS: [&'static str; 3] = ["Linear", "Radial", "Grid Array"];
+    pub const LABELS: [&'static str; 4] = ["Linear", "Radial", "Grid Array", "Object"];
 
     #[must_use]
     pub const fn label(&self) -> &'static str {
@@ -130,6 +170,7 @@ impl Layout {
             Self::Linear(_) => 0,
             Self::Radial(_) => 1,
             Self::Grid(_) => 2,
+            Self::Object(_) => 3,
         }
     }
 
@@ -139,6 +180,7 @@ impl Layout {
         match index {
             1 => Self::Radial(Radial::default()),
             2 => Self::Grid(GridArray::default()),
+            3 => Self::Object(Surface::default()),
             _ => Self::Linear(Linear::default()),
         }
     }
@@ -193,7 +235,8 @@ impl Cloner {
     /// in all.
     pub const MAX_COUNT: u32 = 10_000;
 
-    /// How many clones there are.
+    /// How many clones the layout makes (Object mode: as many as its object
+    /// has points or polygons, so 0 here — see [`Cloner::placements`]).
     #[must_use]
     pub fn count(&self) -> usize {
         let count = match self.layout {
@@ -204,11 +247,31 @@ impl Cloner {
                 .iter()
                 .fold(1u32, |n, &c| n.saturating_mul(c))
                 .min(Self::MAX_COUNT),
+            Layout::Object(_) => 0,
         };
         usize::try_from(count.min(Self::MAX_COUNT)).unwrap_or(0)
     }
 
-    /// Clone `index`'s placement in the cloner's space.
+    /// Every clone's placement in the cloner's space, into `out`. Object mode
+    /// needs `surface`: the object's mesh and the matrix taking it into the
+    /// cloner's space (without one there are no clones); `normals` is scratch
+    /// space. At most [`Cloner::MAX_COUNT`].
+    pub fn placements(&self, surface: Option<(&PolyMesh, Mat4)>, normals: &mut Vec<Vec3>, out: &mut Vec<Mat4>) {
+        out.clear();
+        match self.layout {
+            Layout::Object(layout) => {
+                if let Some((mesh, to_cloner)) = surface {
+                    surface_placements(mesh, to_cloner, layout, normals, out);
+                }
+            }
+            Layout::Linear(_) | Layout::Radial(_) | Layout::Grid(_) => {
+                out.extend((0..self.count()).map(|i| self.matrix(i)));
+            }
+        }
+    }
+
+    /// Clone `index`'s placement in the cloner's space (Linear, Radial and Grid
+    /// Array; Object mode's come from [`Cloner::placements`]).
     #[must_use]
     pub fn matrix(&self, index: usize) -> Mat4 {
         let i = index as f32;
@@ -262,6 +325,7 @@ impl Cloner {
                 }
                 Mat4::from_translation(position)
             }
+            Layout::Object(_) => Mat4::IDENTITY,
         }
     }
 
@@ -277,6 +341,56 @@ impl Cloner {
                 let hash = mix(u64::from(self.seed) ^ (index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
                 usize::try_from(hash % children as u64).unwrap_or(0)
             }
+        }
+    }
+}
+
+/// Object mode: a placement on every point (its normal: the area-weighted
+/// mean of its polygons') or polygon centre of `mesh`, taken into the cloner's
+/// space by `to_cloner`.
+fn surface_placements(mesh: &PolyMesh, to_cloner: Mat4, layout: Surface, normals: &mut Vec<Vec3>, out: &mut Vec<Mat4>) {
+    let linear = Mat3::from_mat4(to_cloner);
+    let normal_matrix = if linear.determinant().abs() > f32::EPSILON {
+        linear.inverse().transpose()
+    } else {
+        Mat3::IDENTITY
+    };
+    let place = |point: Vec3, normal: Vec3| {
+        let normal = (normal_matrix * normal).normalize_or_zero();
+        let rotation = if layout.align && normal != Vec3::ZERO {
+            Quat::from_rotation_arc(Vec3::Y, normal)
+        } else {
+            Quat::IDENTITY
+        };
+        Mat4::from_rotation_translation(rotation, to_cloner.transform_point3(point))
+    };
+    let max = usize::try_from(Cloner::MAX_COUNT).unwrap_or(usize::MAX);
+    match layout.distribution {
+        Distribution::Vertex => {
+            normals.clear();
+            normals.resize(mesh.point_count(), Vec3::ZERO);
+            for face in 0..mesh.face_count() {
+                let vector = mesh.face_vector(face);
+                for &corner in mesh.face(face) {
+                    if let Some(normal) = usize::try_from(corner).ok().and_then(|c| normals.get_mut(c)) {
+                        *normal += vector;
+                    }
+                }
+            }
+            out.extend(
+                mesh.points()
+                    .iter()
+                    .zip(normals.iter())
+                    .take(max)
+                    .map(|(&point, &normal)| place(point, normal)),
+            );
+        }
+        Distribution::PolygonCenter => {
+            out.extend(
+                (0..mesh.face_count())
+                    .take(max)
+                    .map(|face| place(mesh.face_center(face), mesh.face_normal(face))),
+            );
         }
     }
 }
@@ -380,6 +494,39 @@ mod tests {
         assert!(position(&fitted, 5).abs_diff_eq(Vec3::new(50.0, 50.0, 0.0), 1e-4));
         grid.count = [Cloner::MAX_COUNT; 3];
         assert_eq!(cloner(grid).count(), Cloner::MAX_COUNT as usize, "capped");
+    }
+
+    #[test]
+    fn object_mode_places_clones_on_points_or_polygon_centres_along_normals() {
+        let cube = crate::shapes::cube(100.0);
+        let cloner = |distribution, align| Cloner {
+            layout: Layout::Object(Surface { distribution, align }),
+            ..Cloner::default()
+        };
+        let (mut normals, mut out) = (Vec::new(), Vec::new());
+        let lifted = Mat4::from_translation(Vec3::Y * 10.0);
+        cloner(Distribution::PolygonCenter, true).placements(Some((&cube, lifted)), &mut normals, &mut out);
+        assert_eq!(out.len(), 6);
+        for m in &out {
+            // Each clone's Y axis points out of its face, from the face's centre.
+            let (centre, up) = (m.w_axis.truncate() - Vec3::Y * 10.0, m.transform_vector3(Vec3::Y));
+            assert!((centre.length() - 50.0).abs() < 1e-3, "{centre}");
+            assert!(up.abs_diff_eq(centre / 50.0, 1e-4), "{up} at {centre}");
+        }
+        cloner(Distribution::Vertex, true).placements(Some((&cube, Mat4::IDENTITY)), &mut normals, &mut out);
+        assert_eq!(out.len(), 8);
+        let corner = out[0].w_axis.truncate();
+        let up = out[0].transform_vector3(Vec3::Y);
+        assert!(
+            up.abs_diff_eq(corner.normalize(), 1e-4),
+            "a corner's normal points out of it"
+        );
+        cloner(Distribution::Vertex, false).placements(Some((&cube, Mat4::IDENTITY)), &mut normals, &mut out);
+        assert_eq!(out[0].transform_vector3(Vec3::Y), Vec3::Y, "unaligned");
+        cloner(Distribution::Vertex, true).placements(None, &mut normals, &mut out);
+        assert!(out.is_empty(), "no object, no clones");
+        Cloner::default().placements(None, &mut normals, &mut out);
+        assert_eq!(out.len(), 3);
     }
 
     #[test]

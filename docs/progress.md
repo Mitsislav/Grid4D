@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 10 — Deformers & MoGraph (v0.10) |
-| Last step done | 10.6 — Cloner framework (2026-10-29) |
-| Next step | 10.7 — Cloner Object mode, nested cloners, groups |
-| Tests | 649, all passing; clippy and rustfmt clean |
+| Last step done | 10.7 — Cloner Object mode, groups, nested cloners (2026-10-30) |
+| Next step | 10.8 — Effectors (Plain, Random) |
+| Tests | 653, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1196,6 +1196,7 @@ Phase 9 is complete.
 | 10.4 | FFD: a lattice (2–20 points per axis) over the box whose moved points reshape the object by Bernstein blending; edited in Points mode like a spline's points (selection, gizmo, Tweak); Reset Lattice; Size scales it, a new grid regrids it; Delete leaves it; saved with its selection; rendered | 635 |
 | 10.5 | Current State to Object (Mesh ▸ Conversion): a polygon copy of what the viewport shows at the current frame (deformers, generators, animation), hierarchy kept, deformers and consumed inputs left out, after the original, selected, one undo step; export writes deformed shapes | 638 |
 | 10.6 | Cloner: Linear, Radial and Grid Array layouts, Iterate / Random children, Reset Coordinates; clones as instances drawn in shared batches (1 000 cubes, one draw), picked and selected as the Cloner, framed, filtered, rendered; Make Editable / Current State / export as one object per clone; saved | 649 |
+| 10.7 | Cloner Object mode (clones on another object's points or polygon centres, aligned to the normals; the object linked, saved and remapped; hidden objects still carry clones); child groups cloned whole; Cloners inside Cloners cloned with their clones | 653 |
 
 **10.1 — Animated parameters**
 
@@ -1388,6 +1389,34 @@ Phase 9 is complete.
 - **On-screen testing:** a Radial Cloner of a cube and a sphere (12 clones,
   aligned) and a 4 × 4 × 4 Grid Array picking children at random; clicking a
   clone selected its Cloner; the path tracer rendered all 10 156 triangles.
+
+**10.7 — Cloner Object mode, groups, nested cloners**
+
+*Problems and solutions:*
+- **An object link in a geometry type.** `grid4d-geom` cannot name a
+  `NodeId`, so the layout (`Layout::Object(Surface)`) holds only how clones
+  sit on a surface, and the link lives in the scene:
+  `ObjectKind::Cloner { cloner, object }` (a constructor, `ObjectKind::cloner`,
+  kept the 10.6 call sites short). The file stores it by object index and
+  resolves it after every object exists, like Target tags; Merge remaps it.
+- **Groups and nesting in one rule.** Instead of only the Cloner's children,
+  every object inside an enabled Cloner is recorded (its nearest Cloner, and
+  whether it is a child), so a clone of a child brings the parts below it.
+  Cloners are built deepest first; when an outer Cloner meets an inner one
+  among its parts it copies the inner one's instances (already built) under
+  its own placement, and the inner ones are then dropped from the list — one
+  `retain`, no allocation.
+- **The object's shape.** Shown objects give the mesh the viewport draws (a
+  generator's result, a deformed shape); a hidden polygon object or primitive
+  still works through its own mesh, the primitive's built once and cached
+  while its parameters stay the same.
+- **Normals on points** are the area-weighted sums of the polygons' Newell
+  vectors, accumulated in a reused buffer; Align turns the clone's Y axis
+  onto them, transformed by the inverse transpose so scaled objects keep
+  correct normals.
+- **On-screen testing:** cones on every polygon of a sphere (Object mode,
+  Polygon Center, aligned) and ten towers of four turning, shrinking cubes (a
+  Linear Cloner inside a Radial one); the path tracer rendered both.
 
 ---
 
