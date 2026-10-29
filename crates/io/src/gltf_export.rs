@@ -212,6 +212,8 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
             | ObjectKind::Sweep(_)
             | ObjectKind::Loft(_)
             | ObjectKind::Cloner { .. }
+            | ObjectKind::PlainEffector(_)
+            | ObjectKind::RandomEffector(_)
             | ObjectKind::Bend(_)
             | ObjectKind::Twist(_)
             | ObjectKind::Taper(_)

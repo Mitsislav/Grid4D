@@ -95,6 +95,18 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     }
                 }
             });
+            ui.menu_button("Effector", |ui| {
+                for tag in ObjectKindTag::EFFECTORS {
+                    if ui
+                        .button(tag.label())
+                        .on_hover_text("With a Cloner selected, it is added to the Cloner's Effectors")
+                        .clicked()
+                    {
+                        editor.commands.push(EditorCommand::CreateObject(tag));
+                        ui.close();
+                    }
+                }
+            });
             ui.menu_button("Deformer", |ui| {
                 for tag in ObjectKindTag::DEFORMERS {
                     if ui

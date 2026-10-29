@@ -13,6 +13,8 @@ pub enum FilterItem {
     Spline,
     /// Deformers (their boxes; their effect stays).
     Deformer,
+    /// Effectors (their markers and falloffs; their effect stays).
+    Effector,
     Camera,
     Light,
     /// The grid.
@@ -23,12 +25,13 @@ pub enum FilterItem {
 }
 
 impl FilterItem {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Polygon,
         Self::Generator,
         Self::SubdivisionSurface,
         Self::Spline,
         Self::Deformer,
+        Self::Effector,
         Self::Camera,
         Self::Light,
         Self::Grid,
@@ -73,6 +76,7 @@ impl FilterItem {
             | ObjectKindTag::Taper
             | ObjectKindTag::Bulge
             | ObjectKindTag::Ffd => Some(Self::Deformer),
+            ObjectKindTag::PlainEffector | ObjectKindTag::RandomEffector => Some(Self::Effector),
         }
     }
 
@@ -88,6 +92,7 @@ impl FilterItem {
             Self::Hud => 1 << 7,
             Self::Spline => 1 << 8,
             Self::Deformer => 1 << 9,
+            Self::Effector => 1 << 10,
         }
     }
 }
@@ -102,7 +107,7 @@ impl ViewFilter {
     /// Everything shown.
     pub const ALL: Self = Self { hidden: 0 };
     /// Everything hidden.
-    pub const NONE: Self = Self { hidden: 0x3FF };
+    pub const NONE: Self = Self { hidden: 0x7FF };
 
     #[must_use]
     pub const fn shows(self, item: FilterItem) -> bool {

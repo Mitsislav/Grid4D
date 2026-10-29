@@ -92,4 +92,4 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 10.4 | [`deformer-ffd.md`](deformer-ffd.md) — the FFD lattice | implemented 2026-10-29 |
 | 10.5 | [`modeling-current-state.md`](modeling-current-state.md) — Current State to Object | implemented 2026-10-29 |
 | 10.6–10.7 | [`mograph-cloner.md`](mograph-cloner.md) — the Cloner: Linear, Radial, Grid Array, Object; clones as instances | implemented 2026-10-30 |
-| 10.8 | `mograph-effectors.md` — Plain and Random effectors, their falloff | todo |
+| 10.8 | [`mograph-effectors.md`](mograph-effectors.md) — Plain and Random effectors, their falloff | implemented 2026-10-30 |

@@ -22,6 +22,7 @@ use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
     cloner::{CloneOrder, Cloner, Distribution, GridArray, Layout, Linear, Radial, StepMode, Surface},
     deform::{Bend, BendOrigin, Bulge, DeformerMode, Ffd, Shape, Taper, Twist},
+    effector::{Effector, Falloff as EffectorFalloff, FalloffShape},
     spline::{
         ArcType, Interpolation as SplineInterpolation, Segment, Spline, SplinePlane, SplinePrimitive, SplineShape,
         SplineType, Text, TextAlign,
@@ -841,12 +842,20 @@ enum KindDto {
         /// written by the object, resolved once every object exists).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         object: Option<usize>,
+        /// Its effectors, by index in `objects` (added in step 10.8; resolved
+        /// like `object`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        effectors: Vec<usize>,
         #[serde(default, skip_serializing_if = "CloneOrderDto::is_iterate")]
         clones: CloneOrderDto,
         seed: u32,
         #[serde(default = "yes", skip_serializing_if = "is_true")]
         reset_coordinates: bool,
     },
+    /// A Plain effector (added in step 10.8).
+    PlainEffector(EffectorDto),
+    /// A Random effector (added in step 10.8).
+    RandomEffector(EffectorDto),
     /// A Bend deformer (added in step 10.2); angles in radians, defaults omitted.
     Bend {
         size: [f32; 3],
@@ -1042,6 +1051,123 @@ impl ExtrudeDirectionDto {
     )]
     fn is_auto(&self) -> bool {
         *self == Self::Auto
+    }
+}
+
+/// An effector's settings (added in step 10.8); angles in radians, the
+/// scale change as a fraction, defaults omitted.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct EffectorDto {
+    strength: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    position: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scale: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    uniform_scale: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rotation: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<[f32; 3]>,
+    seed: u32,
+    #[serde(default, skip_serializing_if = "EffectorFalloffDto::is_infinite")]
+    falloff: EffectorFalloffDto,
+}
+
+/// Omitted while it is the default falloff (Infinite, 200 cm, half soft).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct EffectorFalloffDto {
+    shape: FalloffShapeDto,
+    size: [f32; 3],
+    soft: f32,
+}
+
+impl Default for EffectorFalloffDto {
+    fn default() -> Self {
+        Self {
+            shape: FalloffShapeDto::Infinite,
+            size: [200.0; 3],
+            soft: 0.5,
+        }
+    }
+}
+
+impl EffectorFalloffDto {
+    fn is_infinite(&self) -> bool {
+        self.shape == FalloffShapeDto::Infinite && self.size == [200.0; 3] && self.soft == 0.5
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FalloffShapeDto {
+    #[default]
+    Infinite,
+    Sphere,
+    Box,
+    Linear,
+}
+
+impl EffectorDto {
+    fn new(e: &Effector) -> Self {
+        Self {
+            strength: e.strength,
+            position: e.use_position.then(|| e.position.to_array()),
+            scale: e.use_scale.then(|| e.scale.to_array()),
+            uniform_scale: e.uniform_scale,
+            rotation: e.use_rotation.then(|| e.rotation.to_array()),
+            color: e.use_color.then_some(e.color),
+            seed: e.seed,
+            falloff: EffectorFalloffDto {
+                shape: match e.falloff.shape {
+                    FalloffShape::Infinite => FalloffShapeDto::Infinite,
+                    FalloffShape::Sphere => FalloffShapeDto::Sphere,
+                    FalloffShape::Box => FalloffShapeDto::Box,
+                    FalloffShape::Linear => FalloffShapeDto::Linear,
+                },
+                size: e.falloff.size.to_array(),
+                soft: e.falloff.soft,
+            },
+        }
+    }
+
+    /// The effector, starting from `defaults` for what the file leaves out.
+    fn into_effector(self, defaults: Effector) -> Effector {
+        Effector {
+            strength: self.strength,
+            use_position: self.position.is_some(),
+            position: self.position.map_or(defaults.position, Vec3::from_array),
+            use_scale: self.scale.is_some(),
+            scale: self.scale.map_or(defaults.scale, Vec3::from_array),
+            uniform_scale: self.uniform_scale,
+            use_rotation: self.rotation.is_some(),
+            rotation: self.rotation.map_or(defaults.rotation, Vec3::from_array),
+            use_color: self.color.is_some(),
+            color: self.color.unwrap_or(defaults.color),
+            seed: self.seed,
+            falloff: EffectorFalloff {
+                shape: match self.falloff.shape {
+                    FalloffShapeDto::Infinite => FalloffShape::Infinite,
+                    FalloffShapeDto::Sphere => FalloffShape::Sphere,
+                    FalloffShapeDto::Box => FalloffShape::Box,
+                    FalloffShapeDto::Linear => FalloffShape::Linear,
+                },
+                size: Vec3::from_array(self.falloff.size).abs(),
+                soft: self.falloff.soft.clamp(0.0, 1.0),
+            },
+        }
+    }
+
+    fn parameters(&self) -> Vec<f32> {
+        let mut numbers = vec![self.strength, self.falloff.soft];
+        numbers.extend(self.falloff.size);
+        for values in [self.position, self.scale, self.rotation, self.color]
+            .into_iter()
+            .flatten()
+        {
+            numbers.extend(values);
+        }
+        numbers
     }
 }
 
@@ -2105,14 +2231,14 @@ impl File {
             .map(MaterialDto::into_material)
             .collect::<Result<Vec<_>, IoError>>()?;
         let mut tags: Vec<Vec<TagDto>> = Vec::with_capacity(objects.len());
-        let mut links: Vec<Option<usize>> = Vec::with_capacity(objects.len());
+        let mut links: Vec<(Option<usize>, Vec<usize>)> = Vec::with_capacity(objects.len());
         let objects = objects
             .into_iter()
             .map(|object| {
                 object.check_finite()?;
-                links.push(match object.kind {
-                    KindDto::Cloner { object, .. } => object,
-                    _ => None,
+                links.push(match &object.kind {
+                    KindDto::Cloner { object, effectors, .. } => (*object, effectors.clone()),
+                    _ => (None, Vec::new()),
                 });
                 let parent = object.parent;
                 let (data, object_tags) = object.into_data(&meshes)?;
@@ -2133,12 +2259,16 @@ impl File {
             .map(|material| doc.scene.materials_mut().insert(material))
             .collect();
         // Object links and tags last: they may refer to any object.
-        for (&id, link) in ids.iter().zip(links) {
-            if let Some(index) = link
+        for (&id, (link, effector_links)) in ids.iter().zip(links) {
+            if (link.is_some() || !effector_links.is_empty())
                 && let Some(node) = doc.scene.get_mut(id)
-                && let ObjectKind::Cloner { object, .. } = &mut node.data.kind
+                && let ObjectKind::Cloner { object, effectors, .. } = &mut node.data.kind
             {
-                *object = ids.get(index).copied();
+                *object = link.and_then(|index| ids.get(index).copied());
+                *effectors = effector_links
+                    .iter()
+                    .filter_map(|&index| ids.get(index).copied())
+                    .collect();
             }
         }
         for (&id, object_tags) in ids.iter().zip(tags) {
@@ -2163,10 +2293,17 @@ impl ObjectDto {
             parent,
             kind: {
                 let mut kind = KindDto::new(&data.kind, &data.name, meshes);
-                if let (KindDto::Cloner { object, .. }, ObjectKind::Cloner { object: Some(id), .. }) =
-                    (&mut kind, &data.kind)
+                if let (
+                    KindDto::Cloner { object, effectors, .. },
+                    ObjectKind::Cloner {
+                        object: target,
+                        effectors: links,
+                        ..
+                    },
+                ) = (&mut kind, &data.kind)
                 {
-                    *object = refs.objects.get(id).copied();
+                    *object = target.and_then(|id| refs.objects.get(&id).copied());
+                    effectors.extend(links.iter().filter_map(|id| refs.objects.get(id).copied()));
                 }
                 kind
             },
@@ -2454,6 +2591,7 @@ impl KindDto {
             ObjectKind::Cloner { cloner, .. } => Self::Cloner {
                 layout: ClonerLayoutDto::new(cloner.layout),
                 object: None,
+                effectors: Vec::new(),
                 clones: match cloner.clones {
                     CloneOrder::Iterate => CloneOrderDto::Iterate,
                     CloneOrder::Random => CloneOrderDto::Random,
@@ -2461,6 +2599,8 @@ impl KindDto {
                 seed: cloner.seed,
                 reset_coordinates: cloner.reset_coordinates,
             },
+            ObjectKind::PlainEffector(effector) => Self::PlainEffector(EffectorDto::new(&effector)),
+            ObjectKind::RandomEffector(effector) => Self::RandomEffector(EffectorDto::new(&effector)),
             ObjectKind::Loft(loft) => Self::Loft {
                 subdivision_u: loft.subdivision_u,
                 subdivision_v: loft.subdivision_v,
@@ -2833,9 +2973,12 @@ impl KindDto {
                 end_cap,
                 cap_type: cap_type.into(),
             }),
+            Self::PlainEffector(dto) => ObjectKind::PlainEffector(dto.into_effector(Effector::plain())),
+            Self::RandomEffector(dto) => ObjectKind::RandomEffector(dto.into_effector(Effector::random())),
             Self::Cloner {
                 layout,
                 object: _,
+                effectors: _,
                 clones,
                 seed,
                 reset_coordinates,
@@ -2979,6 +3122,7 @@ impl KindDto {
         match *self {
             Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } | Self::Loft { .. } => Vec::new(),
             Self::Cloner { ref layout, .. } => layout.parameters(),
+            Self::PlainEffector(ref dto) | Self::RandomEffector(ref dto) => dto.parameters(),
             Self::Extrude { offset, movement, .. } => vec![offset, movement[0], movement[1], movement[2]],
             Self::Lathe {
                 angle,
@@ -3755,6 +3899,53 @@ mod tests {
     }
 
     #[test]
+    fn effectors_and_a_cloners_effector_list_round_trip() {
+        use grid4d_geom::effector::{Effector, Falloff, FalloffShape};
+        let mut doc = Document::new("effectors");
+        let plain = ObjectKindTag::PlainEffector.default_kind();
+        let random = ObjectKind::RandomEffector(Effector {
+            strength: 0.75,
+            use_position: false,
+            use_scale: true,
+            scale: Vec3::new(0.5, -0.25, 1.0),
+            use_rotation: true,
+            rotation: Vec3::new(0.1, 0.2, 0.3),
+            use_color: true,
+            seed: 99,
+            falloff: Falloff {
+                shape: FalloffShape::Box,
+                size: Vec3::new(100.0, 200.0, 300.0),
+                soft: 0.25,
+            },
+            ..Effector::random()
+        });
+        let a = doc.scene.insert(Node::new("Plain", plain.clone()));
+        let b = doc.scene.insert(Node::new("Random", random.clone()));
+        doc.scene.insert(Node::new(
+            "Cloner",
+            ObjectKind::Cloner {
+                cloner: Cloner::default(),
+                object: None,
+                effectors: vec![b, a],
+            },
+        ));
+        let loaded = round_trip(&doc);
+        let roots = loaded.scene.roots();
+        let kind = |i: usize| &loaded.scene.get(roots[i]).unwrap().data.kind;
+        assert_eq!(kind(0), &plain);
+        assert_eq!(kind(1), &random);
+        let ObjectKind::Cloner { effectors, .. } = kind(2) else {
+            panic!("not a Cloner")
+        };
+        assert_eq!(effectors, &[roots[1], roots[0]], "in order");
+        let json = serde_json::to_string(&KindDto::new(&plain, "Plain", &mut MeshTable::default())).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"plain_effector","strength":1.0,"position":[0.0,100.0,0.0],"seed":12345}"#
+        );
+    }
+
+    #[test]
     fn object_mode_cloners_keep_their_object_link() {
         use grid4d_geom::cloner::{Cloner, Distribution, Layout, Surface};
         let mut doc = Document::new("surface");
@@ -3773,11 +3964,12 @@ mod tests {
                     ..Cloner::default()
                 },
                 object: Some(sphere),
+                effectors: Vec::new(),
             },
         ));
         let loaded = round_trip(&doc);
         let roots = loaded.scene.roots();
-        let ObjectKind::Cloner { cloner, object } = &loaded.scene.get(roots[1]).unwrap().data.kind else {
+        let ObjectKind::Cloner { cloner, object, .. } = &loaded.scene.get(roots[1]).unwrap().data.kind else {
             panic!("not a Cloner")
         };
         assert_eq!(cloner.layout, surface);

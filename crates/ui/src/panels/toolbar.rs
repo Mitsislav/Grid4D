@@ -120,6 +120,15 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
                 });
             }
         }
+        for tag in ObjectKindTag::EFFECTORS {
+            let style = IconStyle {
+                tint: Some(tag_color(tag)),
+                ..IconStyle::default()
+            };
+            if icon_button(ui, Icon::Object(tag), style, create_tooltip(tag)).clicked() {
+                editor.commands.push(EditorCommand::CreateObject(tag));
+            }
+        }
         group_gap(ui);
         for tag in ObjectKindTag::DEFORMERS {
             let style = IconStyle {
@@ -278,6 +287,8 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Sweep => "Add Sweep: profile first, path second (Alt: around the selected spline)",
         ObjectKindTag::Loft => "Add Loft: a skin over its child splines (Alt: around the selected splines)",
         ObjectKindTag::Cloner => "Add Cloner: repeats its children (Alt: around the selected object)",
+        ObjectKindTag::PlainEffector => "Add Plain effector: moves, turns, scales the selected Cloner's clones",
+        ObjectKindTag::RandomEffector => "Add Random effector: varies the selected Cloner's clones at random",
         ObjectKindTag::Bend => "Add Bend (Shift: under the selected object, fitted to it)",
         ObjectKindTag::Twist => "Add Twist (Shift: under the selected object, fitted to it)",
         ObjectKindTag::Taper => "Add Taper (Shift: under the selected object, fitted to it)",

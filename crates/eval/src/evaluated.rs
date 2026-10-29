@@ -1,7 +1,12 @@
 use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
-use grid4d_geom::{BitSet, cloner::Layout, spline::Polyline};
+use grid4d_geom::{
+    BitSet,
+    cloner::Layout,
+    effector::{Effector, Randoms},
+    spline::Polyline,
+};
 use grid4d_scene::{
     Aabb, Components, LIGHT_MARKER_RADIUS, LightDetails, LightShadow, LightType, MaterialId, MeshHandle, MeshId,
     NodeId, ObjectKind, ObjectKindTag, Scene, SplineHandle, TagKind, Tags, WalkItem,
@@ -346,6 +351,9 @@ impl EvaluatedScene {
                     deform::Deformer::of(&kind).map(CurveSource::Deformer)
                 }
                 kind if kind.is_deformer() => deform::Deformer::of(kind).map(CurveSource::Deformer),
+                ObjectKind::PlainEffector(effector) | ObjectKind::RandomEffector(effector) => {
+                    Some(CurveSource::Effector(*effector))
+                }
                 _ => None,
             };
             if let Some(source) = source {
@@ -379,7 +387,7 @@ impl EvaluatedScene {
                 });
                 curves.insert(handle.id(), handle);
             }
-            let mut bounds = if kind.is_spline() || kind.is_deformer() {
+            let mut bounds = if kind.is_spline() || kind.is_deformer() || kind.is_effector() {
                 bounds_of_curve
             } else {
                 kind.local_bounds()
@@ -460,7 +468,7 @@ impl EvaluatedScene {
                 // Shown by the clones: a child of the Cloner with everything
                 // below it (deformers have done their work; light and camera
                 // markers are not cloned).
-                if !kind.is_deformer() {
+                if !kind.is_deformer() && !kind.is_effector() {
                     sources.push(Source {
                         cloner,
                         top: depth == cloner_depth + 1,
@@ -627,6 +635,8 @@ struct Cloning {
     /// Object mode's objects that are primitives, as meshes, kept while used.
     surfaces: HashMap<NodeId, (ObjectKind, MeshHandle)>,
     used: Vec<NodeId>,
+    /// The current Cloner's effectors: settings, world → effector space, Random.
+    effects: Vec<(Effector, Mat4, bool)>,
 }
 
 /// Makes the clones of every enabled Cloner, the deepest first (a Cloner
@@ -649,6 +659,7 @@ fn build_instances(
         normals,
         surfaces,
         used,
+        effects,
     } = cloning;
     order.clear();
     built.clear();
@@ -669,11 +680,35 @@ fn build_instances(
     );
     for &(_, at) in order.iter() {
         let (owner, world) = (nodes[at].id, nodes[at].world);
-        let settings = scene.get(owner).and_then(|n| match &*n.data.kind_at(frame) {
-            ObjectKind::Cloner { cloner, object } => Some((*cloner, *object)),
-            _ => None,
-        });
-        let Some((cloner, object)) = settings else { continue };
+        let Some(kind) = scene.get(owner).map(|n| n.data.kind_at(frame)) else {
+            continue;
+        };
+        let ObjectKind::Cloner {
+            cloner,
+            object,
+            effectors,
+        } = &*kind
+        else {
+            continue;
+        };
+        let (cloner, object) = (*cloner, *object);
+        // Its enabled effectors, where they are (hidden ones work too).
+        effects.clear();
+        for &id in effectors {
+            let Some(node) = scene.get(id).filter(|n| n.data.enabled) else {
+                continue;
+            };
+            let effector_kind = node.data.kind_at(frame);
+            let Some(effector) = effector_kind.effector() else {
+                continue;
+            };
+            let at = nodes
+                .iter()
+                .find(|n| n.id == id)
+                .map_or_else(|| scene.world_matrix_at(id, frame), |n| n.world);
+            let random = matches!(*effector_kind, ObjectKind::RandomEffector(_));
+            effects.push((*effector, at.inverse(), random));
+        }
         let inverse = world.inverse();
         // Object mode: the object's shape, in the Cloner's space.
         let surface = match cloner.layout {
@@ -714,8 +749,39 @@ fn build_instances(
             } else {
                 inverse * top.world
             };
-            let placed = world * *placement * local;
             let number = u32::try_from(index).unwrap_or(u32::MAX);
+            // The effectors in order, each as strongly as its falloff lets it
+            // where the clone is; colours blend into `colour = c × keep + tint`.
+            let mut clone = world * *placement;
+            let (mut keep, mut tint) = (1.0f32, [0.0f32; 3]);
+            for (effector, to_effector, random) in effects.iter() {
+                let here = to_effector.transform_point3(clone.w_axis.truncate());
+                let amount = effector.strength * effector.falloff.weight(here);
+                if amount == 0.0 {
+                    continue;
+                }
+                let randoms = if *random {
+                    Randoms::of(effector.seed, number)
+                } else {
+                    Randoms::NONE
+                };
+                clone *= effector.offset(amount, &randoms);
+                if effector.use_color {
+                    let w = amount.clamp(0.0, 1.0);
+                    let colour = effector.tint(&randoms);
+                    keep *= 1.0 - w;
+                    for (t, c) in tint.iter_mut().zip(colour) {
+                        *t = *t * (1.0 - w) + c * w;
+                    }
+                }
+            }
+            let coloured = |drawable: Option<Drawable>| {
+                drawable.map(|d| Drawable {
+                    color: [0, 1, 2].map(|i| d.color[i] * keep + tint[i]),
+                    ..d
+                })
+            };
+            let placed = clone * local;
             let parts = sources[start..]
                 .iter()
                 .filter(mine)
@@ -742,6 +808,7 @@ fn build_instances(
                                 owner,
                                 index: number,
                                 world: inner * clone.world,
+                                drawable: coloured(clone.drawable),
                                 ..clone
                             },
                             instances,
@@ -756,7 +823,7 @@ fn build_instances(
                             kind: part.kind,
                             world: part_world,
                             bounds: part.bounds,
-                            drawable: part.drawable,
+                            drawable: coloured(part.drawable),
                             pick: part.pick,
                         },
                         instances,
@@ -975,6 +1042,7 @@ fn curve_of(kind: &ObjectKind) -> Polyline {
         ObjectKind::SplinePrimitive(primitive) => primitive.polyline(),
         ObjectKind::Text(text) => grid4d_text::text_spline(text).sample(text.interpolation),
         kind if kind.is_deformer() => deform::Deformer::of(kind).map_or_else(Polyline::default, |d| d.box_lines()),
+        ObjectKind::PlainEffector(effector) | ObjectKind::RandomEffector(effector) => effector.lines(),
         ObjectKind::Spline {
             spline, interpolation, ..
         } => spline.spline().sample(*interpolation),
@@ -1013,6 +1081,8 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Text(_)
         | ObjectKind::Spline { .. } => PickShape::None,
         ObjectKind::Cloner { .. } => PickShape::Clones,
+        // Picked by its lines (set during evaluation).
+        ObjectKind::PlainEffector(_) | ObjectKind::RandomEffector(_) => PickShape::None,
     }
 }
 
@@ -1298,9 +1368,17 @@ mod tests {
     fn steady_state_updates_reuse_capacity() {
         let mut doc = Document::with_demo_scene();
         doc.scene.insert(Node::new("Mesh", polygon_cube()));
-        let cloner = doc
+        let effector = doc
             .scene
-            .insert(Node::new("Cloner", ObjectKindTag::Cloner.default_kind()));
+            .insert(Node::new("Random", ObjectKindTag::RandomEffector.default_kind()));
+        let cloner = doc.scene.insert(Node::new(
+            "Cloner",
+            ObjectKind::Cloner {
+                cloner: grid4d_geom::cloner::Cloner::default(),
+                object: None,
+                effectors: vec![effector],
+            },
+        ));
         doc.scene
             .insert_child(cloner, Node::new("Clone", ObjectKindTag::Sphere.default_kind()))
             .unwrap();
@@ -1315,6 +1393,8 @@ mod tests {
                 e.walk_stack.capacity(),
                 e.instances.capacity(),
                 e.sources.capacity(),
+                e.cloning.effects.capacity(),
+                e.cloning.placements.capacity(),
             )
         };
         let before = capacity(&eval);
@@ -2407,6 +2487,7 @@ mod tests {
                     ..Cloner::default()
                 },
                 object: Some(target),
+                effectors: Vec::new(),
             },
         ));
         doc.scene
@@ -2434,5 +2515,77 @@ mod tests {
         }
         eval.update(&doc.scene);
         assert!(eval.instances().is_empty());
+    }
+
+    #[test]
+    fn effectors_move_and_colour_clones_within_their_falloff() {
+        use grid4d_geom::effector::{Effector, Falloff, FalloffShape};
+        let mut doc = Document::new("effectors");
+        let mut plain = Effector {
+            use_color: true,
+            color: [1.0, 0.0, 0.0],
+            ..Effector::plain()
+        };
+        let effector = doc.scene.insert(Node::new("Plain", ObjectKind::PlainEffector(plain)));
+        let cloner = doc.scene.insert(Node::new(
+            "Cloner",
+            ObjectKind::Cloner {
+                cloner: grid4d_geom::cloner::Cloner::default(),
+                object: None,
+                effectors: vec![effector],
+            },
+        ));
+        let mut cube = Node::new("Cube", ObjectKindTag::Cube.default_kind());
+        cube.data.display_color = [0.0, 0.0, 1.0];
+        doc.scene.insert_child(cloner, cube).unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let at = |eval: &EvaluatedScene| -> Vec<f32> { eval.instances().iter().map(|c| c.world.w_axis.y).collect() };
+        // The row is 0, 250, 500 cm high; Plain lifts every clone 100 cm and reddens it.
+        assert_eq!(at(&eval), [100.0, 350.0, 600.0]);
+        assert!(
+            eval.instances()
+                .iter()
+                .all(|c| c.drawable.unwrap().color == [1.0, 0.0, 0.0])
+        );
+        let bounds = node(&eval, cloner).bounds.unwrap();
+        assert_eq!(bounds.max.y, 700.0, "bounds follow the moved clones");
+
+        // A sphere falloff around the origin reaches only the first clone.
+        plain.falloff = Falloff {
+            shape: FalloffShape::Sphere,
+            size: Vec3::splat(200.0),
+            soft: 0.0,
+        };
+        plain.strength = 0.5;
+        doc.scene.get_mut(effector).unwrap().data.kind = ObjectKind::PlainEffector(plain);
+        eval.update(&doc.scene);
+        assert_eq!(at(&eval), [50.0, 250.0, 500.0]);
+        let colour = eval.instances()[0].drawable.unwrap().color;
+        assert_eq!(colour, [0.5, 0.0, 0.5], "half way to red");
+        assert_eq!(eval.instances()[1].drawable.unwrap().color, [0.0, 0.0, 1.0]);
+
+        // Switched off, it does nothing.
+        doc.scene.get_mut(effector).unwrap().data.enabled = false;
+        eval.update(&doc.scene);
+        assert_eq!(at(&eval), [0.0, 250.0, 500.0]);
+
+        // A Random effector varies each clone, the same way every time.
+        doc.scene.get_mut(effector).unwrap().data.kind = ObjectKindTag::RandomEffector.default_kind();
+        doc.scene.get_mut(effector).unwrap().data.enabled = true;
+        eval.update(&doc.scene);
+        let moved: Vec<Vec3> = eval.instances().iter().map(|c| c.world.w_axis.truncate()).collect();
+        let offsets = [moved[0], moved[1] - Vec3::Y * 250.0, moved[2] - Vec3::Y * 500.0];
+        assert!(
+            offsets
+                .iter()
+                .all(|o| o.abs().max_element() <= 50.0 && *o != Vec3::ZERO),
+            "{offsets:?}"
+        );
+        assert_ne!(offsets[0], offsets[1]);
+        doc.scene.get_mut(cloner).unwrap().data.transform.position.x = 0.0;
+        eval.update(&doc.scene);
+        let again: Vec<Vec3> = eval.instances().iter().map(|c| c.world.w_axis.truncate()).collect();
+        assert_eq!(again, moved, "repeatable");
     }
 }

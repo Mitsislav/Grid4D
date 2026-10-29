@@ -10,6 +10,7 @@
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
 use grid4d_geom::cloner::{CloneOrder, Cloner, Distribution, Layout, StepMode};
 use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode, Ffd, Shape};
+use grid4d_geom::effector::{Effector, FalloffShape};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_geom::spline::{
@@ -812,7 +813,18 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
             }
             ObjectKind::Sweep(sweep) => sweep_rows(ui, k, sweep),
             ObjectKind::Loft(loft) => loft_rows(ui, loft),
-            ObjectKind::Cloner { cloner, object } => cloner_rows(ui, k, cloner, object, links),
+            ObjectKind::Cloner {
+                cloner,
+                object,
+                effectors,
+            } => {
+                cloner_rows(ui, k, cloner, object, links);
+                if let Some((scene, _)) = links {
+                    effector_list_rows(ui, effectors, scene);
+                }
+            }
+            ObjectKind::PlainEffector(effector) => effector_rows(ui, k, effector, false),
+            ObjectKind::RandomEffector(effector) => effector_rows(ui, k, effector, true),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, k, primitive),
             ObjectKind::Text(text) => text_rows(ui, k, text),
             ObjectKind::Spline {
@@ -1660,6 +1672,123 @@ fn cloner_rows(
     }
     ui.label("");
     ui.label(RichText::new("Clones repeat its children").color(p::TEXT_DIM));
+    ui.end_row();
+}
+
+/// A Cloner's Effectors: the linked ones (each with a remove button) and a
+/// list of the document's other effectors to add.
+fn effector_list_rows(ui: &mut Ui, effectors: &mut Vec<NodeId>, scene: &Scene) {
+    let mut remove = None;
+    for (index, &id) in effectors.iter().enumerate() {
+        attr_label(ui, if index == 0 { "Effectors" } else { "" }, LABEL_WIDTH);
+        let name = scene.get(id).map_or("(deleted)", |n| n.data.name.as_str());
+        ui.horizontal(|ui| {
+            ui.label(name);
+            if ui.small_button("✕").on_hover_text("Remove from the list").clicked() {
+                remove = Some(index);
+            }
+        });
+        ui.end_row();
+    }
+    if let Some(index) = remove {
+        effectors.remove(index);
+    }
+    attr_label(ui, if effectors.is_empty() { "Effectors" } else { "" }, LABEL_WIDTH);
+    let mut added = None;
+    egui::ComboBox::from_id_salt("grid4d.attr.cloner.add_effector")
+        .selected_text("Add…")
+        .width(FIELD_WIDTH + 40.0)
+        .show_ui(ui, |ui| {
+            // Built only while the list is open.
+            scene.walk(&mut Vec::new(), |id, node, _, _| {
+                if node.data.kind.is_effector() && !effectors.contains(&id) && ui.button(&node.data.name).clicked() {
+                    added = Some(id);
+                }
+                true
+            });
+        });
+    ui.end_row();
+    if let Some(id) = added {
+        effectors.push(id);
+    }
+}
+
+/// A Plain or Random effector: Strength, the changes it makes, its colour and
+/// falloff.
+fn effector_rows(ui: &mut Ui, k: &mut KeyRows, effector: &mut Effector, random: bool) {
+    strength_row(ui, k, &mut effector.strength);
+    if random {
+        bounded_count_row(ui, "Seed", &mut effector.seed, 0, 9_999_999);
+    }
+    check_row(ui, "Position", &mut effector.use_position);
+    if effector.use_position {
+        for (axis, label) in ["P . X", "P . Y", "P . Z"].into_iter().enumerate() {
+            offset_row(ui, k, label, &mut effector.position[axis]);
+        }
+    }
+    check_row(ui, "Scale", &mut effector.use_scale);
+    if effector.use_scale {
+        check_row(ui, "Uniform Scale", &mut effector.uniform_scale);
+        let axes: &[(usize, &str)] = if effector.uniform_scale {
+            &[(0, "Scale")]
+        } else {
+            &[(0, "S . X"), (1, "S . Y"), (2, "S . Z")]
+        };
+        for &(axis, label) in axes {
+            signed_percent_row(ui, label, &mut effector.scale[axis]);
+        }
+    }
+    check_row(ui, "Rotation", &mut effector.use_rotation);
+    if effector.use_rotation {
+        for (axis, label) in ["R . H", "R . P", "R . B"].into_iter().enumerate() {
+            angle_row(ui, k, label, &mut effector.rotation[axis], -36_000.0..=36_000.0);
+        }
+    }
+    check_row(ui, "Color", &mut effector.use_color);
+    if effector.use_color && !random {
+        attr_label(ui, "Effector Color", LABEL_WIDTH);
+        colour_button(ui, &mut effector.color);
+        ui.end_row();
+    }
+    let falloff = &mut effector.falloff;
+    attr_label(ui, "Falloff", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.effector.falloff")
+        .selected_text(falloff.shape.label())
+        .show_ui(ui, |ui| {
+            for option in FalloffShape::ALL {
+                ui.selectable_value(&mut falloff.shape, option, option.label());
+            }
+        });
+    ui.end_row();
+    if falloff.shape != FalloffShape::Infinite {
+        for (axis, label) in ["Size . X", "Size . Y", "Size . Z"].into_iter().enumerate() {
+            length_row(ui, k, label, &mut falloff.size[axis]);
+        }
+        if falloff.shape != FalloffShape::Linear {
+            percent_row(ui, k, "Soft Edge", &mut falloff.soft);
+        }
+    }
+    ui.label("");
+    ui.label(RichText::new("Add it to a Cloner's Effectors").color(p::TEXT_DIM));
+    ui.end_row();
+}
+
+/// A change in percent that may be negative (a scale change: −50 % halves).
+fn signed_percent_row(ui: &mut Ui, label: &str, value: &mut f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let mut percent = *value * 100.0;
+    if ui
+        .add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut percent)
+                .speed(0.5)
+                .range(-100.0..=10_000.0)
+                .suffix(" %"),
+        )
+        .changed()
+    {
+        *value = percent / 100.0;
+    }
     ui.end_row();
 }
 

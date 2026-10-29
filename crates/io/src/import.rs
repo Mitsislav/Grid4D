@@ -122,8 +122,9 @@ pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>
             *up = up.and_then(&map);
         }
     }
-    if let ObjectKind::Cloner { object, .. } = &mut data.kind {
+    if let ObjectKind::Cloner { object, effectors, .. } = &mut data.kind {
         *object = object.and_then(&map);
+        effectors.retain_mut(|id| map(*id).map(|new| *id = new).is_some());
     }
 }
 

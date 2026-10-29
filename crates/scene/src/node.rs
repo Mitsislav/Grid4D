@@ -132,7 +132,15 @@ pub enum ObjectKind {
         /// Object mode: the object whose points or polygons carry the clones
         /// (a dangling id gives none).
         object: Option<NodeId>,
+        /// The effectors that change the clones, applied in order (dangling
+        /// ids do nothing).
+        effectors: Vec<NodeId>,
     },
+    /// Moves, turns, scales and colours a Cloner's clones by fixed amounts
+    /// (`docs/reference/mograph-effectors.md`).
+    PlainEffector(grid4d_geom::effector::Effector),
+    /// As the Plain effector, by a random part of its amounts per clone.
+    RandomEffector(grid4d_geom::effector::Effector),
     /// Bend deformer: bends its parent and everything below the parent.
     Bend(grid4d_geom::deform::Bend),
     /// Twist deformer: turns its parent's subtree about Y along the box.
@@ -185,6 +193,8 @@ pub enum ObjectKindTag {
     Sweep,
     Loft,
     Cloner,
+    PlainEffector,
+    RandomEffector,
     Bend,
     Twist,
     Taper,
@@ -202,7 +212,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 34] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -221,6 +231,8 @@ impl ObjectKindTag {
         Self::Sweep,
         Self::Loft,
         Self::Cloner,
+        Self::PlainEffector,
+        Self::RandomEffector,
         Self::Bend,
         Self::Twist,
         Self::Taper,
@@ -260,6 +272,10 @@ impl ObjectKindTag {
         Self::Cloner,
     ];
 
+    /// Effectors: objects that change a Cloner's clones (the "Create ▸ MoGraph"
+    /// family).
+    pub const EFFECTORS: [Self; 2] = [Self::PlainEffector, Self::RandomEffector];
+
     /// Deformers: objects that reshape their parent and its subtree.
     pub const DEFORMERS: [Self; 5] = [Self::Bend, Self::Twist, Self::Taper, Self::Bulge, Self::Ffd];
 
@@ -296,6 +312,8 @@ impl ObjectKindTag {
             Self::Sweep => "Sweep",
             Self::Loft => "Loft",
             Self::Cloner => "Cloner",
+            Self::PlainEffector => "Plain",
+            Self::RandomEffector => "Random",
             Self::Bend => "Bend",
             Self::Twist => "Twist",
             Self::Taper => "Taper",
@@ -389,6 +407,9 @@ impl ObjectKindTag {
             Self::Loft => ObjectKind::Loft(grid4d_geom::surface::Loft::default()),
             // docs/reference/mograph-cloner.md: three clones in a row, 250 cm apart.
             Self::Cloner => ObjectKind::cloner(grid4d_geom::cloner::Cloner::default()),
+            // docs/reference/mograph-effectors.md: the clones lifted 100 cm / moved up to 50 cm.
+            Self::PlainEffector => ObjectKind::PlainEffector(grid4d_geom::effector::Effector::plain()),
+            Self::RandomEffector => ObjectKind::RandomEffector(grid4d_geom::effector::Effector::random()),
             // docs/reference/deformer-bend.md: a 250 cm box, no strength yet.
             Self::Bend => ObjectKind::Bend(grid4d_geom::deform::Bend::default()),
             // docs/reference/deformer-twist-taper-bulge.md: a 250 cm box, no effect yet.
@@ -527,6 +548,8 @@ impl ObjectKind {
             Self::Sweep(_) => ObjectKindTag::Sweep,
             Self::Loft(_) => ObjectKindTag::Loft,
             Self::Cloner { .. } => ObjectKindTag::Cloner,
+            Self::PlainEffector(_) => ObjectKindTag::PlainEffector,
+            Self::RandomEffector(_) => ObjectKindTag::RandomEffector,
             Self::Bend(_) => ObjectKindTag::Bend,
             Self::Twist(_) => ObjectKindTag::Twist,
             Self::Taper(_) => ObjectKindTag::Taper,
@@ -579,7 +602,9 @@ impl ObjectKind {
             | Self::Twist(_)
             | Self::Taper(_)
             | Self::Bulge(_)
-            | Self::Ffd { .. } => 0,
+            | Self::Ffd { .. }
+            | Self::PlainEffector(_)
+            | Self::RandomEffector(_) => 0,
         }
     }
 
@@ -592,10 +617,30 @@ impl ObjectKind {
         )
     }
 
-    /// A Cloner with no object linked (Object mode shows no clones until one is).
+    /// A Cloner with no object linked (Object mode shows no clones until one is)
+    /// and no effectors.
     #[must_use]
     pub const fn cloner(cloner: grid4d_geom::cloner::Cloner) -> Self {
-        Self::Cloner { cloner, object: None }
+        Self::Cloner {
+            cloner,
+            object: None,
+            effectors: Vec::new(),
+        }
+    }
+
+    /// Changes a Cloner's clones (see [`ObjectKindTag::EFFECTORS`]).
+    #[must_use]
+    pub const fn is_effector(&self) -> bool {
+        matches!(self, Self::PlainEffector(_) | Self::RandomEffector(_))
+    }
+
+    /// An effector's settings; `None` for other objects.
+    #[must_use]
+    pub const fn effector(&self) -> Option<&grid4d_geom::effector::Effector> {
+        match self {
+            Self::PlainEffector(effector) | Self::RandomEffector(effector) => Some(effector),
+            _ => None,
+        }
     }
 
     /// An FFD with its regular lattice, nothing selected.
@@ -724,6 +769,10 @@ impl ObjectKind {
             Self::Taper(d) => d.size * 0.5,
             Self::Bulge(d) => d.size * 0.5,
             Self::Ffd { ffd, .. } => ffd.size * 0.5,
+            Self::PlainEffector(effector) | Self::RandomEffector(effector) => match effector.falloff.shape {
+                grid4d_geom::effector::FalloffShape::Infinite => Vec3::splat(25.0),
+                _ => effector.falloff.size * 0.5,
+            },
             Self::Spline {
                 ref spline,
                 interpolation,

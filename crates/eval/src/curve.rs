@@ -64,6 +64,8 @@ pub(crate) enum CurveSource {
     Text(Text),
     /// A deformer's box, deformed.
     Deformer(crate::deform::Deformer),
+    /// An effector's marker and falloff.
+    Effector(grid4d_geom::effector::Effector),
     /// An editable spline's content and sampling.
     Editable(SplineId, Interpolation),
 }

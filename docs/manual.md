@@ -1530,6 +1530,38 @@ Choose the layout in the Object tab's **Mode**:
   its clones.
 - A Cloner makes at most 10 000 clones.
 
+### 15.4 Effectors
+
+**Effectors** change a Cloner's clones: lift them, scale them, turn them,
+colour them — everywhere, or only near the effector.
+
+![A grid of cubes: a Random effector scatters and turns them, a Plain effector with a Sphere falloff lifts, enlarges and reddens those near it](images/manual/mograph-effectors.png)
+
+1. Select the Cloner and choose **Create ▸ Effector ▸ Plain** (or **Random**,
+   or the orange buttons after the Cloner's): the effector is created and
+   added to the Cloner's **Effectors** list. (Created with no Cloner
+   selected, add it later from the Cloner's Object tab: **Effectors ▸ Add…**;
+   **✕** removes one.)
+2. Set what it does in its Object tab:
+   - **Strength**: how much of it applies (animatable).
+   - **Position**, **Scale** and **Rotation**, each switched on with its
+     check box: the move (along each clone's own axes), size change (+50 %
+     makes it half as large again; **Uniform Scale** uses one value) and turn.
+   - **Color**: blends the clones towards the **Effector Color** (Random:
+     towards a random colour each).
+   - **Seed** (Random only): another set of random values.
+3. **Falloff** limits where it works: **Infinite** (everywhere), **Sphere** or
+   **Box** (inside the shape of the **Size**, fading across the **Soft Edge**)
+   or **Linear** (nothing behind, everything in front, along the effector's
+   Z axis). Move the effector to move the falloff — the clones near it react.
+
+The **Plain** effector applies its values as they are; the **Random** effector
+applies a different random part of them (between minus and plus the value) to
+each clone — always the same for the same seed. Effectors apply in the list's
+order. The viewport shows each effector as a small cross with its falloff's
+outline; **Filter ▸ Effector** hides them. Switch an effector off (its check
+mark) to stop it.
+
 ## 16. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
@@ -1898,9 +1930,14 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   and the Sweep (no Isoparm display either). The Sweep has no rail spline, no
   Scale and Rotation graphs and no Keep Segments. The Loft has no Adapt UV
   (no UVs) and uses only the first segment of each section (no holes).
-- **Cloner**: effectors are coming next; not planned yet: Honeycomb, Blend and
-  Sort, Step Rotation, Amount, Offset Variation, grid forms and Fill, Object
-  mode on edges, along splines or by surface area, and the Up Vector.
+- **Cloner**: Honeycomb, Blend and Sort, Step Rotation, Amount, Offset
+  Variation, grid forms and Fill, Object mode on edges, along splines or by
+  surface area, and the Up Vector.
+- **Effectors**: Fields (modular falloffs), the Shader, Step, Delay, Formula
+  and other effectors, Remap and Min / Max, the Random modes other than
+  uniform (Gaussian, Noise, Turbulence), effectors on polygon objects and
+  splines; animating Position, Scale and Rotation values (Strength and the
+  falloff Size animate).
 - **Splines**: other fonts for Text, kerning and Separate Letters; hiding
   points, Grow/Shrink on points,
   snapping to spline points and the Pen snapping to objects; editing points

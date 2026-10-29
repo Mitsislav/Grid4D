@@ -477,6 +477,9 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         }
         EditorCommand::Quit => file::request(FileAction::Quit, doc, editor, viewport),
         EditorCommand::AnswerUnsaved(choice) => file::answer(choice, doc, editor, viewport),
+        EditorCommand::CreateObject(tag) if ObjectKindTag::EFFECTORS.contains(&tag) => {
+            create_effector(doc, editor, viewport, tag);
+        }
         EditorCommand::CreateObject(tag) => {
             let edit = SceneEdit::Insert {
                 parent: None,
@@ -1273,6 +1276,51 @@ fn wrap_in_generator(doc: &mut Document, editor: &mut EditorState, viewport: &mu
         .record(doc, "Create Generator", undo, selection_before, selection_after);
 }
 
+/// A new effector, added to the Effectors list of every selected Cloner (as
+/// the reference does), all as one undo step; the effector becomes the
+/// selection.
+fn create_effector(doc: &mut Document, editor: &mut EditorState, viewport: &ViewportPanel, tag: ObjectKindTag) {
+    let selection_before = editor.selection.clone();
+    let cloners: Vec<NodeId> = editor
+        .selection
+        .as_slice()
+        .iter()
+        .copied()
+        .filter(|&id| {
+            doc.scene
+                .get(id)
+                .is_some_and(|n| matches!(n.data.kind, ObjectKind::Cloner { .. }))
+        })
+        .collect();
+    let insert = SceneEdit::Insert {
+        parent: None,
+        index: usize::MAX,
+        data: new_object_data(tag, &doc.scene, viewport.camera()),
+    };
+    let Ok(undo_insert) = doc.apply(insert) else { return };
+    let Some(effector) = undo_insert.node() else { return };
+    let mut undo = Vec::with_capacity(cloners.len() + 1);
+    for id in cloners {
+        let Some(mut data) = doc.scene.get(id).map(|n| n.data.clone()) else {
+            continue;
+        };
+        if let ObjectKind::Cloner { effectors, .. } = &mut data.kind {
+            effectors.push(effector);
+        }
+        if let Ok(inverse) = doc.apply(SceneEdit::SetData { id, data }) {
+            undo.push(inverse);
+        }
+    }
+    // Undone in reverse: the lists back, then the effector removed.
+    undo.reverse();
+    undo.push(undo_insert);
+    editor.selection.set_single(effector);
+    let selection_after = editor.selection.clone();
+    editor
+        .history
+        .record(doc, "Create Object", undo, selection_before, selection_after);
+}
+
 /// `inner` is `outer` or below it.
 fn is_inside(scene: &Scene, inner: NodeId, outer: NodeId) -> bool {
     let mut at = Some(inner);
@@ -1904,6 +1952,10 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Ffd => {
             data.display_color = [0.55, 0.4, 0.9];
         }
+        // A light orange marker and falloff.
+        ObjectKindTag::PlainEffector | ObjectKindTag::RandomEffector => {
+            data.display_color = [0.95, 0.6, 0.35];
+        }
         ObjectKindTag::Null
         | ObjectKindTag::Cube
         | ObjectKindTag::Sphere
@@ -1979,6 +2031,7 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Taper
         | ObjectKindTag::Bulge
         | ObjectKindTag::Ffd => palette::ICON_DEFORMER,
+        ObjectKindTag::PlainEffector | ObjectKindTag::RandomEffector => palette::ICON_EFFECTOR,
         ObjectKindTag::Cube
         | ObjectKindTag::Sphere
         | ObjectKindTag::Cylinder
@@ -4295,5 +4348,43 @@ mod tests {
             ["Cube.0", "Cube.1", "Cube.2"],
             "the Cloner's clones, not its child"
         );
+    }
+
+    #[test]
+    fn an_effector_created_with_a_cloner_selected_joins_its_list_in_one_step() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        let (cloner, _) = cloner_of_cubes(&mut doc);
+        editor.selection.set_single(cloner);
+        let steps = editor.history.undo_len();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::PlainEffector)],
+        );
+        let effector = editor.selection.active().unwrap();
+        assert!(doc.scene.get(effector).unwrap().data.kind.is_effector());
+        let list = |doc: &Document| match &doc.scene.get(cloner).unwrap().data.kind {
+            ObjectKind::Cloner { effectors, .. } => effectors.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(list(&doc), [effector]);
+        assert_eq!(editor.history.undo_len(), steps + 1);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert!(list(&doc).is_empty());
+        assert!(!doc.scene.contains(effector));
+        assert_eq!(editor.selection.as_slice(), [cloner]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        assert_eq!(list(&doc), [effector]);
+
+        // Without a Cloner selected it is just a new object.
+        editor.selection.clear();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::RandomEffector)],
+        );
+        assert_eq!(list(&doc), [effector]);
     }
 }

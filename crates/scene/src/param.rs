@@ -353,6 +353,12 @@ impl ObjectKind {
                 Layout::Radial(_) => &[P::Radius, P::StartAngle, P::EndAngle],
                 Layout::Grid(_) => &[P::Size(Axis::X), P::Size(Axis::Y), P::Size(Axis::Z)],
             },
+            Self::PlainEffector(_) | Self::RandomEffector(_) => &[
+                P::Amount,
+                P::Size(Axis::X),
+                P::Size(Axis::Y),
+                P::Size(Axis::Z),
+            ],
             Self::Null
             | Self::Polygon { .. }
             | Self::SubdivisionSurface { .. }
@@ -417,6 +423,15 @@ impl ObjectKind {
                 Self::Light {
                     light_type, details, ..
                 } if light_type.has_position() && details.falloff != Falloff::None => Some(&mut details.radius),
+                _ => None,
+            };
+        }
+        // An effector's falloff size only while it has one (the rows are shown then).
+        if let Self::PlainEffector(effector) | Self::RandomEffector(effector) = self {
+            let sized = effector.falloff.shape != grid4d_geom::effector::FalloffShape::Infinite;
+            return match param {
+                P::Amount => Some(&mut effector.strength),
+                P::Size(axis) if sized => Some(&mut effector.falloff.size[axis.index()]),
                 _ => None,
             };
         }

@@ -67,6 +67,8 @@ pub mod palette {
     pub const ICON_SPLINE: Color32 = Color32::from_rgb(0x5c, 0xc6, 0xd6);
     /// Deformers.
     pub const ICON_DEFORMER: Color32 = Color32::from_rgb(0xb7, 0x8c, 0xf0);
+    /// Effectors.
+    pub const ICON_EFFECTOR: Color32 = Color32::from_rgb(0xf0, 0x9a, 0x5c);
     /// Tag icons in the Object Manager.
     pub const TAG: Color32 = Color32::from_rgb(0xc8, 0xcd, 0xd6);
     /// The snap target a drag is stuck to, and its label.

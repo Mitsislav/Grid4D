@@ -242,6 +242,8 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
             | ObjectKind::Sweep(_)
             | ObjectKind::Loft(_)
             | ObjectKind::Cloner { .. }
+            | ObjectKind::PlainEffector(_)
+            | ObjectKind::RandomEffector(_)
             | ObjectKind::Bend(_)
             | ObjectKind::Twist(_)
             | ObjectKind::Taper(_)

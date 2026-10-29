@@ -452,6 +452,23 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.polyline(&inner, false);
             c.ellipse((0.82, 0.3), (0.1, 0.13));
         }
+        ObjectKindTag::PlainEffector => {
+            // A square lifted by an arrow.
+            let square = [(0.18, 0.55), (0.52, 0.55), (0.52, 0.89), (0.18, 0.89)];
+            c.fill_with(&square, soft);
+            c.polyline(&square, true);
+            c.line((0.74, 0.86), (0.74, 0.16));
+            c.polyline(&[(0.6, 0.3), (0.74, 0.14), (0.88, 0.3)], false);
+        }
+        ObjectKindTag::RandomEffector => {
+            // A die: five dots.
+            let face = [(0.14, 0.14), (0.86, 0.14), (0.86, 0.86), (0.14, 0.86)];
+            c.fill_with(&face, soft);
+            c.polyline(&face, true);
+            for dot in [(0.32, 0.32), (0.68, 0.32), (0.5, 0.5), (0.32, 0.68), (0.68, 0.68)] {
+                c.disc(dot, 0.06);
+            }
+        }
         ObjectKindTag::Cloner => {
             // Three squares in a rising row: one shape, repeated.
             for i in 0..3 {

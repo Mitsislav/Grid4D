@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 10 — Deformers & MoGraph (v0.10) |
-| Last step done | 10.7 — Cloner Object mode, groups, nested cloners (2026-10-30) |
-| Next step | 10.8 — Effectors (Plain, Random) |
-| Tests | 653, all passing; clippy and rustfmt clean |
+| Last step done | 10.8 — Effectors (2026-10-30); Phase 10 complete |
+| Next step | Phase 11 — Simulation: plan it in detail |
+| Tests | 658, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1197,6 +1197,7 @@ Phase 9 is complete.
 | 10.5 | Current State to Object (Mesh ▸ Conversion): a polygon copy of what the viewport shows at the current frame (deformers, generators, animation), hierarchy kept, deformers and consumed inputs left out, after the original, selected, one undo step; export writes deformed shapes | 638 |
 | 10.6 | Cloner: Linear, Radial and Grid Array layouts, Iterate / Random children, Reset Coordinates; clones as instances drawn in shared batches (1 000 cubes, one draw), picked and selected as the Cloner, framed, filtered, rendered; Make Editable / Current State / export as one object per clone; saved | 649 |
 | 10.7 | Cloner Object mode (clones on another object's points or polygon centres, aligned to the normals; the object linked, saved and remapped; hidden objects still carry clones); child groups cloned whole; Cloners inside Cloners cloned with their clones | 653 |
+| 10.8 | Plain and Random effectors: Strength, Position / Scale / Rotation, colour, seed, falloff (Infinite, Sphere, Box, Linear; soft edge) drawn as lines; linked through the Cloner's Effectors list (added when created with a Cloner selected); applied in order to clones' placements and colours; saved; rendered | 658 |
 
 **10.1 — Animated parameters**
 
@@ -1417,6 +1418,36 @@ Phase 9 is complete.
 - **On-screen testing:** cones on every polygon of a sphere (Object mode,
   Polygon Center, aligned) and ten towers of four turning, shrinking cubes (a
   Linear Cloner inside a Radial one); the path tracer rendered both.
+
+**10.8 — Effectors**
+
+*Problems and solutions:*
+- **Where effects go.** An effector changes the clone's layout placement, so
+  it is applied to `cloner world × placement` (the falloff weighed at that
+  point, in the effector's space), and only then the child's own placement
+  and the parts of a cloned group follow — a lifted clone lifts its whole
+  group.
+- **Colours across parts without allocating.** Several effectors blend one
+  after another; the chain collapses to `colour × keep + tint` per clone (two
+  numbers kept while the effectors run), applied to every part and to the
+  clones of an inner Cloner.
+- **Randomness that never flickers.** Random values come from a hash of the
+  seed and the clone's number, not from a running generator, so a clone keeps
+  its values whatever else changes.
+- **A name clash in the file format.** Lights already had a `FalloffDto`; the
+  effector's is `EffectorFalloffDto`. Its serde default first gave a zero-size
+  falloff when omitted — the round-trip test caught it; it now defaults to the
+  effector's own default.
+- **Linking in one undo step.** A new effector needs its id before it can join
+  a Cloner's list, so `create_effector` applies the insert, then the lists,
+  and records the inverses together (as wrapping in a generator does).
+- **On-screen testing:** an 11 × 11 grid of cubes, a Random effector scattering
+  and turning them and a Plain effector with a soft Sphere falloff lifting,
+  enlarging and reddening those near it; the falloff's circles drawn; the path
+  tracer rendered the colours.
+
+Phase 10 is complete: deformers, the Cloner and effectors, with animated
+parameters, are undoable, saved, picked, exported and rendered.
 
 ---
 
