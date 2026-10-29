@@ -8,7 +8,7 @@
 //! typed value, a click) is recorded as one undo step through [`LiveEdit`].
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
-use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode, Shape};
+use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode, Ffd, Shape};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_geom::spline::{
@@ -779,6 +779,11 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows) {
             } => extrude_rows(ui, k, extrusion, hierarchical),
             ObjectKind::Lathe(lathe) => lathe_rows(ui, k, lathe),
             ObjectKind::Bend(bend) => bend_rows(ui, k, bend),
+            ObjectKind::Ffd {
+                ffd,
+                lattice,
+                components,
+            } => ffd_rows(ui, k, ffd, lattice, components),
             ObjectKind::Twist(twist) => {
                 box_rows(ui, k, &mut twist.size, &mut twist.mode);
                 angle_row(ui, k, "Angle", &mut twist.angle, -36_000.0..=36_000.0);
@@ -1606,6 +1611,43 @@ fn fit_row(ui: &mut Ui, k: &mut KeyRows, hint: &str) {
     ui.label("");
     ui.label(RichText::new(hint).color(p::TEXT_DIM));
     ui.end_row();
+}
+
+/// The FFD's box, grid and Reset Lattice: Size scales the lattice, a new grid
+/// (or Reset) puts it back on its regular grid, its selection cleared.
+fn ffd_rows(
+    ui: &mut Ui,
+    k: &mut KeyRows,
+    ffd: &mut Ffd,
+    lattice: &mut SplineHandle,
+    components: &mut grid4d_scene::Components,
+) {
+    let (size, grid) = (ffd.size, ffd.grid);
+    box_rows(ui, k, &mut ffd.size, &mut ffd.mode);
+    for (axis, label) in ["Grid Points X", "Grid Points Y", "Grid Points Z"]
+        .into_iter()
+        .enumerate()
+    {
+        bounded_count_row(ui, label, &mut ffd.grid[axis], Ffd::MIN_GRID, Ffd::MAX_GRID);
+    }
+    ui.label("");
+    let reset = ui
+        .button("Reset Lattice")
+        .on_hover_text("Put every lattice point back on its grid")
+        .clicked();
+    ui.end_row();
+    if reset || ffd.grid != grid {
+        *lattice = SplineHandle::new(grid4d_geom::spline::Spline::new(
+            SplineType::Linear,
+            ffd.grid_points(),
+            false,
+        ));
+        *components = grid4d_scene::Components::default();
+    } else if ffd.size != size {
+        let points = grid4d_geom::deform::scale_lattice(&lattice.spline().points, size, ffd.size);
+        *lattice = lattice.edited(|s| s.points = points);
+    }
+    fit_row(ui, k, "Points mode edits the lattice");
 }
 
 /// The Bend deformer's parameters and its Fit to Parent button.

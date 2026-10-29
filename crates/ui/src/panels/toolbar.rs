@@ -281,6 +281,7 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Twist => "Add Twist (Shift: under the selected object, fitted to it)",
         ObjectKindTag::Taper => "Add Taper (Shift: under the selected object, fitted to it)",
         ObjectKindTag::Bulge => "Add Bulge (Shift: under the selected object, fitted to it)",
+        ObjectKindTag::Ffd => "Add FFD (Shift: under the selected object, fitted to it)",
         ObjectKindTag::Circle => "Add Circle",
         ObjectKindTag::Rectangle => "Add Rectangle",
         ObjectKindTag::Arc => "Add Arc",

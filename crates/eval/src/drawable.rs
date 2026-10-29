@@ -243,7 +243,11 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
         | ObjectKind::Sweep(_)
         | ObjectKind::Loft(_) => None,
         // A deformer draws its box as lines, sampled during evaluation.
-        ObjectKind::Bend(_) | ObjectKind::Twist(_) | ObjectKind::Taper(_) | ObjectKind::Bulge(_) => None,
+        ObjectKind::Bend(_)
+        | ObjectKind::Twist(_)
+        | ObjectKind::Taper(_)
+        | ObjectKind::Bulge(_)
+        | ObjectKind::Ffd { .. } => None,
     }
 }
 
@@ -282,6 +286,7 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
         | ObjectKind::Twist(_)
         | ObjectKind::Taper(_)
         | ObjectKind::Bulge(_)
+        | ObjectKind::Ffd { .. }
         // Curves, not surfaces (a spline primitive is made editable as a spline).
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Text(_)
@@ -330,6 +335,7 @@ mod tests {
                     | ObjectKindTag::Twist
                     | ObjectKindTag::Taper
                     | ObjectKindTag::Bulge
+                    | ObjectKindTag::Ffd
             ) && !tag.is_spline();
             assert_eq!(style.is_some(), expected, "{tag:?}");
         }

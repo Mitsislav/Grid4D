@@ -112,8 +112,6 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                         ui.close();
                     }
                 }
-                ui.separator();
-                planned(ui, "FFD", "");
             });
             ui.separator();
             create(ui, editor, ObjectKindTag::Camera);

@@ -285,6 +285,13 @@ impl EvaluatedScene {
                     splines.insert(id, (spline.clone(), components.clone()));
                     Some(CurveSource::Editable(spline.id(), *interpolation))
                 }
+                ObjectKind::Ffd {
+                    lattice, components, ..
+                } => {
+                    // Its lattice is edited in Points mode like a spline's points.
+                    splines.insert(id, (lattice.clone(), components.clone()));
+                    deform::Deformer::of(&kind).map(CurveSource::Deformer)
+                }
                 kind if kind.is_deformer() => deform::Deformer::of(kind).map(CurveSource::Deformer),
                 _ => None,
             };
@@ -704,6 +711,7 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Twist(_)
         | ObjectKind::Taper(_)
         | ObjectKind::Bulge(_)
+        | ObjectKind::Ffd { .. }
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Text(_)
         | ObjectKind::Spline { .. } => PickShape::None,
@@ -1894,5 +1902,50 @@ mod tests {
             );
             assert!(matches!(node(&eval, deformer).pick, PickShape::Curve(_)));
         }
+    }
+
+    #[test]
+    fn an_ffds_lattice_reshapes_its_parent_and_is_edited_as_points() {
+        use grid4d_geom::deform::Ffd;
+        let mut doc = Document::new("ffd");
+        let cube = doc.scene.insert(Node::new(
+            "Cube",
+            ObjectKind::Cube {
+                size: Vec3::splat(100.0),
+                segments: [2, 2, 2],
+            },
+        ));
+        let ffd = doc
+            .scene
+            .insert_child(
+                cube,
+                Node::new(
+                    "FFD",
+                    ObjectKind::ffd(Ffd {
+                        size: Vec3::splat(100.0),
+                        ..Ffd::default()
+                    }),
+                ),
+            )
+            .unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let (_, lattice, _) = eval.spline(ffd).expect("the lattice is edited like a spline's points");
+        assert_eq!(lattice.spline().points.len(), 27);
+        assert_eq!(
+            node(&eval, cube).bounds.unwrap().max,
+            Vec3::splat(50.0),
+            "unmoved: unchanged"
+        );
+
+        let ObjectKind::Ffd { lattice, .. } = &mut doc.scene.get_mut(ffd).unwrap().data.kind else {
+            unreachable!()
+        };
+        *lattice = lattice.edited(|s| s.points[26] += Vec3::Y * 40.0);
+        eval.update(&doc.scene);
+        assert!(
+            (node(&eval, cube).bounds.unwrap().max.y - 90.0).abs() < 1e-3,
+            "the corner rose"
+        );
     }
 }

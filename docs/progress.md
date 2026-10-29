@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 10 — Deformers & MoGraph (v0.10) |
-| Last step done | 10.3 — Twist, Taper, Bulge and the strength handle (2026-10-29) |
-| Next step | 10.4 — FFD |
-| Tests | 629, all passing; clippy and rustfmt clean |
+| Last step done | 10.4 — FFD (2026-10-29) |
+| Next step | 10.5 — Current State to Object |
+| Tests | 635, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1193,6 +1193,7 @@ Phase 9 is complete.
 | 10.1 | Animated parameters: every real-valued Object-tab parameter keyable — key buttons beside the fields, Autokeying and temporary values, F-Curve editor and key strip; evaluated at the frame everywhere (viewport, generators, renders); Make Editable bakes the frame; saved by name | 609 |
 | 10.2 | Deformers and the Bend: a deformer reshapes its parent and the parent's subtree (deepest first), inside a cage before smoothing or beside it on the result; Bend with Mode, Strength, Angle, Keep Y-Axis Length, Origin; its box drawn bent and picked; Shift + create under the selection, Fit to Parent; cached; animatable; saved; rendered | 621 |
 | 10.3 | Twist, Taper and Bulge (curvature, fillet) beside the Bend; an orange strength handle on the selected deformer, dragged in the view (Shift steps, one undo step, Esc), before the gizmo; animatable; saved; rendered | 629 |
+| 10.4 | FFD: a lattice (2–20 points per axis) over the box whose moved points reshape the object by Bernstein blending; edited in Points mode like a spline's points (selection, gizmo, Tweak); Reset Lattice; Size scales it, a new grid regrids it; Delete leaves it; saved with its selection; rendered | 635 |
 
 **10.1 — Animated parameters**
 
@@ -1304,6 +1305,32 @@ Phase 9 is complete.
   selected Bulge with its handle on the X arrow; the path tracer rendered all
   three. Posted mouse drags do not reach the viewport (a gizmo drag did not move
   an object either), so dragging the handle is checked by the headless test.
+
+**10.4 — FFD**
+
+*Problems and solutions:*
+- **Editing a lattice without a new editing path.** The plan expected a third
+  case in the gizmo's point edits. Instead the lattice is stored as a linear
+  spline's points (`SplineHandle`) with `Components`, and
+  `ObjectKind::{points, points_mut}` gives "the points Points mode edits as a
+  spline's" for both editable splines and FFDs; the point drawing, picking,
+  click / rectangle / Live Selection, Select All / Invert, the gizmo and Tweak
+  all work on the lattice with a handful of changed matches. Delete is the one
+  command kept away from it (removing lattice points would break the grid).
+- **A deformer that carries data.** The other deformers are `Copy`; the FFD's
+  chain entry holds its lattice (a shared handle), so `Deformer`, `Link` and
+  `Active` became `Clone` — still no allocation per update.
+- **Size versus lattice.** Lattice points are stored in the deformer's space,
+  so a new Size scales them (Fit to Parent too), and a new grid starts a
+  regular lattice and clears its selection, since the old points no longer
+  correspond.
+- **The maths.** Bernstein weights per axis (computed into stack arrays of 20)
+  blend each lattice point's offset from its grid place; a test lifts one
+  corner and checks that corner moves by the full amount and the opposite one
+  not at all. Clippy asked for the weight loops to iterate the weights directly.
+- **On-screen testing:** a sphere under an FFD whose top-middle point is lifted
+  and one side pushed out became an egg-like shape; in Points mode the 27
+  lattice points and their lines showed over it. The path tracer rendered it.
 
 ---
 

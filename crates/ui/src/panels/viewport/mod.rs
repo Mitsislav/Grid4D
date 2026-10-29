@@ -3265,4 +3265,25 @@ mod tests {
             "not moved"
         );
     }
+
+    #[test]
+    fn moving_lattice_points_writes_the_ffd() {
+        let mut h = Harness::new();
+        let id = h
+            .doc
+            .scene
+            .insert(grid4d_scene::Node::new("FFD", ObjectKindTag::Ffd.default_kind()));
+        let ObjectKind::Ffd { lattice, .. } = h.doc.scene.get(id).unwrap().data.kind.clone() else {
+            panic!()
+        };
+        let points: grid4d_geom::BitSet = [26].into_iter().collect();
+        let corner = lattice.spline().points[26];
+        let edit = gizmo::PointEdit::spline(&lattice, &points, Mat4::IDENTITY, corner);
+        edit.apply(Mat4::from_translation(Vec3::Y * 30.0), &mut h.doc.scene, id);
+        let ObjectKind::Ffd { lattice: moved, .. } = &h.doc.scene.get(id).unwrap().data.kind else {
+            panic!()
+        };
+        assert_eq!(moved.spline().points[26], corner + Vec3::Y * 30.0);
+        assert_eq!(moved.spline().points[0], lattice.spline().points[0], "others stay");
+    }
 }

@@ -245,6 +245,7 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
             | ObjectKind::Twist(_)
             | ObjectKind::Taper(_)
             | ObjectKind::Bulge(_)
+            | ObjectKind::Ffd { .. }
             | ObjectKind::SplinePrimitive(_)
             | ObjectKind::Text(_)
             | ObjectKind::Spline { .. } => continue,

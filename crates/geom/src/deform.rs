@@ -429,6 +429,153 @@ impl Bulge {
     }
 }
 
+/// The FFD deformer's parameters; its lattice (the moved grid points) is kept
+/// by its owner and passed in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ffd {
+    pub size: Vec3,
+    /// Lattice points along X, Y and Z ([`Ffd::MIN_GRID`] – [`Ffd::MAX_GRID`]).
+    pub grid: [u32; 3],
+    pub mode: DeformerMode,
+}
+
+impl Default for Ffd {
+    fn default() -> Self {
+        Self {
+            size: Vec3::splat(250.0),
+            grid: [3, 3, 3],
+            mode: DeformerMode::Limited,
+        }
+    }
+}
+
+impl Ffd {
+    pub const MIN_GRID: u32 = 2;
+    pub const MAX_GRID: u32 = 20;
+
+    /// The lattice points along each axis, clamped.
+    #[must_use]
+    pub fn counts(&self) -> [usize; 3] {
+        self.grid.map(|n| crate::us(n.clamp(Self::MIN_GRID, Self::MAX_GRID)))
+    }
+
+    /// The regular lattice over the box, X fastest, then Y, then Z.
+    #[must_use]
+    pub fn grid_points(&self) -> Vec<Vec3> {
+        let [nx, ny, nz] = self.counts();
+        let at = |i: usize, n: usize, size: f32| {
+            let t = f32::from(u16::try_from(i).unwrap_or(0)) / f32::from(u16::try_from(n - 1).unwrap_or(1));
+            (t - 0.5) * size
+        };
+        let mut points = Vec::with_capacity(nx * ny * nz);
+        for k in 0..nz {
+            for j in 0..ny {
+                for i in 0..nx {
+                    points.push(Vec3::new(
+                        at(i, nx, self.size.x),
+                        at(j, ny, self.size.y),
+                        at(k, nz, self.size.z),
+                    ));
+                }
+            }
+        }
+        points
+    }
+
+    /// `point` (in the deformer's space) moved by `lattice`'s offsets from
+    /// the regular grid, blended by Bernstein weights; unchanged when the
+    /// lattice does not have the grid's point count.
+    #[must_use]
+    pub fn apply(&self, lattice: &[Vec3], point: Vec3) -> Vec3 {
+        let [nx, ny, nz] = self.counts();
+        if lattice.len() != nx * ny * nz || !point.is_finite() {
+            return point;
+        }
+        if self.mode == DeformerMode::WithinBox && !inside(point, self.size) {
+            return point;
+        }
+        let size = self.size.abs();
+        let unit = |v: f32, extent: f32| if extent < 1e-6 { 0.5 } else { v / extent + 0.5 };
+        let mut u = Vec3::new(unit(point.x, size.x), unit(point.y, size.y), unit(point.z, size.z));
+        if self.mode == DeformerMode::Limited {
+            u = u.clamp(Vec3::ZERO, Vec3::ONE);
+        }
+        let (wx, wy, wz) = (bernstein(nx, u.x), bernstein(ny, u.y), bernstein(nz, u.z));
+        let grid = self.grid_points();
+        let mut offset = Vec3::ZERO;
+        let mut index = 0;
+        for &wk in &wz[..nz] {
+            for &wj in &wy[..ny] {
+                let w = wj * wk;
+                for &wi in &wx[..nx] {
+                    if w != 0.0 {
+                        offset += (lattice[index] - grid[index]) * (wi * w);
+                    }
+                    index += 1;
+                }
+            }
+        }
+        point + offset
+    }
+
+    /// The lattice drawn as lines joining neighbouring points along each axis.
+    #[must_use]
+    pub fn lattice_lines(&self, lattice: &[Vec3]) -> Polyline {
+        let [nx, ny, nz] = self.counts();
+        let mut out = Polyline::default();
+        if lattice.len() != nx * ny * nz {
+            return out;
+        }
+        let index = |i: usize, j: usize, k: usize| i + nx * (j + ny * k);
+        let mut line = |points: &mut dyn Iterator<Item = Vec3>| {
+            let before = out.points.len();
+            out.points.extend(points);
+            out.segments.push(Segment {
+                count: u32::try_from(out.points.len() - before).unwrap_or(0),
+                closed: false,
+            });
+        };
+        for k in 0..nz {
+            for j in 0..ny {
+                line(&mut (0..nx).map(|i| lattice[index(i, j, k)]));
+            }
+        }
+        for k in 0..nz {
+            for i in 0..nx {
+                line(&mut (0..ny).map(|j| lattice[index(i, j, k)]));
+            }
+        }
+        for j in 0..ny {
+            for i in 0..nx {
+                line(&mut (0..nz).map(|k| lattice[index(i, j, k)]));
+            }
+        }
+        out
+    }
+}
+
+/// `lattice` scaled with its box from `from` to `to` (a zero extent keeps it).
+#[must_use]
+pub fn scale_lattice(lattice: &[Vec3], from: Vec3, to: Vec3) -> Vec<Vec3> {
+    let factor = |a: f32, b: f32| if a.abs() < 1e-6 { 1.0 } else { b / a };
+    let k = Vec3::new(factor(from.x, to.x), factor(from.y, to.y), factor(from.z, to.z));
+    lattice.iter().map(|&p| p * k).collect()
+}
+
+/// The `n` Bernstein weights of degree `n − 1` at `t` (n ≤ 20).
+fn bernstein(n: usize, t: f32) -> [f32; 20] {
+    let mut weights = [0.0; 20];
+    let degree = n.saturating_sub(1);
+    let mut binomial = 1.0f32;
+    for (i, weight) in weights.iter_mut().enumerate().take(n.min(20)) {
+        let exponent = |e: usize| i32::try_from(e).unwrap_or(0);
+        *weight = binomial * t.powi(exponent(i)) * (1.0 - t).powi(exponent(degree - i));
+        // C(d, i + 1) = C(d, i) · (d − i) / (i + 1)
+        binomial *= f32::from(u16::try_from(degree - i).unwrap_or(0)) / f32::from(u16::try_from(i + 1).unwrap_or(1));
+    }
+    weights
+}
+
 /// How far through the box's height `point` is (0 at the bottom, 1 at the
 /// top), as the mode reads it: clamped to the box (Limited), as it is
 /// (Unlimited); `None` for a point a Within Box deformer leaves alone.
@@ -743,5 +890,59 @@ mod tests {
             normal.dot(quarter.handle() - point).abs() < 1e-3,
             "the handle lies in its plane"
         );
+    }
+
+    #[test]
+    fn an_ffd_moves_points_by_its_lattice() {
+        let ffd = Ffd {
+            size: Vec3::splat(100.0),
+            ..Ffd::default()
+        };
+        let mut lattice = ffd.grid_points();
+        assert_eq!(lattice.len(), 27);
+        let p = Vec3::new(20.0, -10.0, 5.0);
+        assert!(close(ffd.apply(&lattice, p), p), "an unmoved lattice changes nothing");
+        // The far corner (+X +Y +Z) lifted by 30: that corner moves 30, the opposite one 0.
+        let corner = lattice.len() - 1;
+        lattice[corner] += Vec3::Y * 30.0;
+        assert!(close(
+            ffd.apply(&lattice, Vec3::splat(50.0)),
+            Vec3::new(50.0, 80.0, 50.0)
+        ));
+        assert!(close(ffd.apply(&lattice, Vec3::splat(-50.0)), Vec3::splat(-50.0)));
+        // The centre point pulls the centre most.
+        let mut middle = ffd.grid_points();
+        middle[13] += Vec3::X * 40.0;
+        let at_centre = ffd.apply(&middle, Vec3::ZERO).x;
+        let at_side = ffd.apply(&middle, Vec3::new(0.0, 40.0, 0.0)).x;
+        assert!(at_centre > at_side && at_side > 0.0, "{at_centre} {at_side}");
+        // Limited: a point beyond the box moves like the box's surface; Within Box: stays.
+        let beyond = Vec3::new(50.0, 90.0, 50.0);
+        assert!(close(ffd.apply(&lattice, beyond), beyond + Vec3::Y * 30.0));
+        let within = Ffd {
+            mode: DeformerMode::WithinBox,
+            ..ffd
+        };
+        assert_eq!(within.apply(&lattice, beyond), beyond);
+        // A lattice of the wrong size does nothing.
+        assert_eq!(ffd.apply(&lattice[..5], Vec3::splat(50.0)), Vec3::splat(50.0));
+    }
+
+    #[test]
+    fn the_lattice_is_drawn_and_scaled() {
+        let ffd = Ffd {
+            size: Vec3::splat(100.0),
+            grid: [2, 3, 4],
+            ..Ffd::default()
+        };
+        let lattice = ffd.grid_points();
+        assert_eq!(lattice.len(), 24);
+        let lines = ffd.lattice_lines(&lattice);
+        assert_eq!(lines.segments.len(), 3 * 4 + 2 * 4 + 2 * 3, "a line through every row");
+        let scaled = scale_lattice(&lattice, Vec3::splat(100.0), Vec3::new(200.0, 100.0, 50.0));
+        assert!(close(scaled[23], Vec3::new(100.0, 50.0, 25.0)));
+        // Weights of a cubic at a third sum to one.
+        let w = bernstein(4, 1.0 / 3.0);
+        assert!((w.iter().sum::<f32>() - 1.0).abs() < 1e-6);
     }
 }

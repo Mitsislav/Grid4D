@@ -524,7 +524,14 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             }
         }
         // On an editable spline in Points mode: its selected points.
-        EditorCommand::DeleteSelected if spline_target(doc, editor).is_some() => delete_spline_points(doc, editor),
+        EditorCommand::DeleteSelected if spline_target(doc, editor).is_some() => {
+            let lattice = spline_target(doc, editor)
+                .and_then(|id| doc.scene.get(id))
+                .is_some_and(|n| matches!(n.data.kind, ObjectKind::Ffd { .. }));
+            if !lattice {
+                delete_spline_points(doc, editor);
+            }
+        }
         // In a component mode Delete removes components, never objects.
         EditorCommand::DeleteSelected if editor.mode != EditMode::Model => {
             let label = match editor.mode {
@@ -1473,7 +1480,8 @@ fn pen_point(doc: &mut Document, editor: &mut EditorState, position: Vec3, tange
     editor.pen_finished = None;
 }
 
-/// The active object in Points mode, when it is an editable spline.
+/// The active object in Points mode, when its points are edited as a
+/// spline's: an editable spline or an FFD's lattice.
 #[must_use]
 pub fn spline_target(doc: &Document, editor: &EditorState) -> Option<NodeId> {
     (editor.mode == EditMode::Points)
@@ -1482,11 +1490,9 @@ pub fn spline_target(doc: &Document, editor: &EditorState) -> Option<NodeId> {
         .filter(|&id| is_spline(doc, id))
 }
 
-/// Whether `id` is an editable spline.
+/// Whether `id`'s points are edited as a spline's (an editable spline, an FFD).
 fn is_spline(doc: &Document, id: NodeId) -> bool {
-    doc.scene
-        .get(id)
-        .is_some_and(|n| matches!(n.data.kind, ObjectKind::Spline { .. }))
+    doc.scene.get(id).is_some_and(|n| n.data.kind.points().is_some())
 }
 
 /// Runs `change` on the spline target's components (with its point count) as
@@ -1514,31 +1520,22 @@ fn edit_spline_points(
     change: impl FnOnce(&mut ComponentState, &grid4d_geom::spline::Spline),
 ) {
     let Some(node) = doc.scene.get(id) else { return };
-    let ObjectKind::Spline {
-        spline,
-        interpolation,
-        components,
-    } = &node.data.kind
-    else {
+    let mut data = node.data.clone();
+    let Some((spline, components)) = data.kind.points_mut() else {
         return;
     };
-    let mut updated = components.clone();
-    change(updated.make_mut(), spline.spline());
-    if updated == *components {
+    let before = components.clone();
+    change(components.make_mut(), spline.spline());
+    if *components == before {
         return;
     }
-    let mut data = node.data.clone();
-    data.kind = ObjectKind::Spline {
-        spline: spline.clone(),
-        interpolation: *interpolation,
-        components: updated,
-    };
     commit(doc, editor, label, vec![SceneEdit::SetData { id, data }], |_, _| {});
 }
 
 /// Delete in Points mode on an editable spline: its selected points go, hidden
 /// flags follow the points that stay. One undo step.
 fn delete_spline_points(doc: &mut Document, editor: &mut EditorState) {
+    // An FFD's lattice points are never deleted (the grid would break).
     let Some(id) = spline_target(doc, editor) else { return };
     let Some(node) = doc.scene.get(id) else { return };
     let ObjectKind::Spline {
@@ -1747,7 +1744,14 @@ fn fit_to_parent(doc: &Document, parent: NodeId, data: &mut NodeData) -> bool {
     let Some(size) = data.kind.deformer_size_mut() else {
         return false;
     };
+    let before = *size;
     *size = (bounds.max - bounds.min).max(Vec3::splat(1.0));
+    let after = *size;
+    // An FFD's lattice scales with its box.
+    if let ObjectKind::Ffd { lattice, .. } = &mut data.kind {
+        let points = grid4d_geom::deform::scale_lattice(&lattice.spline().points, before, after);
+        *lattice = lattice.edited(|s| s.points = points);
+    }
     data.transform = Transform {
         position: bounds.center(),
         ..Transform::IDENTITY
@@ -1792,7 +1796,11 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Text
         | ObjectKindTag::Spline => data.display_color = [0.9, 0.9, 0.92],
         // A light violet box, apart from splines and selections.
-        ObjectKindTag::Bend | ObjectKindTag::Twist | ObjectKindTag::Taper | ObjectKindTag::Bulge => {
+        ObjectKindTag::Bend
+        | ObjectKindTag::Twist
+        | ObjectKindTag::Taper
+        | ObjectKindTag::Bulge
+        | ObjectKindTag::Ffd => {
             data.display_color = [0.55, 0.4, 0.9];
         }
         ObjectKindTag::Null
@@ -1863,9 +1871,11 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Flower
         | ObjectKindTag::Text
         | ObjectKindTag::Spline => palette::ICON_SPLINE,
-        ObjectKindTag::Bend | ObjectKindTag::Twist | ObjectKindTag::Taper | ObjectKindTag::Bulge => {
-            palette::ICON_DEFORMER
-        }
+        ObjectKindTag::Bend
+        | ObjectKindTag::Twist
+        | ObjectKindTag::Taper
+        | ObjectKindTag::Bulge
+        | ObjectKindTag::Ffd => palette::ICON_DEFORMER,
         ObjectKindTag::Cube
         | ObjectKindTag::Sphere
         | ObjectKindTag::Cylinder
@@ -3965,5 +3975,46 @@ mod tests {
         );
         let top = editor.selection.active().unwrap();
         assert_eq!(doc.scene.get(top).unwrap().parent(), None);
+    }
+
+    #[test]
+    fn points_mode_selects_an_ffds_lattice_and_delete_leaves_it() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Ffd)],
+        );
+        let id = editor.selection.active().unwrap();
+        editor.mode = EditMode::Points;
+        assert_eq!(spline_target(&doc, &editor), Some(id));
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::SelectComponents {
+                node: id,
+                component: Component::Point,
+                hits: vec![26],
+                mode: SelectMode::Replace,
+            }],
+        );
+        let points = |doc: &Document| match &doc.scene.get(id).unwrap().data.kind {
+            ObjectKind::Ffd {
+                lattice, components, ..
+            } => (
+                lattice.spline().points.len(),
+                components.selected().points.iter().collect::<Vec<_>>(),
+            ),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(points(&doc), (27, vec![26]));
+        let steps = editor.history.undo_len();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
+        assert_eq!(points(&doc), (27, vec![26]), "lattice points are not deleted");
+        assert_eq!(editor.history.undo_len(), steps);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SelectAll]);
+        assert_eq!(points(&doc).1.len(), 27);
     }
 }

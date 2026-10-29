@@ -105,8 +105,9 @@ impl GizmoGeometry {
                         let points = selection::points_of(mesh.mesh(), components.selected().get(component), component);
                         centre_of(mesh, &points)?
                     }
-                    // An editable spline in Points mode: its selected control points.
-                    ObjectKind::Spline { spline, components, .. } if component == Component::Point => {
+                    // An editable spline's (or FFD's) points in Points mode: the selected ones.
+                    kind if component == Component::Point && kind.points().is_some() => {
+                        let (spline, components) = kind.points()?;
                         spline_centre(spline, &components.selected().points)?
                     }
                     _ => return None,
@@ -382,7 +383,7 @@ impl PointEdit {
                 }
                 let moved = original.with_points(&points, &tangents);
                 if let Some(node) = scene.get_mut(node)
-                    && let ObjectKind::Spline { spline, .. } = &mut node.data.kind
+                    && let Some((spline, _)) = node.data.kind.points_mut()
                 {
                     *spline = moved;
                 }
@@ -521,10 +522,10 @@ impl GizmoState {
                         let points = selection::points_of(mesh.mesh(), components.selected().get(component), component);
                         Some(PointEdit::new(mesh, &points, world, geo.origin))
                     }
-                    (Target::Components { world, .. }, ObjectKind::Spline { spline, components, .. }) => Some(
-                        PointEdit::spline(spline, &components.selected().points, world, geo.origin),
-                    ),
-                    _ => None,
+                    (Target::Components { world, .. }, kind) => kind.points().map(|(spline, components)| {
+                        PointEdit::spline(spline, &components.selected().points, world, geo.origin)
+                    }),
+                    (Target::Object, _) => None,
                 };
                 // An object takes its children along; generators above change too.
                 let mut skip = generators_above(scene, geo.node);

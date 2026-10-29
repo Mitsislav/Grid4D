@@ -1318,8 +1318,8 @@ point.
 
 A **deformer** changes the shape of other objects without touching their
 points: bend a tube into an arch, curl a column into an S — and keep editing the
-original or animate the deformer. There are four: **Bend**, **Twist**,
-**Taper** and **Bulge**.
+original or animate the deformer. There are five: **Bend**, **Twist**,
+**Taper**, **Bulge** and **FFD**.
 
 ![Three Bends: a tube bent into an arch, a column curled into an S, a Subdivision Surface bent towards the back; the selected Bend's box and its Object properties](images/manual/deformer-bend.png)
 
@@ -1397,6 +1397,34 @@ a full turn), Taper and Bulge follow its distance from the axis. Hold **Shift**
 to step the value (5° or 5 %). Each drag is one undo step; **Esc** while
 dragging puts it back. The handle wins over the move arrows when it sits on
 one.
+
+### 14.5 FFD
+
+The **FFD** surrounds the object with a **lattice** of points; moving its points
+reshapes the object smoothly, like pushing soft clay — lift the middle of the
+top to make an egg, push one side out, pinch a waist.
+
+![An FFD in Points mode: its lattice points over a sphere, the top's middle point lifted and one side pushed out](images/manual/deformer-ffd.png)
+
+1. Add an FFD under the object (**Shift** + **Create ▸ Deformer ▸ FFD** with the
+   object selected): its box and lattice fit around it.
+2. Select the FFD and switch to **Points** mode. The lattice points appear;
+   select them as you select a spline's points (click, Shift / Ctrl, rectangle
+   or Live Selection, Select All) and move, scale or rotate them with the
+   gizmo. The object follows, most strongly near the points you move.
+
+The Attribute Manager's **Object** tab:
+
+- **Size** and **Mode**: as for every deformer. Changing Size scales the lattice
+  with the box.
+- **Grid Points X / Y / Z** (2 – 20): how many lattice points along each axis.
+  Changing them starts a new, regular lattice.
+- **Reset Lattice**: puts every point back on its grid.
+- **Fit to Parent**: as for every deformer (the lattice is scaled to the new
+  box).
+
+Lattice points cannot be deleted, and the lattice is edited rather than
+animated.
 
 ## 15. Snapping
 
@@ -1757,9 +1785,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Modelling**:
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
   Solid, Proportional and Radial modes; Bridge point by point.
-- **Deformers**: Bend, Twist, Taper and Bulge; the FFD comes next. Splines are
-  not deformed; component modes show the undeformed points; handles for size
-  and angle (only strength has one).
+- **Deformers**: splines are not deformed; component modes show the
+  undeformed points; no handles for size and angle (only strength has one);
+  an FFD's lattice cannot be animated.
 - **Generators**: the Subdivision Surface has one type (Catmull-Clark) and no
   edge weights (creases) or UV options. The Extrude has no bevels (fillets),
   Delaunay or grid caps, UVs or selections for its caps; neither have the Lathe

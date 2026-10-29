@@ -8,28 +8,31 @@ use std::collections::HashMap;
 use glam::{Mat4, Vec3};
 use grid4d_geom::{
     PolyMesh,
-    deform::{Bend, Bulge, Taper, Twist},
+    deform::{Bend, Bulge, Ffd, Taper, Twist},
     spline::Polyline,
 };
-use grid4d_scene::{MeshHandle, NodeId, ObjectKind, Scene};
+use grid4d_scene::{MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
 
 /// A deformer's parameters, as a chain applies them.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Deformer {
     Bend(Bend),
     Twist(Twist),
     Taper(Taper),
     Bulge(Bulge),
+    /// With its lattice (shared: cloning does not copy it).
+    Ffd(Ffd, SplineHandle),
 }
 
 impl Deformer {
     /// The deformer `kind` is, if it is one.
     pub(crate) fn of(kind: &ObjectKind) -> Option<Self> {
-        match *kind {
-            ObjectKind::Bend(d) => Some(Self::Bend(d)),
-            ObjectKind::Twist(d) => Some(Self::Twist(d)),
-            ObjectKind::Taper(d) => Some(Self::Taper(d)),
-            ObjectKind::Bulge(d) => Some(Self::Bulge(d)),
+        match kind {
+            ObjectKind::Bend(d) => Some(Self::Bend(*d)),
+            ObjectKind::Twist(d) => Some(Self::Twist(*d)),
+            ObjectKind::Taper(d) => Some(Self::Taper(*d)),
+            ObjectKind::Bulge(d) => Some(Self::Bulge(*d)),
+            ObjectKind::Ffd { ffd, lattice, .. } => Some(Self::Ffd(*ffd, lattice.clone())),
             _ => None,
         }
     }
@@ -41,6 +44,7 @@ impl Deformer {
             Self::Twist(d) => d.box_lines(),
             Self::Taper(d) => d.box_lines(),
             Self::Bulge(d) => d.box_lines(),
+            Self::Ffd(d, lattice) => d.lattice_lines(&lattice.spline().points),
         }
     }
 
@@ -51,13 +55,14 @@ impl Deformer {
             Self::Twist(d) => d.apply(point),
             Self::Taper(d) => d.apply(point),
             Self::Bulge(d) => d.apply(point),
+            Self::Ffd(d, lattice) => d.apply(&lattice.spline().points, point),
         }
     }
 }
 
 /// One deformer of an object's chain: how to get from the object's space into
 /// the deformer's and back.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Link {
     to: Mat4,
     from: Mat4,
@@ -81,7 +86,7 @@ impl Link {
 }
 
 /// A deformer that reaches the objects below its parent, while walking the scene.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Active {
     /// The depth of its parent: it applies to nodes at this depth or deeper.
     depth: u32,
@@ -128,7 +133,7 @@ pub(crate) fn chain(active: &[Active], world: Mat4, out: &mut Vec<Link>) {
         out.extend(
             active[start..end]
                 .iter()
-                .map(|a| Link::new(a.world_inverse, world, a.deformer)),
+                .map(|a| Link::new(a.world_inverse, world, a.deformer.clone())),
         );
         end = start;
     }

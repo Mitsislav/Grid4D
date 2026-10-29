@@ -20,7 +20,7 @@ use std::{
 use glam::{Vec2, Vec3};
 use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
-    deform::{Bend, BendOrigin, Bulge, DeformerMode, Shape, Taper, Twist},
+    deform::{Bend, BendOrigin, Bulge, DeformerMode, Ffd, Shape, Taper, Twist},
     spline::{
         ArcType, Interpolation as SplineInterpolation, Segment, Spline, SplinePlane, SplinePrimitive, SplineShape,
         SplineType, Text, TextAlign,
@@ -874,6 +874,20 @@ enum KindDto {
         curvature: f32,
         #[serde(default, skip_serializing_if = "is_false")]
         fillet: bool,
+    },
+    /// An FFD deformer (added in step 10.4): its lattice points (absent while
+    /// regular) and their selected / hidden ranges.
+    Ffd {
+        size: [f32; 3],
+        grid: [u32; 3],
+        #[serde(default, skip_serializing_if = "DeformerModeDto::is_limited")]
+        mode: DeformerModeDto,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        lattice: Vec<[f32; 3]>,
+        #[serde(default, skip_serializing_if = "SetDto::is_empty")]
+        selected: SetDto,
+        #[serde(default, skip_serializing_if = "SetDto::is_empty")]
+        hidden: SetDto,
     },
     /// A spline primitive (added in step 9.1). Angles in radians.
     Spline {
@@ -2115,6 +2129,25 @@ impl KindDto {
                     BendOrigin::Top => BendOriginDto::Top,
                 },
             },
+            ObjectKind::Ffd {
+                ffd,
+                ref lattice,
+                ref components,
+            } => {
+                let points = &lattice.spline().points;
+                Self::Ffd {
+                    size: ffd.size.to_array(),
+                    grid: ffd.grid,
+                    mode: ffd.mode.into(),
+                    lattice: if *points == ffd.grid_points() {
+                        Vec::new()
+                    } else {
+                        points.iter().map(|p| p.to_array()).collect()
+                    },
+                    selected: SetDto::new(components.selected()),
+                    hidden: SetDto::new(components.hidden()),
+                }
+            }
             ObjectKind::Twist(d) => Self::Twist {
                 size: d.size.to_array(),
                 mode: d.mode.into(),
@@ -2395,6 +2428,43 @@ impl KindDto {
                     BendOriginDto::Top => BendOrigin::Top,
                 },
             }),
+            Self::Ffd {
+                size,
+                grid,
+                mode,
+                lattice,
+                selected,
+                hidden,
+            } => {
+                let ffd = Ffd {
+                    size: Vec3::from_array(size).abs(),
+                    // Never trust a count a file claims.
+                    grid: grid.map(|n| n.clamp(Ffd::MIN_GRID, Ffd::MAX_GRID)),
+                    mode: mode.into(),
+                };
+                let regular = ffd.grid_points();
+                let points: Vec<Vec3> = if lattice.is_empty() {
+                    regular
+                } else if lattice.len() == regular.len() {
+                    lattice.into_iter().map(Vec3::from_array).collect()
+                } else {
+                    return Err(IoError::Invalid(format!(
+                        "FFD \"{object}\" has {} lattice points for a grid of {}",
+                        lattice.len(),
+                        regular.len()
+                    )));
+                };
+                let count = points.len();
+                let state = ComponentState {
+                    selected: selected.into_counts(count, 0, 0, object, "selected")?,
+                    hidden: hidden.into_counts(count, 0, 0, object, "hidden")?,
+                };
+                ObjectKind::Ffd {
+                    ffd,
+                    lattice: SplineHandle::new(Spline::new(SplineType::Linear, points, false)),
+                    components: Components::new(state),
+                }
+            }
             Self::Twist { size, mode, angle } => ObjectKind::Twist(Twist {
                 size: Vec3::from_array(size).abs(),
                 mode: mode.into(),
@@ -2620,6 +2690,11 @@ impl KindDto {
                 size, strength, angle, ..
             } => vec![size[0], size[1], size[2], strength, angle],
             Self::Twist { size, angle, .. } => vec![size[0], size[1], size[2], angle],
+            Self::Ffd { size, ref lattice, .. } => {
+                let mut numbers = size.to_vec();
+                numbers.extend(lattice.iter().flatten().copied());
+                numbers
+            }
             Self::Taper {
                 size,
                 strength,
@@ -3377,6 +3452,39 @@ mod tests {
             let json = serde_json::to_string(&ParamDto::from(Param::Object(param))).unwrap();
             assert_eq!(json, format!("\"{name}\""));
         }
+    }
+
+    #[test]
+    fn ffd_lattices_round_trip_and_bad_counts_are_refused() {
+        let mut doc = Document::new("ffd");
+        let plain = ObjectKindTag::Ffd.default_kind();
+        let mut moved = ObjectKind::ffd(Ffd {
+            grid: [2, 4, 3],
+            mode: DeformerMode::Unlimited,
+            ..Ffd::default()
+        });
+        if let ObjectKind::Ffd {
+            lattice, components, ..
+        } = &mut moved
+        {
+            *lattice = lattice.edited(|s| s.points[5] += Vec3::X * 12.0);
+            components.make_mut().selected.points.insert(5);
+        }
+        doc.scene.insert(Node::new("FFD", plain.clone()));
+        doc.scene.insert(Node::new("FFD.1", moved.clone()));
+        let loaded = round_trip(&doc);
+        let kinds: Vec<&ObjectKind> = loaded
+            .scene
+            .roots()
+            .iter()
+            .map(|&id| &loaded.scene.get(id).unwrap().data.kind)
+            .collect();
+        assert_eq!(kinds, [&plain, &moved]);
+        let json = serde_json::to_string(&KindDto::new(&plain, "FFD", &mut MeshTable::default())).unwrap();
+        assert_eq!(json, r#"{"type":"ffd","size":[250.0,250.0,250.0],"grid":[3,3,3]}"#);
+        let bad = r#"{"type": "ffd", "size": [1, 1, 1], "grid": [2, 2, 2], "lattice": [[0, 0, 0]]}"#;
+        let dto: KindDto = serde_json::from_str(bad).unwrap();
+        assert!(dto.into_kind(&[], "test").is_err());
     }
 
     #[test]

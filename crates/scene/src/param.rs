@@ -351,7 +351,9 @@ impl ObjectKind {
             | Self::Polygon { .. }
             | Self::SubdivisionSurface { .. }
             | Self::Loft(_)
-            | Self::Spline { .. } => &[],
+            | Self::Spline { .. }
+            // The lattice is edited, not keyed.
+            | Self::Ffd { .. } => &[],
         };
         all.iter().copied().filter(|&p| self.param(p).is_some()).collect()
     }

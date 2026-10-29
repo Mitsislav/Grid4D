@@ -132,6 +132,14 @@ pub enum ObjectKind {
     Taper(grid4d_geom::deform::Taper),
     /// Bulge deformer: swells its parent's subtree in the box's middle.
     Bulge(grid4d_geom::deform::Bulge),
+    /// FFD deformer: its lattice's moved points reshape its parent's subtree.
+    /// The lattice is kept as a linear spline's points (with its selected and
+    /// hidden points), so Points mode edits it as it edits a spline.
+    Ffd {
+        ffd: grid4d_geom::deform::Ffd,
+        lattice: SplineHandle,
+        components: Components,
+    },
     /// A parametric spline (Circle, Rectangle, Arc, n-Side, Star, Helix,
     /// Flower): a curve, drawn as lines, not rendered.
     SplinePrimitive(SplinePrimitive),
@@ -171,6 +179,7 @@ pub enum ObjectKindTag {
     Twist,
     Taper,
     Bulge,
+    Ffd,
     Circle,
     Rectangle,
     Arc,
@@ -183,7 +192,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 31] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -205,6 +214,7 @@ impl ObjectKindTag {
         Self::Twist,
         Self::Taper,
         Self::Bulge,
+        Self::Ffd,
         Self::Circle,
         Self::Rectangle,
         Self::Arc,
@@ -238,7 +248,7 @@ impl ObjectKindTag {
     ];
 
     /// Deformers: objects that reshape their parent and its subtree.
-    pub const DEFORMERS: [Self; 4] = [Self::Bend, Self::Twist, Self::Taper, Self::Bulge];
+    pub const DEFORMERS: [Self; 5] = [Self::Bend, Self::Twist, Self::Taper, Self::Bulge, Self::Ffd];
 
     /// Geometric primitives (the "Create ▸ Object" family).
     pub const PRIMITIVES: [Self; 8] = [
@@ -276,6 +286,7 @@ impl ObjectKindTag {
             Self::Twist => "Twist",
             Self::Taper => "Taper",
             Self::Bulge => "Bulge",
+            Self::Ffd => "FFD",
             Self::Circle => "Circle",
             Self::Rectangle => "Rectangle",
             Self::Arc => "Arc",
@@ -368,6 +379,8 @@ impl ObjectKindTag {
             Self::Twist => ObjectKind::Twist(grid4d_geom::deform::Twist::default()),
             Self::Taper => ObjectKind::Taper(grid4d_geom::deform::Taper::default()),
             Self::Bulge => ObjectKind::Bulge(grid4d_geom::deform::Bulge::default()),
+            // docs/reference/deformer-ffd.md: a 3 × 3 × 3 lattice, unmoved.
+            Self::Ffd => ObjectKind::ffd(grid4d_geom::deform::Ffd::default()),
             // The manual states no defaults: these are ours (docs/reference/object-spline.md).
             Self::Circle => spline(SplineShape::Circle {
                 radius: 200.0,
@@ -501,6 +514,7 @@ impl ObjectKind {
             Self::Twist(_) => ObjectKindTag::Twist,
             Self::Taper(_) => ObjectKindTag::Taper,
             Self::Bulge(_) => ObjectKindTag::Bulge,
+            Self::Ffd { .. } => ObjectKindTag::Ffd,
             Self::SplinePrimitive(primitive) => match primitive.shape {
                 SplineShape::Circle { .. } => ObjectKindTag::Circle,
                 SplineShape::Rectangle { .. } => ObjectKindTag::Rectangle,
@@ -547,14 +561,58 @@ impl ObjectKind {
             | Self::Bend(_)
             | Self::Twist(_)
             | Self::Taper(_)
-            | Self::Bulge(_) => 0,
+            | Self::Bulge(_)
+            | Self::Ffd { .. } => 0,
         }
     }
 
     /// Reshapes its parent and the parent's subtree (see [`ObjectKindTag::DEFORMERS`]).
     #[must_use]
     pub const fn is_deformer(&self) -> bool {
-        matches!(self, Self::Bend(_) | Self::Twist(_) | Self::Taper(_) | Self::Bulge(_))
+        matches!(
+            self,
+            Self::Bend(_) | Self::Twist(_) | Self::Taper(_) | Self::Bulge(_) | Self::Ffd { .. }
+        )
+    }
+
+    /// An FFD with its regular lattice, nothing selected.
+    #[must_use]
+    pub fn ffd(ffd: grid4d_geom::deform::Ffd) -> Self {
+        let lattice =
+            grid4d_geom::spline::Spline::new(grid4d_geom::spline::SplineType::Linear, ffd.grid_points(), false);
+        Self::Ffd {
+            ffd,
+            lattice: SplineHandle::new(lattice),
+            components: Components::default(),
+        }
+    }
+
+    /// The points Points mode edits as a spline's: an editable spline's control
+    /// points or an FFD's lattice, with their selected and hidden flags.
+    #[must_use]
+    pub const fn points(&self) -> Option<(&SplineHandle, &Components)> {
+        match self {
+            Self::Spline { spline, components, .. }
+            | Self::Ffd {
+                lattice: spline,
+                components,
+                ..
+            } => Some((spline, components)),
+            _ => None,
+        }
+    }
+
+    /// See [`points`](Self::points).
+    pub const fn points_mut(&mut self) -> Option<(&mut SplineHandle, &mut Components)> {
+        match self {
+            Self::Spline { spline, components, .. }
+            | Self::Ffd {
+                lattice: spline,
+                components,
+                ..
+            } => Some((spline, components)),
+            _ => None,
+        }
     }
 
     /// A deformer's box (its Size), for Fit to Parent; `None` for other objects.
@@ -564,6 +622,7 @@ impl ObjectKind {
             Self::Twist(d) => Some(&mut d.size),
             Self::Taper(d) => Some(&mut d.size),
             Self::Bulge(d) => Some(&mut d.size),
+            Self::Ffd { ffd, .. } => Some(&mut ffd.size),
             _ => None,
         }
     }
@@ -634,6 +693,7 @@ impl ObjectKind {
             Self::Twist(d) => d.size * 0.5,
             Self::Taper(d) => d.size * 0.5,
             Self::Bulge(d) => d.size * 0.5,
+            Self::Ffd { ffd, .. } => ffd.size * 0.5,
             Self::Spline {
                 ref spline,
                 interpolation,

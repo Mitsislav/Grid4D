@@ -89,7 +89,7 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 10.1 | [`animation-parameters.md`](animation-parameters.md) — keys on object parameters | implemented 2026-10-29 |
 | 10.2 | [`deformer-basics.md`](deformer-basics.md), [`deformer-bend.md`](deformer-bend.md) — who a deformer deforms, the box and its modes; the Bend | implemented 2026-10-29 |
 | 10.3 | [`deformer-twist-taper-bulge.md`](deformer-twist-taper-bulge.md) — Twist, Taper, Bulge; strength handles | implemented 2026-10-29 |
-| 10.4 | `deformer-ffd.md` — the FFD lattice | todo |
+| 10.4 | [`deformer-ffd.md`](deformer-ffd.md) — the FFD lattice | implemented 2026-10-29 |
 | 10.5 | `modeling-current-state.md` — Current State to Object | todo |
 | 10.6–10.7 | `mograph-cloner.md` — the Cloner: Linear, Radial, Grid Array, Object; clones as instances | todo |
 | 10.8 | `mograph-effectors.md` — Plain and Random effectors, their falloff | todo |

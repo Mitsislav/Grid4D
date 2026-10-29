@@ -538,6 +538,24 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.fill_with(&outline, soft);
             c.polyline(&outline, true);
         }
+        ObjectKindTag::Ffd => {
+            // A 3 × 3 lattice with one point pulled out.
+            let at = |i: usize, j: usize| -> P {
+                let (x, y) = (0.16 + 0.34 * i as f32, 0.16 + 0.34 * j as f32);
+                if (i, j) == (2, 0) { (x + 0.02, y - 0.06) } else { (x, y) }
+            };
+            for j in 0..3 {
+                c.polyline(&[at(0, j), at(1, j), at(2, j)], false);
+            }
+            for i in 0..3 {
+                c.polyline(&[at(i, 0), at(i, 1), at(i, 2)], false);
+            }
+            for j in 0..3 {
+                for i in 0..3 {
+                    c.disc(at(i, j), 0.05);
+                }
+            }
+        }
         ObjectKindTag::Light => {
             c.disc((0.5, 0.5), 0.19);
             for i in 0..8 {
