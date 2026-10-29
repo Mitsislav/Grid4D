@@ -301,7 +301,8 @@ any time. To edit their points and polygons, make them editable
 **Generators** (Create ▸ Generator, or the green buttons at the right end of the
 command palette) build their shape from their children. The Subdivision Surface
 smooths a polygon mesh ([§12](#12-generators-subdivision-surface)); the Extrude
-turns a spline into a solid ([§13.4](#134-extrude-from-outline-to-solid)).
+turns a spline into a solid ([§13.4](#134-extrude-from-outline-to-solid)) and
+the Lathe turns one around an axis ([§13.5](#135-lathe-turning-a-profile)).
 
 **Splines** (Create ▸ Spline, or the circle button) are curves: Circle,
 Rectangle, Arc, n-Side, Star, Helix and Flower ([§13](#13-splines)).
@@ -1138,6 +1139,41 @@ As with every generator, **Q** switches it on and off, and **Make Editable** (C)
 turns the solid into one polygon object (the spline goes with it). Renders show
 the solid; the spline itself is never rendered.
 
+### 13.5 Lathe: turning a profile
+
+The **Lathe** generator spins a spline around its own **Y axis**, the way a
+lathe turns wood: draw half the outline of a vase, a glass or a bottle and get
+the whole object.
+
+![A vase, a torus, a screw, a half turn with caps and a shrinking spiral, all made with the Lathe; its Object properties](images/manual/spline-lathe.png)
+
+1. Draw the profile in the **XY** plane (the Front view), to the right of the Y
+   axis. A profile that starts on the axis closes the bottom.
+2. Select it and hold **Alt** while you choose **Create ▸ Generator ▸ Lathe**
+   (or the Lathe button in the toolbar). The profile becomes the Lathe's child
+   and stays visible as a line, so you can keep editing it.
+3. To move the profile away from the axis (a ring, a torus), move the spline
+   under the Lathe, not the Lathe itself: the axis goes where the Lathe goes.
+
+The Attribute Manager's **Object** tab:
+
+- **Angle**: how far the profile turns (360° is a full turn; 180° half). Angles
+  over 360° wind round again.
+- **Subdivision**: steps along the turn: more steps, rounder result.
+- **Movement**: how far the profile rises along Y from start to end. With an
+  angle of several turns this makes a screw thread or a spring.
+- **Scaling**: the profile's size at the end, in percent. Less than 100 %
+  shrinks it as it turns (a snail's shell); it grows and shrinks around the
+  Lathe's centre.
+- **Reverse Normals**: turns the surface inside out (caps unaffected).
+- **Start Cap** / **End Cap** and **Caps Type**: when a closed profile does not
+  come back to where it started (less than a full turn, a Movement or a
+  Scaling), its two ends get lids, as with the Extrude.
+
+A full turn closes on itself and shares the points on the axis, so a vase's
+bottom has one centre point. Q, Make Editable and rendering work as for the
+Extrude.
+
 ## 14. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
@@ -1499,8 +1535,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   Solid, Proportional and Radial modes; Bridge point by point.
 - **Generators**: the Subdivision Surface has one type (Catmull-Clark) and no
   edge weights (creases) or UV options. The Extrude has no bevels (fillets),
-  Delaunay or grid caps, UVs or selections for its caps. Lathe, Sweep, Loft and
-  Cloner are planned.
+  Delaunay or grid caps, UVs or selections for its caps; neither has the Lathe
+  (no Isoparm display either). Sweep, Loft and Cloner are planned.
 - **Splines**: Text comes next; hiding points, Grow/Shrink on points,
   snapping to spline points and the Pen snapping to objects; editing points
   inside the Pen (moving them while drawing); the Cissoid, Cogwheel, Cycloid, Formula, Profile,

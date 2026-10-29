@@ -1657,7 +1657,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Capsule
         | ObjectKindTag::Polygon
         | ObjectKindTag::SubdivisionSurface
-        | ObjectKindTag::Extrude => {}
+        | ObjectKindTag::Extrude
+        | ObjectKindTag::Lathe => {}
     }
     data
 }
@@ -1697,7 +1698,7 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         ObjectKindTag::Null => palette::ICON_NULL,
         ObjectKindTag::Camera => palette::ICON_CAMERA,
         ObjectKindTag::Light => palette::ICON_LIGHT,
-        ObjectKindTag::SubdivisionSurface | ObjectKindTag::Extrude => palette::ICON_GENERATOR,
+        ObjectKindTag::SubdivisionSurface | ObjectKindTag::Extrude | ObjectKindTag::Lathe => palette::ICON_GENERATOR,
         ObjectKindTag::Circle
         | ObjectKindTag::Rectangle
         | ObjectKindTag::Arc
@@ -3567,5 +3568,42 @@ mod tests {
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
         assert_eq!(doc.scene.get(extrude).unwrap().data.kind.tag(), ObjectKindTag::Extrude);
         assert_eq!(doc.scene.get(rectangle).unwrap().parent(), Some(extrude));
+    }
+
+    #[test]
+    fn a_lathe_wraps_a_spline_and_bakes_into_a_closed_body() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreateObject(ObjectKindTag::Circle)],
+        );
+        let circle = editor.selection.active().unwrap();
+        // Beside the axis: a torus.
+        doc.scene.get_mut(circle).unwrap().data.transform.position.x = 400.0;
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[
+                EditorCommand::WrapInGenerator(ObjectKindTag::Lathe),
+                EditorCommand::MakeEditable,
+            ],
+        );
+        let lathe = editor.selection.active().unwrap();
+        assert_eq!(doc.scene.get(lathe).unwrap().data.name, "Lathe");
+        let ObjectKind::Polygon { mesh, .. } = &doc.scene.get(lathe).unwrap().data.kind else {
+            panic!("not baked")
+        };
+        assert_eq!(mesh.mesh().face_count() % 24, 0, "24 steps round");
+        assert!(!doc.scene.contains(circle));
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Undo, EditorCommand::Undo],
+        );
+        assert_eq!(doc.scene.get(circle).unwrap().parent(), None, "back where it was");
     }
 }

@@ -1,6 +1,6 @@
-//! Surfaces made from splines: the Extrude generator's solid (see
-//! `docs/reference/generator-extrude.md`). Pure functions of a sampled
-//! [`Polyline`]; Lathe, Sweep and Loft will join them.
+//! Surfaces made from splines: the Extrude and Lathe generators' bodies (see
+//! `docs/reference/generator-extrude.md`, `generator-lathe.md`). Pure
+//! functions of a sampled [`Polyline`]; Sweep and Loft will join them.
 
 use glam::{Vec2, Vec3};
 
@@ -127,19 +127,105 @@ fn plane_axis(polyline: &Polyline) -> Vec3 {
     }
 }
 
-/// One run of the polyline as the solid uses it.
+/// One run of the polyline as a surface uses it.
 struct Run<'a> {
     points: &'a [Vec3],
     closed: bool,
-    /// Projected onto the plane across the movement.
+    /// Projected onto the plane caps are made in.
     flat: Vec<Vec2>,
     /// Closed runs: how many other closed runs contain it (even: an outline,
     /// odd: a hole).
     depth: usize,
-    /// Its points in the order that faces outwards.
+    /// Its points in the order that faces outwards: outlines counter-clockwise
+    /// and holes clockwise in the flat plane; open runs as drawn.
     order: Vec<u32>,
-    /// Index of its first point in the mesh.
-    base: u32,
+}
+
+/// The runs of `polyline` with two points or more, projected by `flat`,
+/// nested even-odd and ordered outwards.
+fn profile<'a>(polyline: &'a Polyline, flat: impl Fn(Vec3) -> Vec2) -> Vec<Run<'a>> {
+    let mut runs: Vec<Run<'a>> = polyline
+        .runs()
+        .filter(|(points, _)| points.len() >= 2)
+        .map(|(points, closed)| Run {
+            points,
+            closed: closed && points.len() >= 3,
+            flat: points.iter().map(|&p| flat(p)).collect(),
+            depth: 0,
+            order: (0..u32_index(points.len())).collect(),
+        })
+        .collect();
+    for i in 0..runs.len() {
+        if !runs[i].closed {
+            continue;
+        }
+        let probe = runs[i].flat[0];
+        runs[i].depth = (0..runs.len())
+            .filter(|&j| j != i && runs[j].closed && contains(&runs[j].flat, probe))
+            .count();
+        let counter_clockwise = area(&runs[i].flat) > 0.0;
+        if counter_clockwise != runs[i].depth.is_multiple_of(2) {
+            runs[i].order.reverse();
+        }
+    }
+    runs
+}
+
+/// The cap polygons of `runs`: each outline with its direct holes cut out, as
+/// (run, point) pairs, counter-clockwise in the flat plane.
+fn caps(runs: &[Run<'_>], cap_type: CapType) -> Vec<Vec<(usize, u32)>> {
+    let mut polygons = Vec::new();
+    for (i, outline) in runs.iter().enumerate() {
+        if !outline.closed || !outline.depth.is_multiple_of(2) {
+            continue;
+        }
+        let holes: Vec<usize> = (0..runs.len())
+            .filter(|&j| {
+                j != i
+                    && runs[j].closed
+                    && runs[j].depth == outline.depth + 1
+                    && contains(&outline.flat, runs[j].flat[0])
+            })
+            .collect();
+        if holes.is_empty() && cap_type == CapType::NGons {
+            polygons.push(outline.order.iter().map(|&p| (i, p)).collect());
+            continue;
+        }
+        let hole_flats: Vec<&[Vec2]> = holes.iter().map(|&h| runs[h].flat.as_slice()).collect();
+        let mut owners: Vec<(usize, u32)> = (0..u32_index(outline.points.len())).map(|p| (i, p)).collect();
+        for &hole in &holes {
+            owners.extend((0..u32_index(runs[hole].points.len())).map(|p| (hole, p)));
+        }
+        for triangle in triangulate_outlines(&outline.flat, &hole_flats) {
+            polygons.push(
+                triangle
+                    .iter()
+                    .filter_map(|&c| owners.get(crate::us(c)).copied())
+                    .collect(),
+            );
+        }
+    }
+    polygons
+}
+
+/// A mesh from `points` and `faces`; repeated corners are dropped from a face
+/// (welded points, a triangle across a bridge) and faces left with fewer than
+/// three are skipped.
+fn assemble(points: Vec<Vec3>, faces: &[Vec<u32>]) -> PolyMesh {
+    let mut mesh = PolyMesh::from_faces(points, Vec::<Vec<u32>>::new()).unwrap_or_default();
+    let mut corners = Vec::new();
+    for face in faces {
+        corners.clear();
+        for &c in face {
+            if !corners.contains(&c) {
+                corners.push(c);
+            }
+        }
+        if corners.len() >= 3 {
+            let _ = mesh.add_face(&corners);
+        }
+    }
+    mesh
 }
 
 /// The solid `polyline` makes when it is pushed along `extrusion`'s movement:
@@ -156,53 +242,28 @@ pub fn extrude(polyline: &Polyline, extrusion: &Extrusion) -> PolyMesh {
     let u = dir.any_orthonormal_vector();
     let v = dir.cross(u);
     let rings = extrusion.subdivision.clamp(1, Extrusion::MAX_SUBDIVISION);
-    let mut runs: Vec<Run<'_>> = polyline
-        .runs()
-        .filter(|(points, _)| points.len() >= 2)
-        .map(|(points, closed)| Run {
-            points,
-            closed: closed && points.len() >= 3,
-            flat: points.iter().map(|&p| Vec2::new(p.dot(u), p.dot(v))).collect(),
-            depth: 0,
-            order: (0..u32_index(points.len())).collect(),
-            base: 0,
-        })
-        .collect();
-    // Nesting (even-odd) and orientation: outlines counter-clockwise, holes clockwise.
-    for i in 0..runs.len() {
-        if !runs[i].closed {
-            continue;
-        }
-        let probe = runs[i].flat[0];
-        runs[i].depth = (0..runs.len())
-            .filter(|&j| j != i && runs[j].closed && contains(&runs[j].flat, probe))
-            .count();
-        let counter_clockwise = area(&runs[i].flat) > 0.0;
-        if counter_clockwise != runs[i].depth.is_multiple_of(2) {
-            runs[i].order.reverse();
-        }
-    }
+    let runs = profile(polyline, |p| Vec2::new(p.dot(u), p.dot(v)));
 
     let mut points = Vec::new();
-    let mut faces: Vec<Vec<u32>> = Vec::new();
+    let mut bases = Vec::with_capacity(runs.len());
     let steps = f32::from(u16::try_from(rings).unwrap_or(u16::MAX));
-    for run in &mut runs {
-        run.base = u32_index(points.len());
+    for run in &runs {
+        bases.push(u32_index(points.len()));
         for k in 0..=rings {
             let along = movement * (f32::from(u16::try_from(k).unwrap_or(u16::MAX)) / steps);
             points.extend(run.points.iter().map(|&p| p + along));
         }
     }
-    let n_of = |run: &Run<'_>| u32_index(run.points.len());
-    let at = |run: &Run<'_>, ring: u32, local: u32| run.base + ring * n_of(run) + local;
+    let at = |run: usize, ring: u32, local: u32| bases[run] + ring * u32_index(runs[run].points.len()) + local;
+    let mut faces: Vec<Vec<u32>> = Vec::new();
     // The shell: each edge of each run swept ring by ring.
-    for run in &runs {
+    for (r, run) in runs.iter().enumerate() {
         let n = run.order.len();
         let edges = if run.closed { n } else { n - 1 };
         for e in 0..edges {
             let (a, b) = (run.order[e], run.order[(e + 1) % n]);
             for k in 0..rings {
-                let mut quad = vec![at(run, k, a), at(run, k, b), at(run, k + 1, b), at(run, k + 1, a)];
+                let mut quad = vec![at(r, k, a), at(r, k, b), at(r, k + 1, b), at(r, k + 1, a)];
                 if extrusion.reverse_normals {
                     quad.reverse();
                 }
@@ -210,53 +271,162 @@ pub fn extrude(polyline: &Polyline, extrusion: &Extrusion) -> PolyMesh {
             }
         }
     }
-    // The caps: each outline with its direct holes.
-    for (i, outline) in runs.iter().enumerate() {
-        if !outline.closed || !outline.depth.is_multiple_of(2) {
+    // The caps: counter-clockwise around dir faces forward (the end).
+    for polygon in caps(&runs, extrusion.cap_type) {
+        if extrusion.end_cap {
+            faces.push(polygon.iter().map(|&(run, p)| at(run, rings, p)).collect());
+        }
+        if extrusion.start_cap {
+            faces.push(polygon.iter().rev().map(|&(run, p)| at(run, 0, p)).collect());
+        }
+    }
+    assemble(points, &faces)
+}
+
+/// The Lathe generator's options: how far a profile turns around the Y axis.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lathe {
+    /// Radians; a full turn is ±τ.
+    pub angle: f32,
+    /// Steps along the turn (3 – [`Lathe::MAX_SUBDIVISION`]).
+    pub subdivision: u32,
+    /// Distance along Y from start to end (cm): a helix.
+    pub movement: f32,
+    /// The profile's size at the end (1.0 = 100 %), about the origin.
+    pub scaling: f32,
+    /// Turns the shell inside out (caps untouched).
+    pub reverse_normals: bool,
+    pub start_cap: bool,
+    pub end_cap: bool,
+    pub cap_type: CapType,
+}
+
+impl Default for Lathe {
+    fn default() -> Self {
+        Self {
+            angle: std::f32::consts::TAU,
+            subdivision: 24,
+            movement: 0.0,
+            scaling: 1.0,
+            reverse_normals: false,
+            start_cap: true,
+            end_cap: true,
+            cap_type: CapType::NGons,
+        }
+    }
+}
+
+impl Lathe {
+    pub const MIN_SUBDIVISION: u32 = 3;
+    pub const MAX_SUBDIVISION: u32 = 4000;
+
+    /// Closes on itself: a full turn that ends where it started.
+    #[must_use]
+    pub fn is_full_turn(&self) -> bool {
+        (self.angle.abs() - std::f32::consts::TAU).abs() < 1e-4 && self.movement == 0.0 && self.scaling == 1.0
+    }
+}
+
+/// The body `polyline` makes when it turns around the Y axis by `lathe`'s
+/// angle (rising by its movement, growing to its scaling). A full turn closes
+/// on itself, sharing the points on the axis; an open one gets caps on closed
+/// profiles. Empty when nothing moves.
+#[must_use]
+pub fn lathe(polyline: &Polyline, lathe: &Lathe) -> PolyMesh {
+    let (angle, movement, scaling) = (lathe.angle, lathe.movement, lathe.scaling.max(0.0));
+    if !(angle.is_finite() && movement.is_finite() && scaling.is_finite())
+        || (angle == 0.0 && movement == 0.0 && scaling == 1.0)
+    {
+        return PolyMesh::new();
+    }
+    let full = lathe.is_full_turn();
+    let steps = lathe.subdivision.clamp(Lathe::MIN_SUBDIVISION, Lathe::MAX_SUBDIVISION);
+    let stored = if full { steps } else { steps + 1 };
+    // Each point as (distance from the axis, height): the half-plane caps are made in.
+    let mut runs = profile(polyline, |p| Vec2::new(p.x.hypot(p.z), p.y));
+    // Open profiles face away from the area between them and the axis.
+    for run in &mut runs {
+        if run.closed {
             continue;
         }
-        let holes: Vec<&Run<'_>> = runs
-            .iter()
-            .enumerate()
-            .filter(|&(j, hole)| {
-                j != i && hole.closed && hole.depth == outline.depth + 1 && contains(&outline.flat, hole.flat[0])
-            })
-            .map(|(_, hole)| hole)
-            .collect();
-        // Cap polygons around dir, as (run, local point) pairs.
-        let mut cap: Vec<Vec<(&Run<'_>, u32)>> = Vec::new();
-        if holes.is_empty() && extrusion.cap_type == CapType::NGons {
-            cap.push(outline.order.iter().map(|&p| (outline, p)).collect());
-        } else {
-            let hole_flats: Vec<&[Vec2]> = holes.iter().map(|h| h.flat.as_slice()).collect();
-            let mut owners: Vec<(&Run<'_>, u32)> = (0..n_of(outline)).map(|p| (outline, p)).collect();
-            for hole in &holes {
-                owners.extend((0..n_of(hole)).map(|p| (*hole, p)));
-            }
-            for triangle in triangulate_outlines(&outline.flat, &hole_flats) {
-                cap.push(
-                    triangle
-                        .iter()
-                        .filter_map(|&c| owners.get(crate::us(c)).copied())
-                        .collect(),
-                );
+        let n = run.flat.len();
+        let swept: f32 = (1..n)
+            .map(|i| (run.flat[i - 1].x + run.flat[i].x) * (run.flat[i].y - run.flat[i - 1].y))
+            .sum();
+        if swept < 0.0 {
+            run.order.reverse();
+        }
+    }
+    let size = polyline
+        .bounds()
+        .map_or(1.0, |(min, max)| (max - min).max_element().max(1.0));
+    // Points on the axis stay put while nothing but the angle changes them.
+    let welded = |q: Vec2| movement == 0.0 && scaling == 1.0 && q.x <= size * 1e-5;
+    let span = f32::from(u16::try_from(steps).unwrap_or(u16::MAX));
+    let mut points = Vec::new();
+    // Point index by run, ring and point.
+    let mut ids: Vec<Vec<u32>> = Vec::with_capacity(runs.len());
+    for run in &runs {
+        let n = run.points.len();
+        let mut table = Vec::with_capacity(n * crate::us(stored));
+        for k in 0..stored {
+            let t = f32::from(u16::try_from(k).unwrap_or(u16::MAX)) / span;
+            let turn = glam::Quat::from_rotation_y(angle * t);
+            let grow = 1.0 + (scaling - 1.0) * t;
+            for (i, &p) in run.points.iter().enumerate() {
+                if k > 0 && welded(run.flat[i]) {
+                    let first = table[i];
+                    table.push(first);
+                    continue;
+                }
+                table.push(u32_index(points.len()));
+                points.push(turn * (p * grow) + Vec3::Y * (movement * t));
             }
         }
-        for polygon in &cap {
-            if extrusion.end_cap {
-                faces.push(polygon.iter().map(|&(run, p)| at(run, rings, p)).collect());
-            }
-            if extrusion.start_cap {
-                faces.push(polygon.iter().rev().map(|&(run, p)| at(run, 0, p)).collect());
+        ids.push(table);
+    }
+    let at = |run: usize, ring: u32, local: u32| {
+        let n = u32_index(runs[run].points.len());
+        ids[run][crate::us((ring % stored) * n + local)]
+    };
+    // Counter-clockwise profiles turning the positive way face the axis: flip.
+    let flip = (angle > 0.0) != lathe.reverse_normals;
+    let mut faces: Vec<Vec<u32>> = Vec::new();
+    for (r, run) in runs.iter().enumerate() {
+        let n = run.order.len();
+        let edges = if run.closed { n } else { n - 1 };
+        for e in 0..edges {
+            let (a, b) = (run.order[e], run.order[(e + 1) % n]);
+            for k in 0..steps {
+                let mut quad = vec![at(r, k, a), at(r, k, b), at(r, k + 1, b), at(r, k + 1, a)];
+                if flip {
+                    quad.reverse();
+                }
+                faces.push(quad);
             }
         }
     }
-    let mut mesh = PolyMesh::from_faces(points, Vec::<Vec<u32>>::new()).unwrap_or_default();
-    for face in &faces {
-        // Corners that coincide (a triangle across a bridge) make no face.
-        let _ = mesh.add_face(face);
+    if !full {
+        // Counter-clockwise in the half-plane faces back against a positive turn.
+        let backwards = angle >= 0.0;
+        for polygon in caps(&runs, lathe.cap_type) {
+            let start: Vec<u32> = polygon.iter().map(|&(run, p)| at(run, 0, p)).collect();
+            let end: Vec<u32> = polygon.iter().map(|&(run, p)| at(run, steps, p)).collect();
+            let (mut start, mut end) = (start, end);
+            if backwards {
+                end.reverse();
+            } else {
+                start.reverse();
+            }
+            if lathe.start_cap {
+                faces.push(start);
+            }
+            if lathe.end_cap {
+                faces.push(end);
+            }
+        }
     }
-    mesh
+    assemble(points, &faces)
 }
 
 /// Twice the signed area: positive when counter-clockwise.
@@ -519,5 +689,147 @@ mod tests {
             total += doubled * 0.5;
         }
         assert!((total - (100.0 - 4.0 - 4.0)).abs() < 1e-3, "{total}");
+    }
+
+    /// A rectangle beside the Y axis in the XY plane: x 50–100, y 0–80.
+    fn beside_axis(counter_clockwise: bool) -> Vec<Vec3> {
+        let mut points = vec![
+            Vec3::new(50.0, 0.0, 0.0),
+            Vec3::new(100.0, 0.0, 0.0),
+            Vec3::new(100.0, 80.0, 0.0),
+            Vec3::new(50.0, 80.0, 0.0),
+        ];
+        if !counter_clockwise {
+            points.reverse();
+        }
+        points
+    }
+
+    #[test]
+    fn a_full_turn_of_a_rectangle_is_a_closed_pipe_facing_outwards() {
+        for counter_clockwise in [true, false] {
+            for angle in [std::f32::consts::TAU, -std::f32::consts::TAU] {
+                let rectangle = polyline(&[(&beside_axis(counter_clockwise), true)]);
+                let mesh = lathe(
+                    &rectangle,
+                    &Lathe {
+                        angle,
+                        ..Lathe::default()
+                    },
+                );
+                assert_eq!(mesh.point_count(), 24 * 4, "no ring repeated");
+                assert_eq!(mesh.face_count(), 24 * 4, "no caps on a full turn");
+                assert!(is_closed(&mesh));
+                // A 24-sided prism ring: outer minus inner polygon area times height.
+                let polygon = |r: f32| 12.0 * r * r * (std::f32::consts::TAU / 24.0).sin();
+                let expected = (polygon(100.0) - polygon(50.0)) * 80.0;
+                assert!(
+                    (volume(&mesh) - expected).abs() < expected * 1e-4,
+                    "{counter_clockwise} {angle}: {} vs {expected}",
+                    volume(&mesh)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_open_profile_from_the_axis_makes_a_cup_with_a_shared_centre() {
+        let cup = [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(60.0, 0.0, 0.0),
+            Vec3::new(80.0, 100.0, 0.0),
+        ];
+        for points in [cup.to_vec(), cup.iter().rev().copied().collect()] {
+            let mesh = lathe(&polyline(&[(&points, false)]), &Lathe::default());
+            assert_eq!(mesh.point_count(), 1 + 24 * 2, "one centre point");
+            let triangles = mesh.faces().filter(|f| f.len() == 3).count();
+            assert_eq!(triangles, 24, "the bottom fans round the centre");
+            let bottom = mesh.faces().position(|f| f.len() == 3).unwrap();
+            assert!(mesh.face_normal(bottom).y < -0.99, "the bottom faces down");
+            let wall = mesh.faces().position(|f| f.len() == 4).unwrap();
+            let centre = mesh.face_center(wall);
+            assert!(
+                mesh.face_normal(wall).dot(Vec3::new(centre.x, 0.0, centre.z)) > 0.0,
+                "the wall faces out"
+            );
+        }
+    }
+
+    #[test]
+    fn half_a_turn_gets_caps_and_reverse_normals_flips_only_the_shell() {
+        let rectangle = polyline(&[(&beside_axis(true), true)]);
+        let half = Lathe {
+            angle: std::f32::consts::PI,
+            ..Lathe::default()
+        };
+        let mesh = lathe(&rectangle, &half);
+        assert_eq!(mesh.point_count(), 25 * 4);
+        assert_eq!(mesh.face_count(), 24 * 4 + 2);
+        assert!(is_closed(&mesh));
+        assert!(volume(&mesh) > 0.0);
+        let reversed = lathe(
+            &rectangle,
+            &Lathe {
+                reverse_normals: true,
+                ..half
+            },
+        );
+        assert!(
+            mesh.face_normal(0).dot(reversed.face_normal(0)) < -0.99,
+            "shell flipped"
+        );
+        let last = mesh.face_count() - 1;
+        assert_eq!(mesh.face_normal(last), reversed.face_normal(last), "caps kept");
+        let open = lathe(
+            &rectangle,
+            &Lathe {
+                start_cap: false,
+                end_cap: false,
+                ..half
+            },
+        );
+        assert_eq!(open.face_count(), 24 * 4);
+    }
+
+    #[test]
+    fn movement_and_scaling_change_the_end() {
+        let rectangle = polyline(&[(&beside_axis(true), true)]);
+        let screw = lathe(
+            &rectangle,
+            &Lathe {
+                angle: std::f32::consts::TAU * 2.0,
+                movement: 200.0,
+                ..Lathe::default()
+            },
+        );
+        let (min, max) = screw.bounds().unwrap();
+        assert!((min.y - 0.0).abs() < 1e-3 && (max.y - 280.0).abs() < 1e-3);
+        assert!(is_closed(&screw), "capped at both ends");
+        assert!(volume(&screw) > 0.0);
+        let shrink = lathe(
+            &rectangle,
+            &Lathe {
+                angle: std::f32::consts::PI,
+                scaling: 0.5,
+                ..Lathe::default()
+            },
+        );
+        // The end ring is the profile at half size, turned half way: x = -25 … -50.
+        let end = &shrink.points()[24 * 4..];
+        assert!(
+            end.iter().all(|p| p.x <= -24.9 && p.x >= -50.1 && p.y <= 40.1),
+            "{end:?}"
+        );
+        assert_eq!(
+            lathe(
+                &rectangle,
+                &Lathe {
+                    angle: 0.0,
+                    ..Lathe::default()
+                }
+            )
+            .face_count(),
+            0
+        );
     }
 }

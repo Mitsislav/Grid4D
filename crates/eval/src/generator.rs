@@ -2,14 +2,14 @@
 //! Subdivision Surface smooths its first child — the *cage*, with the cage's own
 //! descendants merged into one mesh — in the generator's space; the Extrude
 //! pushes its first child spline (or, hierarchical, every spline below it) into
-//! a solid.
+//! a solid; the Lathe turns its first child spline around its Y axis.
 
 use glam::Mat4;
 use grid4d_geom::{
     PolyMesh,
     spline::{Interpolation, Polyline, SplinePrimitive},
     subdivision::{self, SubdivisionOptions},
-    surface::{self, Extrusion},
+    surface::{self, Extrusion, Lathe},
 };
 use grid4d_scene::{MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
 
@@ -20,6 +20,7 @@ use crate::{Purpose, editable_mesh};
 pub(crate) enum Options {
     Subdivision(SubdivisionOptions),
     Extrude { extrusion: Extrusion, hierarchical: bool },
+    Lathe(Lathe),
 }
 
 /// One input of a generator, in the generator's space: what decides the result,
@@ -79,6 +80,7 @@ pub(crate) fn options(kind: &ObjectKind, purpose: Purpose) -> Option<Options> {
             extrusion,
             hierarchical,
         }),
+        ObjectKind::Lathe(lathe) => Some(Options::Lathe(lathe)),
         _ => None,
     }
 }
@@ -103,6 +105,7 @@ pub(crate) fn gather(
         Options::Subdivision(_) => (scene.get(first)?.data.display_color, true),
         // Its own: a spline's line colour would not suit a solid.
         Options::Extrude { hierarchical, .. } => (scene.get(id)?.data.display_color, hierarchical),
+        Options::Lathe(_) => (scene.get(id)?.data.display_color, false),
     };
     let into_generator = scene.world_matrix(id).inverse();
     stack.push(first);
@@ -115,14 +118,14 @@ pub(crate) fn gather(
         let source = match (&data.kind, options) {
             (ObjectKind::Polygon { mesh, .. }, Options::Subdivision(_)) => Some(Source::Mesh(mesh.clone())),
             (kind, Options::Subdivision(_)) if editable_mesh_exists(kind) => Some(Source::Primitive(kind.clone())),
-            (ObjectKind::SplinePrimitive(primitive), Options::Extrude { .. }) => {
+            (ObjectKind::SplinePrimitive(primitive), Options::Extrude { .. } | Options::Lathe(_)) => {
                 Some(Source::SplinePrimitive(*primitive))
             }
             (
                 ObjectKind::Spline {
                     spline, interpolation, ..
                 },
-                Options::Extrude { .. },
+                Options::Extrude { .. } | Options::Lathe(_),
             ) => Some(Source::Spline(spline.clone(), *interpolation)),
             _ => None,
         };
@@ -141,7 +144,8 @@ pub(crate) fn gather(
 }
 
 /// The generator's result from `inputs`, in its space: the Subdivision
-/// Surface's merged and smoothed cage, or the Extrude's solids merged.
+/// Surface's merged and smoothed cage, the Extrude's solids merged, or the
+/// Lathe's body.
 pub(crate) fn build(inputs: &[Input], options: &Options) -> PolyMesh {
     let mut merged = Merged::default();
     match options {
@@ -168,6 +172,18 @@ pub(crate) fn build(inputs: &[Input], options: &Options) -> PolyMesh {
                     *point = input.matrix.transform_point3(*point);
                 }
                 merged.add(&surface::extrude(&polyline, extrusion), Mat4::IDENTITY);
+            }
+            merged.finish()
+        }
+        Options::Lathe(lathe) => {
+            for input in inputs {
+                let Some(mut polyline) = input.source.polyline() else {
+                    continue;
+                };
+                for point in &mut polyline.points {
+                    *point = input.matrix.transform_point3(*point);
+                }
+                merged.add(&surface::lathe(&polyline, lathe), Mat4::IDENTITY);
             }
             merged.finish()
         }

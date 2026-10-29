@@ -602,4 +602,17 @@ mod tests {
         // Four walls of two triangles and two square caps of two: the curve itself adds none.
         assert_eq!(scene_of(&doc).triangle_count(), 12);
     }
+
+    #[test]
+    fn a_lathed_spline_is_rendered() {
+        let mut doc = Document::new("t");
+        let lathe = doc
+            .scene
+            .insert(Node::new("Lathe", ObjectKindTag::Lathe.default_kind()));
+        let mut rectangle = Node::new("Rectangle", ObjectKindTag::Rectangle.default_kind());
+        rectangle.data.transform.position.x = 400.0;
+        doc.scene.insert_child(lathe, rectangle).unwrap();
+        // 24 steps round, four sides of two triangles each.
+        assert_eq!(scene_of(&doc).triangle_count(), 24 * 4 * 2);
+    }
 }

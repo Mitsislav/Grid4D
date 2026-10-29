@@ -628,6 +628,7 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         // Picked by its result, or its curve (set during evaluation).
         ObjectKind::SubdivisionSurface { .. }
         | ObjectKind::Extrude { .. }
+        | ObjectKind::Lathe(_)
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Spline { .. } => PickShape::None,
     }
@@ -1385,5 +1386,47 @@ mod tests {
             .unwrap();
         eval.update(&doc.scene);
         assert_eq!(node(&eval, empty).drawable, None);
+    }
+
+    #[test]
+    fn a_lathe_turns_its_spline_around_its_y_axis() {
+        let mut doc = Document::new("lathe");
+        let lathe = doc
+            .scene
+            .insert(Node::new("Lathe", ObjectKindTag::Lathe.default_kind()));
+        let mut circle = Node::new("Circle", ObjectKindTag::Circle.default_kind());
+        let ObjectKind::SplinePrimitive(primitive) = &mut circle.data.kind else {
+            unreachable!()
+        };
+        primitive.shape = grid4d_geom::spline::SplineShape::Circle {
+            radius: 50.0,
+            ellipse: None,
+            ring: None,
+        };
+        circle.data.transform.position.x = 200.0;
+        let circle = doc.scene.insert_child(lathe, circle).unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let torus = result_of(&eval, lathe);
+        let bounds = torus.bounds().unwrap();
+        assert!(
+            (bounds.max.x - 250.0).abs() < 1.0 && (bounds.min.z + 250.0).abs() < 1.0,
+            "{bounds:?}"
+        );
+        assert!((bounds.max.y - 50.0).abs() < 1e-3);
+        assert!(
+            matches!(node(&eval, circle).pick, PickShape::Curve(_)),
+            "the profile stays"
+        );
+        assert_eq!(crate::generator_mesh(&doc.scene, lathe).unwrap(), *torus.mesh());
+
+        let ObjectKind::Lathe(options) = &mut doc.scene.get_mut(lathe).unwrap().data.kind else {
+            unreachable!()
+        };
+        options.movement = 100.0;
+        eval.update(&doc.scene);
+        let raised = result_of(&eval, lathe);
+        assert_ne!(raised.id(), torus.id());
+        assert!((raised.bounds().unwrap().max.y - 150.0).abs() < 1e-3);
     }
 }

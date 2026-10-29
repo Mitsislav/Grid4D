@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 9 — Splines & spline generators (v0.9) |
-| Last step done | 9.4 — Extrude generator (2026-10-29) |
-| Next step | 9.5 — Lathe generator |
-| Tests | 564, all passing; clippy and rustfmt clean |
+| Last step done | 9.5 — Lathe generator (2026-10-29) |
+| Next step | 9.6 — Sweep generator |
+| Tests | 572, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -896,6 +896,7 @@ Phase 8 is complete.
 | 9.2 | Editable splines: Make Editable on spline primitives; Points mode on a spline — click, rectangle and brush selection, the gizmo on points (tangents along), Bezier handle drags (Shift breaks them), Delete, Select All / Invert; Type and Close Spline in the Attribute Manager | 548 |
 | 9.3 | Spline commands and the Pen: Mesh ▸ Spline — Hard / Soft Interpolation, Reverse Sequence, Set First Point (selection follows the points); the Pen tool — click adds a point on the grid's plane, a drag pulls its tangents, a click on the first point closes, Esc / Enter finish, Type option; one undo step per point | 552 |
 | 9.4 | Extrude generator: a spline pushed along Auto / X / Y / Z / Custom / Absolute by an offset, subdivided; start and end caps (N-Gons or Triangles) with holes cut out (even-odd nesting, hole bridging), outward whichever way the outlines run; Reverse Normals, Hierarchical; Alt wraps the selected spline, Make Editable bakes the solid; saved; rendered | 564 |
+| 9.5 | Lathe generator: a profile turned around the Lathe's Y axis — angle, subdivision, movement (screws, springs), scaling (spirals), Reverse Normals, caps where a closed profile's turn stays open; a full turn closes and shares the points on the axis; saved; rendered | 572 |
 
 **9.1 — Spline primitives**
 
@@ -1032,6 +1033,31 @@ Phase 8 is complete.
   Extrude showed its Object properties. The same file rendered with the path
   tracer (3110 triangles). Posted drags still do not move egui's panel
   dividers, so the lower Attribute Manager rows were checked headless.
+
+**9.5 — Lathe generator**
+
+*Problems and solutions:*
+- **One profile code for two generators.** The Extrude's nesting, outward
+  ordering and caps were inside `extrude`. They moved into `profile` (runs
+  projected by a closure, nested even-odd, ordered outwards), `caps` (cap
+  polygons with holes, counter-clockwise in the projected plane) and `assemble`
+  (repeated corners dropped); the Extrude's tests passed unchanged.
+- **Which way is out on a lathe.** The profile is measured as (distance from
+  the axis, height), so it may lie in any plane through Y. A counter-clockwise
+  profile turned the positive way faces the axis, so the shell is flipped for
+  positive angles; caps at the start face against the turn. Open profiles are
+  ordered by the sign of the area between them and the axis (∑ ρ dy), so a cup
+  drawn either way has an outward wall and a downward bottom; tests check
+  volumes for both directions and both angle signs.
+- **Points on the axis.** A full turn would stack 24 copies of a vase's centre
+  point and make zero-area quads. Points on the axis keep one index on every
+  ring while nothing but the angle moves them (no Movement, Scaling 100 %);
+  faces then lose the repeated corners and become triangles (or vanish).
+- **On-screen testing:** a document with five Lathes (a vase from a cubic
+  spline, a torus, a four-turn screw with 180 cm of movement, a half turn of a
+  rounded rectangle with caps, a spiral shrinking to 25 %) showed all five as
+  expected, with the profiles still drawn; the path tracer rendered the same
+  file (30 568 triangles).
 
 ---
 

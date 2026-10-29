@@ -414,6 +414,26 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.fill_with(&front, soft);
             c.polyline(&front, true);
         }
+        ObjectKindTag::Lathe => {
+            // A goblet: a profile turned around a dashed axis.
+            let half: [P; 6] = [
+                (0.5, 0.92),
+                (0.72, 0.9),
+                (0.56, 0.78),
+                (0.56, 0.56),
+                (0.82, 0.36),
+                (0.8, 0.08),
+            ];
+            let mut outline: Vec<P> = half.to_vec();
+            outline.extend(half.iter().rev().map(|&(x, y)| (1.0 - x, y)));
+            c.fill_with(&outline, soft);
+            c.polyline(&outline, true);
+            c.ellipse((0.5, 0.08), (0.3, 0.06));
+            for k in 0..4 {
+                let y = 0.16 + 0.2 * k as f32;
+                c.line((0.5, y), (0.5, y + 0.1));
+            }
+        }
         ObjectKindTag::Light => {
             c.disc((0.5, 0.5), 0.19);
             for i in 0..8 {

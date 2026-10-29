@@ -11,7 +11,7 @@ use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdi
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_geom::spline::{ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape, SplineType};
-use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion};
+use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe};
 use grid4d_scene::{
     Axis, Document, Falloff, KeyState, LightDetails, LightShadow, LightType, Material, MaterialId, NodeData, NodeId,
     ObjectKind, Param, Scene, SceneEdit, SplineHandle, Tag, TagKind, TimeSettings,
@@ -701,6 +701,7 @@ fn object_tab(ui: &mut Ui, data: &mut NodeData) {
                 extrusion,
                 hierarchical,
             } => extrude_rows(ui, extrusion, hierarchical),
+            ObjectKind::Lathe(lathe) => lathe_rows(ui, lathe),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, primitive),
             ObjectKind::Spline {
                 spline, interpolation, ..
@@ -1340,19 +1341,66 @@ fn extrude_rows(ui: &mut Ui, extrusion: &mut Extrusion, hierarchical: &mut bool)
     ui.label("");
     ui.label(RichText::new("Caps").strong());
     ui.end_row();
-    check_row(ui, "Start Cap", &mut extrusion.start_cap);
-    check_row(ui, "End Cap", &mut extrusion.end_cap);
-    attr_label(ui, "Caps Type", LABEL_WIDTH);
-    egui::ComboBox::from_id_salt("grid4d.attr.extrude.caps")
-        .selected_text(extrusion.cap_type.label())
-        .show_ui(ui, |ui| {
-            for option in CapType::ALL {
-                ui.selectable_value(&mut extrusion.cap_type, option, option.label());
-            }
-        });
-    ui.end_row();
+    cap_rows(
+        ui,
+        &mut extrusion.start_cap,
+        &mut extrusion.end_cap,
+        &mut extrusion.cap_type,
+    );
     ui.label("");
     ui.label(RichText::new("Extrudes its first child spline").color(p::TEXT_DIM));
+    ui.end_row();
+}
+
+/// The Lathe generator's Object and Caps parameters.
+fn lathe_rows(ui: &mut Ui, lathe: &mut Lathe) {
+    angle_row(ui, "Angle", &mut lathe.angle, -36_000.0..=36_000.0);
+    attr_label(ui, "Subdivision", LABEL_WIDTH);
+    ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        DragValue::new(&mut lathe.subdivision)
+            .speed(0.1)
+            .range(Lathe::MIN_SUBDIVISION..=Lathe::MAX_SUBDIVISION),
+    );
+    ui.end_row();
+    offset_row(ui, "Movement", &mut lathe.movement);
+    attr_label(ui, "Scaling", LABEL_WIDTH);
+    let mut percent = lathe.scaling * 100.0;
+    if ui
+        .add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut percent)
+                .speed(0.5)
+                .range(0.0..=100_000.0)
+                .suffix(" %"),
+        )
+        .changed()
+    {
+        lathe.scaling = percent / 100.0;
+    }
+    ui.end_row();
+    check_row(ui, "Reverse Normals", &mut lathe.reverse_normals);
+    ui.label("");
+    ui.label(RichText::new("Caps").strong());
+    ui.end_row();
+    cap_rows(ui, &mut lathe.start_cap, &mut lathe.end_cap, &mut lathe.cap_type);
+    ui.label("");
+    ui.label(RichText::new("Turns its first child spline around Y").color(p::TEXT_DIM));
+    ui.end_row();
+}
+
+/// Start / End Cap and Caps Type (Extrude, Lathe).
+fn cap_rows(ui: &mut Ui, start: &mut bool, end: &mut bool, cap_type: &mut CapType) {
+    check_row(ui, "Start Cap", start);
+    check_row(ui, "End Cap", end);
+    attr_label(ui, "Caps Type", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.caps.type")
+        .selected_text(cap_type.label())
+        .show_ui(ui, |ui| {
+            for option in CapType::ALL {
+                ui.selectable_value(cap_type, option, option.label());
+            }
+        });
     ui.end_row();
 }
 

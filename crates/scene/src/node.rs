@@ -117,6 +117,8 @@ pub enum ObjectKind {
         extrusion: grid4d_geom::surface::Extrusion,
         hierarchical: bool,
     },
+    /// Lathe generator: turns its first child spline around its Y axis.
+    Lathe(grid4d_geom::surface::Lathe),
     /// A parametric spline (Circle, Rectangle, Arc, n-Side, Star, Helix,
     /// Flower): a curve, drawn as lines, not rendered.
     SplinePrimitive(SplinePrimitive),
@@ -147,6 +149,7 @@ pub enum ObjectKindTag {
     Polygon,
     SubdivisionSurface,
     Extrude,
+    Lathe,
     Circle,
     Rectangle,
     Arc,
@@ -158,7 +161,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -173,6 +176,7 @@ impl ObjectKindTag {
         Self::Polygon,
         Self::SubdivisionSurface,
         Self::Extrude,
+        Self::Lathe,
         Self::Circle,
         Self::Rectangle,
         Self::Arc,
@@ -195,7 +199,7 @@ impl ObjectKindTag {
     ];
 
     /// Generators: objects that build their geometry from their children.
-    pub const GENERATORS: [Self; 2] = [Self::SubdivisionSurface, Self::Extrude];
+    pub const GENERATORS: [Self; 3] = [Self::SubdivisionSurface, Self::Extrude, Self::Lathe];
 
     /// Geometric primitives (the "Create ▸ Object" family).
     pub const PRIMITIVES: [Self; 8] = [
@@ -226,6 +230,7 @@ impl ObjectKindTag {
             Self::Polygon => "Polygon",
             Self::SubdivisionSurface => "Subdivision Surface",
             Self::Extrude => "Extrude",
+            Self::Lathe => "Lathe",
             Self::Circle => "Circle",
             Self::Rectangle => "Rectangle",
             Self::Arc => "Arc",
@@ -305,6 +310,8 @@ impl ObjectKindTag {
                 extrusion: grid4d_geom::surface::Extrusion::default(),
                 hierarchical: false,
             },
+            // docs/reference/generator-lathe.md: a full turn in 24 steps.
+            Self::Lathe => ObjectKind::Lathe(grid4d_geom::surface::Lathe::default()),
             // The manual states no defaults: these are ours (docs/reference/object-spline.md).
             Self::Circle => spline(SplineShape::Circle {
                 radius: 200.0,
@@ -428,6 +435,7 @@ impl ObjectKind {
             Self::Polygon { .. } => ObjectKindTag::Polygon,
             Self::SubdivisionSurface { .. } => ObjectKindTag::SubdivisionSurface,
             Self::Extrude { .. } => ObjectKindTag::Extrude,
+            Self::Lathe(_) => ObjectKindTag::Lathe,
             Self::SplinePrimitive(primitive) => match primitive.shape {
                 SplineShape::Circle { .. } => ObjectKindTag::Circle,
                 SplineShape::Rectangle { .. } => ObjectKindTag::Rectangle,
@@ -450,7 +458,10 @@ impl ObjectKind {
     /// Builds its geometry from its children (see [`ObjectKindTag::GENERATORS`]).
     #[must_use]
     pub const fn is_generator(&self) -> bool {
-        matches!(self, Self::SubdivisionSurface { .. } | Self::Extrude { .. })
+        matches!(
+            self,
+            Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_)
+        )
     }
 
     #[must_use]
@@ -464,7 +475,7 @@ impl ObjectKind {
     pub fn local_bounds(&self) -> Option<Aabb> {
         let half = match *self {
             // A generator's extent is its result's: evaluation knows it.
-            Self::Null | Self::SubdivisionSurface { .. } | Self::Extrude { .. } => return None,
+            Self::Null | Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) => return None,
             Self::Cube { size, .. } => size * 0.5,
             Self::Sphere { radius, .. } => Vec3::splat(radius),
             Self::Cylinder { radius, height, .. } => Vec3::new(radius, height * 0.5, radius),

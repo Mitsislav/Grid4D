@@ -25,7 +25,7 @@ use grid4d_geom::{
         SplineType,
     },
     subdivision::{Boundary, MAX_LEVEL},
-    surface::{CapType, ExtrudeDirection, Extrusion},
+    surface::{CapType, ExtrudeDirection, Extrusion, Lathe},
 };
 use grid4d_scene::{
     Axis, ComponentState, Components, Curve, Document, Falloff, FrameNaming, FrameRange, ImageFormat, Interpolation,
@@ -640,6 +640,24 @@ enum KindDto {
         #[serde(default, skip_serializing_if = "CapTypeDto::is_ngons")]
         cap_type: CapTypeDto,
     },
+    /// A Lathe generator (added in step 9.5), the angle in radians; defaults
+    /// omitted.
+    Lathe {
+        angle: f32,
+        subdivision: u32,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        movement: f32,
+        #[serde(default = "one", skip_serializing_if = "is_one")]
+        scaling: f32,
+        #[serde(default, skip_serializing_if = "is_false")]
+        reverse_normals: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        start_cap: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        end_cap: bool,
+        #[serde(default, skip_serializing_if = "CapTypeDto::is_ngons")]
+        cap_type: CapTypeDto,
+    },
     /// A spline primitive (added in step 9.1). Angles in radians.
     Spline {
         spline: SplineShapeDto,
@@ -703,6 +721,44 @@ fn is_true(value: &bool) -> bool {
 
 const fn yes() -> bool {
     true
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_zero(value: &f32) -> bool {
+    *value == 0.0
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_one(value: &f32) -> bool {
+    *value == 1.0
+}
+
+const fn one() -> f32 {
+    1.0
+}
+
+impl From<CapType> for CapTypeDto {
+    fn from(cap_type: CapType) -> Self {
+        match cap_type {
+            CapType::NGons => Self::NGons,
+            CapType::Triangles => Self::Triangles,
+        }
+    }
+}
+
+impl From<CapTypeDto> for CapType {
+    fn from(cap_type: CapTypeDto) -> Self {
+        match cap_type {
+            CapTypeDto::NGons => Self::NGons,
+            CapTypeDto::Triangles => Self::Triangles,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1710,10 +1766,17 @@ impl KindDto {
                 hierarchical,
                 start_cap: extrusion.start_cap,
                 end_cap: extrusion.end_cap,
-                cap_type: match extrusion.cap_type {
-                    CapType::NGons => CapTypeDto::NGons,
-                    CapType::Triangles => CapTypeDto::Triangles,
-                },
+                cap_type: extrusion.cap_type.into(),
+            },
+            ObjectKind::Lathe(lathe) => Self::Lathe {
+                angle: lathe.angle,
+                subdivision: lathe.subdivision,
+                movement: lathe.movement,
+                scaling: lathe.scaling,
+                reverse_normals: lathe.reverse_normals,
+                start_cap: lathe.start_cap,
+                end_cap: lathe.end_cap,
+                cap_type: lathe.cap_type.into(),
             },
             ObjectKind::Spline {
                 ref spline,
@@ -1913,13 +1976,30 @@ impl KindDto {
                     reverse_normals,
                     start_cap,
                     end_cap,
-                    cap_type: match cap_type {
-                        CapTypeDto::NGons => CapType::NGons,
-                        CapTypeDto::Triangles => CapType::Triangles,
-                    },
+                    cap_type: cap_type.into(),
                 },
                 hierarchical,
             },
+            Self::Lathe {
+                angle,
+                subdivision,
+                movement,
+                scaling,
+                reverse_normals,
+                start_cap,
+                end_cap,
+                cap_type,
+            } => ObjectKind::Lathe(Lathe {
+                angle,
+                // Never trust a count a file claims: each step adds a ring.
+                subdivision: subdivision.clamp(Lathe::MIN_SUBDIVISION, Lathe::MAX_SUBDIVISION),
+                movement,
+                scaling: scaling.max(0.0),
+                reverse_normals,
+                start_cap,
+                end_cap,
+                cap_type: cap_type.into(),
+            }),
             Self::Spline {
                 spline,
                 plane,
@@ -2002,6 +2082,12 @@ impl KindDto {
         match *self {
             Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } => Vec::new(),
             Self::Extrude { offset, movement, .. } => vec![offset, movement[0], movement[1], movement[2]],
+            Self::Lathe {
+                angle,
+                movement,
+                scaling,
+                ..
+            } => vec![angle, movement, scaling],
             Self::EditableSpline {
                 ref points,
                 ref tangents,
@@ -2488,6 +2574,40 @@ mod tests {
             panic!("not an extrude")
         };
         assert_eq!(extrusion.subdivision, Extrusion::MAX_SUBDIVISION);
+    }
+
+    #[test]
+    fn lathe_generators_round_trip_and_defaults_are_omitted() {
+        let mut doc = Document::new("lathe");
+        let plain = ObjectKindTag::Lathe.default_kind();
+        let custom = ObjectKind::Lathe(Lathe {
+            angle: -3.0,
+            subdivision: 9,
+            movement: 120.0,
+            scaling: 0.25,
+            reverse_normals: true,
+            start_cap: true,
+            end_cap: false,
+            cap_type: CapType::Triangles,
+        });
+        doc.scene.insert(Node::new("Lathe", plain.clone()));
+        doc.scene.insert(Node::new("Lathe.1", custom.clone()));
+        let loaded = round_trip(&doc);
+        let kinds: Vec<&ObjectKind> = loaded
+            .scene
+            .roots()
+            .iter()
+            .map(|&id| &loaded.scene.get(id).unwrap().data.kind)
+            .collect();
+        assert_eq!(kinds, [&plain, &custom]);
+        let json = serde_json::to_string(&KindDto::new(&plain, "Lathe", &mut MeshTable::default())).unwrap();
+        assert_eq!(json, r#"{"type":"lathe","angle":6.2831855,"subdivision":24}"#);
+        let json = r#"{"type": "lathe", "angle": 1.0, "subdivision": 1, "scaling": -2.0}"#;
+        let dto: KindDto = serde_json::from_str(json).unwrap();
+        let ObjectKind::Lathe(lathe) = dto.into_kind(&[], "test").unwrap() else {
+            panic!("not a lathe")
+        };
+        assert_eq!((lathe.subdivision, lathe.scaling), (Lathe::MIN_SUBDIVISION, 0.0));
     }
 
     #[test]
