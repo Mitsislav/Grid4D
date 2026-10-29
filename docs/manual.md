@@ -24,12 +24,13 @@ screenshots come from the application itself.
 12. [Generators: Subdivision Surface](#12-generators-subdivision-surface)
 13. [Splines](#13-splines)
 14. [Deformers](#14-deformers)
-15. [Snapping](#15-snapping)
-16. [Tags](#16-tags)
-17. [Materials](#17-materials)
-18. [Rendering](#18-rendering)
-19. [Keyboard shortcuts](#19-keyboard-shortcuts)
-20. [Limitations and what is planned](#20-limitations-and-what-is-planned)
+15. [The Cloner](#15-the-cloner)
+16. [Snapping](#16-snapping)
+17. [Tags](#17-tags)
+18. [Materials](#18-materials)
+19. [Rendering](#19-rendering)
+20. [Keyboard shortcuts](#20-keyboard-shortcuts)
+21. [Limitations and what is planned](#21-limitations-and-what-is-planned)
 
 ---
 
@@ -60,7 +61,7 @@ sessions.
 |---|------|----------------|
 | 1 | **Menu bar** | Every command: File, Edit, Create, Modes, Select, Tools, Mesh, Animate, Window, Help. |
 | 2 | **Command palette** | Undo/redo, the selection tools, Move/Scale/Rotate, axis locks, World/Object coordinates, render buttons (*planned*) and buttons that create objects. |
-| 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§15](#15-snapping)). |
+| 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§16](#16-snapping)). |
 | 4 | **Viewport** | The 3D view of the scene, or up to four views ([§3.2](#32-several-views-top-front-and-side)). Each view's header has the View, Cameras, Display, Options, Filter and Panel menus and three navigation icons. |
 | 5 | **Object Manager** | The scene's objects as a hierarchy. |
 | 6 | **Attribute Manager** | The parameters of the selected object, or the options of the current tool. |
@@ -307,6 +308,8 @@ turns a spline into a solid ([§13.4](#134-extrude-from-outline-to-solid)) and
 the Lathe turns one around an axis ([§13.5](#135-lathe-turning-a-profile)) and
 the Sweep moves one along another ([§13.6](#136-sweep-a-profile-along-a-path))
 and the Loft stretches a skin over several ([§13.7](#137-loft-a-skin-over-sections)).
+The Cloner repeats its children in a row, on a circle or in a grid
+([§15](#15-the-cloner)).
 
 **Splines** (Create ▸ Spline, or the circle button) are curves: Circle,
 Rectangle, Arc, n-Side, Star, Helix and Flower ([§13](#13-splines)).
@@ -334,7 +337,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
 
 - Spot and Infinite lights shine along their **−Z axis**, like cameras look. Turn
   them with the Rotate tool or the Coordinates, or give them a **Target tag** to
-  point them at an object ([§16.3](#163-target)). *Cameras ▸ Selected Object as
+  point them at an object ([§17.3](#173-target)). *Cameras ▸ Selected Object as
   Camera* shows what a light points at.
 - In the viewport a **Spot** shows its cone and an **Infinite** light an arrow
   along its direction (orange when selected).
@@ -342,7 +345,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
   light the viewport.
 - Sides that no light reaches keep a little soft light, so shapes stay readable.
 
-**Materials** show in the lit viewport too ([§17](#17-materials)): roughness sets
+**Materials** show in the lit viewport too ([§18](#18-materials)): roughness sets
 how sharp the highlights are, metals reflect in their own colour, and luminance
 makes a surface glow whatever the light.
 
@@ -374,7 +377,7 @@ then drag a handle of the gizmo.
 - **Alt + drag** always navigates, even over the gizmo.
 - For exact values, type them in the Attribute Manager ([§7](#7-the-attribute-manager)).
 - To place objects exactly on other objects or on the grid, turn on snapping
-  (**Shift+S**, [§15](#15-snapping)).
+  (**Shift+S**, [§16](#16-snapping)).
 
 Every drag is one undo step.
 
@@ -392,7 +395,7 @@ Every drag is one undo step.
 - **Re-parent**: drag a row onto another row. The object keeps its position in the
   world. Right-click ▸ *Move to Top Level* takes it out of its group.
 - **Search**: type in the search field to show only matching objects.
-- **Tags** appear as icons after the name; click one to edit it ([§16](#16-tags)).
+- **Tags** appear as icons after the name; click one to edit it ([§17](#17-tags)).
 - Right-click a row for Rename, Frame Object, Move to Top Level, Add Tag and Delete.
 
 ## 7. The Attribute Manager
@@ -1013,7 +1016,7 @@ Select the generator and open **Attribute Manager ▸ Object**:
 |-----------|---------|
 | Type | **Catmull-Clark (N-Gons)**: every polygon with *n* corners becomes *n* quads, then the surface is smoothed. It is the only type for now. |
 | Subdivision Viewport | How many times the viewport subdivides (0 shows the cage itself, 6 at most). Each level multiplies the polygons by about four, so keep it low (2) while modelling. |
-| Subdivision Renderer | The level for final renders ([§18](#18-rendering)). |
+| Subdivision Renderer | The level for final renders ([§19](#19-rendering)). |
 | Linear Pre-Subdivision | Splits the cage this many times *without* smoothing before the smoothing levels, which keeps the result closer to the cage. |
 | Boundary Interpolation | How open borders (the edge of a plane) are smoothed. **Edge and Corner** keeps a border's corners in place; **Edge** rounds them off as well. |
 
@@ -1457,7 +1460,63 @@ were. **Ctrl+Z** removes the copy.
 Unlike **Make Editable** (C), which converts the object itself, this always
 adds a copy.
 
-## 15. Snapping
+## 15. The Cloner
+
+The **Cloner** repeats objects: put objects under it and it shows copies of
+them — **clones** — in a row, on a circle or in a grid. Change one value and
+every clone follows; edit a child and all its clones change with it.
+
+![A ring of twelve clones alternating a cube and a sphere, and a 4 × 4 × 4 grid of spheres and cubes picked at random, each from a Cloner with two children](images/manual/mograph-cloner.png)
+
+1. Select an object and hold **Alt** while you choose **Create ▸ Generator ▸
+   Cloner** (or Alt + click the Cloner button at the end of the generator
+   buttons): the object goes under a new Cloner. Without Alt you get an empty
+   Cloner; drag objects onto it in the Object Manager.
+2. The objects under the Cloner are no longer drawn themselves — the clones
+   are. Select a child in the Object Manager to edit it: its clones follow.
+
+### 15.1 Modes
+
+Choose the layout in the Object tab's **Mode**:
+
+- **Linear**: a row starting at the Cloner. **Count** clones; **P**, **S**
+  and **R** are the position, scale and rotation change from one clone to the
+  next (**Spacing: Per Step**) or from the first to the last (**End Point**).
+  **Offset** starts the row further along. A scale below 100 % per step makes
+  each clone smaller than the one before; a rotation curls the row.
+- **Radial**: a circle around the Cloner. **Count**, **Radius**, the **Plane**
+  it lies in (XZ: on the floor), **Align** (each clone turned to face the same
+  way relative to the centre), **Start / End Angle** for a part of the circle
+  and **Offset** to turn them all along it.
+- **Grid Array**: a box-shaped grid centred on the Cloner. **Count** along X,
+  Y and Z, and **Size**: the distance between neighbours (Per Step) or the
+  whole grid's size (End Point).
+
+### 15.2 Which child, and where
+
+- **Clones**: with several children, **Iterate** uses them in turn (cube,
+  sphere, cube, …); **Random** picks one for each clone — change the **Seed**
+  for another mix.
+- **Reset Coordinates** (on): every clone sits exactly where the layout puts
+  it. Switch it off to keep the child's own position, rotation and scale on top
+  — move a child up and all its clones rise.
+
+### 15.3 Working with clones
+
+- **Clicking a clone** selects the Cloner. Its selection box surrounds all the
+  clones, and **H** / **O** frame them.
+- **Q** or the check mark switches the Cloner off: its children then show as
+  they are.
+- Radius, Start / End Angle and Size have key buttons: animate them like other
+  parameters.
+- **Make Editable** (C) turns the Cloner into a Null holding one polygon object
+  per clone (`Cube.0`, `Cube.1`, …); **Current State to Object**
+  ([§14.6](#146-current-state-to-object)) adds the same as a copy.
+- Clones are rendered, and glTF and OBJ export write the Cloner as a group of
+  its clones.
+- A Cloner makes at most 10 000 clones.
+
+## 16. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
 the floor grid, so you can place things exactly: an object's axis level with a
@@ -1504,7 +1563,7 @@ Move tool and look at the **Snap** group in the Attribute Manager's Tool mode
 Within the radius, points win over edges and grid lines, which win over surfaces,
 so a corner can be caught right next to its edges.
 
-## 16. Tags
+## 17. Tags
 
 Tags add a property or a behaviour to an object without changing what kind of
 object it is. They show as small icons to the right of the object's name in the
@@ -1525,7 +1584,7 @@ change can be undone and is saved with the document.
 **Removing:** click the tag icon, then press **Delete** (or right-click the icon ▸
 *Delete Tag*). With a tag selected, Delete removes only the tag, not its object.
 
-### 16.1 Phong
+### 17.1 Phong
 
 Controls how smooth the object looks.
 
@@ -1538,7 +1597,7 @@ Controls how smooth the object looks.
 
 ![A sphere with a Phong tag at 0°: flat shading](images/manual/tags_flat.png)
 
-### 16.2 Protection
+### 17.2 Protection
 
 Guards an object against accidental changes. Tick **Position**, **Scale** and/or
 **Rotation**. A protected channel cannot be changed with the gizmo (the Move, Scale
@@ -1546,7 +1605,7 @@ or Rotate gizmo does not appear for the object) or in the Coordinates fields of 
 Attribute Manager, which turn grey. The object's points, edges and polygons can still
 be edited in the component modes.
 
-### 16.3 Target
+### 17.3 Target
 
 Turns the object to face another object.
 
@@ -1562,11 +1621,11 @@ Turns the object to face another object.
 
 ![The Target tag's settings](images/manual/tags_target.png)
 
-### 16.4 Material
+### 17.4 Material
 
-Links a material to the object; see [§17](#17-materials).
+Links a material to the object; see [§18](#18-materials).
 
-## 17. Materials
+## 18. Materials
 
 A **material** gives objects their surface. Materials live in the **Material
 Manager**, the **Materials** tab at the bottom (beside Timeline and F-Curve;
@@ -1620,7 +1679,7 @@ their objects show their display colour again; undo brings everything back.
 Every change is one undo step. Materials are saved with the document, travel with
 glTF and OBJ files ([§9](#9-files)), and come along when you merge a document.
 
-## 18. Rendering
+## 19. Rendering
 
 A **render** is the finished picture of the scene: materials and lights as
 they look for real — soft shadows, light bouncing between surfaces, reflections —
@@ -1628,7 +1687,7 @@ where the viewport only approximates them. **Render Settings** say how the
 document is rendered; the **Picture Viewer** renders it and shows the result;
 the **Render View** renders the view you work in, in place.
 
-### 18.1 Render Settings
+### 19.1 Render Settings
 
 **Render ▸ Edit Render Settings…**, **Ctrl+B** or the gear button in the
 toolbar opens the **Render Settings** window. It stays open while you work;
@@ -1650,7 +1709,7 @@ left: **Output**, **Save**, **Sampling** or **Options**.
 | Frames | how many pictures the range gives |
 
 **Render to Picture Viewer** renders every frame of the range at the Frame
-Step and saves each as its own numbered file ([§18.2](#182-the-picture-viewer));
+Step and saves each as its own numbered file ([§19.2](#192-the-picture-viewer));
 the Render View always shows the current frame.
 
 ![The Save page: renders go to renders/shot.png next to the document, with transparency](images/manual/render-settings-save.png)
@@ -1685,7 +1744,7 @@ how many frames and the first file's name.
 
 Every change is one undo step, and the settings are saved with the document.
 
-### 18.2 The Picture Viewer
+### 19.2 The Picture Viewer
 
 **Render ▸ Render to Picture Viewer**, **Shift+R** or the toolbar button next to
 the gear renders the scene and opens the **Picture Viewer**. It renders:
@@ -1733,7 +1792,7 @@ pixel per screen pixel, **−** and **+** halve and double. The **mouse wheel**
 zooms about the pointer and **dragging** moves the picture. A picture with
 transparency shows over a grey checkerboard.
 
-### 18.3 The Render View
+### 19.3 The Render View
 
 **Render ▸ Render View**, **Ctrl+R** or the leftmost render button in the
 toolbar renders the **active view** right where it is: at the view's own size,
@@ -1752,7 +1811,7 @@ overlays stay on top, so you can carry on working. **Ctrl+R** again renders
 afresh. The Render View is never saved and does not appear in the Picture
 Viewer's history; use **Shift+R** for a picture to keep.
 
-## 19. Keyboard shortcuts
+## 20. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -1807,7 +1866,7 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 20. Limitations and what is planned
+## 21. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
@@ -1824,8 +1883,11 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   Delaunay or grid caps, UVs or selections for its caps; neither have the Lathe
   and the Sweep (no Isoparm display either). The Sweep has no rail spline, no
   Scale and Rotation graphs and no Keep Segments. The Loft has no Adapt UV
-  (no UVs) and uses only the first segment of each section (no holes). The
-  Cloner is planned.
+  (no UVs) and uses only the first segment of each section (no holes).
+- **Cloner**: the Object mode (clones on another object's points), clones of a
+  child's own children, Cloners inside Cloners and effectors are coming next;
+  not planned yet: Honeycomb, Blend and Sort, Step Rotation, Amount, Offset
+  Variation, grid forms and Fill.
 - **Splines**: other fonts for Text, kerning and Separate Letters; hiding
   points, Grow/Shrink on points,
   snapping to spline points and the Pen snapping to objects; editing points

@@ -29,6 +29,9 @@ pub enum PickShape {
     /// A spline's curve: picked a few pixels around its line (see
     /// [`EvaluatedScene::curve`]).
     Curve(CurveId),
+    /// A Cloner: picked through its clones (see [`EvaluatedScene::instances`]);
+    /// a frame around it (rectangle selection) selects it.
+    Clones,
 }
 
 /// One visible node, as viewers see it this frame.
@@ -45,6 +48,35 @@ pub struct EvaluatedNode {
     /// What to draw; `None` for objects without geometry.
     pub drawable: Option<Drawable>,
     pub pick: PickShape,
+}
+
+/// One clone a Cloner makes, as viewers see it this frame: its child's shape
+/// where the layout puts it. Selected, picked and filtered as its Cloner.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EvaluatedInstance {
+    /// The Cloner.
+    pub owner: NodeId,
+    /// The child it repeats.
+    pub source: NodeId,
+    /// The child's kind.
+    pub kind: ObjectKindTag,
+    pub world: Mat4,
+    /// The child's object-space bounds.
+    pub bounds: Option<Aabb>,
+    pub drawable: Option<Drawable>,
+    pub pick: PickShape,
+}
+
+/// A Cloner's child as evaluated: what each of its clones shows.
+#[derive(Clone, Copy, Debug)]
+struct Source {
+    cloner: NodeId,
+    /// Its index in `nodes` (its world matrix after animation).
+    node: usize,
+    kind: ObjectKindTag,
+    bounds: Option<Aabb>,
+    drawable: Option<Drawable>,
+    pick: PickShape,
 }
 
 /// What an evaluation is for: what is visible, and at what detail.
@@ -103,6 +135,10 @@ pub struct EvaluatedLight {
 #[derive(Debug, Default)]
 pub struct EvaluatedScene {
     nodes: Vec<EvaluatedNode>,
+    /// The enabled Cloners' clones, by Cloner in pre-order.
+    instances: Vec<EvaluatedInstance>,
+    /// The Cloners' children, in order (scratch space for the instances).
+    sources: Vec<Source>,
     /// The visible light objects, in pre-order.
     lights: Vec<EvaluatedLight>,
     /// The meshes of the visible polygon objects as shown (hidden polygons left
@@ -199,6 +235,7 @@ impl EvaluatedScene {
             return false;
         }
         self.nodes.clear();
+        self.sources.clear();
         self.meshes.clear();
         self.polygons.clear();
         self.curves.clear();
@@ -210,6 +247,9 @@ impl EvaluatedScene {
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
         let material_stack = &mut self.material_stack;
         material_stack.clear();
+        let sources = &mut self.sources;
+        // The Cloner whose children are being visited, and its depth.
+        let mut cloner_at: Option<(u32, NodeId)> = None;
         let (deformed, active, links) = (&mut self.deformed, &mut self.active, &mut self.links);
         active.clear();
         let materials = scene.materials();
@@ -220,13 +260,16 @@ impl EvaluatedScene {
             if cage_depth.is_some_and(|d| depth <= d) {
                 cage_depth = None;
             }
+            if cloner_at.is_some_and(|(d, _)| depth <= d) {
+                cloner_at = None;
+            }
             deform::leave(active, depth);
             let data = &node.data;
             // Its own parameters at the frame (borrowed unless animated).
             let kind = data.kind_at(frame);
             let generator = generator::options(&kind, purpose);
             // A disabled generator is a plain group: its children show as they are.
-            if !purpose.shows(data) || (!data.enabled && generator.is_none()) {
+            if !purpose.shows(data) || (!data.enabled && !kind.is_generator()) {
                 return false;
             }
             if next_cage == Some(id) {
@@ -403,6 +446,24 @@ impl EvaluatedScene {
                 drawable = None;
                 pick = PickShape::None;
             }
+            if let Some((cloner_depth, cloner)) = cloner_at {
+                // A Cloner's child is shown by its clones (deformers beside
+                // them, light and camera markers are not cloned).
+                if depth == cloner_depth + 1 && !kind.is_deformer() {
+                    sources.push(Source {
+                        cloner,
+                        node: nodes.len(),
+                        kind: kind.tag(),
+                        bounds,
+                        drawable: drawable.filter(|d| !d.marker),
+                        pick,
+                    });
+                }
+                drawable = None;
+                pick = PickShape::None;
+            } else if data.enabled && matches!(*kind, ObjectKind::Cloner(_)) {
+                cloner_at = Some((depth, id));
+            }
             nodes.push(EvaluatedNode {
                 id,
                 kind: kind.tag(),
@@ -428,6 +489,9 @@ impl EvaluatedScene {
         {
             apply_aims(scene, &mut self.nodes, &mut self.aim_index, &mut self.aim_stack);
         }
+        // Clones follow their Cloner where animation and Target tags put it.
+        self.instances.clear();
+        build_instances(scene, self.frame, &mut self.nodes, &self.sources, &mut self.instances);
         // The lights where animation and Target tags put them.
         self.lights.clear();
         for node in &self.nodes {
@@ -467,6 +531,13 @@ impl EvaluatedScene {
     #[must_use]
     pub fn nodes(&self) -> &[EvaluatedNode] {
         &self.nodes
+    }
+
+    /// The clones of the visible, enabled Cloners (by Cloner in pre-order, in
+    /// clone order).
+    #[must_use]
+    pub fn instances(&self) -> &[EvaluatedInstance] {
+        &self.instances
     }
 
     /// The visible light objects, in Object Manager pre-order.
@@ -516,6 +587,62 @@ impl EvaluatedScene {
         let (mesh, components) = self.polygons.get(&id)?;
         let node = self.nodes.iter().find(|n| n.id == id)?;
         Some((node, mesh, components))
+    }
+}
+
+/// Makes the clones of every Cloner with children in `sources` (grouped by
+/// Cloner) and gives each Cloner the bounds of its clones.
+fn build_instances(
+    scene: &Scene,
+    frame: f64,
+    nodes: &mut [EvaluatedNode],
+    sources: &[Source],
+    instances: &mut Vec<EvaluatedInstance>,
+) {
+    let mut start = 0;
+    while let Some(first) = sources.get(start) {
+        let owner = first.cloner;
+        let end = start + sources[start..].iter().take_while(|s| s.cloner == owner).count();
+        let group = &sources[start..end];
+        start = end;
+        let Some(index) = nodes.iter().position(|n| n.id == owner) else {
+            continue;
+        };
+        let cloner = scene.get(owner).and_then(|n| match &*n.data.kind_at(frame) {
+            ObjectKind::Cloner(cloner) => Some(*cloner),
+            _ => None,
+        });
+        let Some(cloner) = cloner else { continue };
+        let world = nodes[index].world;
+        let inverse = world.inverse();
+        let mut bounds: Option<Aabb> = None;
+        for i in 0..cloner.count() {
+            let Some(source) = group.get(cloner.source(i, group.len())) else {
+                continue;
+            };
+            let Some(child) = nodes.get(source.node) else { continue };
+            // Reset Coordinates: the child's own placement is ignored.
+            let local = if cloner.reset_coordinates {
+                Mat4::IDENTITY
+            } else {
+                inverse * child.world
+            };
+            let placed = cloner.matrix(i) * local;
+            if let Some(b) = source.bounds.filter(|b| !b.is_empty()) {
+                let b = b.transformed(&placed);
+                bounds = Some(bounds.map_or(b, |all| all.union(b)));
+            }
+            instances.push(EvaluatedInstance {
+                owner,
+                source: child.id,
+                kind: source.kind,
+                world: world * placed,
+                bounds: source.bounds,
+                drawable: source.drawable,
+                pick: source.pick,
+            });
+        }
+        nodes[index].bounds = bounds;
     }
 }
 
@@ -725,6 +852,7 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Text(_)
         | ObjectKind::Spline { .. } => PickShape::None,
+        ObjectKind::Cloner(_) => PickShape::Clones,
     }
 }
 
@@ -1010,6 +1138,12 @@ mod tests {
     fn steady_state_updates_reuse_capacity() {
         let mut doc = Document::with_demo_scene();
         doc.scene.insert(Node::new("Mesh", polygon_cube()));
+        let cloner = doc
+            .scene
+            .insert(Node::new("Cloner", ObjectKindTag::Cloner.default_kind()));
+        doc.scene
+            .insert_child(cloner, Node::new("Clone", ObjectKindTag::Sphere.default_kind()))
+            .unwrap();
         let mut eval = EvaluatedScene::new();
         eval.update(&doc.scene);
         let capacity = |e: &EvaluatedScene| {
@@ -1019,6 +1153,8 @@ mod tests {
                 e.polygons.capacity(),
                 e.shown.capacity(),
                 e.walk_stack.capacity(),
+                e.instances.capacity(),
+                e.sources.capacity(),
             )
         };
         let before = capacity(&eval);
@@ -1957,5 +2093,57 @@ mod tests {
             (node(&eval, cube).bounds.unwrap().max.y - 90.0).abs() < 1e-3,
             "the corner rose"
         );
+    }
+
+    #[test]
+    fn a_cloner_repeats_its_children_as_instances_and_hides_them() {
+        use grid4d_geom::cloner::{Cloner, Layout, Linear};
+        let mut doc = Document::new("clones");
+        let cloner = doc.scene.insert(Node::new(
+            "Cloner",
+            ObjectKind::Cloner(Cloner {
+                layout: Layout::Linear(Linear {
+                    count: 5,
+                    position: Vec3::new(100.0, 0.0, 0.0),
+                    ..Linear::default()
+                }),
+                ..Cloner::default()
+            }),
+        ));
+        doc.scene.get_mut(cloner).unwrap().data.transform.position.z = 10.0;
+        let mut cube = Node::new("Cube", ObjectKindTag::Cube.default_kind());
+        cube.data.transform.position.y = 500.0;
+        let cube = doc.scene.insert_child(cloner, cube).unwrap();
+        let sphere = doc
+            .scene
+            .insert_child(cloner, Node::new("Sphere", ObjectKindTag::Sphere.default_kind()))
+            .unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let clones = eval.instances();
+        assert_eq!(clones.len(), 5);
+        let sources: Vec<NodeId> = clones.iter().map(|c| c.source).collect();
+        assert_eq!(sources, [cube, sphere, cube, sphere, cube], "Iterate");
+        assert!(clones.iter().all(|c| c.owner == cloner && c.drawable.is_some()));
+        // Reset Coordinates: the cube's own Y is ignored; the Cloner's Z is not.
+        assert_eq!(clones[2].world.w_axis.truncate(), Vec3::new(200.0, 0.0, 10.0));
+        // The children are not drawn themselves; the Cloner has its clones' bounds.
+        assert!(node(&eval, cube).drawable.is_none() && node(&eval, cube).pick == PickShape::None);
+        let bounds = node(&eval, cloner).bounds.unwrap();
+        assert_eq!((bounds.min.x, bounds.max.x), (-100.0, 500.0));
+        assert_eq!(node(&eval, cloner).pick, PickShape::Clones);
+
+        // Off, the child's placement is kept on top of the layout.
+        if let ObjectKind::Cloner(c) = &mut doc.scene.get_mut(cloner).unwrap().data.kind {
+            c.reset_coordinates = false;
+        }
+        eval.update(&doc.scene);
+        assert_eq!(eval.instances()[2].world.w_axis.y, 500.0);
+
+        // Disabled, it is a group: its children show as they are.
+        doc.scene.get_mut(cloner).unwrap().data.enabled = false;
+        eval.update(&doc.scene);
+        assert!(eval.instances().is_empty());
+        assert!(node(&eval, cube).drawable.is_some());
     }
 }

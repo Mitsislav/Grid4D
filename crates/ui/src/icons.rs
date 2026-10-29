@@ -452,6 +452,15 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.polyline(&inner, false);
             c.ellipse((0.82, 0.3), (0.1, 0.13));
         }
+        ObjectKindTag::Cloner => {
+            // Three squares in a rising row: one shape, repeated.
+            for i in 0..3 {
+                let (x, y) = (0.08 + 0.28 * i as f32, 0.6 - 0.25 * i as f32);
+                let square = [(x, y), (x + 0.3, y), (x + 0.3, y + 0.3), (x, y + 0.3)];
+                c.fill_with(&square, soft);
+                c.polyline(&square, true);
+            }
+        }
         ObjectKindTag::Loft => {
             // Three sections, large to small, with the skin's outline over them.
             let skin = [

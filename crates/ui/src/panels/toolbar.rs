@@ -277,6 +277,7 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Lathe => "Add Lathe (Alt: around the selected spline)",
         ObjectKindTag::Sweep => "Add Sweep: profile first, path second (Alt: around the selected spline)",
         ObjectKindTag::Loft => "Add Loft: a skin over its child splines (Alt: around the selected splines)",
+        ObjectKindTag::Cloner => "Add Cloner: repeats its children (Alt: around the selected object)",
         ObjectKindTag::Bend => "Add Bend (Shift: under the selected object, fitted to it)",
         ObjectKindTag::Twist => "Add Twist (Shift: under the selected object, fitted to it)",
         ObjectKindTag::Taper => "Add Taper (Shift: under the selected object, fitted to it)",

@@ -20,6 +20,7 @@ use std::{
 use glam::{Vec2, Vec3};
 use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
+    cloner::{CloneOrder, Cloner, GridArray, Layout, Linear, Radial, StepMode},
     deform::{Bend, BendOrigin, Bulge, DeformerMode, Ffd, Shape, Taper, Twist},
     spline::{
         ArcType, Interpolation as SplineInterpolation, Segment, Spline, SplinePlane, SplinePrimitive, SplineShape,
@@ -833,6 +834,15 @@ enum KindDto {
         #[serde(default, skip_serializing_if = "CapTypeDto::is_ngons")]
         cap_type: CapTypeDto,
     },
+    /// A Cloner (added in step 10.6); angles in radians, defaults omitted.
+    Cloner {
+        layout: ClonerLayoutDto,
+        #[serde(default, skip_serializing_if = "CloneOrderDto::is_iterate")]
+        clones: CloneOrderDto,
+        seed: u32,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        reset_coordinates: bool,
+    },
     /// A Bend deformer (added in step 10.2); angles in radians, defaults omitted.
     Bend {
         size: [f32; 3],
@@ -1029,6 +1039,206 @@ impl ExtrudeDirectionDto {
     fn is_auto(&self) -> bool {
         *self == Self::Auto
     }
+}
+
+/// A Cloner's layout, by mode.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+enum ClonerLayoutDto {
+    Linear {
+        count: u32,
+        #[serde(default, skip_serializing_if = "is_zero_count")]
+        offset: u32,
+        #[serde(default, skip_serializing_if = "StepModeDto::is_per_step")]
+        step: StepModeDto,
+        position: [f32; 3],
+        #[serde(default, skip_serializing_if = "is_zero_vector")]
+        rotation: [f32; 3],
+        scale: [f32; 3],
+    },
+    Radial {
+        count: u32,
+        radius: f32,
+        plane: SplinePlaneDto,
+        align: bool,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        start_angle: f32,
+        end_angle: f32,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        offset: f32,
+    },
+    Grid {
+        count: [u32; 3],
+        #[serde(default, skip_serializing_if = "StepModeDto::is_per_step")]
+        step: StepModeDto,
+        size: [f32; 3],
+    },
+}
+
+impl ClonerLayoutDto {
+    fn new(layout: Layout) -> Self {
+        match layout {
+            Layout::Linear(linear) => Self::Linear {
+                count: linear.count,
+                offset: linear.offset,
+                step: linear.mode.into(),
+                position: linear.position.to_array(),
+                rotation: linear.rotation.to_array(),
+                scale: linear.scale.to_array(),
+            },
+            Layout::Radial(radial) => Self::Radial {
+                count: radial.count,
+                radius: radial.radius,
+                plane: match radial.plane {
+                    SplinePlane::XY => SplinePlaneDto::Xy,
+                    SplinePlane::ZY => SplinePlaneDto::Zy,
+                    SplinePlane::XZ => SplinePlaneDto::Xz,
+                },
+                align: radial.align,
+                start_angle: radial.start_angle,
+                end_angle: radial.end_angle,
+                offset: radial.offset,
+            },
+            Layout::Grid(grid) => Self::Grid {
+                count: grid.count,
+                step: grid.mode.into(),
+                size: grid.size.to_array(),
+            },
+        }
+    }
+
+    /// Counts a file claims are clamped (never trusted).
+    fn into_layout(self) -> Layout {
+        let count = |c: u32| c.min(Cloner::MAX_COUNT);
+        match self {
+            Self::Linear {
+                count: n,
+                offset,
+                step,
+                position,
+                rotation,
+                scale,
+            } => Layout::Linear(Linear {
+                count: count(n),
+                offset: count(offset),
+                mode: step.into(),
+                position: Vec3::from_array(position),
+                rotation: Vec3::from_array(rotation),
+                scale: Vec3::from_array(scale),
+            }),
+            Self::Radial {
+                count: n,
+                radius,
+                plane,
+                align,
+                start_angle,
+                end_angle,
+                offset,
+            } => Layout::Radial(Radial {
+                count: count(n),
+                radius,
+                plane: match plane {
+                    SplinePlaneDto::Xy => SplinePlane::XY,
+                    SplinePlaneDto::Zy => SplinePlane::ZY,
+                    SplinePlaneDto::Xz => SplinePlane::XZ,
+                },
+                align,
+                start_angle,
+                end_angle,
+                offset,
+            }),
+            Self::Grid { count: n, step, size } => Layout::Grid(GridArray {
+                count: n.map(|c| count(c).max(1)),
+                mode: step.into(),
+                size: Vec3::from_array(size),
+            }),
+        }
+    }
+
+    fn parameters(&self) -> Vec<f32> {
+        match *self {
+            Self::Linear {
+                position,
+                rotation,
+                scale,
+                ..
+            } => [position, rotation, scale].concat(),
+            Self::Radial {
+                radius,
+                start_angle,
+                end_angle,
+                offset,
+                ..
+            } => vec![radius, start_angle, end_angle, offset],
+            Self::Grid { size, .. } => size.to_vec(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StepModeDto {
+    #[default]
+    PerStep,
+    EndPoint,
+}
+
+impl StepModeDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_per_step(&self) -> bool {
+        *self == Self::PerStep
+    }
+}
+
+impl From<StepMode> for StepModeDto {
+    fn from(mode: StepMode) -> Self {
+        match mode {
+            StepMode::PerStep => Self::PerStep,
+            StepMode::EndPoint => Self::EndPoint,
+        }
+    }
+}
+
+impl From<StepModeDto> for StepMode {
+    fn from(mode: StepModeDto) -> Self {
+        match mode {
+            StepModeDto::PerStep => Self::PerStep,
+            StepModeDto::EndPoint => Self::EndPoint,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CloneOrderDto {
+    #[default]
+    Iterate,
+    Random,
+}
+
+impl CloneOrderDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_iterate(&self) -> bool {
+        *self == Self::Iterate
+    }
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+const fn is_zero_count(value: &u32) -> bool {
+    *value == 0
+}
+
+fn is_zero_vector(value: &[f32; 3]) -> bool {
+    value.iter().all(|&v| v == 0.0)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -2177,6 +2387,15 @@ impl KindDto {
                 end_cap: lathe.end_cap,
                 cap_type: lathe.cap_type.into(),
             },
+            ObjectKind::Cloner(cloner) => Self::Cloner {
+                layout: ClonerLayoutDto::new(cloner.layout),
+                clones: match cloner.clones {
+                    CloneOrder::Iterate => CloneOrderDto::Iterate,
+                    CloneOrder::Random => CloneOrderDto::Random,
+                },
+                seed: cloner.seed,
+                reset_coordinates: cloner.reset_coordinates,
+            },
             ObjectKind::Loft(loft) => Self::Loft {
                 subdivision_u: loft.subdivision_u,
                 subdivision_v: loft.subdivision_v,
@@ -2549,6 +2768,20 @@ impl KindDto {
                 end_cap,
                 cap_type: cap_type.into(),
             }),
+            Self::Cloner {
+                layout,
+                clones,
+                seed,
+                reset_coordinates,
+            } => ObjectKind::Cloner(Cloner {
+                layout: layout.into_layout(),
+                clones: match clones {
+                    CloneOrderDto::Iterate => CloneOrder::Iterate,
+                    CloneOrderDto::Random => CloneOrder::Random,
+                },
+                seed,
+                reset_coordinates,
+            }),
             Self::Loft {
                 subdivision_u,
                 subdivision_v,
@@ -2679,6 +2912,7 @@ impl KindDto {
     fn parameters(&self) -> Vec<f32> {
         match *self {
             Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } | Self::Loft { .. } => Vec::new(),
+            Self::Cloner { ref layout, .. } => layout.parameters(),
             Self::Extrude { offset, movement, .. } => vec![offset, movement[0], movement[1], movement[2]],
             Self::Lathe {
                 angle,
@@ -3452,6 +3686,77 @@ mod tests {
             let json = serde_json::to_string(&ParamDto::from(Param::Object(param))).unwrap();
             assert_eq!(json, format!("\"{name}\""));
         }
+    }
+
+    #[test]
+    fn cloners_round_trip_and_counts_are_clamped() {
+        use grid4d_geom::cloner::{CloneOrder, Cloner, GridArray, Layout, Linear, Radial, StepMode};
+        let mut doc = Document::new("clones");
+        let kinds = [
+            ObjectKindTag::Cloner.default_kind(),
+            ObjectKind::Cloner(Cloner {
+                layout: Layout::Linear(Linear {
+                    count: 7,
+                    offset: 2,
+                    mode: StepMode::EndPoint,
+                    position: Vec3::new(1.0, 2.0, 3.0),
+                    rotation: Vec3::new(0.1, 0.2, 0.3),
+                    scale: Vec3::new(0.5, 1.5, 1.0),
+                }),
+                clones: CloneOrder::Random,
+                seed: 42,
+                reset_coordinates: false,
+            }),
+            ObjectKind::Cloner(Cloner {
+                layout: Layout::Radial(Radial {
+                    count: 12,
+                    plane: SplinePlane::ZY,
+                    align: false,
+                    start_angle: 0.5,
+                    offset: 0.25,
+                    ..Radial::default()
+                }),
+                ..Cloner::default()
+            }),
+            ObjectKind::Cloner(Cloner {
+                layout: Layout::Grid(GridArray {
+                    count: [2, 3, 4],
+                    mode: StepMode::EndPoint,
+                    size: Vec3::new(10.0, 20.0, 30.0),
+                }),
+                ..Cloner::default()
+            }),
+        ];
+        for (i, kind) in kinds.iter().enumerate() {
+            doc.scene.insert(Node::new(format!("Cloner.{i}"), kind.clone()));
+        }
+        let loaded = round_trip(&doc);
+        let back: Vec<&ObjectKind> = loaded
+            .scene
+            .roots()
+            .iter()
+            .map(|&id| &loaded.scene.get(id).unwrap().data.kind)
+            .collect();
+        assert_eq!(back, kinds.iter().collect::<Vec<_>>());
+        let json = serde_json::to_string(&KindDto::new(&kinds[0], "Cloner", &mut MeshTable::default())).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"cloner","layout":{"mode":"linear","count":3,"position":[0.0,250.0,0.0],"scale":[1.0,1.0,1.0]},"seed":1234567}"#
+        );
+        let huge = r#"{"type": "cloner", "seed": 1, "layout": {"mode": "grid", "count": [4000000000, 0, 5], "size": [1, 1, 1]}}"#;
+        let dto: KindDto = serde_json::from_str(huge).unwrap();
+        let ObjectKind::Cloner(cloner) = dto.into_kind(&[], "test").unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            cloner.layout,
+            Layout::Grid(GridArray {
+                count: [Cloner::MAX_COUNT, 1, 5],
+                mode: StepMode::PerStep,
+                size: Vec3::ONE,
+            })
+        );
+        assert_eq!(cloner.count(), Cloner::MAX_COUNT as usize);
     }
 
     #[test]

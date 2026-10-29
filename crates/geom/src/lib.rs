@@ -21,6 +21,7 @@
 
 mod bitset;
 mod bvh;
+pub mod cloner;
 pub mod deform;
 pub mod loops;
 mod mesh;

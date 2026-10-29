@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
 use grid4d_eval::{CurveHandle, EvaluatedLight, EvaluatedScene, MeshKey, Shading};
 use grid4d_geom::Component;
-use grid4d_scene::{Falloff, LightType, MeshHandle, NodeId};
+use grid4d_scene::{Falloff, LightType, MeshHandle, NodeId, ObjectKindTag};
 
 use crate::{
     ComponentHit, ComponentStyle, DisplayMode, OrbitCamera, ViewEffects, ViewFilter, components::ComponentOverlay,
@@ -290,13 +290,25 @@ impl FrameData {
             .position(|l| l.shadow.casts())
             .map(|index| (index, scene.lights()[index].shadow.is_hard()));
         let mut bounds: Option<(Vec3, Vec3)> = None;
-        for node in scene.nodes() {
-            let Some(draw) = node.drawable.filter(|_| self.filter.shows_object(node.kind)) else {
+        // Objects, then clones (drawn, selected and filtered as their Cloner).
+        let filter = self.filter;
+        let objects = scene
+            .nodes()
+            .iter()
+            .filter(|n| filter.shows_object(n.kind))
+            .map(|n| (n.id, n.world, n.bounds, n.drawable));
+        let clones = scene
+            .instances()
+            .iter()
+            .filter(|c| filter.shows_object(ObjectKindTag::Cloner) && filter.shows_object(c.kind))
+            .map(|c| (c.owner, c.world, c.bounds, c.drawable));
+        for (id, world, object_bounds, drawable) in objects.chain(clones) {
+            let Some(draw) = drawable else {
                 continue;
             };
-            let model = node.world * Mat4::from_scale(draw.scale);
+            let model = world * Mat4::from_scale(draw.scale);
             if !draw.marker
-                && let Some(b) = node.bounds
+                && let Some(b) = object_bounds
             {
                 for i in 0..8u8 {
                     let corner = Vec3::new(
@@ -304,7 +316,7 @@ impl FrameData {
                         if i & 2 == 0 { b.min.y } else { b.max.y },
                         if i & 4 == 0 { b.min.z } else { b.max.z },
                     );
-                    let p = node.world.transform_point3(corner);
+                    let p = world.transform_point3(corner);
                     bounds = Some(bounds.map_or((p, p), |(min, max)| (min.min(p), max.max(p))));
                 }
             }
@@ -342,7 +354,7 @@ impl FrameData {
                 normal: normal_matrix(&model),
                 color: [draw.color[0], draw.color[1], draw.color[2], 1.0],
                 params: [
-                    f32::from(u8::from(is_selected(node.id))),
+                    f32::from(u8::from(is_selected(id))),
                     f32::from(u8::from(draw.unlit)),
                     surface.roughness,
                     surface.metallic,
@@ -741,5 +753,42 @@ mod tests {
                 .draw_batches()
                 .any(|(_, shading, _, _)| shading == Shading::from_angle(0.0))
         );
+    }
+
+    #[test]
+    fn clones_draw_as_one_instanced_batch_selected_with_their_cloner() {
+        use grid4d_geom::cloner::{Cloner, GridArray, Layout};
+        let mut doc = Document::new("clones");
+        let cloner = doc.scene.insert(Node::new(
+            "Cloner",
+            ObjectKind::Cloner(Cloner {
+                layout: Layout::Grid(GridArray {
+                    count: [10, 10, 10],
+                    ..GridArray::default()
+                }),
+                ..Cloner::default()
+            }),
+        ));
+        doc.scene
+            .insert_child(cloner, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        let eval = evaluated(&doc);
+        let mut frame = FrameData::new();
+        frame.extract(&eval, |id| id == cloner);
+        assert_eq!(frame.instance_count(), 1000);
+        assert_eq!(
+            frame.batches.iter().filter(|b| !b.instances.is_empty()).count(),
+            1,
+            "one instanced draw"
+        );
+        assert!(
+            frame.batches[0].instances.iter().all(|i| i.params[0] == 1.0),
+            "selected with the Cloner"
+        );
+        let mut hidden = ViewFilter::ALL;
+        hidden.set(crate::FilterItem::Generator, false);
+        frame.filter = hidden;
+        frame.extract(&eval, |_| false);
+        assert_eq!(frame.instance_count(), 0, "filtered with the Cloner");
     }
 }

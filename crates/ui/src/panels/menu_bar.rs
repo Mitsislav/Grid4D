@@ -94,7 +94,6 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                         ui.close();
                     }
                 }
-                planned(ui, "Cloner", "");
             });
             ui.menu_button("Deformer", |ui| {
                 for tag in ObjectKindTag::DEFORMERS {

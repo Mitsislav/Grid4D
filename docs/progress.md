@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 10 — Deformers & MoGraph (v0.10) |
-| Last step done | 10.5 — Current State to Object (2026-10-29) |
-| Next step | 10.6 — Cloner framework |
-| Tests | 638, all passing; clippy and rustfmt clean |
+| Last step done | 10.6 — Cloner framework (2026-10-29) |
+| Next step | 10.7 — Cloner Object mode, nested cloners, groups |
+| Tests | 649, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1195,6 +1195,7 @@ Phase 9 is complete.
 | 10.3 | Twist, Taper and Bulge (curvature, fillet) beside the Bend; an orange strength handle on the selected deformer, dragged in the view (Shift steps, one undo step, Esc), before the gizmo; animatable; saved; rendered | 629 |
 | 10.4 | FFD: a lattice (2–20 points per axis) over the box whose moved points reshape the object by Bernstein blending; edited in Points mode like a spline's points (selection, gizmo, Tweak); Reset Lattice; Size scales it, a new grid regrids it; Delete leaves it; saved with its selection; rendered | 635 |
 | 10.5 | Current State to Object (Mesh ▸ Conversion): a polygon copy of what the viewport shows at the current frame (deformers, generators, animation), hierarchy kept, deformers and consumed inputs left out, after the original, selected, one undo step; export writes deformed shapes | 638 |
+| 10.6 | Cloner: Linear, Radial and Grid Array layouts, Iterate / Random children, Reset Coordinates; clones as instances drawn in shared batches (1 000 cubes, one draw), picked and selected as the Cloner, framed, filtered, rendered; Make Editable / Current State / export as one object per clone; saved | 649 |
 
 **10.1 — Animated parameters**
 
@@ -1356,6 +1357,37 @@ Phase 9 is complete.
   selected and twisted; switching the Twist off straightened the original while
   the copy stayed twisted. (Typing into the Coordinates fields does not reach
   the app through posted messages, so the copy was not moved aside.)
+
+**10.6 — Cloner framework**
+
+*Problems and solutions:*
+- **Clones beside the nodes, not among them.** Making clones extra
+  `EvaluatedNode`s would have broken everything that looks a node up by id
+  (animation, Target tags, the gizmo). They are a second list,
+  `EvaluatedScene::instances()`, built after animation and aims so they follow
+  the Cloner; consumers chain it after the nodes (`objects.chain(clones)`), so
+  drawing, picking and the path tracer each needed a few lines and no
+  allocation.
+- **Hiding the children but keeping their shapes.** During the walk the
+  Cloner's direct children record what they would draw (drawable, pick shape,
+  bounds) as `Source`s, then are hidden like a cage; the instances reuse those
+  drawables, so a deformed child or a generator child is cloned as shown, and
+  same-shape clones land in one batch.
+- **Selecting and framing a Cloner** without a surface of its own: its bounds
+  become the union of its clones' (so selection boxes and H / O work
+  unchanged), and a new `PickShape::Clones` lets rectangle selection take it
+  while a ray never hits the empty space between clones.
+- **A disabled Cloner hid its children**: evaluation treated "disabled and not
+  a mesh generator" as hidden. The test now asks `is_generator()`, which
+  includes the Cloner.
+- **Export wrote the child as well as the clones**: the exporter skips a
+  generator's inputs only when it has a mesh; a Cloner's children are skipped
+  explicitly. Found by the export test.
+- **The Attribute Manager widened** with a long hint under the Cloner's rows;
+  shortened.
+- **On-screen testing:** a Radial Cloner of a cube and a sphere (12 clones,
+  aligned) and a 4 × 4 × 4 Grid Array picking children at random; clicking a
+  clone selected its Cloner; the path tracer rendered all 10 156 triangles.
 
 ---
 

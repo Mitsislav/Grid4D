@@ -5,6 +5,7 @@
 //! writes nothing.
 
 use grid4d_geom::{
+    cloner::Layout,
     spline::{ArcType, SplineShape},
     surface::ExtrudeDirection,
 };
@@ -347,6 +348,11 @@ impl ObjectKind {
                 P::Amount,
                 P::Curvature,
             ],
+            Self::Cloner(cloner) => match cloner.layout {
+                Layout::Linear(_) => &[],
+                Layout::Radial(_) => &[P::Radius, P::StartAngle, P::EndAngle],
+                Layout::Grid(_) => &[P::Size(Axis::X), P::Size(Axis::Y), P::Size(Axis::Z)],
+            },
             Self::Null
             | Self::Polygon { .. }
             | Self::SubdivisionSurface { .. }
@@ -480,6 +486,13 @@ impl ObjectKind {
             (Self::Bulge(d), P::Size(axis)) => Some(&mut d.size[axis.index()]),
             (Self::Bulge(d), P::Amount) => Some(&mut d.strength),
             (Self::Bulge(d), P::Curvature) => Some(&mut d.shape.curvature),
+            (Self::Cloner(cloner), param) => match (&mut cloner.layout, param) {
+                (Layout::Radial(radial), P::Radius) => Some(&mut radial.radius),
+                (Layout::Radial(radial), P::StartAngle) => Some(&mut radial.start_angle),
+                (Layout::Radial(radial), P::EndAngle) => Some(&mut radial.end_angle),
+                (Layout::Grid(grid), P::Size(axis)) => Some(&mut grid.size[axis.index()]),
+                _ => None,
+            },
             _ => None,
         }
     }

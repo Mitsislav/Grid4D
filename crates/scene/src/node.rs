@@ -124,6 +124,10 @@ pub enum ObjectKind {
     Sweep(grid4d_geom::surface::Sweep),
     /// Loft generator: stretches a skin over its child splines, in order.
     Loft(grid4d_geom::surface::Loft),
+    /// Repeats its children along a line, a circle or a grid
+    /// (`docs/reference/mograph-cloner.md`). The clones are instances made by
+    /// evaluation, not nodes.
+    Cloner(grid4d_geom::cloner::Cloner),
     /// Bend deformer: bends its parent and everything below the parent.
     Bend(grid4d_geom::deform::Bend),
     /// Twist deformer: turns its parent's subtree about Y along the box.
@@ -175,6 +179,7 @@ pub enum ObjectKindTag {
     Lathe,
     Sweep,
     Loft,
+    Cloner,
     Bend,
     Twist,
     Taper,
@@ -192,7 +197,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 31] = [
+    pub const ALL: [Self; 32] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -210,6 +215,7 @@ impl ObjectKindTag {
         Self::Lathe,
         Self::Sweep,
         Self::Loft,
+        Self::Cloner,
         Self::Bend,
         Self::Twist,
         Self::Taper,
@@ -238,13 +244,15 @@ impl ObjectKindTag {
         Self::Text,
     ];
 
-    /// Generators: objects that build their geometry from their children.
-    pub const GENERATORS: [Self; 5] = [
+    /// Generators: objects that build their geometry from their children (the
+    /// Cloner repeats them).
+    pub const GENERATORS: [Self; 6] = [
         Self::SubdivisionSurface,
         Self::Extrude,
         Self::Lathe,
         Self::Sweep,
         Self::Loft,
+        Self::Cloner,
     ];
 
     /// Deformers: objects that reshape their parent and its subtree.
@@ -282,6 +290,7 @@ impl ObjectKindTag {
             Self::Lathe => "Lathe",
             Self::Sweep => "Sweep",
             Self::Loft => "Loft",
+            Self::Cloner => "Cloner",
             Self::Bend => "Bend",
             Self::Twist => "Twist",
             Self::Taper => "Taper",
@@ -373,6 +382,8 @@ impl ObjectKindTag {
             Self::Sweep => ObjectKind::Sweep(grid4d_geom::surface::Sweep::default()),
             // docs/reference/generator-loft.md: 30 × 10, through the sections.
             Self::Loft => ObjectKind::Loft(grid4d_geom::surface::Loft::default()),
+            // docs/reference/mograph-cloner.md: three clones in a row, 250 cm apart.
+            Self::Cloner => ObjectKind::Cloner(grid4d_geom::cloner::Cloner::default()),
             // docs/reference/deformer-bend.md: a 250 cm box, no strength yet.
             Self::Bend => ObjectKind::Bend(grid4d_geom::deform::Bend::default()),
             // docs/reference/deformer-twist-taper-bulge.md: a 250 cm box, no effect yet.
@@ -510,6 +521,7 @@ impl ObjectKind {
             Self::Lathe(_) => ObjectKindTag::Lathe,
             Self::Sweep(_) => ObjectKindTag::Sweep,
             Self::Loft(_) => ObjectKindTag::Loft,
+            Self::Cloner(_) => ObjectKindTag::Cloner,
             Self::Bend(_) => ObjectKindTag::Bend,
             Self::Twist(_) => ObjectKindTag::Twist,
             Self::Taper(_) => ObjectKindTag::Taper,
@@ -540,7 +552,7 @@ impl ObjectKind {
     #[must_use]
     pub const fn generator_inputs(&self) -> usize {
         match self {
-            Self::Loft(_) => usize::MAX,
+            Self::Loft(_) | Self::Cloner(_) => usize::MAX,
             Self::Sweep(_) => 2,
             Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) => 1,
             Self::Null
@@ -627,12 +639,18 @@ impl ObjectKind {
         }
     }
 
-    /// Builds its geometry from its children (see [`ObjectKindTag::GENERATORS`]).
+    /// Builds its geometry from its children (see [`ObjectKindTag::GENERATORS`]:
+    /// the Cloner's clones are its children repeated).
     #[must_use]
     pub const fn is_generator(&self) -> bool {
         matches!(
             self,
-            Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) | Self::Sweep(_) | Self::Loft(_)
+            Self::SubdivisionSurface { .. }
+                | Self::Extrude { .. }
+                | Self::Lathe(_)
+                | Self::Sweep(_)
+                | Self::Loft(_)
+                | Self::Cloner(_)
         )
     }
 
@@ -652,7 +670,8 @@ impl ObjectKind {
             | Self::Extrude { .. }
             | Self::Lathe(_)
             | Self::Sweep(_)
-            | Self::Loft(_) => {
+            | Self::Loft(_)
+            | Self::Cloner(_) => {
                 return None;
             }
             Self::Cube { size, .. } => size * 0.5,

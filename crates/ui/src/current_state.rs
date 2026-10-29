@@ -4,6 +4,7 @@
 use grid4d_eval::{EvaluatedNode, EvaluatedScene, MeshKey};
 use grid4d_scene::{
     Components, Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, Scene, SplineHandle, Tag, TagKind, Tags,
+    Transform,
 };
 
 /// One copy to insert.
@@ -58,14 +59,59 @@ pub(crate) fn bake(doc: &Document, selection: &[NodeId]) -> Vec<Baked> {
             }
             let parent = parents.last().map(|&(_, index)| index);
             parents.push((node.depth, baked.len()));
+            let copied = baked.len();
             baked.push(Baked {
                 parent,
                 original: node.id,
                 data: copy(&eval, &doc.scene, node, original, frame),
             });
+            // A Cloner's copy (a Null) holds its clones as objects.
+            if original.data.enabled && matches!(original.data.kind, ObjectKind::Cloner(_)) {
+                baked.extend(
+                    clone_objects(&eval, &doc.scene, node.id, frame)
+                        .into_iter()
+                        .map(|data| Baked {
+                            parent: Some(copied),
+                            original: node.id,
+                            data,
+                        }),
+                );
+            }
         }
     }
     baked
+}
+
+/// The clones `eval` shows for `cloner` as plain objects placed in the
+/// Cloner's space, named after the child each repeats (`Cube.0`, `Cube.1`, …):
+/// polygon objects of their shapes; a clone of a curve keeps the curve, a
+/// clone of a Null is a Null. Nothing for a hidden or disabled Cloner.
+pub(crate) fn clone_objects(eval: &EvaluatedScene, scene: &Scene, cloner: NodeId, frame: f64) -> Vec<NodeData> {
+    let Some(world) = eval.nodes().iter().find(|n| n.id == cloner).map(|n| n.world) else {
+        return Vec::new();
+    };
+    let inverse = world.inverse();
+    eval.instances()
+        .iter()
+        .filter(|clone| clone.owner == cloner)
+        .enumerate()
+        .filter_map(|(index, clone)| {
+            let source = scene.get(clone.source)?;
+            let mut data = source.data.clone();
+            data.name = format!("{}.{index}", source.data.name);
+            data.transform = Transform::from_matrix(&(inverse * clone.world));
+            data.tracks.clear();
+            data.unkeyed = None;
+            let kind = source.data.kind_at(frame);
+            data.kind = match clone.drawable.map(|d| d.key) {
+                Some(MeshKey::Polygon(id)) => ObjectKind::polygon(eval.mesh(id)?.clone()),
+                Some(MeshKey::Curve(_)) => kind.into_owned(),
+                Some(_) => ObjectKind::polygon(MeshHandle::new(grid4d_eval::editable_mesh(&kind)?)),
+                None => ObjectKind::Null,
+            };
+            Some(data)
+        })
+        .collect()
 }
 
 /// `true` if an ancestor of `id` is selected too (it goes with that one).

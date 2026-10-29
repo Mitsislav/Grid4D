@@ -1,6 +1,6 @@
 use glam::{Vec2, Vec3};
 use grid4d_eval::{EvaluatedScene, PickShape};
-use grid4d_scene::NodeId;
+use grid4d_scene::{NodeId, ObjectKindTag};
 
 use crate::{Ray, ScreenView, ViewFilter};
 
@@ -13,24 +13,31 @@ use crate::{Ray, ScreenView, ViewFilter};
 #[must_use]
 pub fn pick(scene: &EvaluatedScene, ray: Ray, shown: ViewFilter) -> Option<NodeId> {
     let mut best: Option<(f32, NodeId)> = None;
-    for node in scene.nodes() {
-        if node.pick == PickShape::None
-            || !shown.shows_object(node.kind)
-            || node.world.determinant().abs() <= f32::EPSILON
-        {
+    // Objects, then clones (a clone picks its Cloner).
+    let objects = scene
+        .nodes()
+        .iter()
+        .filter(|n| shown.shows_object(n.kind))
+        .map(|n| (n.id, n.world, n.bounds, n.pick));
+    let clones = scene
+        .instances()
+        .iter()
+        .filter(|c| shown.shows_object(ObjectKindTag::Cloner) && shown.shows_object(c.kind))
+        .map(|c| (c.owner, c.world, c.bounds, c.pick));
+    for (id, world, bounds, shape) in objects.chain(clones) {
+        if shape == PickShape::None || world.determinant().abs() <= f32::EPSILON {
             continue;
         }
-        let inv = node.world.inverse();
+        let inv = world.inverse();
         let origin = inv.transform_point3(ray.origin);
         let dir = inv.transform_vector3(ray.dir);
-        let hit = match node.pick {
-            // Curves are picked on screen (`pick_curve`).
-            PickShape::None | PickShape::Curve(_) => None,
+        let hit = match shape {
+            // Curves are picked on screen (`pick_curve`); a Cloner by its clones.
+            PickShape::None | PickShape::Curve(_) | PickShape::Clones => None,
             PickShape::Sphere { radius } => ray_sphere(origin, dir, radius),
-            PickShape::Bounds => node.bounds.and_then(|b| b.ray_intersect(origin, dir)),
+            PickShape::Bounds => bounds.and_then(|b| b.ray_intersect(origin, dir)),
             // The box first: most rays miss most objects.
-            PickShape::Mesh(mesh) => node
-                .bounds
+            PickShape::Mesh(mesh) => bounds
                 .and_then(|b| b.ray_intersect(origin, dir))
                 .and(scene.mesh(mesh))
                 .and_then(|mesh| mesh.raycast(origin, dir))
@@ -40,7 +47,7 @@ pub fn pick(scene: &EvaluatedScene, ray: Ray, shown: ViewFilter) -> Option<NodeI
         if let Some(t) = hit
             && best.is_none_or(|(best_t, _)| t < best_t)
         {
-            best = Some((t, node.id));
+            best = Some((t, id));
         }
     }
     best.map(|(_, id)| id)
@@ -251,5 +258,32 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn a_clone_picks_its_cloner_and_the_gaps_pick_nothing() {
+        use grid4d_geom::cloner::{Cloner, Layout, Linear};
+        let mut doc = Document::new("clones");
+        let cloner = doc.scene.insert(Node::new(
+            "Cloner",
+            ObjectKind::Cloner(Cloner {
+                layout: Layout::Linear(Linear {
+                    count: 3,
+                    position: Vec3::new(500.0, 0.0, 0.0),
+                    ..Linear::default()
+                }),
+                ..Cloner::default()
+            }),
+        ));
+        doc.scene
+            .insert_child(cloner, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        let eval = evaluated(&doc);
+        let down = |x: f32| Ray {
+            origin: Vec3::new(x, 1000.0, 0.0),
+            dir: -Vec3::Y,
+        };
+        assert_eq!(pick(&eval, down(1000.0), ViewFilter::ALL), Some(cloner));
+        assert_eq!(pick(&eval, down(250.0), ViewFilter::ALL), None, "between two clones");
     }
 }

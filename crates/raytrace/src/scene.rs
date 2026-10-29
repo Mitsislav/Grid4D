@@ -97,8 +97,11 @@ impl RenderScene {
         let mut bounds: Option<(Vec3, Vec3)> = None;
         let mut triangulator = Triangulator::new();
         let mut tri = TriMesh::default();
-        for node in evaluated.nodes() {
-            let Some(draw) = node.drawable.filter(|d| !d.marker) else {
+        // Objects, then clones.
+        let objects = evaluated.nodes().iter().map(|n| (n.world, n.drawable));
+        let clones = evaluated.instances().iter().map(|c| (c.world, c.drawable));
+        for (world, drawable) in objects.chain(clones) {
+            let Some(draw) = drawable.filter(|d| !d.marker) else {
                 continue;
             };
             let generated;
@@ -115,7 +118,7 @@ impl RenderScene {
                     None => continue,
                 },
             };
-            let model = node.world * Mat4::from_scale(draw.scale);
+            let model = world * Mat4::from_scale(draw.scale);
             let linear = Mat3::from_mat4(model);
             if linear.determinant().abs() <= f32::EPSILON {
                 continue; // flattened to nothing
@@ -249,5 +252,30 @@ mod tests {
         assert!(hit.geometric.y.abs() > 0.999 && hit.shading.abs_diff_eq(Vec3::Y, 1e-4));
         assert!(scene.occluded(Vec3::new(10.0, 500.0, 20.0), Vec3::NEG_Y, 400.0));
         assert!(!scene.occluded(Vec3::new(10.0, 500.0, 20.0), Vec3::NEG_Y, 250.0));
+    }
+
+    #[test]
+    fn clones_are_rendered() {
+        use grid4d_geom::cloner::{Cloner, Layout, Radial};
+        let mut doc = Document::new("clones");
+        let cloner = doc.scene.insert(Node::new(
+            "Cloner",
+            ObjectKind::Cloner(Cloner {
+                layout: Layout::Radial(Radial {
+                    count: 8,
+                    ..Radial::default()
+                }),
+                ..Cloner::default()
+            }),
+        ));
+        doc.scene
+            .insert_child(cloner, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        let mut eval = EvaluatedScene::for_render();
+        eval.update(&doc.scene);
+        let scene = RenderScene::new(&eval);
+        assert_eq!(scene.triangle_count(), 8 * 12, "eight cubes");
+        let (min, max) = scene.bounds().unwrap();
+        assert!(min.x < -400.0 && max.x > 400.0, "around the ring: {min} {max}");
     }
 }

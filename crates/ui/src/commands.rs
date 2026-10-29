@@ -1735,6 +1735,8 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
     let mut cages = Vec::new();
     // Shapes are baked as they are at the current frame.
     let frame = f64::from(doc.time.frame());
+    // Clones exist only in an evaluation (made when a Cloner needs it).
+    let mut evaluated: Option<grid4d_eval::EvaluatedScene> = None;
     for &id in selection {
         let Some(node) = doc.scene.get(id).filter(|_| !in_cage(id)) else {
             continue;
@@ -1767,6 +1769,35 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
                 id,
                 data: without_lost_tracks(data),
             });
+            continue;
+        }
+        // A Cloner becomes a Null holding its clones as polygon objects.
+        if let ObjectKind::Cloner(_) = &*kind {
+            if enabled_generator(id).is_none() {
+                continue;
+            }
+            let eval = evaluated.get_or_insert_with(|| {
+                let mut eval = grid4d_eval::EvaluatedScene::new();
+                eval.set_frame(frame);
+                eval.update(&doc.scene);
+                eval
+            });
+            let mut data = node.data.clone();
+            data.kind = ObjectKind::Null;
+            edits.push(SceneEdit::SetData {
+                id,
+                data: without_lost_tracks(data),
+            });
+            edits.extend(
+                crate::current_state::clone_objects(eval, &doc.scene, id, frame)
+                    .into_iter()
+                    .map(|data| SceneEdit::Insert {
+                        parent: Some(id),
+                        index: usize::MAX,
+                        data,
+                    }),
+            );
+            cages.extend(inputs(node));
             continue;
         }
         let mesh = if node.data.kind.is_generator() {
@@ -1887,7 +1918,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Extrude
         | ObjectKindTag::Lathe
         | ObjectKindTag::Sweep
-        | ObjectKindTag::Loft => {}
+        | ObjectKindTag::Loft
+        | ObjectKindTag::Cloner => {}
     }
     data
 }
@@ -1931,7 +1963,8 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Extrude
         | ObjectKindTag::Lathe
         | ObjectKindTag::Sweep
-        | ObjectKindTag::Loft => palette::ICON_GENERATOR,
+        | ObjectKindTag::Loft
+        | ObjectKindTag::Cloner => palette::ICON_GENERATOR,
         ObjectKindTag::Circle
         | ObjectKindTag::Rectangle
         | ObjectKindTag::Arc
@@ -4192,6 +4225,75 @@ mod tests {
             doc.scene.get(sds).unwrap().data.tracks.len(),
             1,
             "the original keeps its animation"
+        );
+    }
+
+    fn cloner_of_cubes(doc: &mut Document) -> (NodeId, NodeId) {
+        let cloner = doc
+            .scene
+            .insert(Node::new("Cloner", ObjectKindTag::Cloner.default_kind()));
+        let cube = doc
+            .scene
+            .insert_child(cloner, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        (cloner, cube)
+    }
+
+    #[test]
+    fn make_editable_turns_a_cloner_into_a_null_of_its_clones() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        let (cloner, cube) = cloner_of_cubes(&mut doc);
+        editor.selection.set_single(cloner);
+        assert!(can_make_editable(&doc, &editor.selection));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        assert!(matches!(doc.scene.get(cloner).unwrap().data.kind, ObjectKind::Null));
+        assert!(!doc.scene.contains(cube), "the original child goes");
+        let clones = doc.scene.children(cloner).to_vec();
+        let names: Vec<&str> = clones
+            .iter()
+            .map(|&id| doc.scene.get(id).unwrap().data.name.as_str())
+            .collect();
+        assert_eq!(names, ["Cube.0", "Cube.1", "Cube.2"]);
+        let last = &doc.scene.get(clones[2]).unwrap().data;
+        assert!(matches!(last.kind, ObjectKind::Polygon { .. }));
+        assert_eq!(last.transform.position, Vec3::new(0.0, 500.0, 0.0));
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert!(matches!(
+            doc.scene.get(cloner).unwrap().data.kind,
+            ObjectKind::Cloner(_)
+        ));
+        assert_eq!(doc.scene.children(cloner), [cube]);
+    }
+
+    #[test]
+    fn current_state_and_export_write_clones_as_objects() {
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        let (cloner, _) = cloner_of_cubes(&mut doc);
+        editor.selection.set_single(cloner);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::CurrentStateToObject]);
+        let copy = doc.scene.roots()[1];
+        assert!(matches!(doc.scene.get(copy).unwrap().data.kind, ObjectKind::Null));
+        assert_eq!(doc.scene.children(copy).len(), 3);
+        assert!(
+            doc.scene
+                .children(copy)
+                .iter()
+                .all(|&id| matches!(doc.scene.get(id).unwrap().data.kind, ObjectKind::Polygon { .. }))
+        );
+
+        let objects = file::exportable(&doc);
+        let index = objects.nodes.iter().position(|e| e.data.name == "Cloner").unwrap();
+        let clones: Vec<&str> = objects
+            .nodes
+            .iter()
+            .filter(|e| e.parent == Some(index))
+            .map(|e| e.data.name.as_str())
+            .collect();
+        assert_eq!(
+            clones,
+            ["Cube.0", "Cube.1", "Cube.2"],
+            "the Cloner's clones, not its child"
         );
     }
 }

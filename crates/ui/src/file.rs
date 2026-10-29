@@ -642,7 +642,13 @@ pub fn exportable(doc: &Document) -> Objects {
                     }
                     data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
                 }
-                None => data.kind = ObjectKind::Null,
+                None => {
+                    // A Cloner's children are written as its clones (below).
+                    if data.enabled && matches!(data.kind, ObjectKind::Cloner(_)) {
+                        inputs = node.children();
+                    }
+                    data.kind = ObjectKind::Null;
+                }
             }
         } else if let Some(mesh) = grid4d_eval::editable_mesh(&data.kind_at(f64::from(doc.time.frame()))) {
             data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
@@ -660,8 +666,22 @@ pub fn exportable(doc: &Document) -> Objects {
             });
         }
         let parent = node.parent().and_then(|p| index_of.get(&p).copied());
-        index_of.insert(id, nodes.len());
+        let index = nodes.len();
+        index_of.insert(id, index);
+        let cloner = node.data.enabled && matches!(node.data.kind, ObjectKind::Cloner(_));
         nodes.push(ObjectEntry { parent, data });
+        // A Cloner is written as a group of its clones.
+        if cloner {
+            let frame = f64::from(doc.time.frame());
+            nodes.extend(
+                crate::current_state::clone_objects(&evaluated, &doc.scene, id, frame)
+                    .into_iter()
+                    .map(|data| ObjectEntry {
+                        parent: Some(index),
+                        data,
+                    }),
+            );
+        }
         stack.extend(node.children().iter().rev().filter(|child| !inputs.contains(child)));
     }
     Objects {

@@ -241,7 +241,9 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
         | ObjectKind::Extrude { .. }
         | ObjectKind::Lathe(_)
         | ObjectKind::Sweep(_)
-        | ObjectKind::Loft(_) => None,
+        | ObjectKind::Loft(_)
+        // A Cloner draws its clones (instances evaluation makes).
+        | ObjectKind::Cloner(_) => None,
         // A deformer draws its box as lines, sampled during evaluation.
         ObjectKind::Bend(_)
         | ObjectKind::Twist(_)
@@ -282,6 +284,7 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
         | ObjectKind::Lathe(_)
         | ObjectKind::Sweep(_)
         | ObjectKind::Loft(_)
+        | ObjectKind::Cloner(_)
         | ObjectKind::Bend(_)
         | ObjectKind::Twist(_)
         | ObjectKind::Taper(_)
@@ -331,6 +334,7 @@ mod tests {
                     | ObjectKindTag::Lathe
                     | ObjectKindTag::Sweep
                     | ObjectKindTag::Loft
+                    | ObjectKindTag::Cloner
                     | ObjectKindTag::Bend
                     | ObjectKindTag::Twist
                     | ObjectKindTag::Taper

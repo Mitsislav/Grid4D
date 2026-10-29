@@ -8,6 +8,7 @@
 //! typed value, a click) is recorded as one undo step through [`LiveEdit`].
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
+use grid4d_geom::cloner::{CloneOrder, Cloner, Layout, StepMode};
 use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode, Ffd, Shape};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
@@ -803,6 +804,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows) {
             }
             ObjectKind::Sweep(sweep) => sweep_rows(ui, k, sweep),
             ObjectKind::Loft(loft) => loft_rows(ui, loft),
+            ObjectKind::Cloner(cloner) => cloner_rows(ui, k, cloner),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, k, primitive),
             ObjectKind::Text(text) => text_rows(ui, k, text),
             ObjectKind::Spline {
@@ -1552,6 +1554,96 @@ fn sweep_rows(ui: &mut Ui, k: &mut KeyRows, sweep: &mut Sweep) {
     cap_rows(ui, &mut sweep.start_cap, &mut sweep.end_cap, &mut sweep.cap_type);
     ui.label("");
     ui.label(RichText::new("Child 1: profile; child 2: path").color(p::TEXT_DIM));
+    ui.end_row();
+}
+
+/// A Cloner's mode and its layout's values, which child each clone repeats and
+/// Reset Coordinates.
+fn cloner_rows(ui: &mut Ui, k: &mut KeyRows, cloner: &mut Cloner) {
+    attr_label(ui, "Mode", LABEL_WIDTH);
+    let mut index = cloner.layout.index();
+    egui::ComboBox::from_id_salt("grid4d.attr.cloner.mode")
+        .selected_text(cloner.layout.label())
+        .show_ui(ui, |ui| {
+            for (i, label) in Layout::LABELS.into_iter().enumerate() {
+                ui.selectable_value(&mut index, i, label);
+            }
+        });
+    ui.end_row();
+    if index != cloner.layout.index() {
+        cloner.layout = Layout::of_index(index);
+    }
+    attr_label(ui, "Clones", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.cloner.clones")
+        .selected_text(cloner.clones.label())
+        .show_ui(ui, |ui| {
+            for option in CloneOrder::ALL {
+                ui.selectable_value(&mut cloner.clones, option, option.label());
+            }
+        });
+    ui.end_row();
+    if cloner.clones == CloneOrder::Random {
+        bounded_count_row(ui, "Seed", &mut cloner.seed, 0, 9_999_999);
+    }
+    check_row(ui, "Reset Coordinates", &mut cloner.reset_coordinates);
+    let max = Cloner::MAX_COUNT;
+    match &mut cloner.layout {
+        Layout::Linear(linear) => {
+            bounded_count_row(ui, "Count", &mut linear.count, 0, max);
+            bounded_count_row(ui, "Offset", &mut linear.offset, 0, max);
+            step_mode_row(ui, &mut linear.mode);
+            for (axis, label) in ["P . X", "P . Y", "P . Z"].into_iter().enumerate() {
+                offset_row(ui, k, label, &mut linear.position[axis]);
+            }
+            for (axis, label) in ["S . X", "S . Y", "S . Z"].into_iter().enumerate() {
+                scale_row(ui, k, label, &mut linear.scale[axis]);
+            }
+            for (axis, label) in ["R . H", "R . P", "R . B"].into_iter().enumerate() {
+                angle_row(ui, k, label, &mut linear.rotation[axis], -36_000.0..=36_000.0);
+            }
+        }
+        Layout::Radial(radial) => {
+            bounded_count_row(ui, "Count", &mut radial.count, 0, max);
+            length_row(ui, k, "Radius", &mut radial.radius);
+            attr_label(ui, "Plane", LABEL_WIDTH);
+            egui::ComboBox::from_id_salt("grid4d.attr.cloner.plane")
+                .selected_text(radial.plane.label())
+                .show_ui(ui, |ui| {
+                    for option in SplinePlane::ALL {
+                        ui.selectable_value(&mut radial.plane, option, option.label());
+                    }
+                });
+            ui.end_row();
+            check_row(ui, "Align", &mut radial.align);
+            angle_row(ui, k, "Start Angle", &mut radial.start_angle, -36_000.0..=36_000.0);
+            angle_row(ui, k, "End Angle", &mut radial.end_angle, -36_000.0..=36_000.0);
+            angle_row(ui, k, "Offset", &mut radial.offset, -36_000.0..=36_000.0);
+        }
+        Layout::Grid(grid) => {
+            for (axis, label) in ["Count . X", "Count . Y", "Count . Z"].into_iter().enumerate() {
+                bounded_count_row(ui, label, &mut grid.count[axis], 1, max);
+            }
+            step_mode_row(ui, &mut grid.mode);
+            for (axis, label) in ["Size . X", "Size . Y", "Size . Z"].into_iter().enumerate() {
+                length_row(ui, k, label, &mut grid.size[axis]);
+            }
+        }
+    }
+    ui.label("");
+    ui.label(RichText::new("Clones repeat its children").color(p::TEXT_DIM));
+    ui.end_row();
+}
+
+/// Whether Linear and Grid Array values count per step or to the end.
+fn step_mode_row(ui: &mut Ui, mode: &mut StepMode) {
+    attr_label(ui, "Spacing", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.cloner.step")
+        .selected_text(mode.label())
+        .show_ui(ui, |ui| {
+            for option in StepMode::ALL {
+                ui.selectable_value(mode, option, option.label());
+            }
+        });
     ui.end_row();
 }
 
