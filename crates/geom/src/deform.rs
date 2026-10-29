@@ -138,6 +138,313 @@ impl Bend {
     }
 }
 
+impl Bend {
+    /// Where the strength handle sits (deformer space): the end of the bending
+    /// part, where the box's top (or, with Origin Top, its bottom) centre went.
+    #[must_use]
+    pub fn handle(&self) -> Vec3 {
+        let half = self.size.y.abs() * 0.5;
+        let end = if self.origin == BendOrigin::Top { -half } else { half };
+        self.apply(Vec3::new(0.0, end, 0.0))
+    }
+
+    /// The plane the handle is dragged in: the bend's own plane (through the
+    /// origin, spanned by Y and the bend's direction).
+    #[must_use]
+    pub fn handle_plane(&self) -> (Vec3, Vec3) {
+        (Vec3::ZERO, Quat::from_rotation_y(self.angle) * Vec3::Z)
+    }
+
+    /// This Bend with the strength that puts its handle nearest `target`.
+    #[must_use]
+    pub fn with_handle(&self, target: Vec3) -> Self {
+        let with = |strength: f32| Self { strength, ..*self };
+        let distance = |strength: f32| with(strength).handle().distance_squared(target);
+        // Coarse search over two turns either way, then refine.
+        let mut best = self.strength;
+        let mut best_distance = distance(best);
+        for i in -720..=720 {
+            let strength = f32::from(i16::try_from(i).unwrap_or(0)) * std::f32::consts::PI / 180.0;
+            let d = distance(strength);
+            if d < best_distance {
+                (best, best_distance) = (strength, d);
+            }
+        }
+        let mut step = std::f32::consts::PI / 180.0;
+        for _ in 0..24 {
+            for candidate in [best - step, best + step] {
+                let d = distance(candidate);
+                if d < best_distance {
+                    (best, best_distance) = (candidate, d);
+                }
+            }
+            step *= 0.5;
+        }
+        with(best)
+    }
+}
+
+/// The Twist deformer's parameters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Twist {
+    pub size: Vec3,
+    pub mode: DeformerMode,
+    /// How far the box's top turns relative to its bottom (radians).
+    pub angle: f32,
+}
+
+impl Default for Twist {
+    fn default() -> Self {
+        Self {
+            size: Vec3::splat(250.0),
+            mode: DeformerMode::Limited,
+            angle: 0.0,
+        }
+    }
+}
+
+impl Twist {
+    /// `point` (in the deformer's space) turned about Y by its height.
+    #[must_use]
+    pub fn apply(&self, point: Vec3) -> Vec3 {
+        let Some(t) = along(point, self.size, self.mode) else {
+            return point;
+        };
+        Quat::from_rotation_y(self.angle * t) * point
+    }
+
+    #[must_use]
+    pub fn box_lines(&self) -> Polyline {
+        box_lines(self.size, |p| self.apply(p))
+    }
+
+    /// The handle: the top of the box on its +X side, turned with the twist.
+    #[must_use]
+    pub fn handle(&self) -> Vec3 {
+        self.apply(Vec3::new(self.size.x.abs() * 0.5, self.size.y.abs() * 0.5, 0.0))
+    }
+
+    /// The top of the box.
+    #[must_use]
+    pub fn handle_plane(&self) -> (Vec3, Vec3) {
+        (Vec3::Y * (self.size.y.abs() * 0.5), Vec3::Y)
+    }
+
+    /// This Twist turned so its handle points at `target`, winding on past a
+    /// full turn from the current angle.
+    #[must_use]
+    pub fn with_handle(&self, target: Vec3) -> Self {
+        if target.x.hypot(target.z) < 1e-6 {
+            return *self;
+        }
+        // A turn about Y takes +X towards −Z.
+        let wanted = (-target.z).atan2(target.x);
+        let tau = std::f32::consts::TAU;
+        let delta = (wanted - self.angle).rem_euclid(tau);
+        let delta = if delta > std::f32::consts::PI {
+            delta - tau
+        } else {
+            delta
+        };
+        Self {
+            angle: self.angle + delta,
+            ..*self
+        }
+    }
+}
+
+/// How a Taper or Bulge eases its effect.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Shape {
+    /// 0 – any (1.0 = 100 %).
+    pub curvature: f32,
+    /// Soft ends.
+    pub fillet: bool,
+}
+
+impl Shape {
+    fn ease(self, value: f32) -> f32 {
+        if self.fillet {
+            value * value * (3.0 - 2.0 * value)
+        } else {
+            value
+        }
+    }
+}
+
+/// The Taper deformer's parameters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Taper {
+    pub size: Vec3,
+    pub mode: DeformerMode,
+    /// How much narrower the top gets (1.0 = 100 %: to a point).
+    pub strength: f32,
+    pub shape: Shape,
+}
+
+impl Default for Taper {
+    fn default() -> Self {
+        Self {
+            size: Vec3::splat(250.0),
+            mode: DeformerMode::Limited,
+            strength: 0.0,
+            shape: Shape::default(),
+        }
+    }
+}
+
+impl Taper {
+    /// The scale of distances from the Y axis at `t` through the box's height.
+    #[must_use]
+    pub fn factor(&self, t: f32) -> f32 {
+        // Inside the box: the eased curve; beyond it (Unlimited): straight on.
+        let g = if (0.0..=1.0).contains(&t) {
+            self.shape.ease(t.powf(1.0 + self.shape.curvature.max(0.0)))
+        } else {
+            t
+        };
+        (1.0 - self.strength * g).max(0.0)
+    }
+
+    /// `point` (in the deformer's space) tapered.
+    #[must_use]
+    pub fn apply(&self, point: Vec3) -> Vec3 {
+        let Some(t) = along(point, self.size, self.mode) else {
+            return point;
+        };
+        let k = self.factor(t);
+        Vec3::new(point.x * k, point.y, point.z * k)
+    }
+
+    #[must_use]
+    pub fn box_lines(&self) -> Polyline {
+        box_lines(self.size, |p| self.apply(p))
+    }
+
+    /// The handle: the top of the box on its +X side, at the tapered width.
+    #[must_use]
+    pub fn handle(&self) -> Vec3 {
+        self.apply(Vec3::new(self.size.x.abs() * 0.5, self.size.y.abs() * 0.5, 0.0))
+    }
+
+    /// The deformer's XY plane.
+    #[must_use]
+    pub fn handle_plane(&self) -> (Vec3, Vec3) {
+        (Vec3::ZERO, Vec3::Z)
+    }
+
+    /// This Taper with the strength that puts its handle at `target`'s
+    /// distance from the axis.
+    #[must_use]
+    pub fn with_handle(&self, target: Vec3) -> Self {
+        let half = self.size.x.abs() * 0.5;
+        if half < 1e-6 {
+            return *self;
+        }
+        Self {
+            strength: 1.0 - target.x / half,
+            ..*self
+        }
+    }
+}
+
+/// The Bulge deformer's parameters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bulge {
+    pub size: Vec3,
+    pub mode: DeformerMode,
+    /// How much wider the middle gets (1.0 = 100 %: twice as wide).
+    pub strength: f32,
+    pub shape: Shape,
+}
+
+impl Default for Bulge {
+    fn default() -> Self {
+        Self {
+            size: Vec3::splat(250.0),
+            mode: DeformerMode::Limited,
+            strength: 0.0,
+            shape: Shape::default(),
+        }
+    }
+}
+
+impl Bulge {
+    /// The scale of distances from the Y axis at `t` through the box's height.
+    #[must_use]
+    pub fn factor(&self, t: f32) -> f32 {
+        let unlimited = self.mode == DeformerMode::Unlimited;
+        if !unlimited && !(0.0..=1.0).contains(&t) {
+            return 1.0;
+        }
+        let u = (2.0 * t - 1.0).abs();
+        let b = 1.0 - u.powf(2.0 + 2.0 * self.shape.curvature.max(0.0));
+        let b = if (0.0..=1.0).contains(&b) {
+            self.shape.ease(b)
+        } else {
+            b
+        };
+        (1.0 + self.strength * b).max(0.0)
+    }
+
+    /// `point` (in the deformer's space) swollen.
+    #[must_use]
+    pub fn apply(&self, point: Vec3) -> Vec3 {
+        let Some(t) = along(point, self.size, self.mode) else {
+            return point;
+        };
+        let k = self.factor(t);
+        Vec3::new(point.x * k, point.y, point.z * k)
+    }
+
+    #[must_use]
+    pub fn box_lines(&self) -> Polyline {
+        box_lines(self.size, |p| self.apply(p))
+    }
+
+    /// The handle: the middle of the box on its +X side, at the swollen width.
+    #[must_use]
+    pub fn handle(&self) -> Vec3 {
+        self.apply(Vec3::new(self.size.x.abs() * 0.5, 0.0, 0.0))
+    }
+
+    /// The deformer's XY plane.
+    #[must_use]
+    pub fn handle_plane(&self) -> (Vec3, Vec3) {
+        (Vec3::ZERO, Vec3::Z)
+    }
+
+    /// This Bulge with the strength that puts its handle at `target`'s
+    /// distance from the axis.
+    #[must_use]
+    pub fn with_handle(&self, target: Vec3) -> Self {
+        let half = self.size.x.abs() * 0.5;
+        if half < 1e-6 {
+            return *self;
+        }
+        Self {
+            strength: target.x / half - 1.0,
+            ..*self
+        }
+    }
+}
+
+/// How far through the box's height `point` is (0 at the bottom, 1 at the
+/// top), as the mode reads it: clamped to the box (Limited), as it is
+/// (Unlimited); `None` for a point a Within Box deformer leaves alone.
+fn along(point: Vec3, size: Vec3, mode: DeformerMode) -> Option<f32> {
+    let height = size.y.abs();
+    if height < 1e-6 || !point.is_finite() {
+        return None;
+    }
+    let t = (point.y + height * 0.5) / height;
+    match mode {
+        DeformerMode::Limited => Some(t.clamp(0.0, 1.0)),
+        DeformerMode::Unlimited => Some(t),
+        DeformerMode::WithinBox => inside(point, size).then_some(t),
+    }
+}
+
 /// Bends the column starting at y = 0 with `length` through `theta` towards +X:
 /// a point `s` along it turns through `theta · s / length` on a circle.
 fn bend_column(p: Vec3, length: f32, theta: f32, keep_length: bool, unlimited: bool) -> Vec3 {
@@ -308,6 +615,133 @@ mod tests {
         assert!(
             close(min, Vec3::splat(-50.0)) && close(max, Vec3::splat(50.0)),
             "{min} {max}"
+        );
+    }
+
+    #[test]
+    fn twist_turns_by_height() {
+        let t = Twist {
+            size: Vec3::splat(100.0),
+            angle: FRAC_PI_2,
+            ..Twist::default()
+        };
+        let x = Vec3::new(10.0, 0.0, 0.0);
+        assert!(
+            close(t.apply(x + Vec3::Y * -50.0), x + Vec3::Y * -50.0),
+            "the bottom stays"
+        );
+        assert!(
+            close(t.apply(x + Vec3::Y * 50.0), Vec3::new(0.0, 50.0, -10.0)),
+            "the top turns a quarter"
+        );
+        let middle = t.apply(x);
+        assert!(
+            (middle.x - 10.0 * (PI / 4.0).cos()).abs() < 1e-3 && middle.z < 0.0,
+            "{middle}"
+        );
+        assert!(
+            close(t.apply(x + Vec3::Y * 90.0), Vec3::new(0.0, 90.0, -10.0)),
+            "Limited: above turns fully"
+        );
+        // The handle follows the pointer around, winding on.
+        let turned = t.with_handle(Vec3::new(-10.0, 50.0, 0.0));
+        assert!((turned.angle - PI).abs() < 1e-4, "{}", turned.angle);
+        assert!(close(turned.handle(), Vec3::new(-50.0, 50.0, 0.0)));
+        let wound = turned.with_handle(Vec3::new(0.0, 50.0, 10.0));
+        assert!(
+            (wound.angle - 1.5 * PI).abs() < 1e-4,
+            "past half a turn: {}",
+            wound.angle
+        );
+    }
+
+    #[test]
+    fn taper_narrows_towards_the_top() {
+        let full = Taper {
+            size: Vec3::splat(100.0),
+            strength: 1.0,
+            ..Taper::default()
+        };
+        let p = |y: f32| full.apply(Vec3::new(10.0, y, 10.0));
+        assert!(close(p(-50.0), Vec3::new(10.0, -50.0, 10.0)), "the bottom stays");
+        assert!(close(p(50.0), Vec3::new(0.0, 50.0, 0.0)), "the top to a point");
+        assert!(close(p(0.0), Vec3::new(5.0, 0.0, 5.0)), "half way, half width");
+        let curved = Taper {
+            shape: Shape {
+                curvature: 1.0,
+                fillet: false,
+            },
+            ..full
+        };
+        assert!(curved.apply(Vec3::new(10.0, 0.0, 0.0)).x > 7.0, "slower at first");
+        let filleted = Taper {
+            shape: Shape {
+                curvature: 0.0,
+                fillet: true,
+            },
+            ..full
+        };
+        assert!(filleted.factor(0.05) > full.factor(0.05), "eases in");
+        let widen = Taper { strength: -1.0, ..full };
+        assert!(close(
+            widen.apply(Vec3::new(10.0, 50.0, 0.0)),
+            Vec3::new(20.0, 50.0, 0.0)
+        ));
+        // The handle: at the tapered top; dragged to half the width, strength 50 %.
+        assert!(close(full.handle(), Vec3::new(0.0, 50.0, 0.0)));
+        assert!((full.with_handle(Vec3::new(25.0, 50.0, 0.0)).strength - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bulge_swells_the_middle() {
+        let b = Bulge {
+            size: Vec3::splat(100.0),
+            strength: 1.0,
+            ..Bulge::default()
+        };
+        let p = |y: f32| b.apply(Vec3::new(10.0, y, 0.0));
+        assert!(close(p(0.0), Vec3::new(20.0, 0.0, 0.0)), "the middle doubles");
+        assert!(close(p(50.0), Vec3::new(10.0, 50.0, 0.0)) && close(p(-50.0), Vec3::new(10.0, -50.0, 0.0)));
+        assert!(
+            close(p(80.0), Vec3::new(10.0, 80.0, 0.0)),
+            "outside the height: nothing"
+        );
+        let flat = Bulge {
+            shape: Shape {
+                curvature: 2.0,
+                fillet: false,
+            },
+            ..b
+        };
+        assert!(flat.factor(0.25) > b.factor(0.25), "a flatter, wider swell");
+        let pinch = Bulge { strength: -2.0, ..b };
+        assert_eq!(pinch.factor(0.5), 0.0, "never inside out");
+        assert!(close(b.handle(), Vec3::new(100.0, 0.0, 0.0)));
+        assert!((b.with_handle(Vec3::new(75.0, 0.0, 0.0)).strength - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_bend_handle_follows_the_pointer_along_its_arc() {
+        let b = Bend {
+            keep_length: true,
+            ..bend(0.0)
+        };
+        assert!(close(b.handle(), Vec3::new(0.0, 50.0, 0.0)));
+        let quarter = Bend {
+            strength: FRAC_PI_2,
+            ..b
+        };
+        let target = quarter.handle();
+        let found = b.with_handle(target + Vec3::new(0.5, 0.5, 0.0));
+        assert!(
+            (found.strength - FRAC_PI_2).abs() < 0.02,
+            "{}",
+            found.strength.to_degrees()
+        );
+        let (point, normal) = quarter.handle_plane();
+        assert!(
+            normal.dot(quarter.handle() - point).abs() < 1e-3,
+            "the handle lies in its plane"
         );
     }
 }

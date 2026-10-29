@@ -2,6 +2,7 @@
 //! of the active polygon object in a component mode), gizmo and the GPU view.
 
 mod cut_tools;
+mod deformer_tools;
 mod gizmo;
 mod gpu_view;
 mod join_tools;
@@ -243,6 +244,8 @@ pub struct ViewportPanel {
     point_stroke: Option<spline_tools::PointStroke>,
     /// The Pen's press, pull and preview.
     pen: pen_tool::PenState,
+    /// A deformer's strength handle being dragged.
+    deformer_drag: Option<deformer_tools::DeformerDrag>,
 }
 
 /// The Render View's picture as a texture, with the version it was made from.
@@ -306,6 +309,7 @@ impl ViewportPanel {
             handle_dragging: None,
             point_stroke: None,
             pen: pen_tool::PenState::default(),
+            deformer_drag: None,
         }
     }
 
@@ -623,8 +627,10 @@ impl ViewportPanel {
         let keying = crate::keys::Keying::of(doc, editor);
         let mut gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect, keying.frame);
         self.snap_hit = None;
-        let gizmo_owns_pointer = if navigating {
-            false
+        // A deformer's handle comes before the gizmo: it may sit on an arrow.
+        let handle_owns_pointer = !navigating && self.deformer_handle_drag(ui, &response, rect, doc, editor);
+        let gizmo_owns_pointer = if navigating || handle_owns_pointer {
+            handle_owns_pointer
         } else {
             let mut snapper = snapping::Snapper {
                 settings: editor.snap,
@@ -766,6 +772,7 @@ impl ViewportPanel {
         }
         if interactive {
             self.paint_pen(painter, rect, doc, editor);
+            self.paint_deformer_handle(painter, rect, doc, editor);
         }
         overlay::view_label(painter, rect, &label);
         if editor.animation.autokey {
@@ -3220,5 +3227,42 @@ mod tests {
         h.editor.selection.set_single(extrude);
         h.viewport.frame_selection(&h.doc.scene, &h.editor.selection);
         assert!(h.viewport.camera().target.x > 2000.0);
+    }
+
+    #[test]
+    fn dragging_a_bends_handle_sets_its_strength_in_one_step() {
+        let mut h = Harness::new();
+        let mut node = grid4d_scene::Node::new("Bend", ObjectKindTag::Bend.default_kind());
+        let ObjectKind::Bend(bend) = &mut node.data.kind else {
+            unreachable!()
+        };
+        bend.size = Vec3::new(100.0, 200.0, 100.0);
+        bend.keep_length = true;
+        let wanted = grid4d_geom::deform::Bend {
+            strength: std::f32::consts::FRAC_PI_2,
+            ..*bend
+        };
+        let id = h.doc.scene.insert(node);
+        h.editor.selection.set_single(id);
+        h.frame(Vec::new());
+        let steps = h.editor.history.undo_len();
+        let from = on_screen(&h, Vec3::new(0.0, 100.0, 0.0));
+        let to = on_screen(&h, wanted.handle());
+        h.drag(from, to);
+        let ObjectKind::Bend(bent) = h.doc.scene.get(id).unwrap().data.kind else {
+            panic!("not a bend")
+        };
+        assert!(
+            (bent.strength - std::f32::consts::FRAC_PI_2).abs() < 0.05,
+            "{}°",
+            bent.strength.to_degrees()
+        );
+        assert_eq!(h.editor.history.undo_len(), steps + 1);
+        assert_eq!(h.editor.history.undo_label(), Some("Move Handle"));
+        assert_eq!(
+            h.doc.scene.get(id).unwrap().data.transform,
+            Transform::IDENTITY,
+            "not moved"
+        );
     }
 }

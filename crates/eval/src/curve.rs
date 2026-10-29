@@ -7,10 +7,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use grid4d_geom::{
-    deform::Bend,
-    spline::{Interpolation, Polyline, SplinePrimitive, Text},
-};
+use grid4d_geom::spline::{Interpolation, Polyline, SplinePrimitive, Text};
 use grid4d_scene::SplineId;
 
 /// Names one sampled curve; a changed spline gets a new id.
@@ -65,8 +62,8 @@ pub(crate) enum CurveSource {
     Primitive(SplinePrimitive),
     /// A text's parameters (its string shared, so this does not allocate).
     Text(Text),
-    /// A Bend's box, bent.
-    Bend(Bend),
+    /// A deformer's box, deformed.
+    Deformer(crate::deform::Deformer),
     /// An editable spline's content and sampling.
     Editable(SplineId, Interpolation),
 }

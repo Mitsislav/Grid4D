@@ -126,6 +126,12 @@ pub enum ObjectKind {
     Loft(grid4d_geom::surface::Loft),
     /// Bend deformer: bends its parent and everything below the parent.
     Bend(grid4d_geom::deform::Bend),
+    /// Twist deformer: turns its parent's subtree about Y along the box.
+    Twist(grid4d_geom::deform::Twist),
+    /// Taper deformer: narrows its parent's subtree towards the box's top.
+    Taper(grid4d_geom::deform::Taper),
+    /// Bulge deformer: swells its parent's subtree in the box's middle.
+    Bulge(grid4d_geom::deform::Bulge),
     /// A parametric spline (Circle, Rectangle, Arc, n-Side, Star, Helix,
     /// Flower): a curve, drawn as lines, not rendered.
     SplinePrimitive(SplinePrimitive),
@@ -162,6 +168,9 @@ pub enum ObjectKindTag {
     Sweep,
     Loft,
     Bend,
+    Twist,
+    Taper,
+    Bulge,
     Circle,
     Rectangle,
     Arc,
@@ -174,7 +183,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 30] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -193,6 +202,9 @@ impl ObjectKindTag {
         Self::Sweep,
         Self::Loft,
         Self::Bend,
+        Self::Twist,
+        Self::Taper,
+        Self::Bulge,
         Self::Circle,
         Self::Rectangle,
         Self::Arc,
@@ -226,7 +238,7 @@ impl ObjectKindTag {
     ];
 
     /// Deformers: objects that reshape their parent and its subtree.
-    pub const DEFORMERS: [Self; 1] = [Self::Bend];
+    pub const DEFORMERS: [Self; 4] = [Self::Bend, Self::Twist, Self::Taper, Self::Bulge];
 
     /// Geometric primitives (the "Create ▸ Object" family).
     pub const PRIMITIVES: [Self; 8] = [
@@ -261,6 +273,9 @@ impl ObjectKindTag {
             Self::Sweep => "Sweep",
             Self::Loft => "Loft",
             Self::Bend => "Bend",
+            Self::Twist => "Twist",
+            Self::Taper => "Taper",
+            Self::Bulge => "Bulge",
             Self::Circle => "Circle",
             Self::Rectangle => "Rectangle",
             Self::Arc => "Arc",
@@ -349,6 +364,10 @@ impl ObjectKindTag {
             Self::Loft => ObjectKind::Loft(grid4d_geom::surface::Loft::default()),
             // docs/reference/deformer-bend.md: a 250 cm box, no strength yet.
             Self::Bend => ObjectKind::Bend(grid4d_geom::deform::Bend::default()),
+            // docs/reference/deformer-twist-taper-bulge.md: a 250 cm box, no effect yet.
+            Self::Twist => ObjectKind::Twist(grid4d_geom::deform::Twist::default()),
+            Self::Taper => ObjectKind::Taper(grid4d_geom::deform::Taper::default()),
+            Self::Bulge => ObjectKind::Bulge(grid4d_geom::deform::Bulge::default()),
             // The manual states no defaults: these are ours (docs/reference/object-spline.md).
             Self::Circle => spline(SplineShape::Circle {
                 radius: 200.0,
@@ -479,6 +498,9 @@ impl ObjectKind {
             Self::Sweep(_) => ObjectKindTag::Sweep,
             Self::Loft(_) => ObjectKindTag::Loft,
             Self::Bend(_) => ObjectKindTag::Bend,
+            Self::Twist(_) => ObjectKindTag::Twist,
+            Self::Taper(_) => ObjectKindTag::Taper,
+            Self::Bulge(_) => ObjectKindTag::Bulge,
             Self::SplinePrimitive(primitive) => match primitive.shape {
                 SplineShape::Circle { .. } => ObjectKindTag::Circle,
                 SplineShape::Rectangle { .. } => ObjectKindTag::Rectangle,
@@ -522,14 +544,28 @@ impl ObjectKind {
             | Self::SplinePrimitive(_)
             | Self::Text(_)
             | Self::Spline { .. }
-            | Self::Bend(_) => 0,
+            | Self::Bend(_)
+            | Self::Twist(_)
+            | Self::Taper(_)
+            | Self::Bulge(_) => 0,
         }
     }
 
     /// Reshapes its parent and the parent's subtree (see [`ObjectKindTag::DEFORMERS`]).
     #[must_use]
     pub const fn is_deformer(&self) -> bool {
-        matches!(self, Self::Bend(_))
+        matches!(self, Self::Bend(_) | Self::Twist(_) | Self::Taper(_) | Self::Bulge(_))
+    }
+
+    /// A deformer's box (its Size), for Fit to Parent; `None` for other objects.
+    pub const fn deformer_size_mut(&mut self) -> Option<&mut Vec3> {
+        match self {
+            Self::Bend(d) => Some(&mut d.size),
+            Self::Twist(d) => Some(&mut d.size),
+            Self::Taper(d) => Some(&mut d.size),
+            Self::Bulge(d) => Some(&mut d.size),
+            _ => None,
+        }
     }
 
     /// Builds its geometry from its children (see [`ObjectKindTag::GENERATORS`]).
@@ -595,6 +631,9 @@ impl ObjectKind {
             Self::Text(_) => return None,
             // The deformer's box (unbent).
             Self::Bend(bend) => bend.size * 0.5,
+            Self::Twist(d) => d.size * 0.5,
+            Self::Taper(d) => d.size * 0.5,
+            Self::Bulge(d) => d.size * 0.5,
             Self::Spline {
                 ref spline,
                 interpolation,

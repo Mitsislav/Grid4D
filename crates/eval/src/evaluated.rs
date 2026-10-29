@@ -285,7 +285,7 @@ impl EvaluatedScene {
                     splines.insert(id, (spline.clone(), components.clone()));
                     Some(CurveSource::Editable(spline.id(), *interpolation))
                 }
-                ObjectKind::Bend(bend) => Some(CurveSource::Bend(*bend)),
+                kind if kind.is_deformer() => deform::Deformer::of(kind).map(CurveSource::Deformer),
                 _ => None,
             };
             if let Some(source) = source {
@@ -670,7 +670,7 @@ fn curve_of(kind: &ObjectKind) -> Polyline {
     match kind {
         ObjectKind::SplinePrimitive(primitive) => primitive.polyline(),
         ObjectKind::Text(text) => grid4d_text::text_spline(text).sample(text.interpolation),
-        ObjectKind::Bend(bend) => bend.box_lines(),
+        kind if kind.is_deformer() => deform::Deformer::of(kind).map_or_else(Polyline::default, |d| d.box_lines()),
         ObjectKind::Spline {
             spline, interpolation, ..
         } => spline.spline().sample(*interpolation),
@@ -701,6 +701,9 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Sweep(_)
         | ObjectKind::Loft(_)
         | ObjectKind::Bend(_)
+        | ObjectKind::Twist(_)
+        | ObjectKind::Taper(_)
+        | ObjectKind::Bulge(_)
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Text(_)
         | ObjectKind::Spline { .. } => PickShape::None,
@@ -1848,5 +1851,48 @@ mod tests {
         eval.set_frame(10.0);
         eval.update(&doc.scene);
         assert!(reach(&eval) > 50.0, "half a turn at frame 10: {}", reach(&eval));
+    }
+
+    #[test]
+    fn twist_taper_and_bulge_reshape_their_parent() {
+        use grid4d_geom::deform::{Bulge, Taper, Twist};
+        let box_size = Vec3::new(100.0, 200.0, 100.0);
+        let kinds = [
+            ObjectKind::Twist(Twist {
+                size: box_size,
+                angle: std::f32::consts::FRAC_PI_4,
+                ..Twist::default()
+            }),
+            ObjectKind::Taper(Taper {
+                size: box_size,
+                strength: 1.0,
+                ..Taper::default()
+            }),
+            ObjectKind::Bulge(Bulge {
+                size: box_size,
+                strength: 1.0,
+                ..Bulge::default()
+            }),
+        ];
+        let straight = crate::editable_mesh(&tall_cube().data.kind).unwrap();
+        for kind in kinds {
+            let mut doc = Document::new("deform");
+            let cube = doc.scene.insert(tall_cube());
+            let deformer = doc.scene.insert_child(cube, Node::new("D", kind.clone())).unwrap();
+            let mut eval = EvaluatedScene::new();
+            eval.update(&doc.scene);
+            let MeshKey::Polygon(mesh) = node(&eval, cube).drawable.unwrap().key else {
+                panic!("not drawn from a deformed mesh")
+            };
+            let deformed = eval.mesh(mesh).unwrap().mesh();
+            assert_eq!(deformed.point_count(), straight.point_count());
+            assert_ne!(
+                deformed.points(),
+                straight.points(),
+                "{:?} changed the shape",
+                kind.tag()
+            );
+            assert!(matches!(node(&eval, deformer).pick, PickShape::Curve(_)));
+        }
     }
 }

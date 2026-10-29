@@ -66,7 +66,9 @@ impl FilterItem {
             | ObjectKindTag::Flower
             | ObjectKindTag::Text
             | ObjectKindTag::Spline => Some(Self::Spline),
-            ObjectKindTag::Bend => Some(Self::Deformer),
+            ObjectKindTag::Bend | ObjectKindTag::Twist | ObjectKindTag::Taper | ObjectKindTag::Bulge => {
+                Some(Self::Deformer)
+            }
         }
     }
 

@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 10 — Deformers & MoGraph (v0.10) |
-| Last step done | 10.2 — Deformer framework and Bend (2026-10-29) |
-| Next step | 10.3 — Twist, Taper, Bulge and the strength handle |
-| Tests | 621, all passing; clippy and rustfmt clean |
+| Last step done | 10.3 — Twist, Taper, Bulge and the strength handle (2026-10-29) |
+| Next step | 10.4 — FFD |
+| Tests | 629, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1192,6 +1192,7 @@ Phase 9 is complete.
 | — | Phase 10 planned in detail: animated parameters, Bend / Twist / Taper / Bulge / FFD, Current State to Object, Cloner (Linear, Radial, Grid, Object) and Plain / Random effectors; Phases 11–13 (simulation, workspace, extensibility) sketched (`IMPLEMENTATION_PLAN.md`) | 600 |
 | 10.1 | Animated parameters: every real-valued Object-tab parameter keyable — key buttons beside the fields, Autokeying and temporary values, F-Curve editor and key strip; evaluated at the frame everywhere (viewport, generators, renders); Make Editable bakes the frame; saved by name | 609 |
 | 10.2 | Deformers and the Bend: a deformer reshapes its parent and the parent's subtree (deepest first), inside a cage before smoothing or beside it on the result; Bend with Mode, Strength, Angle, Keep Y-Axis Length, Origin; its box drawn bent and picked; Shift + create under the selection, Fit to Parent; cached; animatable; saved; rendered | 621 |
+| 10.3 | Twist, Taper and Bulge (curvature, fillet) beside the Bend; an orange strength handle on the selected deformer, dragged in the view (Shift steps, one undo step, Esc), before the gizmo; animatable; saved; rendered | 629 |
 
 **10.1 — Animated parameters**
 
@@ -1274,6 +1275,35 @@ Phase 9 is complete.
   (Center S-Shape, 180°) and a Subdivision Surface bent towards −Z (Angle 90°)
   showed with their boxes bent alike; selecting a Bend showed its rows with key
   buttons. The path tracer rendered the three shapes (6272 triangles).
+
+**10.3 — Twist, Taper, Bulge and the strength handle**
+
+*Problems and solutions:*
+- **No formulas to follow.** The manual names the parameters and their effects
+  but not the shapes, so the spec states ours: a Twist turns by
+  `Angle · t`, a Taper scales distances from the axis by `1 − Strength · g(t)`
+  with `g = t^(1 + Curvature)`, a Bulge by `1 + Strength · b(t)` with
+  `b = 1 − |2t − 1|^(2 + 2·Curvature)`; Fillet eases with `3x² − 2x³`. The tests
+  check the described effects (top to a point, middle doubled, ends kept).
+- **Two strengths.** The Bend's strength is an angle, the Taper's and Bulge's a
+  percentage; since an `ObjectParam` has one unit, the percentages are a new
+  `Amount` parameter labelled "Strength" (labels only need to be unique within
+  an object, which the key-button test checks).
+- **One handle model.** Each deformer says where its handle is, which plane it
+  moves in and what strength a point in that plane means; the viewport code is
+  the same for all four. The Bend's inverse has no closed form, so it searches
+  along the arc (two turns each way, then halving steps).
+- **The gizmo got there first.** A headless drag on a Bend's handle did nothing:
+  the gizmo, handled before the other tools, took the press because the
+  handle sat on its Y arrow. The handle is now tried before the gizmo, which is
+  what a user grabbing it expects.
+- **A test with a wrong premise.** "The bounds change" fails for a Taper, whose
+  base keeps its width; the test compares the deformed points instead.
+- **On-screen testing:** a twisted column (180°), a tapered cylinder (80 %,
+  curvature 60 %) and a bulging one (60 %, fillet) showed correctly, the
+  selected Bulge with its handle on the X arrow; the path tracer rendered all
+  three. Posted mouse drags do not reach the viewport (a gizmo drag did not move
+  an object either), so dragging the handle is checked by the headless test.
 
 ---
 

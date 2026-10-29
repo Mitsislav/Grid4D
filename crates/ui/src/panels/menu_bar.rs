@@ -113,9 +113,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     }
                 }
                 ui.separator();
-                for name in ["Twist", "Taper", "Bulge", "FFD"] {
-                    planned(ui, name, "");
-                }
+                planned(ui, "FFD", "");
             });
             ui.separator();
             create(ui, editor, ObjectKindTag::Camera);

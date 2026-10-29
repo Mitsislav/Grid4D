@@ -73,11 +73,15 @@ pub enum ObjectParam {
     EndGrowth,
     /// A deformer's strength (radians for a Bend).
     Strength,
+    /// A deformer's strength as a fraction (Taper, Bulge; shown "Strength").
+    Amount,
+    /// A Taper's or Bulge's curvature (a fraction).
+    Curvature,
 }
 
 impl ObjectParam {
     /// How many there are ([`ObjectParam::index`] is below this).
-    pub const COUNT: usize = 40;
+    pub const COUNT: usize = 42;
 
     /// Every parameter, in index order.
     pub const ALL: [Self; Self::COUNT] = [
@@ -121,6 +125,8 @@ impl ObjectParam {
         Self::StartGrowth,
         Self::EndGrowth,
         Self::Strength,
+        Self::Amount,
+        Self::Curvature,
     ];
 
     /// The row label (shared by the Attribute Manager and the F-Curve editor).
@@ -166,7 +172,8 @@ impl ObjectParam {
             Self::EndRotation => "End Rotation",
             Self::StartGrowth => "Start Growth",
             Self::EndGrowth => "End Growth",
-            Self::Strength => "Strength",
+            Self::Strength | Self::Amount => "Strength",
+            Self::Curvature => "Curvature",
         }
     }
 
@@ -210,6 +217,8 @@ impl ObjectParam {
             Self::StartGrowth => 37,
             Self::EndGrowth => 38,
             Self::Strength => 39,
+            Self::Amount => 40,
+            Self::Curvature => 41,
         }
     }
 
@@ -227,7 +236,9 @@ impl ObjectParam {
             | Self::Scaling
             | Self::EndScale
             | Self::StartGrowth
-            | Self::EndGrowth => ParamUnit::Fraction,
+            | Self::EndGrowth
+            | Self::Amount
+            | Self::Curvature => ParamUnit::Fraction,
             Self::Size(_)
             | Self::Radius
             | Self::Height
@@ -328,6 +339,14 @@ impl ObjectKind {
                 P::Strength,
                 P::Angle,
             ],
+            Self::Twist(_) => &[P::Size(Axis::X), P::Size(Axis::Y), P::Size(Axis::Z), P::Angle],
+            Self::Taper(_) | Self::Bulge(_) => &[
+                P::Size(Axis::X),
+                P::Size(Axis::Y),
+                P::Size(Axis::Z),
+                P::Amount,
+                P::Curvature,
+            ],
             Self::Null
             | Self::Polygon { .. }
             | Self::SubdivisionSurface { .. }
@@ -351,7 +370,7 @@ impl ObjectKind {
         if !value.is_finite() {
             return;
         }
-        let non_negative = matches!(param.unit(), ParamUnit::Fraction)
+        let non_negative = (matches!(param.unit(), ParamUnit::Fraction) && param != P::Amount)
             || matches!(
                 param,
                 P::Size(_)
@@ -451,6 +470,14 @@ impl ObjectKind {
             (Self::Bend(bend), P::Size(axis)) => Some(&mut bend.size[axis.index()]),
             (Self::Bend(bend), P::Strength) => Some(&mut bend.strength),
             (Self::Bend(bend), P::Angle) => Some(&mut bend.angle),
+            (Self::Twist(d), P::Size(axis)) => Some(&mut d.size[axis.index()]),
+            (Self::Twist(d), P::Angle) => Some(&mut d.angle),
+            (Self::Taper(d), P::Size(axis)) => Some(&mut d.size[axis.index()]),
+            (Self::Taper(d), P::Amount) => Some(&mut d.strength),
+            (Self::Taper(d), P::Curvature) => Some(&mut d.shape.curvature),
+            (Self::Bulge(d), P::Size(axis)) => Some(&mut d.size[axis.index()]),
+            (Self::Bulge(d), P::Amount) => Some(&mut d.strength),
+            (Self::Bulge(d), P::Curvature) => Some(&mut d.shape.curvature),
             _ => None,
         }
     }

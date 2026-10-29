@@ -1318,7 +1318,8 @@ point.
 
 A **deformer** changes the shape of other objects without touching their
 points: bend a tube into an arch, curl a column into an S — and keep editing the
-original or animate the deformer. The first one is the **Bend**.
+original or animate the deformer. There are four: **Bend**, **Twist**,
+**Taper** and **Bulge**.
 
 ![Three Bends: a tube bent into an arch, a column curled into an S, a Subdivision Surface bent towards the back; the selected Bend's box and its Object properties](images/manual/deformer-bend.png)
 
@@ -1327,8 +1328,8 @@ original or animate the deformer. The first one is the **Bend**.
 - A deformer changes its **parent** and **everything below the parent**. To
   bend one object, put the deformer under it; to bend several together, put
   them and the deformer under one Null.
-- **Creating:** **Create ▸ Deformer ▸ Bend** or the deformer button in the
-  toolbar adds a Bend at the top of the Object Manager. Hold **Shift** to add
+- **Creating:** **Create ▸ Deformer ▸ …** or a deformer button in the
+  toolbar adds a deformer at the top of the Object Manager. Hold **Shift** to add
   it **under the selected object, sized to it** — the quickest way to bend one
   object.
 - The deformer's **box** is drawn as lines (violet, orange when selected),
@@ -1366,6 +1367,36 @@ The Attribute Manager's **Object** tab:
 Strength, Angle and Size have key buttons: animate Strength to make an object
 bend over time. Objects need enough segments along the bend to look smooth (a
 Cube with one height segment cannot bend).
+
+### 14.3 Twist, Taper and Bulge
+
+![A twisted column, a tapered cylinder and a bulging one; the selected Bulge shows its orange handle](images/manual/deformer-twist-taper-bulge.png)
+
+All three work along the deformer's Y axis, through the box's height, and have
+the same **Size**, **Mode** and **Fit to Parent** as the Bend.
+
+- **Twist** turns the object about Y, more and more towards the top of the box:
+  **Angle** is how far the top turns relative to the bottom (720° = two turns).
+- **Taper** narrows the object towards the top of the box: **Strength** 100 %
+  brings the top to a point, negative values widen it. **Curvature** makes the
+  narrowing curve (slow at the bottom, fast at the top); **Fillet** eases it in
+  and out at both ends.
+- **Bulge** swells the middle of the box: **Strength** 100 % doubles the width
+  in the middle, negative values pinch it. **Curvature** makes the swell flatter
+  and wider; **Fillet** softens it where it meets the top and bottom.
+
+Size, Angle, Strength and Curvature have key buttons.
+
+### 14.4 The strength handle
+
+With a deformer selected (Model mode), an **orange handle** sits on its box —
+at the bent end of a Bend, at the top of a Twist or Taper, at the middle of a
+Bulge. **Drag it** to change the strength in the view: the Bend follows the
+pointer along its arc, the Twist turns with it around the axis (winding on past
+a full turn), Taper and Bulge follow its distance from the axis. Hold **Shift**
+to step the value (5° or 5 %). Each drag is one undo step; **Esc** while
+dragging puts it back. The handle wins over the move arrows when it sits on
+one.
 
 ## 15. Snapping
 
@@ -1726,9 +1757,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Modelling**:
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
   Solid, Proportional and Radial modes; Bridge point by point.
-- **Deformers**: only the Bend; Twist, Taper, Bulge and FFD come next. No
-  strength handle in the viewport yet; splines are not deformed; component
-  modes show the undeformed points.
+- **Deformers**: Bend, Twist, Taper and Bulge; the FFD comes next. Splines are
+  not deformed; component modes show the undeformed points; handles for size
+  and angle (only strength has one).
 - **Generators**: the Subdivision Surface has one type (Catmull-Clark) and no
   edge weights (creases) or UV options. The Extrude has no bevels (fillets),
   Delaunay or grid caps, UVs or selections for its caps; neither have the Lathe

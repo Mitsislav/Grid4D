@@ -8,7 +8,7 @@
 //! typed value, a click) is recorded as one undo step through [`LiveEdit`].
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
-use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode};
+use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode, Shape};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_geom::spline::{
@@ -779,6 +779,23 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows) {
             } => extrude_rows(ui, k, extrusion, hierarchical),
             ObjectKind::Lathe(lathe) => lathe_rows(ui, k, lathe),
             ObjectKind::Bend(bend) => bend_rows(ui, k, bend),
+            ObjectKind::Twist(twist) => {
+                box_rows(ui, k, &mut twist.size, &mut twist.mode);
+                angle_row(ui, k, "Angle", &mut twist.angle, -36_000.0..=36_000.0);
+                fit_row(ui, k, "Twists its parent's subtree");
+            }
+            ObjectKind::Taper(taper) => {
+                box_rows(ui, k, &mut taper.size, &mut taper.mode);
+                strength_row(ui, k, &mut taper.strength);
+                shape_rows(ui, k, &mut taper.shape);
+                fit_row(ui, k, "Tapers its parent's subtree");
+            }
+            ObjectKind::Bulge(bulge) => {
+                box_rows(ui, k, &mut bulge.size, &mut bulge.mode);
+                strength_row(ui, k, &mut bulge.strength);
+                shape_rows(ui, k, &mut bulge.shape);
+                fit_row(ui, k, "Bulges its parent's subtree");
+            }
             ObjectKind::Sweep(sweep) => sweep_rows(ui, k, sweep),
             ObjectKind::Loft(loft) => loft_rows(ui, loft),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, k, primitive),
@@ -1533,20 +1550,67 @@ fn sweep_rows(ui: &mut Ui, k: &mut KeyRows, sweep: &mut Sweep) {
     ui.end_row();
 }
 
-/// The Bend deformer's parameters and its Fit to Parent button.
-fn bend_rows(ui: &mut Ui, k: &mut KeyRows, bend: &mut Bend) {
+/// Every deformer's box: its Size and Mode.
+fn box_rows(ui: &mut Ui, k: &mut KeyRows, size: &mut glam::Vec3, mode: &mut DeformerMode) {
     for (axis, label) in ["Size . X", "Size . Y", "Size . Z"].into_iter().enumerate() {
-        length_row(ui, k, label, &mut bend.size[axis]);
+        length_row(ui, k, label, &mut size[axis]);
     }
     attr_label(ui, "Mode", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.deformer.mode")
-        .selected_text(bend.mode.label())
+        .selected_text(mode.label())
         .show_ui(ui, |ui| {
-            for mode in DeformerMode::ALL {
-                ui.selectable_value(&mut bend.mode, mode, mode.label());
+            for option in DeformerMode::ALL {
+                ui.selectable_value(mode, option, option.label());
             }
         });
     ui.end_row();
+}
+
+/// A Taper's or Bulge's strength, in percent (negative values allowed).
+fn strength_row(ui: &mut Ui, k: &mut KeyRows, value: &mut f32) {
+    attr_label(ui, "Strength", LABEL_WIDTH);
+    let mut shown = *value * 100.0;
+    if ui
+        .add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut shown)
+                .speed(0.5)
+                .range(-10_000.0..=10_000.0)
+                .suffix(" %"),
+        )
+        .changed()
+    {
+        *value = shown / 100.0;
+    }
+    k.button(ui, "Strength");
+    ui.end_row();
+}
+
+/// A Taper's or Bulge's Curvature and Fillet.
+fn shape_rows(ui: &mut Ui, k: &mut KeyRows, shape: &mut Shape) {
+    scale_row(ui, k, "Curvature", &mut shape.curvature);
+    check_row(ui, "Fillet", &mut shape.fillet);
+}
+
+/// The Fit to Parent button and a short hint.
+fn fit_row(ui: &mut Ui, k: &mut KeyRows, hint: &str) {
+    ui.label("");
+    if ui
+        .button("Fit to Parent")
+        .on_hover_text("Size the box to the parent and centre it there")
+        .clicked()
+    {
+        k.fit_to_parent = true;
+    }
+    ui.end_row();
+    ui.label("");
+    ui.label(RichText::new(hint).color(p::TEXT_DIM));
+    ui.end_row();
+}
+
+/// The Bend deformer's parameters and its Fit to Parent button.
+fn bend_rows(ui: &mut Ui, k: &mut KeyRows, bend: &mut Bend) {
+    box_rows(ui, k, &mut bend.size, &mut bend.mode);
     angle_row(ui, k, "Strength", &mut bend.strength, -36_000.0..=36_000.0);
     angle_row(ui, k, "Angle", &mut bend.angle, -36_000.0..=36_000.0);
     check_row(ui, "Keep Y-Axis Length", &mut bend.keep_length);
@@ -1559,18 +1623,7 @@ fn bend_rows(ui: &mut Ui, k: &mut KeyRows, bend: &mut Bend) {
             }
         });
     ui.end_row();
-    ui.label("");
-    if ui
-        .button("Fit to Parent")
-        .on_hover_text("Size the box to the parent and centre it there")
-        .clicked()
-    {
-        k.fit_to_parent = true;
-    }
-    ui.end_row();
-    ui.label("");
-    ui.label(RichText::new("Bends its parent's subtree").color(p::TEXT_DIM));
-    ui.end_row();
+    fit_row(ui, k, "Bends its parent's subtree");
 }
 
 /// The Loft generator's Object and Caps parameters.

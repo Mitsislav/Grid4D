@@ -1744,10 +1744,10 @@ fn fit_to_parent(doc: &Document, parent: NodeId, data: &mut NodeData) -> bool {
     let Some(bounds) = bounds.filter(|b| !b.is_empty()) else {
         return false;
     };
-    match &mut data.kind {
-        ObjectKind::Bend(bend) => bend.size = (bounds.max - bounds.min).max(Vec3::splat(1.0)),
-        _ => return false,
-    }
+    let Some(size) = data.kind.deformer_size_mut() else {
+        return false;
+    };
+    *size = (bounds.max - bounds.min).max(Vec3::splat(1.0));
     data.transform = Transform {
         position: bounds.center(),
         ..Transform::IDENTITY
@@ -1792,7 +1792,9 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Text
         | ObjectKindTag::Spline => data.display_color = [0.9, 0.9, 0.92],
         // A light violet box, apart from splines and selections.
-        ObjectKindTag::Bend => data.display_color = [0.55, 0.4, 0.9],
+        ObjectKindTag::Bend | ObjectKindTag::Twist | ObjectKindTag::Taper | ObjectKindTag::Bulge => {
+            data.display_color = [0.55, 0.4, 0.9];
+        }
         ObjectKindTag::Null
         | ObjectKindTag::Cube
         | ObjectKindTag::Sphere
@@ -1861,7 +1863,9 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Flower
         | ObjectKindTag::Text
         | ObjectKindTag::Spline => palette::ICON_SPLINE,
-        ObjectKindTag::Bend => palette::ICON_DEFORMER,
+        ObjectKindTag::Bend | ObjectKindTag::Twist | ObjectKindTag::Taper | ObjectKindTag::Bulge => {
+            palette::ICON_DEFORMER
+        }
         ObjectKindTag::Cube
         | ObjectKindTag::Sphere
         | ObjectKindTag::Cylinder

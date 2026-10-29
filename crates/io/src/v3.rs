@@ -20,7 +20,7 @@ use std::{
 use glam::{Vec2, Vec3};
 use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
-    deform::{Bend, BendOrigin, DeformerMode},
+    deform::{Bend, BendOrigin, Bulge, DeformerMode, Shape, Taper, Twist},
     spline::{
         ArcType, Interpolation as SplineInterpolation, Segment, Spline, SplinePlane, SplinePrimitive, SplineShape,
         SplineType, Text, TextAlign,
@@ -364,6 +364,8 @@ enum ParamDto {
     StartGrowth,
     EndGrowth,
     Strength,
+    Amount,
+    Curvature,
 }
 
 impl From<Param> for ParamDto {
@@ -418,6 +420,8 @@ impl From<Param> for ParamDto {
             Param::Object(ObjectParam::StartGrowth) => Self::StartGrowth,
             Param::Object(ObjectParam::EndGrowth) => Self::EndGrowth,
             Param::Object(ObjectParam::Strength) => Self::Strength,
+            Param::Object(ObjectParam::Amount) => Self::Amount,
+            Param::Object(ObjectParam::Curvature) => Self::Curvature,
         }
     }
 }
@@ -474,6 +478,8 @@ impl From<ParamDto> for Param {
             ParamDto::StartGrowth => Self::Object(ObjectParam::StartGrowth),
             ParamDto::EndGrowth => Self::Object(ObjectParam::EndGrowth),
             ParamDto::Strength => Self::Object(ObjectParam::Strength),
+            ParamDto::Amount => Self::Object(ObjectParam::Amount),
+            ParamDto::Curvature => Self::Object(ObjectParam::Curvature),
         }
     }
 }
@@ -840,6 +846,35 @@ enum KindDto {
         #[serde(default, skip_serializing_if = "BendOriginDto::is_bottom")]
         origin: BendOriginDto,
     },
+    /// A Twist deformer (added in step 10.3); the angle in radians.
+    Twist {
+        size: [f32; 3],
+        #[serde(default, skip_serializing_if = "DeformerModeDto::is_limited")]
+        mode: DeformerModeDto,
+        angle: f32,
+    },
+    /// A Taper deformer (added in step 10.3); strength and curvature as fractions.
+    Taper {
+        size: [f32; 3],
+        #[serde(default, skip_serializing_if = "DeformerModeDto::is_limited")]
+        mode: DeformerModeDto,
+        strength: f32,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        curvature: f32,
+        #[serde(default, skip_serializing_if = "is_false")]
+        fillet: bool,
+    },
+    /// A Bulge deformer (added in step 10.3); strength and curvature as fractions.
+    Bulge {
+        size: [f32; 3],
+        #[serde(default, skip_serializing_if = "DeformerModeDto::is_limited")]
+        mode: DeformerModeDto,
+        strength: f32,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        curvature: f32,
+        #[serde(default, skip_serializing_if = "is_false")]
+        fillet: bool,
+    },
     /// A spline primitive (added in step 9.1). Angles in radians.
     Spline {
         spline: SplineShapeDto,
@@ -989,6 +1024,26 @@ enum DeformerModeDto {
     Limited,
     WithinBox,
     Unlimited,
+}
+
+impl From<DeformerMode> for DeformerModeDto {
+    fn from(mode: DeformerMode) -> Self {
+        match mode {
+            DeformerMode::Limited => Self::Limited,
+            DeformerMode::WithinBox => Self::WithinBox,
+            DeformerMode::Unlimited => Self::Unlimited,
+        }
+    }
+}
+
+impl From<DeformerModeDto> for DeformerMode {
+    fn from(mode: DeformerModeDto) -> Self {
+        match mode {
+            DeformerModeDto::Limited => Self::Limited,
+            DeformerModeDto::WithinBox => Self::WithinBox,
+            DeformerModeDto::Unlimited => Self::Unlimited,
+        }
+    }
 }
 
 impl DeformerModeDto {
@@ -2060,6 +2115,25 @@ impl KindDto {
                     BendOrigin::Top => BendOriginDto::Top,
                 },
             },
+            ObjectKind::Twist(d) => Self::Twist {
+                size: d.size.to_array(),
+                mode: d.mode.into(),
+                angle: d.angle,
+            },
+            ObjectKind::Taper(d) => Self::Taper {
+                size: d.size.to_array(),
+                mode: d.mode.into(),
+                strength: d.strength,
+                curvature: d.shape.curvature,
+                fillet: d.shape.fillet,
+            },
+            ObjectKind::Bulge(d) => Self::Bulge {
+                size: d.size.to_array(),
+                mode: d.mode.into(),
+                strength: d.strength,
+                curvature: d.shape.curvature,
+                fillet: d.shape.fillet,
+            },
             ObjectKind::Lathe(lathe) => Self::Lathe {
                 angle: lathe.angle,
                 subdivision: lathe.subdivision,
@@ -2321,6 +2395,41 @@ impl KindDto {
                     BendOriginDto::Top => BendOrigin::Top,
                 },
             }),
+            Self::Twist { size, mode, angle } => ObjectKind::Twist(Twist {
+                size: Vec3::from_array(size).abs(),
+                mode: mode.into(),
+                angle,
+            }),
+            Self::Taper {
+                size,
+                mode,
+                strength,
+                curvature,
+                fillet,
+            } => ObjectKind::Taper(Taper {
+                size: Vec3::from_array(size).abs(),
+                mode: mode.into(),
+                strength,
+                shape: Shape {
+                    curvature: curvature.max(0.0),
+                    fillet,
+                },
+            }),
+            Self::Bulge {
+                size,
+                mode,
+                strength,
+                curvature,
+                fillet,
+            } => ObjectKind::Bulge(Bulge {
+                size: Vec3::from_array(size).abs(),
+                mode: mode.into(),
+                strength,
+                shape: Shape {
+                    curvature: curvature.max(0.0),
+                    fillet,
+                },
+            }),
             Self::Text {
                 text,
                 height,
@@ -2510,6 +2619,19 @@ impl KindDto {
             Self::Bend {
                 size, strength, angle, ..
             } => vec![size[0], size[1], size[2], strength, angle],
+            Self::Twist { size, angle, .. } => vec![size[0], size[1], size[2], angle],
+            Self::Taper {
+                size,
+                strength,
+                curvature,
+                ..
+            }
+            | Self::Bulge {
+                size,
+                strength,
+                curvature,
+                ..
+            } => vec![size[0], size[1], size[2], strength, curvature],
             Self::Text {
                 height,
                 horizontal_spacing,
@@ -3211,6 +3333,50 @@ mod tests {
         assert_eq!(json, r#"{"type":"bend","size":[250.0,250.0,250.0],"strength":0.0}"#);
         let json = serde_json::to_string(&ParamDto::from(Param::Object(ObjectParam::Strength))).unwrap();
         assert_eq!(json, r#""strength""#);
+    }
+
+    #[test]
+    fn twist_taper_and_bulge_round_trip() {
+        let mut doc = Document::new("deformers");
+        let shape = Shape {
+            curvature: 0.5,
+            fillet: true,
+        };
+        let kinds = [
+            ObjectKindTag::Twist.default_kind(),
+            ObjectKind::Twist(Twist {
+                size: Vec3::new(1.0, 2.0, 3.0),
+                mode: DeformerMode::WithinBox,
+                angle: 2.0,
+            }),
+            ObjectKind::Taper(Taper {
+                size: Vec3::splat(9.0),
+                mode: DeformerMode::Unlimited,
+                strength: -0.5,
+                shape,
+            }),
+            ObjectKind::Bulge(Bulge {
+                size: Vec3::splat(7.0),
+                mode: DeformerMode::Limited,
+                strength: 0.75,
+                shape,
+            }),
+        ];
+        for (i, kind) in kinds.iter().enumerate() {
+            doc.scene.insert(Node::new(format!("d{i}"), kind.clone()));
+        }
+        let loaded = round_trip(&doc);
+        let back: Vec<ObjectKind> = loaded
+            .scene
+            .roots()
+            .iter()
+            .map(|&id| loaded.scene.get(id).unwrap().data.kind.clone())
+            .collect();
+        assert_eq!(back, kinds);
+        for (param, name) in [(ObjectParam::Amount, "amount"), (ObjectParam::Curvature, "curvature")] {
+            let json = serde_json::to_string(&ParamDto::from(Param::Object(param))).unwrap();
+            assert_eq!(json, format!("\"{name}\""));
+        }
     }
 
     #[test]

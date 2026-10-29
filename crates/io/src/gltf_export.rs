@@ -212,6 +212,9 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
             | ObjectKind::Sweep(_)
             | ObjectKind::Loft(_)
             | ObjectKind::Bend(_)
+            | ObjectKind::Twist(_)
+            | ObjectKind::Taper(_)
+            | ObjectKind::Bulge(_)
             // Curves have no surface: the node keeps its place, nothing more.
             | ObjectKind::SplinePrimitive(_)
             | ObjectKind::Text(_)

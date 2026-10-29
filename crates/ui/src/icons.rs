@@ -501,6 +501,43 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.line((0.22, 0.9), (0.44, 0.9));
             c.line((0.9, 0.22), (0.9, 0.44));
         }
+        ObjectKindTag::Twist => {
+            // A ribbon wound about a vertical axis.
+            c.rect_stroke((0.1, 0.1), (0.9, 0.9), soft);
+            let strand = |phase: f32| -> Vec<P> {
+                (0..=16)
+                    .map(|i| {
+                        let t = i as f32 / 16.0;
+                        (0.5 + 0.3 * (PI * 1.5 * t + phase).sin(), 0.88 - 0.76 * t)
+                    })
+                    .collect()
+            };
+            c.polyline(&strand(0.0), false);
+            c.polyline(&strand(PI), false);
+        }
+        ObjectKindTag::Taper => {
+            // A column narrowing to the top.
+            c.rect_stroke((0.1, 0.1), (0.9, 0.9), soft);
+            let outline = [(0.24, 0.88), (0.76, 0.88), (0.6, 0.14), (0.4, 0.14)];
+            c.fill_with(&outline, soft);
+            c.polyline(&outline, true);
+        }
+        ObjectKindTag::Bulge => {
+            // A barrel: a column swelling in the middle.
+            c.rect_stroke((0.1, 0.1), (0.9, 0.9), soft);
+            let side = |sign: f32| -> Vec<P> {
+                (0..=12)
+                    .map(|i| {
+                        let t = i as f32 / 12.0;
+                        (0.5 + sign * (0.18 + 0.2 * (PI * t).sin()), 0.88 - 0.76 * t)
+                    })
+                    .collect()
+            };
+            let mut outline = side(-1.0);
+            outline.extend(side(1.0).into_iter().rev());
+            c.fill_with(&outline, soft);
+            c.polyline(&outline, true);
+        }
         ObjectKindTag::Light => {
             c.disc((0.5, 0.5), 0.19);
             for i in 0..8 {
