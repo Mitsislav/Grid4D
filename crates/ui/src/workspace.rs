@@ -175,6 +175,7 @@ pub struct Panels {
     pub fcurve: FCurvePanel,
     pub materials: MaterialsPanel,
     pub layers: crate::panels::LayersPanel,
+    pub takes: crate::panels::TakesPanel,
 }
 
 impl Panels {
@@ -189,6 +190,7 @@ impl Panels {
             fcurve: FCurvePanel::default(),
             materials: MaterialsPanel,
             layers: crate::panels::LayersPanel::default(),
+            takes: crate::panels::TakesPanel::default(),
         }
     }
 }
@@ -353,7 +355,7 @@ impl Behavior<Pane> for Dispatch<'_> {
                         Pane::Timeline => panels.timeline.show(ui, doc, editor),
                         Pane::FCurve => panels.fcurve.show(ui, doc, editor),
                         Pane::Materials => panels.materials.show(ui, doc, editor),
-                        Pane::Takes => planned(ui, "Takes come with step 12.5"),
+                        Pane::Takes => panels.takes.show(ui, doc, editor),
                         Pane::Layers => panels.layers.show(ui, doc, editor),
                         Pane::Viewport => {}
                     }
@@ -430,12 +432,6 @@ impl Behavior<Pane> for Dispatch<'_> {
     fn drag_preview_color(&self, _visuals: &Visuals) -> Color32 {
         p().accent.gamma_multiply(0.25)
     }
-}
-
-/// A pane whose manager is still to come.
-fn planned(ui: &mut Ui, text: &str) {
-    ui.add_space(12.0);
-    ui.vertical_centered(|ui| ui.label(egui::RichText::new(text).color(p().text_dim)));
 }
 
 /// A tab group of `panes`, the first in front.
@@ -683,6 +679,15 @@ mod tests {
         let layer = doc.scene.layers_mut().insert(grid4d_scene::Layer::new("Set", [1.0; 3]));
         let first = doc.scene.roots()[0];
         doc.scene.get_mut(first).unwrap().data.layer = Some(layer);
+        // The Take Manager shows an active take with an override.
+        let take = doc.takes.insert(grid4d_scene::Take::new("Night"));
+        doc.apply(grid4d_scene::SceneEdit::SwitchTake(Some(take))).unwrap();
+        let mut moved = doc.scene.get(first).unwrap().data.clone();
+        moved.transform.position.x += 10.0;
+        let inverse = doc
+            .apply(grid4d_scene::SceneEdit::SetData { id: first, data: moved })
+            .unwrap();
+        doc.record_in_take(&[inverse]).unwrap();
         let mut editor = EditorState::default();
         editor.selection.set_single(first);
         let ctx = egui::Context::default();

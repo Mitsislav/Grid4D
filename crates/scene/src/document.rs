@@ -12,6 +12,8 @@ pub struct Document {
     pub render: RenderSettings,
     /// How its rigid bodies are simulated.
     pub simulation: crate::SimulationSettings,
+    /// Its takes; the document holds the active one's values.
+    pub takes: crate::Takes,
 }
 
 impl Default for Document {
@@ -30,7 +32,120 @@ impl Document {
             time: TimeState::default(),
             render: RenderSettings::default(),
             simulation: crate::SimulationSettings::default(),
+            takes: crate::Takes::default(),
         }
+    }
+
+    /// Makes `to` the active take (`None`: Main): Main's values come back
+    /// over the active take's (which already holds them: edits in a take are
+    /// recorded as it goes), then `to`'s values are written with Main's kept
+    /// beside them. Returns the take that was active, so switching back is
+    /// the exact inverse. An unknown take counts as Main.
+    pub fn switch_take(&mut self, to: Option<crate::TakeId>) -> Option<crate::TakeId> {
+        use crate::take::{Override, set_override};
+        let to = to.filter(|&t| self.takes.contains(t));
+        let from = self.takes.active();
+        if from == to {
+            return from;
+        }
+        for (id, values) in std::mem::take(self.takes.main_mut()) {
+            let Some(data) = self.scene.data_mut_any(id) else {
+                continue;
+            };
+            for value in values {
+                value.write(data);
+            }
+        }
+        if let Some(main) = self.takes.main_render_mut().take() {
+            self.render = main;
+        }
+        if let Some(to) = to
+            && let Some(take) = self.takes.get(to).cloned()
+        {
+            let mut main = crate::ObjectOverrides::new();
+            for (id, values) in &take.objects {
+                let Some(data) = self.scene.data_mut_any(*id) else {
+                    continue;
+                };
+                for value in values {
+                    set_override(&mut main, *id, Override::of(value.group(), data));
+                    value.write(data);
+                }
+            }
+            *self.takes.main_mut() = main;
+            *self.takes.main_render_mut() = take.render.map(|render| std::mem::replace(&mut self.render, render));
+        }
+        self.takes.set_active(to);
+        from
+    }
+
+    /// Auto Take: while a take other than Main is active, what the edits whose
+    /// inverses are `inverses` changed (object values, render settings)
+    /// becomes that take's overrides, Main's values kept beside them. Returns
+    /// the inverse of that change of the takes, if there was one.
+    pub fn record_in_take(&mut self, inverses: &[crate::SceneEdit]) -> Option<crate::SceneEdit> {
+        use crate::take::{Override, OverrideGroup, get_override, overridable, remove_override, set_override};
+        let active = self.takes.active()?;
+        let mut takes = self.takes.clone();
+        for inverse in inverses {
+            match inverse {
+                crate::SceneEdit::SetData { id, data: before } => {
+                    let Some(node) = self.scene.get(*id) else { continue };
+                    let now = &node.data;
+                    // Made editable (another kind of object): its parameters
+                    // are no take's any more.
+                    if before.kind.tag() != now.kind.tag() {
+                        remove_override(takes.main_mut(), *id, OverrideGroup::Parameters);
+                        if let Some(take) = takes.get_mut(active) {
+                            remove_override(&mut take.objects, *id, OverrideGroup::Parameters);
+                        }
+                    }
+                    for group in OverrideGroup::ALL {
+                        if !overridable(group, &now.kind) || !overridable(group, &before.kind) {
+                            continue;
+                        }
+                        let (old, new) = (Override::of(group, before), Override::of(group, now));
+                        if old == new {
+                            continue;
+                        }
+                        if get_override(takes.main(), *id, group).is_none() {
+                            set_override(takes.main_mut(), *id, old);
+                        }
+                        if let Some(take) = takes.get_mut(active) {
+                            set_override(&mut take.objects, *id, new);
+                        }
+                    }
+                }
+                crate::SceneEdit::Move {
+                    id, transform: before, ..
+                } => {
+                    let Some(now) = self.scene.get(*id).map(|n| n.data.transform) else {
+                        continue;
+                    };
+                    if *before != now {
+                        if get_override(takes.main(), *id, OverrideGroup::Transform).is_none() {
+                            set_override(takes.main_mut(), *id, Override::Transform(*before));
+                        }
+                        if let Some(take) = takes.get_mut(active) {
+                            set_override(&mut take.objects, *id, Override::Transform(now));
+                        }
+                    }
+                }
+                crate::SceneEdit::SetRender(before) if *before != self.render => {
+                    if takes.main_render().is_none() {
+                        *takes.main_render_mut() = Some(before.clone());
+                    }
+                    if let Some(take) = takes.get_mut(active) {
+                        take.render = Some(self.render.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+        if takes == self.takes {
+            return None;
+        }
+        Some(crate::SceneEdit::SetTakes(std::mem::replace(&mut self.takes, takes)))
     }
 
     /// A small starter scene that exercises hierarchy, transforms and every

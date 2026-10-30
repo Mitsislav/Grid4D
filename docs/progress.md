@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 12 — Workspace (v0.12) |
-| Last step done | 12.4 — Layers (2026-10-30) |
-| Next step | 12.5 — Takes |
-| Tests | 708, all passing; clippy and rustfmt clean |
+| Last step done | 12.5 — Takes (2026-10-30) |
+| Next step | 12.6 — Greek |
+| Tests | 713, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1608,6 +1608,7 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
 | 12.2 | Preferences (Edit ▸ Preferences…): the length unit for every length field and the grid HUD (typed units converted), Undo Depth, Autosave with crash recovery, view defaults; saved between runs | 697 |
 | 12.3 | Dark, Darker and Light themes (Preferences ▸ Interface ▸ Theme) for every panel, menu, window and icon; the 3D view keeps its own colours; a contrast test for every theme | 699 |
 | 12.4 | Layers: a coloured, named table in the document with Solo, View, Render, Manager, Locked, Animation, Generators and Deformers switches; objects on a layer (children inherit it); the Layer Manager, layer chips in the Object Manager, a Layer field; saved and merged | 708 |
+| 12.5 | Takes: variations of the document (transform, visibility, parameters, tags, display colour, a camera, render settings) recorded automatically in the active take, switched as undo steps, rendered by choice; the Take Manager; saved | 713 |
 
 **Planning notes:**
 - **The docking library.** The plan named `egui_dock`, to be checked against
@@ -1755,6 +1756,38 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
   selected nothing, clicking the cone selected it. Dragging rows cannot be
   driven by posted mouse messages, so the drop onto a layer is tested in
   code.
+
+**12.5 — Takes**
+
+*Problems and solutions:*
+- **Panels that know nothing about takes.** The document always holds the
+  active take's values (decision D14); Main's values for what that take
+  overrides wait beside it in `Takes`. Switching is one swap, so every panel,
+  the evaluation, the simulation and the path tracer work unchanged.
+- **Recording without touching every tool.** All undo steps pass through
+  `History::record`, so Auto Take lives there: it compares each step's
+  inverses (`SetData`, `Move`, `SetRender`) with the document and writes what
+  changed into the active take, as one more edit of the same step. Edits of
+  the takes themselves (clearing an override) use `record_as_is`, or clearing
+  would be recorded as a new override.
+- **An exact undo for switching.** Storing the document's values back into
+  the take when leaving it (as first written) would let switching away and
+  back change the take, so switching is a pure swap — the take already holds
+  those values, since edits are recorded as they happen — and the random
+  undo/redo test records in the take like the editor does.
+- **Objects deleted while overridden.** A deleted object is only detached
+  (undo can bring it back); the swap writes into detached objects too, so
+  Main's values are not lost while it is away. The random test caught a
+  second case: Main's parameters of an object whose kind had changed were
+  skipped and so lost; Auto Take now drops parameter overrides when an
+  object becomes another kind (Make Editable), and the swap always writes.
+- **Rendering another take.** The render job gets a copy of the document
+  switched to that take — the active take stays as it is; a take's camera is
+  the one the render looks through.
+- **On-screen testing:** New Take made a take active; unticking Visible in
+  Editor in the Basic tab hid the cube and the Take Manager listed
+  "Cube · Visibility"; clicking Main showed the cube, clicking the take hid it
+  again.
 
 ---
 

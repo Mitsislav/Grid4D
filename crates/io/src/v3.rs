@@ -33,9 +33,9 @@ use grid4d_geom::{
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
     FrameRange, ImageFormat, Inherit, Interpolation, Key, Layer, LayerId, LayerSwitches, LightDetails, LightShadow,
-    LightType, MassMode, Material, MaterialId, MeshHandle, MeshId, Motion, NodeData, NodeId, ObjectKind, ObjectParam,
-    Param, RenderSettings, SimulationCache, SimulationSettings, SplineHandle, Tag, Tangents, TimeSettings, Track,
-    Transform,
+    LightType, MassMode, Material, MaterialId, MeshHandle, MeshId, Motion, NodeData, NodeId, ObjectKind,
+    ObjectOverrides, ObjectParam, Override, Param, RenderSettings, SimulationCache, SimulationSettings, SplineHandle,
+    Tag, Take, TakeId, Takes, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -75,6 +75,11 @@ struct DocumentDto {
     /// none. Objects refer to them by index.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     layers: Vec<LayerDto>,
+    /// Added in the course of version 3 (step 12.5); absent when there are
+    /// none. The objects hold the active take's values; `main_values` Main's
+    /// beside them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    takes: Option<TakesDto>,
     /// Added in the course of version 3 (step 8.2); absent while they are the
     /// defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -86,6 +91,157 @@ struct DocumentDto {
     /// Added in step 11.5: the simulated frames, when saved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     simulation_cache: Option<SimCacheDto>,
+}
+
+/// The takes, the active one and Main's values beside it.
+#[derive(Debug, Serialize, Deserialize)]
+struct TakesDto {
+    takes: Vec<TakeDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active: Option<usize>,
+    /// Render Settings ▸ Take.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    render: Option<usize>,
+    /// Main's values of what the active take overrides.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    main_values: Vec<OverridesDto>,
+    /// Main's render settings while the active take has its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    main_render: Option<OwnRenderDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TakeDto {
+    name: String,
+    /// The camera object's index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    camera: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    render: Option<OwnRenderDto>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    objects: Vec<OverridesDto>,
+}
+
+/// Render settings a take holds (`settings` left out while the defaults).
+#[derive(Debug, Serialize, Deserialize)]
+struct OwnRenderDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    settings: Option<RenderDto>,
+}
+
+impl OwnRenderDto {
+    fn new(settings: &RenderSettings) -> Self {
+        Self {
+            settings: RenderDto::new(settings),
+        }
+    }
+
+    fn into_settings(self) -> RenderSettings {
+        self.settings.map(RenderDto::into_settings).unwrap_or_default()
+    }
+}
+
+/// One object's overridden groups.
+#[derive(Debug, Serialize, Deserialize)]
+struct OverridesDto {
+    object: usize,
+    /// Position, rotation (heading, pitch, bank in radians), scale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transform: Option<[[f32; 3]; 3]>,
+    /// Visible in the editor, in the renderer, enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    visibility: Option<[bool; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parameters: Option<KindDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tags: Option<Vec<TagDto>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_color: Option<[f32; 3]>,
+}
+
+impl OverridesDto {
+    /// `None` for an object that is not saved (deleted).
+    fn new(id: NodeId, values: &[Override], refs: &Refs, meshes: &mut MeshTable) -> Option<Self> {
+        let mut dto = Self {
+            object: *refs.objects.get(&id)?,
+            transform: None,
+            visibility: None,
+            parameters: None,
+            tags: None,
+            display_color: None,
+        };
+        for value in values {
+            match value {
+                Override::Transform(t) => {
+                    dto.transform = Some([t.position.to_array(), t.rotation.to_array(), t.scale.to_array()]);
+                }
+                Override::Visibility {
+                    editor,
+                    render,
+                    enabled,
+                } => dto.visibility = Some([*editor, *render, *enabled]),
+                Override::Parameters(kind) => dto.parameters = Some(KindDto::new(kind, "take", meshes)),
+                Override::Tags(tags) => dto.tags = Some(tags.iter().map(|tag| TagDto::new(tag, refs)).collect()),
+                Override::DisplayColor(colour) => dto.display_color = Some(*colour),
+            }
+        }
+        Some(dto)
+    }
+
+    fn check_finite(&self) -> Result<(), IoError> {
+        let transform: Vec<f32> = self.transform.iter().flatten().flatten().copied().collect();
+        let colour: Vec<f32> = self.display_color.iter().flatten().copied().collect();
+        let parameters = self.parameters.as_ref().map(KindDto::parameters).unwrap_or_default();
+        let tags: Vec<f32> = self.tags.iter().flatten().flat_map(TagDto::parameters).collect();
+        check_finite(
+            "a take's override",
+            &[
+                ("transform", &transform),
+                ("display colour", &colour),
+                ("parameters", &parameters),
+                ("tag", &tags),
+            ],
+        )
+    }
+
+    /// The object's id and values; `None` for an index that names no object.
+    fn into_values(
+        self,
+        ids: &[NodeId],
+        materials: &[MaterialId],
+        meshes: &[MeshHandle],
+    ) -> Result<Option<(NodeId, Vec<Override>)>, IoError> {
+        let Some(&id) = ids.get(self.object) else {
+            return Ok(None);
+        };
+        let mut values = Vec::new();
+        if let Some([position, rotation, scale]) = self.transform {
+            values.push(Override::Transform(Transform {
+                position: Vec3::from_array(position),
+                rotation: Vec3::from_array(rotation),
+                scale: Vec3::from_array(scale),
+            }));
+        }
+        if let Some([editor, render, enabled]) = self.visibility {
+            values.push(Override::Visibility {
+                editor,
+                render,
+                enabled,
+            });
+        }
+        if let Some(kind) = self.parameters {
+            values.push(Override::Parameters(kind.into_kind(meshes, "take")?));
+        }
+        if let Some(tags) = self.tags {
+            values.push(Override::Tags(
+                tags.into_iter().map(|tag| tag.into_tag(ids, materials)).collect(),
+            ));
+        }
+        if let Some(colour) = self.display_color {
+            values.push(Override::DisplayColor(colour));
+        }
+        Ok(Some((id, values)))
+    }
 }
 
 /// A layer; its colour is linear RGB.
@@ -2523,6 +2679,80 @@ impl MeshTable {
     }
 }
 
+/// The document's takes for the file (`None` without any).
+fn takes_dto(doc: &Document, refs: &Refs, meshes: &mut MeshTable) -> Result<Option<TakesDto>, IoError> {
+    let takes = &doc.takes;
+    if takes.is_empty() {
+        return Ok(None);
+    }
+    let index_of = |id: Option<TakeId>| id.and_then(|id| takes.ids().iter().position(|&t| t == id));
+    let mut overrides = |objects: &ObjectOverrides| -> Vec<OverridesDto> {
+        objects
+            .iter()
+            .filter_map(|(&id, values)| OverridesDto::new(id, values, refs, meshes))
+            .collect()
+    };
+    let list = takes
+        .iter()
+        .map(|(_, take)| TakeDto {
+            name: take.name.clone(),
+            camera: take.camera.and_then(|c| refs.objects.get(&c).copied()),
+            render: take.render.as_ref().map(OwnRenderDto::new),
+            objects: overrides(&take.objects),
+        })
+        .collect();
+    let dto = TakesDto {
+        takes: list,
+        active: index_of(takes.active()),
+        render: index_of(takes.render_take),
+        main_values: overrides(takes.main()),
+        main_render: takes.main_render().map(OwnRenderDto::new),
+    };
+    for overrides in dto.takes.iter().flat_map(|t| &t.objects).chain(&dto.main_values) {
+        overrides.check_finite()?;
+    }
+    Ok(Some(dto))
+}
+
+/// Rebuilds the takes; the objects already hold the active take's values.
+fn read_takes(
+    doc: &mut Document,
+    dto: TakesDto,
+    ids: &[NodeId],
+    materials: &[MaterialId],
+    meshes: &[MeshHandle],
+) -> Result<(), IoError> {
+    let objects = |list: Vec<OverridesDto>| -> Result<ObjectOverrides, IoError> {
+        let mut out = ObjectOverrides::new();
+        for overrides in list {
+            overrides.check_finite()?;
+            if let Some((id, values)) = overrides.into_values(ids, materials, meshes)? {
+                out.insert(id, values);
+            }
+        }
+        Ok(out)
+    };
+    let mut takes = Takes::default();
+    let mut take_ids = Vec::with_capacity(dto.takes.len());
+    for take in dto.takes {
+        take_ids.push(takes.insert(Take {
+            name: take.name,
+            camera: take.camera.and_then(|i| ids.get(i).copied()),
+            render: take.render.map(OwnRenderDto::into_settings),
+            objects: objects(take.objects)?,
+        }));
+    }
+    takes.render_take = dto.render.and_then(|i| take_ids.get(i).copied());
+    let active = dto.active.and_then(|i| take_ids.get(i).copied());
+    takes.restore(
+        active,
+        objects(dto.main_values)?,
+        dto.main_render.map(OwnRenderDto::into_settings),
+    );
+    doc.takes = takes;
+    Ok(())
+}
+
 /// Writes `doc` as a version 3 archive.
 pub(crate) fn write(doc: &Document, cache: Option<&SimulationCache>) -> Result<Vec<u8>, IoError> {
     // Pre-order: a parent is always written (and indexed) before its children.
@@ -2575,6 +2805,7 @@ pub(crate) fn write(doc: &Document, cache: Option<&SimulationCache>) -> Result<V
     for (mesh, object) in &table.meshes {
         check_mesh_finite(mesh.mesh(), object)?;
     }
+    let takes = takes_dto(doc, &refs, &mut table)?;
     let saved_cache = cache.and_then(|c| SimCacheDto::new(c, &refs));
     let settings = doc.time.settings();
     let (simulation_cache, cache_bytes) = saved_cache.map_or((None, None), |(dto, bytes)| (Some(dto), Some(bytes)));
@@ -2592,6 +2823,7 @@ pub(crate) fn write(doc: &Document, cache: Option<&SimulationCache>) -> Result<V
             objects,
             materials: doc.scene.materials().iter().map(|(_, m)| MaterialDto::new(m)).collect(),
             layers: doc.scene.layers().iter().map(|(_, l)| LayerDto::new(l)).collect(),
+            takes,
             render: RenderDto::new(&doc.render),
             simulation: SimulationDto::new(&doc.simulation),
             simulation_cache,
@@ -2660,6 +2892,7 @@ impl File {
             objects,
             materials,
             layers,
+            takes,
             render,
             simulation,
             simulation_cache,
@@ -2739,6 +2972,9 @@ impl File {
                     .map(|tag| tag.into_tag(&ids, &material_ids))
                     .collect();
             }
+        }
+        if let Some(takes) = takes {
+            read_takes(&mut doc, takes, &ids, &material_ids, &meshes)?;
         }
         let cache = simulation_cache.map(|dto| dto.into_cache(archive, &ids)).transpose()?;
         Ok((doc, cache))
@@ -3992,6 +4228,81 @@ mod tests {
             .set_key(Key::new(40.0, f32::NAN));
         let err = to_bytes(&doc).unwrap_err();
         assert!(err.to_string().contains("animation key"), "{err}");
+    }
+
+    #[test]
+    fn takes_round_trip_with_the_active_one_and_mains_values() {
+        let mut doc = Document::with_demo_scene();
+        let id = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+        let red = doc.scene.materials_mut().insert(Material::new("Red"));
+        let (cube, sphere, camera) = (id(&doc, "Cube"), id(&doc, "Sphere"), id(&doc, "Camera"));
+        let main_cube = doc.scene.get(cube).unwrap().data.clone();
+        let take = doc.takes.insert(Take::new("Night"));
+        let other = doc.takes.insert(Take::new("Day"));
+        doc.takes.render_take = Some(other);
+        doc.takes.get_mut(take).unwrap().camera = Some(camera);
+        doc.apply(grid4d_scene::SceneEdit::SwitchTake(Some(take))).unwrap();
+        // Recorded as the editor records: an edit, then Auto Take.
+        let mut data = main_cube.clone();
+        data.transform.position.x = 77.0;
+        data.visible_in_editor = false;
+        data.display_color = [1.0, 0.0, 0.0];
+        data.tags = vec![Tag::Material { material: Some(red) }];
+        data.kind = ObjectKind::Cube {
+            size: Vec3::splat(33.0),
+            segments: [2, 2, 2],
+        };
+        let inverse = doc.apply(grid4d_scene::SceneEdit::SetData { id: cube, data }).unwrap();
+        doc.record_in_take(&[inverse]).unwrap();
+        let mut render = doc.render.clone();
+        render.width = 640;
+        let inverse = doc.apply(grid4d_scene::SceneEdit::SetRender(render)).unwrap();
+        doc.record_in_take(&[inverse]).unwrap();
+        // A take that is not active: its values stay in it.
+        let mut moved = doc.scene.get(sphere).unwrap().data.clone();
+        moved.transform.position.y = -5.0;
+        let values = vec![Override::Transform(moved.transform)];
+        doc.takes.get_mut(other).unwrap().objects.insert(sphere, values);
+
+        let mut loaded = round_trip(&doc);
+        let names: Vec<&str> = loaded.takes.iter().map(|(_, t)| t.name.as_str()).collect();
+        assert_eq!(names, ["Night", "Day"]);
+        let (night, day) = (loaded.takes.ids()[0], loaded.takes.ids()[1]);
+        assert_eq!(loaded.takes.active(), Some(night));
+        assert_eq!(loaded.takes.render_take, Some(day));
+        assert_eq!(loaded.takes.get(night).unwrap().camera, Some(id(&loaded, "Camera")));
+        assert_eq!(loaded.takes.get(night).unwrap().override_count(), 6);
+        let shown = &loaded.scene.get(id(&loaded, "Cube")).unwrap().data;
+        assert_eq!(shown.transform.position.x, 77.0, "the active take's values");
+        assert_eq!(loaded.render.width, 640);
+        // Back to Main: Main's values, kept in the file beside the take's.
+        loaded.switch_take(None);
+        let main = &loaded.scene.get(id(&loaded, "Cube")).unwrap().data;
+        assert_eq!(main.transform, main_cube.transform);
+        assert_eq!(main.kind, main_cube.kind);
+        assert!(main.visible_in_editor && main.tags.is_empty());
+        assert_eq!(loaded.render, RenderSettings::default());
+        loaded.switch_take(Some(day));
+        assert_eq!(
+            loaded
+                .scene
+                .get(id(&loaded, "Sphere"))
+                .unwrap()
+                .data
+                .transform
+                .position
+                .y,
+            -5.0
+        );
+        loaded.switch_take(Some(night));
+        let [Tag::Material { material: Some(m) }] = loaded.scene.get(id(&loaded, "Cube")).unwrap().data.tags[..] else {
+            panic!("the take's Material tag");
+        };
+        assert_eq!(loaded.scene.materials().get(m).unwrap().name, "Red");
+        assert!(
+            !document_json(&Document::with_demo_scene()).contains("\"takes\""),
+            "omitted when there are none"
+        );
     }
 
     #[test]

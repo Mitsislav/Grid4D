@@ -156,6 +156,20 @@ pub enum EditorCommand {
     },
     /// Selects every object whose own layer is this one.
     SelectLayerObjects(grid4d_scene::LayerId),
+    /// Makes a take active (`None`: Main); the view looks through its camera,
+    /// if it has one.
+    SwitchTake(Option<grid4d_scene::TakeId>),
+    /// Adds a take and makes it active.
+    NewTake,
+    /// Removes a take (going back to Main first if it is the active one).
+    DeleteTake(grid4d_scene::TakeId),
+    /// Drops one override of a take (`group` `None`: its render settings); the
+    /// active take's object shows Main's value again.
+    ClearOverride {
+        take: grid4d_scene::TakeId,
+        node: Option<NodeId>,
+        group: Option<grid4d_scene::OverrideGroup>,
+    },
     CreateObject(ObjectKindTag),
     /// Creates an object under the active one (Shift + create for deformers),
     /// a deformer fitted to it; at the top without an active object.
@@ -414,14 +428,24 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::MergeFile(path) => file::merge(&path, doc, editor, viewport),
         EditorCommand::Export => file::export(doc, editor),
         EditorCommand::RenderToPictureViewer => {
-            let replay = editor.simulation.replay(doc);
-            editor.renders.start(
-                doc,
-                viewport.camera(),
-                viewport.view_object(),
-                editor.file.path(),
-                replay,
-            );
+            // Render Settings ▸ Take: another take renders from a copy
+            // switched to it; a take's camera is the one renders look through.
+            let take = doc.takes.take_to_render();
+            let camera = take
+                .and_then(|t| doc.takes.get(t))
+                .and_then(|t| t.camera)
+                .filter(|&c| doc.scene.contains(c))
+                .or(viewport.view_object());
+            let other = (take != doc.takes.active()).then(|| {
+                let mut copy = doc.clone();
+                copy.switch_take(take);
+                copy
+            });
+            let shown = other.as_ref().unwrap_or(doc);
+            let replay = editor.simulation.replay(shown);
+            editor
+                .renders
+                .start(shown, viewport.camera(), camera, editor.file.path(), replay);
             editor.renders.viewer_open = true;
         }
         EditorCommand::RenderView => {
@@ -1042,6 +1066,76 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     "Remove from Layer"
                 };
                 commit(doc, editor, label, edits, |_, _| {});
+            }
+        }
+        EditorCommand::SwitchTake(take) => {
+            commit(doc, editor, "Switch Take", vec![SceneEdit::SwitchTake(take)], |_, _| {});
+            if let Some(camera) = take
+                .and_then(|t| doc.takes.get(t))
+                .and_then(|t| t.camera)
+                .filter(|&c| doc.scene.contains(c))
+            {
+                editor.view_camera = Some(camera);
+            }
+        }
+        EditorCommand::NewTake => {
+            let mut takes = doc.takes.clone();
+            let take = takes.insert(grid4d_scene::Take::new(takes.unique_name("Take")));
+            commit(
+                doc,
+                editor,
+                "New Take",
+                vec![SceneEdit::SetTakes(takes), SceneEdit::SwitchTake(Some(take))],
+                |_, _| {},
+            );
+        }
+        EditorCommand::DeleteTake(take) => {
+            let mut inverses = Vec::new();
+            if doc.takes.active() == Some(take)
+                && let Ok(inverse) = doc.apply(SceneEdit::SwitchTake(None))
+            {
+                inverses.push(inverse);
+            }
+            let mut takes = doc.takes.clone();
+            if takes.remove(take).is_some()
+                && let Ok(inverse) = doc.apply(SceneEdit::SetTakes(takes))
+            {
+                inverses.insert(0, inverse);
+            }
+            let selection = editor.selection.clone();
+            editor
+                .history
+                .record_as_is(doc, "Delete Take", inverses, selection.clone(), selection);
+        }
+        EditorCommand::ClearOverride { take, node, group } => {
+            let mut takes = doc.takes.clone();
+            let mut edits = Vec::new();
+            match (node, group) {
+                (Some(node), Some(group)) => {
+                    let main = takes.clear_override(take, node, group);
+                    edits.push(SceneEdit::SetTakes(takes));
+                    if let (Some(main), Some(current)) = (main, doc.scene.get(node)) {
+                        let mut data = current.data.clone();
+                        main.write(&mut data);
+                        edits.push(SceneEdit::SetData { id: node, data });
+                    }
+                }
+                _ => {
+                    let main = takes.clear_render(take);
+                    edits.push(SceneEdit::SetTakes(takes));
+                    if let Some(main) = main {
+                        edits.push(SceneEdit::SetRender(main));
+                    }
+                }
+            }
+            let selection = editor.selection.clone();
+            match doc.apply_all(edits) {
+                Ok(inverses) => {
+                    editor
+                        .history
+                        .record_as_is(doc, "Clear Override", inverses, selection.clone(), selection);
+                }
+                Err(err) => log::warn!("Clear Override rejected: {err}"),
             }
         }
         EditorCommand::SelectLayerObjects(layer) => {
@@ -2056,6 +2150,8 @@ fn is_current_state(doc: &Document, edit: &SceneEdit) -> bool {
         SceneEdit::SetName(name) => doc.name == *name,
         SceneEdit::SetMaterials(materials) => doc.scene.materials() == materials,
         SceneEdit::SetLayers(layers) => doc.scene.layers() == layers,
+        SceneEdit::SetTakes(takes) => doc.takes == *takes,
+        SceneEdit::SwitchTake(take) => doc.takes.active() == *take,
         SceneEdit::SetRender(settings) => doc.render == *settings,
         SceneEdit::SetSimulation(settings) => doc.simulation == *settings,
         // Structural changes are never made live; record them as given.
@@ -3347,6 +3443,148 @@ mod tests {
         );
         assert!(!doc.scene.contains(ids[0]));
         assert!(doc.scene.contains(ids[1]) && doc.scene.contains(ids[2]));
+    }
+
+    #[test]
+    fn rendering_a_take_renders_its_changes_without_making_it_active() {
+        use crate::rendering::tests::{small, wait};
+        let (mut doc, mut editor, mut vp) = demo();
+        small(&mut doc, 2);
+        let picture = |doc: &mut Document, editor: &mut EditorState, vp: &mut ViewportPanel| {
+            run(doc, editor, vp, &[EditorCommand::RenderToPictureViewer]);
+            wait(&mut editor.renders);
+            editor.renders.history().last().unwrap().rgba.clone()
+        };
+        let main = picture(&mut doc, &mut editor, &mut vp);
+
+        // A take that hides every object from the renderer, made while it is
+        // active, then Main made active again.
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::NewTake]);
+        let take = doc.takes.ids()[0];
+        for &root in doc.scene.roots().to_vec().iter() {
+            let before = doc.scene.get(root).unwrap().data.clone();
+            doc.scene.get_mut(root).unwrap().data.visible_in_render = false;
+            run(
+                &mut doc,
+                &mut editor,
+                &mut vp,
+                &[EditorCommand::CommitLive {
+                    inverse: SceneEdit::SetData { id: root, data: before },
+                    label: "Hide",
+                }],
+            );
+        }
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SwitchTake(None)]);
+        assert_eq!(picture(&mut doc, &mut editor, &mut vp), main, "Main renders as before");
+
+        let mut takes = doc.takes.clone();
+        takes.render_take = Some(take);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Edit {
+                edit: SceneEdit::SetTakes(takes),
+                label: "Render Take",
+            }],
+        );
+        let empty = picture(&mut doc, &mut editor, &mut vp);
+        assert_ne!(empty, main, "the take's hidden objects are left out");
+        assert_eq!(doc.takes.active(), None, "Main stays active");
+        assert!(
+            doc.scene
+                .roots()
+                .iter()
+                .all(|&r| doc.scene.get(r).unwrap().data.visible_in_render)
+        );
+    }
+
+    #[test]
+    fn takes_record_edits_switch_clear_and_delete_as_undo_steps() {
+        use grid4d_scene::OverrideGroup;
+        let (mut doc, mut editor, mut vp) = demo();
+        let cube = id_of(&doc, "Cube");
+        let main = doc.scene.get(cube).unwrap().data.clone();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::NewTake]);
+        let take = doc.takes.ids()[0];
+        assert_eq!(doc.takes.active(), Some(take), "a new take is active");
+        assert_eq!(doc.takes.get(take).unwrap().name, "Take");
+
+        // A live drag, as the gizmo makes it, then its commit: one step that
+        // also records the take's override.
+        doc.scene.get_mut(cube).unwrap().data.transform.position.x = 250.0;
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CommitLive {
+                inverse: SceneEdit::SetData {
+                    id: cube,
+                    data: main.clone(),
+                },
+                label: "Move",
+            }],
+        );
+        let overrides = |doc: &Document| doc.takes.get(take).map_or(0, grid4d_scene::Take::override_count);
+        assert_eq!(overrides(&doc), 1);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(overrides(&doc), 0, "undo takes back the recording too");
+        assert_eq!(doc.scene.get(cube).unwrap().data.transform, main.transform);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        assert_eq!(overrides(&doc), 1);
+
+        // Main shows Main's values; the take its own.
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SwitchTake(None)]);
+        assert_eq!(doc.scene.get(cube).unwrap().data.transform, main.transform);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SwitchTake(Some(take))]);
+        assert_eq!(doc.scene.get(cube).unwrap().data.transform.position.x, 250.0);
+
+        // Clearing the override shows Main's value again, without recording it.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::ClearOverride {
+                take,
+                node: Some(cube),
+                group: Some(OverrideGroup::Transform),
+            }],
+        );
+        assert_eq!(overrides(&doc), 0);
+        assert_eq!(doc.scene.get(cube).unwrap().data.transform, main.transform);
+        assert!(doc.takes.main().is_empty());
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(cube).unwrap().data.transform.position.x, 250.0);
+
+        // Rendering another take leaves the active one as it is.
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SwitchTake(None)]);
+        let mut chosen = doc.takes.clone();
+        chosen.render_take = Some(take);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[
+                EditorCommand::Edit {
+                    edit: SceneEdit::SetTakes(chosen),
+                    label: "Render Take",
+                },
+                EditorCommand::RenderToPictureViewer,
+                EditorCommand::StopRender,
+            ],
+        );
+        assert_eq!(doc.takes.active(), None);
+        assert_eq!(doc.scene.get(cube).unwrap().data.transform, main.transform);
+
+        // Deleting the active take goes back to Main in the same step.
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SwitchTake(Some(take))]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteTake(take)]);
+        assert!(doc.takes.is_empty());
+        assert_eq!(doc.scene.get(cube).unwrap().data.transform, main.transform);
+        assert_eq!(editor.history.undo_label(), Some("Delete Take"));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.takes.active(), Some(take));
+        assert_eq!(doc.scene.get(cube).unwrap().data.transform.position.x, 250.0);
     }
 
     #[test]

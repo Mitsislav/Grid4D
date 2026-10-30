@@ -125,9 +125,27 @@ impl History {
     /// Records an already-applied step. `inverses` are the edits returned by
     /// [`Document::apply_all`] (undo order). An empty step is ignored.
     ///
+    /// Auto Take: inside a take other than Main, what the step changed is
+    /// recorded as that take's overrides, in the same step.
+    ///
     /// Discards the redo stack and trims the oldest steps beyond the limit,
     /// purging the detached nodes only those steps could have restored.
     pub fn record(
+        &mut self,
+        doc: &mut Document,
+        label: &'static str,
+        mut inverses: Vec<SceneEdit>,
+        selection_before: Selection,
+        selection_after: Selection,
+    ) {
+        if let Some(recorded) = doc.record_in_take(&inverses) {
+            inverses.insert(0, recorded);
+        }
+        self.record_as_is(doc, label, inverses, selection_before, selection_after);
+    }
+
+    /// [`Self::record`] without Auto Take (edits of the takes themselves).
+    pub fn record_as_is(
         &mut self,
         doc: &mut Document,
         label: &'static str,

@@ -27,6 +27,7 @@ pub mod preferences;
 pub mod recovery;
 pub mod render_settings;
 pub mod status_bar;
+pub mod takes;
 pub mod timeline;
 pub mod toolbar;
 pub mod unsaved_changes;
@@ -40,6 +41,7 @@ pub use materials::MaterialsPanel;
 pub use outliner::OutlinerPanel;
 pub use picture_viewer::PictureViewerPanel;
 pub use render_settings::RenderSettingsPanel;
+pub use takes::TakesPanel;
 pub use timeline::TimelinePanel;
 pub use viewport::ViewportPanel;
 

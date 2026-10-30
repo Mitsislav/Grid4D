@@ -56,6 +56,11 @@ pub enum SceneEdit {
     /// Replaces the document's layers (the whole table, ids included: objects
     /// keep naming the same layers across undo and redo).
     SetLayers(crate::Layers),
+    /// Replaces the document's takes (overrides recorded, takes added, renamed
+    /// or removed; Main's values kept beside the active one).
+    SetTakes(crate::Takes),
+    /// Makes a take active (`None`: Main), swapping the values it overrides.
+    SwitchTake(Option<crate::TakeId>),
     /// Replaces the document's render settings (validated).
     SetRender(RenderSettings),
     /// Replaces the document's simulation settings (validated).
@@ -76,6 +81,8 @@ impl SceneEdit {
             | Self::SetName(_)
             | Self::SetMaterials(_)
             | Self::SetLayers(_)
+            | Self::SetTakes(_)
+            | Self::SwitchTake(_)
             | Self::SetRender(_)
             | Self::SetSimulation(_) => None,
         }
@@ -140,6 +147,8 @@ impl Document {
             SceneEdit::SetLayers(layers) => {
                 Ok(SceneEdit::SetLayers(std::mem::replace(self.scene.layers_mut(), layers)))
             }
+            SceneEdit::SetTakes(takes) => Ok(SceneEdit::SetTakes(std::mem::replace(&mut self.takes, takes))),
+            SceneEdit::SwitchTake(to) => Ok(SceneEdit::SwitchTake(self.switch_take(to))),
             SceneEdit::SetRender(settings) => Ok(SceneEdit::SetRender(std::mem::replace(
                 &mut self.render,
                 settings.validated(),
@@ -191,6 +200,7 @@ mod tests {
         time: TimeSettings,
         materials: Materials,
         layers: crate::Layers,
+        takes: crate::Takes,
         render: RenderSettings,
         simulation: crate::SimulationSettings,
         nodes: Vec<(NodeId, Option<NodeId>, u32, NodeData)>,
@@ -208,6 +218,7 @@ mod tests {
             time: doc.time.settings(),
             materials: doc.scene.materials().clone(),
             layers: doc.scene.layers().clone(),
+            takes: doc.takes.clone(),
             render: doc.render.clone(),
             simulation: doc.simulation,
             nodes,
@@ -534,6 +545,29 @@ mod tests {
                     looping: rng.chance(2),
                 })
             }
+            (7, Some(id)) if rng.chance(2) => {
+                // Add a take overriding this object, or switch takes.
+                let mut takes = doc.takes.clone();
+                match rng.pick(takes.ids()) {
+                    Some(take) if rng.chance(2) => SceneEdit::SwitchTake(Some(take)),
+                    _ if rng.chance(3) => SceneEdit::SwitchTake(None),
+                    _ => {
+                        let mut take = crate::Take::new(takes.unique_name("Take"));
+                        let mut data = doc
+                            .scene
+                            .get(id)
+                            .map(|n| n.data.clone())
+                            .unwrap_or_else(|| random_data(rng));
+                        data.transform = random_data(rng).transform;
+                        data.visible_in_editor = rng.chance(2);
+                        for group in [crate::OverrideGroup::Transform, crate::OverrideGroup::Visibility] {
+                            crate::take::set_override(&mut take.objects, id, crate::Override::of(group, &data));
+                        }
+                        takes.insert(take);
+                        SceneEdit::SetTakes(takes)
+                    }
+                }
+            }
             (7, _) => SceneEdit::SetName(format!("doc {}", rng.below(100))),
             (8, _) if rng.chance(2) => {
                 // Add a layer, switch one, or remove one (replaced whole).
@@ -618,7 +652,13 @@ mod tests {
                 let edit = random_edit(&mut rng, &doc);
                 match doc.apply(edit.clone()) {
                     Ok(inverse) => {
-                        undo_stack.push(inverse);
+                        // As the editor commits: inside a take, the change is
+                        // recorded as its override in the same step.
+                        let mut step = vec![inverse];
+                        if let Some(recorded) = doc.record_in_take(&step) {
+                            step.insert(0, recorded);
+                        }
+                        undo_stack.push(step);
                         states.push(snapshot(&doc));
                     }
                     Err(err) => {
@@ -634,21 +674,21 @@ mod tests {
             // Undo everything, checking each intermediate state.
             let mut redo_stack = Vec::new();
             for k in (0..undo_stack.len()).rev() {
-                let inverse = undo_stack.pop().unwrap();
-                redo_stack.push(doc.apply(inverse).unwrap());
+                let step = undo_stack.pop().unwrap();
+                redo_stack.push(doc.apply_all(step).unwrap());
                 assert_eq!(snapshot(&doc), states[k], "seed {seed}: undo to state {k}");
             }
 
             // Redo everything, checking each intermediate state again.
             for (k, expected) in states.iter().enumerate().skip(1) {
                 let redo = redo_stack.pop().unwrap();
-                undo_stack.push(doc.apply(redo).unwrap());
+                undo_stack.push(doc.apply_all(redo).unwrap());
                 assert_eq!(&snapshot(&doc), expected, "seed {seed}: redo to state {k}");
             }
             assert!(redo_stack.is_empty());
 
             // And the redone history undoes cleanly once more.
-            let undo_all: Vec<SceneEdit> = undo_stack.into_iter().rev().collect();
+            let undo_all: Vec<SceneEdit> = undo_stack.into_iter().rev().flatten().collect();
             doc.apply_all(undo_all).unwrap();
             assert_eq!(snapshot(&doc), states[0], "seed {seed}: undo after redo");
         }

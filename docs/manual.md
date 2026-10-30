@@ -497,6 +497,36 @@ Open the **Layers** tab (beside Attributes, or **Window ▸ Layer Manager**).
 Every change to layers is one undo step and is saved with the document;
 **File ▸ Merge** brings a file's layers along.
 
+### 6.2 Takes
+
+Takes keep variations of one scene side by side — another camera, a red
+material instead of a blue one, an object hidden — without copies of the
+file. **Main** is the scene as it is; every other take holds changes to it.
+Open the **Takes** tab (beside Objects, or **Window ▸ Take Manager**).
+
+![A take hides the cube: the Take Manager lists its one override; clicking Main shows the cube again](images/manual/takes.png)
+
+- **New Take** adds a take and makes it active (the dot marks the active
+  take). Click **Main** or a take to make it active; the views, the managers
+  and renders show it. Double-click a take to rename it; right-click it to
+  delete it.
+- **Changes are recorded automatically.** While a take other than Main is
+  active, whatever you change of an object's **position, rotation and
+  scale**, its **visibility** (the dots and the check mark), its
+  **parameters**, its **tags** (for example which material it uses) or its
+  **display colour**, and the **render settings**, belongs to that take; Main
+  keeps its own values. Other changes — names, the hierarchy, new objects,
+  keys, layers, the materials themselves — apply to every take.
+- Under the takes, the active take's **Camera** (the one its renders look
+  through; *The view's* by default) and its **overrides**, one line per object
+  and group. **Clear** drops an override: the object shows Main's value again.
+- **Rendering another take:** Render Settings ▸ **Take** — *Current* (the
+  active take) or a take by name. That take is rendered without making it
+  active.
+
+Switching takes and every recorded change are undo steps, and takes are
+saved with the document.
+
 ## 7. The Attribute Manager
 
 ![The Attribute Manager](images/manual/attribute-manager.png)
@@ -2172,6 +2202,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   the status bar in the chosen unit; a scale per document.
 - **Layers**: folders of layers, the Expressions and XRef switches, layer
   colours in the views.
-- The Takes and Filter panels are placeholders.
+- **Takes**: takes inside takes, override groups shared by several objects,
+  rendering several takes at once; a Cloner's object links are not part of a
+  take's saved parameters.
+- The Filter panel is a placeholder.
 
 See [`progress.md`](progress.md) for what changed in each step.

@@ -255,6 +255,18 @@ impl Scene {
         Some(node)
     }
 
+    /// A node's data, detached nodes included (a take's values reach objects
+    /// deleted for now, so undo brings them back as they were).
+    pub(crate) fn data_mut_any(&mut self, id: NodeId) -> Option<&mut crate::NodeData> {
+        if !self.nodes.contains_key(id) {
+            return None;
+        }
+        let revision = self.touch();
+        let node = self.nodes.get_mut(id)?;
+        node.revision = revision;
+        Some(&mut node.data)
+    }
+
     /// Top-level nodes, in Object Manager order.
     #[must_use]
     pub fn roots(&self) -> &[NodeId] {

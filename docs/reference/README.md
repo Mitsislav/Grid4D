@@ -99,5 +99,5 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 12.1 | [`workspace-layouts.md`](workspace-layouts.md) — docking panels, the Standard / Modeling / Animate layouts, Reset Layout | implemented 2026-10-30 |
 | 12.2–12.3 | [`workspace-preferences.md`](workspace-preferences.md) — units, undo depth, autosave, viewport defaults, themes | implemented 2026-10-30 |
 | 12.4 | [`manager-layer.md`](manager-layer.md) — layers and their switches, the Layer Manager | implemented 2026-10-30 |
-| 12.5 | `manager-take.md` — takes, overrides, Auto Take, rendering a take | todo |
+| 12.5 | [`manager-take.md`](manager-take.md) — takes, overrides, Auto Take, rendering a take | implemented 2026-10-30 |
 | 12.6 | `workspace-language.md` — the interface's languages, Greek | todo |

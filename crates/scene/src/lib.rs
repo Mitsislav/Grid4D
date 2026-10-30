@@ -32,6 +32,7 @@ mod render;
 mod scene;
 mod spline;
 mod tag;
+mod take;
 mod time;
 mod transform;
 
@@ -55,5 +56,6 @@ pub use render::{FrameNaming, FrameRange, ImageFormat, RenderSettings};
 pub use scene::{Detached, Scene, SceneError, WalkItem};
 pub use spline::{SplineHandle, SplineId};
 pub use tag::{Aim, DEFAULT_PHONG_ANGLE, Protection, Tag, TagKind, Tags};
+pub use take::{ObjectOverrides, Override, OverrideGroup, Take, TakeId, Takes, overridable};
 pub use time::{Playback, TimeSettings, TimeState};
 pub use transform::Transform;

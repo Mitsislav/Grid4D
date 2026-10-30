@@ -114,9 +114,14 @@ impl RenderSettingsPanel {
                     ui.vertical(|ui| {
                         // Every page as tall as the tallest: the window keeps its size.
                         ui.set_min_size(egui::vec2(330.0, PAGE_HEIGHT));
-                        let Document { render, time, .. } = doc;
+                        let Document {
+                            render, time, takes, ..
+                        } = doc;
                         match self.page {
-                            Page::Output => output_page(ui, render, time, self.ratio),
+                            Page::Output => {
+                                take_field(ui, takes, &mut editor.commands);
+                                output_page(ui, render, time, self.ratio);
+                            }
                             Page::Save => save_page(ui, render, time, editor),
                             Page::Sampling => sampling_page(ui, render),
                             Page::Options => options_page(ui, render),
@@ -159,6 +164,44 @@ impl RenderSettingsPanel {
                 });
             });
     }
+}
+
+/// Render Settings ▸ Take: the take renders show (Current: the active one).
+fn take_field(ui: &mut Ui, takes: &grid4d_scene::Takes, commands: &mut crate::CommandQueue) {
+    if takes.is_empty() {
+        return;
+    }
+    section_heading(ui, "Take");
+    Grid::new("grid4d.render.take")
+        .num_columns(2)
+        .spacing([6.0, 4.0])
+        .show(ui, |ui| {
+            attr_label(ui, "Take", LABEL_WIDTH);
+            let name = |id: Option<grid4d_scene::TakeId>| {
+                id.and_then(|t| takes.get(t))
+                    .map_or_else(|| "Current".to_owned(), |t| t.name.clone())
+            };
+            let mut chosen = takes.render_take.filter(|&t| takes.contains(t));
+            ComboBox::from_id_salt("grid4d.render.take")
+                .selected_text(name(chosen))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut chosen, None, "Current");
+                    for (id, take) in takes.iter() {
+                        ui.selectable_value(&mut chosen, Some(id), &take.name);
+                    }
+                })
+                .response
+                .on_hover_text("The take renders show; Current: the active one");
+            if chosen != takes.render_take {
+                let mut changed = takes.clone();
+                changed.render_take = chosen;
+                commands.push(EditorCommand::Edit {
+                    edit: SceneEdit::SetTakes(changed),
+                    label: "Render Take",
+                });
+            }
+            ui.end_row();
+        });
 }
 
 fn output_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, ratio: (u32, u32)) {
