@@ -1,0 +1,22 @@
+[package]
+name = "grid4d-script"
+description = "Grid4D scripting: Rhai scripts that read and change a document as one undo step."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+grid4d-geom.workspace = true
+grid4d-scene.workspace = true
+grid4d-plugin.workspace = true
+glam.workspace = true
+rhai.workspace = true
+
+[dev-dependencies]
+grid4d-plugin-scatter.workspace = true
+grid4d-plugin-gear.workspace = true
+
+[lints]
+workspace = true

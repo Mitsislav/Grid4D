@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 13 — Extensibility (v0.13) |
-| Last step done | 13.3 — Command plugins (2026-10-30) |
-| Next step | 13.4 — Scripting core |
-| Tests | 737, all passing; clippy and rustfmt clean |
+| Last step done | 13.5 — The Script Manager (2026-10-31) |
+| Next step | 13.6 — SDK documentation and finish |
+| Tests | 749, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1835,6 +1835,8 @@ the interface in Greek.
 | 13.1 | Plugins: the `grid4d-plugin` API (parameter descriptions, generator plugins, the registry), plugin objects in documents (kept when their plugin is missing), Create ▸ Plugins, parameters in the Attribute Manager, the example Gear | 726 |
 | 13.2 | Deformer plugins (in the deformer chain, their box, a handle, Shift-create under the selection, Fit to Parent) and keyed plugin numbers (key buttons, F-Curves, files, takes); the example Wave | 732 |
 | 13.3 | Command plugins: the Plugins menu, an options dialog from the plugin's description, changes applied as one undo step (or the plugin's message); the example Scatter | 737 |
+| 13.4 | Scripting core: Rhai scripts on a copy of the document (objects, placement, parameters, hierarchy, materials and layers, plugin commands), one undo step, errors with line and column, an operations limit; Script ▸ Run Script File… | 743 |
+| 13.5 | The Script Manager: the script library with five examples, the editor with line numbers, Run and Ctrl+Enter, the console; Script ▸ lists the library | 749 |
 
 **Planning notes:**
 - **Why plugins are built in.** Loading plugin libraries at run time would
@@ -1946,6 +1948,62 @@ test makes fifty at once.
   selected it said "Select the objects to scatter, then the surface last"
   and the document stayed unchanged. Typing into the dialog's fields cannot
   be posted to the window; tests set options directly.
+
+**13.4 — Scripting core**
+
+*Problems and solutions:*
+- **All or nothing without recording forward edits.** A script works on a
+  clone of the document (meshes are shared handles, so the clone is cheap)
+  through `Document::apply`, keeping the inverses. When it finishes, the
+  clone *is* the new document and the inverses, reversed, are the undo
+  step; on an error the clone is dropped and the user's document was never
+  touched. The ids the script made are the clone's, so nothing has to be
+  mapped back.
+- **Rhai's functions must own what they use.** The registered closures are
+  `'static`, so the copy lives in an `Rc<RefCell<State>>` each closure
+  holds, and the shapes for plugin commands are a plain function pointer
+  (`commands::shape_of`) evaluated on the copy's scene.
+- **One way to apply a command's changes.** Scripts run plugin commands too,
+  so the all-or-nothing application of `Changes` moved from the interface
+  into `grid4d_plugin::Changes::apply` (with `Applied`: inverses, new
+  objects, top-level ones).
+- **Errors where they happened.** Rhai fills in the call's position for
+  errors raised by our functions; `take_position` separates it from the
+  message, shown as "Line 3, column 9: …".
+- **An endless loop** costs 100 million operations before it is stopped:
+  about three seconds in a dev build; the document is unchanged.
+- **On-screen testing:** Script ▸ Run Script File… opened the system's file
+  dialog (filled in by typing); a 5 × 5 grid script on an empty document
+  made the Grid Null with 25 coloured cubes, selected, and said "made 25
+  cubes"; one Undo removed all of it and the title lost its unsaved mark.
+
+**13.5 — The Script Manager**
+
+*Problems and solutions:*
+- **Panels never touch files.** The window edits the script in memory and
+  pushes commands (New, Open, Save, Run); `ui/src/scripts.rs` is the only
+  code that reads and writes the library, and the menu lists the names it
+  keeps (refreshed when the library is made or saved to), so no frame reads
+  the folder.
+- **Ctrl+Enter, not a new line.** The editor would take the Enter first, so
+  the window consumes Ctrl+Enter before drawing the editor, and only while
+  the editor has the keyboard.
+- **Where output goes.** With the window open, output and errors of every
+  run (also Script ▸ a script) go to its console; a message would hide the
+  window. With it closed, a message as in 13.4.
+- **A Rhai rule met in testing:** a property cannot be set on a call's
+  result (`find("Cube").name = …` is a syntax error); the manual says to
+  keep the object in a variable first.
+- **Examples are tested:** every built-in example runs on the demo scene
+  (the Sphere and the Cube selected) without error, changes something and
+  prints one line.
+- **A backslash in the Greek table** (the characters a name may not
+  contain) has to be escaped in the Rust literal; written by hand.
+- **On-screen testing:** the first start made the library with the five
+  examples, listed in Script ▸; the Script Manager opened with the hint
+  script and line numbers; Open ▸ Grid of Cubes, Run made the grid
+  ("made 25 cubes" in the console); Random Colours and Spread Selected
+  Objects ran on the selected Grid and wrote their lines below.
 
 ---
 

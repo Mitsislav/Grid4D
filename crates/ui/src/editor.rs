@@ -753,6 +753,8 @@ pub struct EditorState {
     /// Plugins ▸: the command whose options dialog is open, and each
     /// command's options as last set.
     pub plugin_commands: PluginCommands,
+    /// The script library, the Script Manager's script and its console.
+    pub scripts: crate::scripts::Scripts,
     /// The Render Settings window is open (Ctrl+B).
     pub show_render_settings: bool,
     /// The session's renders and the Picture Viewer (Shift+R).
@@ -816,6 +818,7 @@ impl Default for EditorState {
             show_about: false,
             show_optimize: false,
             plugin_commands: PluginCommands::default(),
+            scripts: crate::scripts::Scripts::default(),
             show_render_settings: false,
             renders: crate::rendering::Renders::default(),
             simulation: crate::simulation::Sim::default(),

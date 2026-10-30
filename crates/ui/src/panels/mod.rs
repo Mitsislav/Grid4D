@@ -27,6 +27,7 @@ pub mod plugin_command;
 pub mod preferences;
 pub mod recovery;
 pub mod render_settings;
+pub mod script_manager;
 pub mod status_bar;
 pub mod takes;
 pub mod timeline;

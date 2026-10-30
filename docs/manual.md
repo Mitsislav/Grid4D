@@ -30,8 +30,9 @@ screenshots come from the application itself.
 18. [Tags](#18-tags)
 19. [Materials](#19-materials)
 20. [Rendering](#20-rendering)
-21. [Keyboard shortcuts](#21-keyboard-shortcuts)
-22. [Limitations and what is planned](#22-limitations-and-what-is-planned)
+21. [Scripts](#21-scripts)
+22. [Keyboard shortcuts](#22-keyboard-shortcuts)
+23. [Limitations and what is planned](#23-limitations-and-what-is-planned)
 
 ---
 
@@ -2156,7 +2157,98 @@ overlays stay on top, so you can carry on working. **Ctrl+R** again renders
 afresh. The Render View is never saved and does not appear in the Picture
 Viewer's history; use **Shift+R** for a picture to keep.
 
-## 21. Keyboard shortcuts
+## 21. Scripts
+
+A script is a short program that does a job on the open document for you —
+build a row of objects, rename or recolour many at once. Scripts are text
+files ending in `.rhai`, written in [Rhai](https://rhai.rs), a small
+language that reads much like Rust or JavaScript.
+
+**Your script library.** Grid4D keeps your scripts in a folder of its own
+(in its data folder, beside its settings: on Windows
+`%APPDATA%\grid4d\data\scripts`). The first time Grid4D starts it puts some
+examples there: Grid of Cubes, Number Selected Objects, Random Colours,
+Scatter on the Last Selected and Spread Selected Objects. The **Script**
+menu lists the library's scripts — click one to run it — then **Script
+Manager…** and **Run Script File…**, which runs any `.rhai` file you pick.
+
+**The Script Manager** (Script ▸ Script Manager…) is where you write and
+try scripts:
+
+- **New** starts an empty script; **Open** lists the library's scripts;
+  **Save** stores the script in the library under the name typed in the
+  **Name** field (not containing `\ / : * ? " < > |`). The window's title
+  shows the name, and `*` while there are unsaved changes.
+- The editor shows line numbers beside the text. **Run**, or **Ctrl+Enter**
+  while you type, runs the script on the document.
+- The **console** below shows what scripts print and, in orange, their
+  errors with the line and column. **Clear** empties it. While the Script
+  Manager is open, every script you run — also from the Script menu — writes
+  there instead of showing a message.
+
+![The Script Manager after running Grid of Cubes: its text with line numbers, and the console](images/manual/script-manager.png)
+
+How a script runs:
+
+- **One undo step.** Everything a script changes is undone with one
+  **Ctrl+Z** ("Run Script").
+- **If it fails**, nothing is changed at all, and a message says what went
+  wrong and where: "Line 3, column 9: there is no kind of object called
+  "Teapot"".
+- **If it never ends** (an endless loop), Grid4D stops it after a few
+  seconds and changes nothing.
+- **What it prints** with `print(…)` is shown when it ends.
+- A script can only change the document: it cannot open, write or delete
+  files, or reach the network.
+- Keep an object in a variable before you set its properties: write
+  `let c = find("Cube"); c.name = "Box";` — Rhai does not accept
+  `find("Cube").name = "Box"`.
+
+This script builds the grid below:
+
+```rust
+// A 5 × 5 grid of cubes, coloured from corner to corner.
+let group = create("Null");
+group.name = "Grid";
+for x in 0..5 {
+    for z in 0..5 {
+        let cube = create("Cube", group);
+        cube.name = `Cube ${x}-${z}`;
+        cube.position = [(x - 2) * 60, 0, (z - 2) * 60];
+        cube.set("Size . X", 40);
+        cube.set("Size . Y", 20 + 15 * (x + z));
+        cube.set("Size . Z", 40);
+        cube.color = [x / 4.0, 0.4, z / 4.0];
+    }
+}
+select(group);
+print(`made ${group.children.len()} cubes`);
+```
+
+![A grid of 25 cubes made by a script, under the Grid Null it selected](images/manual/script-grid.png)
+
+**What a script can use.** Numbers are as the Attribute Manager shows them:
+lengths in centimetres, angles in degrees, percentages as 0 – 100; positions,
+rotations (H, P, B), scales and colours are lists of three numbers, colours
+from 0 to 1.
+
+| In a script | What it does |
+|-------------|--------------|
+| `objects()`, `roots()` | every object (parents before children), the top-level ones |
+| `find("Cube")` | the first object with that name, or `()` if there is none |
+| `selection()`, `select(object)`, `select([a, b])` | the selection; what to select when the script ends |
+| `frame()` | the current frame |
+| `create("Cube")`, `create("Cube", parent)` | a new object of a kind from the Create menu or a plugin ("Gear") |
+| `delete(object)` | deletes it and everything under it |
+| `run_command("Scatter", #{ Count: 50, Seed: 2 })` | runs a plugin command on the script's selection (see [Plugins](#42-plugins)) |
+| `print(…)` | a line of output |
+| `o.name`, `o.kind`, `o.position`, `o.rotation`, `o.scale`, `o.color` | an object's name, kind and placement (set them with `=`) |
+| `o.visible`, `o.visible_in_render`, `o.enabled` | its switches |
+| `o.parent`, `o.children` | its place in the hierarchy (setting `parent` keeps it where it is in the world) |
+| `o.material`, `o.layer` | the name of its material or layer; set them by name |
+| `o.get("Radius")`, `o.set("Radius", 50)` | a parameter by its name on the Object tab |
+
+## 22. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -2211,7 +2303,7 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 22. Limitations and what is planned
+## 23. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
@@ -2247,6 +2339,10 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   4-Side and Spiral primitives; splines in glTF and OBJ files; drawing splines in
   renders.
 - **Tags**: Protection limits, Phong edge breaks, copying tags between objects.
+- **Plugins and scripts**: plugins are built into Grid4D (none can be added
+  without building it); scripts cannot set keys, create materials or layers,
+  or run every frame; the Script Manager's editor has no syntax colouring or
+  completion, and the library no sub-folders.
 - **Materials**: one Material tag per object (no layering), projection settings,
   textures, rendered previews; the viewport shows only the colour.
 - **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's

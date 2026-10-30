@@ -14,13 +14,14 @@
 #  grid4d-sim (rigid bodies, rapier3d) depends on grid4d-scene; ui uses it.
 #  grid4d-plugin (the plugin API) depends on geom and scene; eval and ui use it.
 #  Plugins (plugins/*) depend on grid4d-plugin; the binary lists them (src/plugins.rs).
+#  grid4d-script (Rhai scripts) depends on geom, scene and plugin; ui uses it.
 #
 #  See ARCHITECTURE.md for the architectural rules.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [workspace]
 resolver = "3"
-members = ["crates/geom", "crates/text", "crates/scene", "crates/plugin", "crates/eval", "crates/render", "crates/raytrace", "crates/sim", "crates/io", "crates/ui", "plugins/gear", "plugins/wave", "plugins/scatter"]
+members = ["crates/geom", "crates/text", "crates/scene", "crates/plugin", "crates/script", "crates/eval", "crates/render", "crates/raytrace", "crates/sim", "crates/io", "crates/ui", "plugins/gear", "plugins/wave", "plugins/scatter"]
 
 [workspace.package]
 version = "0.1.0"
@@ -37,6 +38,7 @@ grid4d-scene = { path = "crates/scene" }
 grid4d-plugin = { path = "crates/plugin" }
 grid4d-plugin-gear = { path = "plugins/gear" }
 grid4d-plugin-wave = { path = "plugins/wave" }
+grid4d-script = { path = "crates/script" }
 grid4d-plugin-scatter = { path = "plugins/scatter" }
 grid4d-eval = { path = "crates/eval" }
 grid4d-render = { path = "crates/render" }
@@ -90,6 +92,8 @@ png = "0.18"
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 half = "2.7"
 exr = "1.73"
+# Scripting (grid4d-script only): Rhai, pure Rust and sandboxed (IMPLEMENTATION_PLAN.md, D17).
+rhai = "1.27"
 
 # Text splines (grid4d-text): glyph outlines, and the typeface egui already embeds.
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }

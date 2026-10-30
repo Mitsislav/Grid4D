@@ -331,6 +331,70 @@ impl Changes {
     pub fn into_list(self) -> Vec<Change> {
         self.changes
     }
+
+    /// Applies the changes to `document` in order, all or nothing.
+    ///
+    /// # Errors
+    ///
+    /// Why a change was refused; the document is then as it was.
+    pub fn apply(self, document: &mut Document) -> Result<Applied, String> {
+        let mut applied = Applied::default();
+        for change in self.changes {
+            let result = match change {
+                Change::Insert { parent, data } => {
+                    let parent = match parent {
+                        Parent::Root => Ok(None),
+                        Parent::Object(id) => Ok(Some(id)),
+                        Parent::New(new) => applied
+                            .created
+                            .get(new.index())
+                            .map(|&id| Some(id))
+                            .ok_or_else(|| "a new object's parent is added after it".to_owned()),
+                    };
+                    parent.and_then(|parent| {
+                        let top = parent.is_none_or(|p| !applied.created.contains(&p));
+                        let edit = SceneEdit::Insert {
+                            parent,
+                            index: usize::MAX,
+                            data,
+                        };
+                        let inverse = document.apply(edit).map_err(|err| err.to_string())?;
+                        if let Some(id) = inverse.node() {
+                            applied.created.push(id);
+                            if top {
+                                applied.tops.push(id);
+                            }
+                        }
+                        Ok(inverse)
+                    })
+                }
+                Change::Edit(edit) => document.apply(edit).map_err(|err| err.to_string()),
+            };
+            match result {
+                Ok(inverse) => applied.inverses.push(inverse),
+                Err(err) => {
+                    // All or nothing: take back what was done.
+                    for inverse in applied.inverses.into_iter().rev() {
+                        let _ = document.apply(inverse);
+                    }
+                    return Err(err);
+                }
+            }
+        }
+        applied.inverses.reverse();
+        Ok(applied)
+    }
+}
+
+/// What applying [`Changes`] did.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Applied {
+    /// The inverses of the changes, in undo order (the last change's first).
+    pub inverses: Vec<SceneEdit>,
+    /// Every new object, in the order they were added.
+    pub created: Vec<NodeId>,
+    /// The new objects that are not under another new one.
+    pub tops: Vec<NodeId>,
 }
 
 /// A plugin that changes the document once, when chosen in the Plugins
@@ -781,6 +845,17 @@ mod tests {
             Change::Insert { parent: Parent::New(first), .. } if first.index() == 0
         ));
         assert!(context.mesh(some[0]).is_none());
+
+        // Applied: the child under its new parent; undone in one go.
+        let mut document = Document::new("d");
+        let applied = changes.apply(&mut document).unwrap();
+        let (a, b) = (applied.created[0], applied.created[1]);
+        assert_eq!(applied.tops, [a]);
+        assert_eq!(document.scene.children(a), [b]);
+        for inverse in applied.inverses {
+            document.apply(inverse).unwrap();
+        }
+        assert_eq!(document.scene.len(), 0);
     }
 
     #[test]

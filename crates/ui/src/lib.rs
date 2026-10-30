@@ -30,6 +30,7 @@ pub mod panels;
 pub mod preferences;
 pub mod recent;
 pub mod rendering;
+pub mod scripts;
 pub mod shortcuts;
 pub mod simulation;
 pub mod theme;

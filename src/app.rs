@@ -9,7 +9,7 @@ use grid4d_ui::{
     commands, file,
     panels::{
         about, alert, drop_overlay, menu_bar, mode_palette, optimize, plugin_command,
-        preferences as preferences_window, recovery, status_bar, toolbar, unsaved_changes,
+        preferences as preferences_window, recovery, script_manager, status_bar, toolbar, unsaved_changes,
     },
     preferences::{self, Preferences},
     recent, shortcuts,
@@ -63,6 +63,8 @@ impl Grid4DApp {
         // left is offered on the first frame.
         if let Some(dir) = eframe::storage_dir("grid4d") {
             editor.autosave = Autosave::new(dir.join("recovery"));
+            // The script library beside them (made with the examples).
+            editor.scripts = grid4d_ui::scripts::Scripts::new(dir.join("scripts"));
         }
 
         let doc = Document::with_demo_scene();
@@ -173,6 +175,7 @@ impl eframe::App for Grid4DApp {
         recovery::show(&ctx, &mut self.editor);
         optimize::show(&ctx, &mut self.editor);
         plugin_command::show(&ctx, &mut self.editor);
+        script_manager::show(&ctx, &mut self.editor);
         unsaved_changes::show(&ctx, &self.doc, &mut self.editor);
         alert::show(&ctx, &mut self.editor);
         drop_overlay::show(&ctx);

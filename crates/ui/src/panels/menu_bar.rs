@@ -521,6 +521,39 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 ui.add_enabled(false, Button::new(tr("No commands installed")));
             }
         });
+        ui.menu_button(tr("Script"), |ui| {
+            // The library's scripts: a click runs one.
+            let mut chosen = None;
+            for name in editor.scripts.names() {
+                if ui.button(name).clicked() {
+                    chosen = Some(name.clone());
+                }
+            }
+            if editor.scripts.names().is_empty() {
+                ui.add_enabled(false, Button::new(tr("No scripts in the library")));
+            }
+            if let Some(name) = chosen {
+                editor.commands.push(EditorCommand::RunLibraryScript(name));
+                ui.close();
+            }
+            ui.separator();
+            if ui
+                .button(tr("Script Manager…"))
+                .on_hover_text(tr("Edits, saves and runs scripts; shows what they print"))
+                .clicked()
+            {
+                editor.scripts.show = true;
+                ui.close();
+            }
+            if ui
+                .button(tr("Run Script File…"))
+                .on_hover_text(tr("Runs a Rhai script (.rhai) on the document: one undo step"))
+                .clicked()
+            {
+                editor.commands.push(EditorCommand::RunScriptFile);
+                ui.close();
+            }
+        });
         ui.menu_button(tr("Window"), |ui| {
             command(ui, editor, "Frame Scene", "H", EditorCommand::FrameScene);
             command(ui, editor, "Frame Selected Objects", "O", EditorCommand::FrameSelected);

@@ -46,6 +46,10 @@ pub trait FileDialogs: std::fmt::Debug {
     fn pick_render_output(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
         self.pick_save(directory, suggested)
     }
+    /// A script to run (Script ▸ Run Script File…), or `None` if cancelled.
+    fn pick_script(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
+        self.pick_open(directory)
+    }
 }
 
 /// The platform dialogs (Win32, Cocoa, XDG desktop portal), via `rfd`.
@@ -62,6 +66,13 @@ impl FileDialogs for NativeDialogs {
     fn pick_merge(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
         with_filters(with_directory(rfd::FileDialog::new(), directory))
             .set_title("Merge")
+            .pick_file()
+    }
+
+    fn pick_script(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
+        with_directory(rfd::FileDialog::new(), directory)
+            .set_title(tr("Run Script File"))
+            .add_filter(tr("Rhai Script"), &["rhai"])
             .pick_file()
     }
 
@@ -414,6 +425,19 @@ pub fn autosave(ctx: &egui::Context, doc: &Document, editor: &mut EditorState) {
 /// File ▸ Merge: adds the objects of `path` (a glTF file or a Grid4D document)
 /// to the document at the top level, as one undo step, and selects them. On
 /// error nothing changes and an alert explains why.
+/// Script ▸ Run Script File…: reads the script at `path` and runs it.
+pub(crate) fn run_script_file(path: &Path, doc: &mut Document, editor: &mut EditorState) {
+    match std::fs::read_to_string(path) {
+        Ok(source) => crate::commands::run_script(doc, editor, &source),
+        Err(err) => {
+            editor.file.alert = Some(Alert {
+                title: "Could Not Read Script",
+                message: format!("{}\n\n{err}", path.display()),
+            });
+        }
+    }
+}
+
 pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel) {
     let failed = |editor: &mut EditorState, message: String| {
         editor.file.alert = Some(Alert {

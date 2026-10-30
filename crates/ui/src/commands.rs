@@ -171,6 +171,19 @@ pub enum EditorCommand {
         type_id: String,
         options: grid4d_scene::PluginObject,
     },
+    /// Runs a script on the document: its changes as one undo step, its
+    /// output or error shown.
+    RunScript(String),
+    /// Script ▸ Run Script File…: asks for a `.rhai` file and runs it.
+    RunScriptFile,
+    /// Runs the library script of this name (Script ▸ a script).
+    RunLibraryScript(String),
+    /// The Script Manager's New: an empty script.
+    NewScript,
+    /// The Script Manager's Open: the library script of this name.
+    OpenScript(String),
+    /// The Script Manager's Save: its script into the library, under its name.
+    SaveScript,
     /// Makes a take active (`None`: Main); the view looks through its camera,
     /// if it has one.
     SwitchTake(Option<grid4d_scene::TakeId>),
@@ -566,6 +579,48 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             });
         }
         EditorCommand::RunPlugin { type_id, options } => run_plugin(doc, editor, &type_id, options),
+        EditorCommand::RunScript(source) => run_script(doc, editor, &source),
+        EditorCommand::RunLibraryScript(name) => match editor.scripts.read(&name) {
+            Ok(source) => run_script(doc, editor, &source),
+            Err(err) => {
+                editor.file.alert = Some(file::Alert {
+                    title: "Could Not Open Script",
+                    message: format!("{name}\n\n{err}"),
+                });
+            }
+        },
+        EditorCommand::NewScript => editor.scripts.new_script(),
+        EditorCommand::OpenScript(name) => {
+            if let Err(err) = editor.scripts.open(&name) {
+                editor.file.alert = Some(file::Alert {
+                    title: "Could Not Open Script",
+                    message: format!("{name}\n\n{err}"),
+                });
+            }
+        }
+        EditorCommand::SaveScript => {
+            let message = if crate::scripts::valid_name(&editor.scripts.name) {
+                editor.scripts.save().err().map(|err| err.to_string())
+            } else {
+                Some(crate::i18n::tr("Type a name for the script first (without \\ / : * ? \" < > |).").to_owned())
+            };
+            if let Some(message) = message {
+                editor.file.alert = Some(file::Alert {
+                    title: crate::scripts::COULD_NOT_SAVE,
+                    message,
+                });
+            }
+        }
+        EditorCommand::RunScriptFile => {
+            let directory = editor
+                .file
+                .path()
+                .and_then(std::path::Path::parent)
+                .map(std::path::Path::to_path_buf);
+            if let Some(path) = editor.file.dialogs.pick_script(directory.as_deref()) {
+                file::run_script_file(&path, doc, editor);
+            }
+        }
         EditorCommand::CreatePlugin { type_id, child } => {
             let registry = grid4d_plugin::registry();
             let Some(plugin) = registry.plugin(&type_id) else {
@@ -1903,7 +1958,7 @@ pub fn can_bake_current_state(doc: &Document, selection: &Selection) -> bool {
 /// An object's shape in its own space at `frame`, for command plugins: a
 /// polygon object's mesh, a generator's result, a primitive's or a
 /// generator plugin's mesh.
-fn shape_of(scene: &Scene, id: NodeId, frame: f64) -> Option<PolyMesh> {
+pub(crate) fn shape_of(scene: &Scene, id: NodeId, frame: f64) -> Option<PolyMesh> {
     let kind = scene.get(id)?.data.kind_at(frame);
     match &*kind {
         ObjectKind::Polygon { mesh, .. } => Some(mesh.mesh().clone()),
@@ -1944,76 +1999,90 @@ fn run_plugin(doc: &mut Document, editor: &mut EditorState, type_id: &str, optio
     }
 }
 
-/// Applies a command plugin's changes in order as one undo step named
-/// `label` (all or nothing) and selects the new top-level objects.
+/// The last lines of a script's output, for a message.
+fn output_text(output: &[String]) -> String {
+    const SHOWN: usize = 40;
+    let skipped = output.len().saturating_sub(SHOWN);
+    let mut text = if skipped > 0 {
+        String::from("…\n")
+    } else {
+        String::new()
+    };
+    text.push_str(&output[skipped..].join("\n"));
+    text
+}
+
+/// Runs a script (see `docs/reference/extend-scripting.md`): on a copy of the
+/// document, which becomes the document when it finishes, its edits one undo
+/// step ("Run Script"), the selection it asked for. Its output and error go to
+/// the Script Manager's console, and into a message while the Script Manager
+/// is closed. A failing script changes nothing.
+pub(crate) fn run_script(doc: &mut Document, editor: &mut EditorState, source: &str) {
+    let frame = f64::from(doc.time.frame());
+    match grid4d_script::run(doc, editor.selection.as_slice(), frame, shape_of, source) {
+        Ok(outcome) => {
+            let selection_before = editor.selection.clone();
+            let changed = !outcome.inverses.is_empty();
+            if changed {
+                *doc = outcome.document;
+            }
+            if let Some(selection) = outcome.selection {
+                editor.selection.set_all(selection);
+            }
+            editor.selection.retain_existing(&doc.scene);
+            if changed {
+                let selection_after = editor.selection.clone();
+                editor
+                    .history
+                    .record(doc, "Run Script", outcome.inverses, selection_before, selection_after);
+            }
+            if !outcome.output.is_empty() && !editor.scripts.show {
+                editor.file.alert = Some(file::Alert {
+                    title: "Script Output",
+                    message: output_text(&outcome.output),
+                });
+            }
+            editor.scripts.log(outcome.output, false);
+        }
+        Err(err) => {
+            if !editor.scripts.show {
+                let mut message = err.to_string();
+                if !err.output.is_empty() {
+                    message.push_str("\n\n");
+                    message.push_str(&output_text(&err.output));
+                }
+                editor.file.alert = Some(file::Alert {
+                    title: "Script Error",
+                    message,
+                });
+            }
+            let line = err.to_string();
+            editor.scripts.log(err.output, false);
+            editor.scripts.log([line], true);
+        }
+    }
+}
+
+/// Applies a command plugin's changes as one undo step named `label` (all or
+/// nothing) and selects the new top-level objects.
 fn apply_changes(doc: &mut Document, editor: &mut EditorState, label: &'static str, changes: grid4d_plugin::Changes) {
-    use grid4d_plugin::{Change, Parent};
     if changes.is_empty() {
         return;
     }
     let selection_before = editor.selection.clone();
-    let mut inverses = Vec::new();
-    let mut created: Vec<NodeId> = Vec::new();
-    let mut tops = Vec::new();
-    for change in changes.into_list() {
-        let edit = match change {
-            Change::Insert { parent, data } => {
-                let parent = match parent {
-                    Parent::Root => Ok(None),
-                    Parent::Object(id) => Ok(Some(id)),
-                    Parent::New(new) => created
-                        .get(new.index())
-                        .map(|&id| Some(id))
-                        .ok_or_else(|| "a new object's parent is added after it".to_owned()),
-                };
-                parent.map(|parent| {
-                    (
-                        SceneEdit::Insert {
-                            parent,
-                            index: usize::MAX,
-                            data,
-                        },
-                        parent.is_none_or(|p| !created.contains(&p)),
-                    )
-                })
+    match changes.apply(doc) {
+        Ok(applied) => {
+            if !applied.tops.is_empty() {
+                editor.selection.set_all(applied.tops);
             }
-            Change::Edit(edit) => Ok((edit, false)),
-        };
-        let applied = edit.and_then(|(edit, top)| {
-            let insert = matches!(edit, SceneEdit::Insert { .. });
-            doc.apply(edit)
-                .map(|inverse| (inverse, insert, top))
-                .map_err(|err| err.to_string())
-        });
-        match applied {
-            Ok((inverse, insert, top)) => {
-                if insert && let Some(id) = inverse.node() {
-                    created.push(id);
-                    if top {
-                        tops.push(id);
-                    }
-                }
-                inverses.push(inverse);
-            }
-            Err(err) => {
-                // All or nothing: take back what was done.
-                for inverse in inverses.into_iter().rev() {
-                    let _ = doc.apply(inverse);
-                }
-                log::warn!("{label} rejected: {err}");
-                return;
-            }
+            editor.selection.retain_existing(&doc.scene);
+            let selection_after = editor.selection.clone();
+            editor
+                .history
+                .record(doc, label, applied.inverses, selection_before, selection_after);
         }
+        Err(err) => log::warn!("{label} rejected: {err}"),
     }
-    inverses.reverse();
-    if !tops.is_empty() {
-        editor.selection.set_all(tops);
-    }
-    editor.selection.retain_existing(&doc.scene);
-    let selection_after = editor.selection.clone();
-    editor
-        .history
-        .record(doc, label, inverses, selection_before, selection_after);
 }
 
 /// Inserts the copies [`crate::current_state::bake`] makes as one undo step and
@@ -3890,6 +3959,99 @@ mod tests {
         assert_eq!(editor.selection.as_slice(), [sphere, cube]);
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
         assert_eq!(doc.scene.len(), len + 6);
+    }
+
+    #[test]
+    fn a_script_is_one_undo_step_and_a_failing_one_changes_nothing() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let (len, steps) = (doc.scene.len(), editor.history.undo_len());
+        let grid = r#"
+            for i in 0..4 {
+                let cube = create("Cube");
+                cube.position = [i * 300, 0, 0];
+                cube.color = [1, 0, 0];
+            }
+            select(find("Sphere"));
+            print("done");
+        "#;
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::RunScript(grid.to_owned())],
+        );
+        assert_eq!(doc.scene.len(), len + 4);
+        assert_eq!(editor.history.undo_len(), steps + 1, "one step");
+        assert_eq!(editor.selection.as_slice(), [id_of(&doc, "Sphere")]);
+        let alert = editor.file.alert.take().unwrap();
+        assert_eq!((alert.title, alert.message.as_str()), ("Script Output", "done"));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.len(), len, "all of it undone");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        assert_eq!(doc.scene.len(), len + 4);
+
+        // An error: nothing changes, the message says where.
+        let before = doc.scene.len();
+        let steps = editor.history.undo_len();
+        let failing = "create(\"Cube\");\nlet o = find(\"Nobody\");\no.name = \"x\";".to_owned();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::RunScript(failing)]);
+        assert_eq!((doc.scene.len(), editor.history.undo_len()), (before, steps));
+        let alert = editor.file.alert.take().unwrap();
+        assert_eq!(alert.title, "Script Error");
+        assert!(alert.message.starts_with("Line 3, column"), "{}", alert.message);
+
+        // A script that only reads: no step, no change.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::RunScript("let n = objects().len();".to_owned())],
+        );
+        assert_eq!(editor.history.undo_len(), steps);
+        assert!(editor.file.alert.is_none());
+    }
+
+    #[test]
+    fn with_the_script_manager_open_output_and_errors_go_to_its_console() {
+        let (mut doc, mut editor, mut vp) = demo();
+        editor.scripts.show = true;
+        let script = |s: &str| EditorCommand::RunScript(s.to_owned());
+        run(&mut doc, &mut editor, &mut vp, &[script("print(\"hello\");")]);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[script("print(\"before\");\nlet o = find(\"Nobody\");\no.name = \"x\";")],
+        );
+        assert!(editor.file.alert.is_none(), "no messages");
+        let console: Vec<(&str, bool)> = editor
+            .scripts
+            .console()
+            .iter()
+            .map(|l| (l.text.as_str(), l.error))
+            .collect();
+        assert_eq!(console[..2], [("hello", false), ("before", false)][..]);
+        assert!(console[2].1 && console[2].0.starts_with("Line 3"), "{console:?}");
+
+        // Saving needs a name; the library runs by name.
+        editor.scripts.name = "a/b".to_owned();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SaveScript]);
+        assert!(
+            editor
+                .file
+                .alert
+                .take()
+                .is_some_and(|a| a.title == crate::scripts::COULD_NOT_SAVE)
+        );
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::RunLibraryScript("Missing".to_owned())],
+        );
+        assert!(editor.file.alert.take().is_some(), "no library: cannot open");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::NewScript]);
+        assert!(editor.scripts.name.is_empty() && !editor.scripts.is_dirty());
     }
 
     #[test]
