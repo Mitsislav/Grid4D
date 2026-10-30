@@ -150,6 +150,8 @@ pub struct Preferences {
     /// How often, in minutes.
     pub autosave_minutes: u32,
     pub views: ViewDefaults,
+    /// The interface's colours.
+    pub theme: crate::theme::ColorTheme,
 }
 
 impl Default for Preferences {
@@ -160,6 +162,7 @@ impl Default for Preferences {
             autosave: true,
             autosave_minutes: 5,
             views: ViewDefaults::default(),
+            theme: crate::theme::ColorTheme::default(),
         }
     }
 }
@@ -282,6 +285,7 @@ mod tests {
                 world_axis: true,
                 hud: false,
             },
+            theme: crate::theme::ColorTheme::Light,
         };
         let text = serde_json::to_string(&preferences).unwrap();
         assert_eq!(serde_json::from_str::<Preferences>(&text).unwrap(), preferences);
@@ -294,6 +298,7 @@ mod tests {
         assert_eq!(other.units, Units::Centimetres);
         assert_eq!((other.undo_depth, other.autosave_minutes), (1, 120));
         assert_eq!(other.views, ViewDefaults::default());
+        assert_eq!(other.theme, crate::theme::ColorTheme::Dark);
         assert_eq!(Preferences::default().autosave_interval(), Some(300.0));
     }
 }

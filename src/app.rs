@@ -34,8 +34,6 @@ pub struct Grid4DApp {
 impl Grid4DApp {
     /// `open`: a document to open instead of the demo scene (from the command line).
     pub fn new(cc: &eframe::CreationContext<'_>, open: Option<std::path::PathBuf>) -> Self {
-        theme::apply(&cc.egui_ctx);
-
         let render_state = cc.wgpu_render_state.as_ref();
         let mut viewport = ViewportPanel::new(render_state);
 
@@ -59,6 +57,7 @@ impl Grid4DApp {
         {
             editor.preferences = stored.checked();
         }
+        theme::apply(&cc.egui_ctx, editor.preferences.theme);
         viewport.apply_defaults(&editor.preferences.views);
         // Recovery copies live beside the stored settings; one a crashed run
         // left is offered on the first frame.
@@ -131,6 +130,7 @@ impl eframe::App for Grid4DApp {
         let ctx = ui.ctx().clone();
         self.window_fit.check(&ctx);
         preferences::set_units(&ctx, self.editor.preferences.units);
+        theme::follow(&ctx, self.editor.preferences.theme);
         shortcuts::handle(&ctx, &mut self.doc, &mut self.editor);
         file::accept_dropped_files(&ctx, &mut self.editor);
 

@@ -128,7 +128,7 @@ impl TimelinePanel {
     fn ruler(&mut self, ui: &mut Ui, rect: Rect, scale: FrameScale, time: &mut TimeState, editor: &mut EditorState) {
         let response = ui.interact(rect, egui::Id::unique("grid4d.timeline.ruler"), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, CornerRadius::ZERO, p::BG_WELL);
+        painter.rect_filled(rect, CornerRadius::ZERO, p().bg_well);
         let (start, end, px_per_frame) = (scale.start, scale.end, scale.px_per_frame);
 
         // Pick a label step that keeps labels ≥ 44 px apart, and a tick step under it.
@@ -148,7 +148,7 @@ impl TimelinePanel {
             let x = scale.x(f64::from(f));
             let major = f % label_step == 0;
             let tick_h = if major { 9.0 } else { 4.0 };
-            let color = if major { p::TEXT_FAINT } else { p::SEPARATOR };
+            let color = if major { p().text_faint } else { p().separator };
             painter.line_segment(
                 [pos2(x, rect.bottom() - tick_h), pos2(x, rect.bottom())],
                 Stroke::new(1.0, color),
@@ -159,7 +159,7 @@ impl TimelinePanel {
                     Align2::LEFT_TOP,
                     f,
                     small.clone(),
-                    p::TEXT_DIM,
+                    p().text_dim,
                 );
             }
             f += tick_step;
@@ -173,7 +173,7 @@ impl TimelinePanel {
                     scale.x(f64::from(from))..=scale.x(f64::from(to)).max(scale.x(f64::from(from)) + 2.0),
                     rect.bottom() - 3.0..=rect.bottom(),
                 );
-                painter.rect_filled(bar, CornerRadius::ZERO, p::SIM_CACHE);
+                painter.rect_filled(bar, CornerRadius::ZERO, p().sim_cache);
             }
         }
 
@@ -181,12 +181,12 @@ impl TimelinePanel {
         let x = scale.x(time.frame_f64().clamp(f64::from(start), f64::from(end)));
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(1.5, p::ACCENT),
+            Stroke::new(1.5, p().accent),
         );
-        let label = painter.layout_no_wrap(time.frame().to_string(), small, p::TEXT_STRONG);
+        let label = painter.layout_no_wrap(time.frame().to_string(), small, p().text_strong);
         let tag = Rect::from_center_size(pos2(x, rect.bottom() - 8.0), label.size() + vec2(10.0, 3.0));
-        painter.rect_filled(tag, CornerRadius::same(2), p::ACCENT);
-        painter.galley(tag.center() - label.size() * 0.5, label, p::TEXT_STRONG);
+        painter.rect_filled(tag, CornerRadius::same(2), p().accent);
+        painter.galley(tag.center() - label.size() * 0.5, label, p().text_strong);
 
         // Scrubbing.
         if (response.clicked() || response.dragged())
@@ -357,10 +357,10 @@ impl TimelinePanel {
 
     fn paint_keys(&self, ui: &Ui, rect: Rect, scale: FrameScale, playhead: f32, editor: &EditorState) {
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, CornerRadius::ZERO, p::BG_HEADER);
+        painter.rect_filled(rect, CornerRadius::ZERO, p().bg_header);
         painter.line_segment(
             [pos2(playhead, rect.top()), pos2(playhead, rect.bottom())],
-            Stroke::new(1.5, p::ACCENT),
+            Stroke::new(1.5, p().accent),
         );
         let moved = match self.key_drag {
             Some(KeyDrag::Move { by, .. }) => by,
@@ -372,7 +372,7 @@ impl TimelinePanel {
             painter.rect_stroke(
                 r,
                 CornerRadius::same(1),
-                Stroke::new(1.0, p::BORDER),
+                Stroke::new(1.0, p().border),
                 StrokeKind::Outside,
             );
         };
@@ -380,28 +380,28 @@ impl TimelinePanel {
             let selected = editor.keys.contains(frame);
             if selected && moved != 0 {
                 // Where it was, faintly; where it goes, below.
-                mark(scale.x(frame), p::KEY.gamma_multiply(0.3));
+                mark(scale.x(frame), p().key.gamma_multiply(0.3));
                 continue;
             }
             if scale.shows(frame) {
-                mark(scale.x(frame), if selected { p::HIGHLIGHT } else { p::KEY });
+                mark(scale.x(frame), if selected { p().highlight } else { p().key });
             }
         }
         if moved != 0 {
             for &frame in &editor.keys.frames {
                 let to = frame + f64::from(moved);
                 if scale.shows(to) {
-                    mark(scale.x(to), p::HIGHLIGHT);
+                    mark(scale.x(to), p().highlight);
                 }
             }
         }
         if let Some(KeyDrag::Select { from, to, .. }) = self.key_drag {
             let band = Rect::from_min_max(pos2(from.min(to), rect.top()), pos2(from.max(to), rect.bottom()));
-            painter.rect_filled(band, CornerRadius::ZERO, p::ACCENT.gamma_multiply(0.25));
+            painter.rect_filled(band, CornerRadius::ZERO, p().accent.gamma_multiply(0.25));
             painter.rect_stroke(
                 band,
                 CornerRadius::ZERO,
-                Stroke::new(1.0, p::ACCENT),
+                Stroke::new(1.0, p().accent),
                 StrokeKind::Inside,
             );
         }
@@ -440,7 +440,7 @@ fn transport(ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {
         }
         ui.label(
             RichText::new(format!("{:.2} s", time.seconds()))
-                .color(p::TEXT_DIM)
+                .color(p().text_dim)
                 .size(11.5),
         );
     });
@@ -482,7 +482,7 @@ fn transport(ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {
         };
         let play_style = IconStyle {
             selected: forward,
-            tint: Some(if forward { p::TEXT_STRONG } else { p::ENABLED }),
+            tint: Some(if forward { p().text_strong } else { p().enabled }),
             ..style
         };
         if icon_button(ui, icon, play_style, tip).clicked() {
@@ -498,7 +498,7 @@ fn transport(ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {
         ui.add_space(GAP);
         let record = IconStyle {
             enabled: !editor.selection.is_empty(),
-            tint: Some(p::RECORD),
+            tint: Some(p().record),
             ..style
         };
         if icon_button(
@@ -514,7 +514,7 @@ fn transport(ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {
         let autokey = editor.animation.autokey;
         let autokey_style = IconStyle {
             selected: autokey,
-            tint: Some(if autokey { p::RECORD } else { p::TEXT }),
+            tint: Some(if autokey { p().record } else { p().text }),
             ..style
         };
         if icon_button(
@@ -561,7 +561,7 @@ fn transport(ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {
                 .add_sized([58.0, 20.0], DragValue::new(&mut end).speed(0.25).suffix(" F"))
                 .on_hover_text("Preview max")
                 .changed();
-            ui.label(RichText::new("to").color(p::TEXT_DIM));
+            ui.label(RichText::new("to").color(p().text_dim));
             let start_changed = ui
                 .add_sized([58.0, 20.0], DragValue::new(&mut start).speed(0.25).suffix(" F"))
                 .on_hover_text("Preview min")

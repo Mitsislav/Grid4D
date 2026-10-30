@@ -36,7 +36,7 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
         group_gap(ui);
 
         for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
-            axis_toggle(ui, &mut editor.axes[axis], label, p::AXIS[axis]);
+            axis_toggle(ui, &mut editor.axes[axis], label, p().axis[axis]);
         }
         let (icon, tip) = if editor.world_coordinates {
             (Icon::CoordWorld, "Coordinate System: World (click for Object)")
@@ -204,9 +204,9 @@ fn axis_toggle(ui: &mut Ui, enabled: &mut bool, label: &'static str, color: egui
     let (rect, response) = ui.allocate_exact_size(vec2(22.0, metrics::ICON_BUTTON), Sense::click());
     let painter = ui.painter();
     if response.hovered() {
-        painter.rect_filled(rect.shrink(1.0), CornerRadius::same(3), p::BG_HOVER);
+        painter.rect_filled(rect.shrink(1.0), CornerRadius::same(3), p().bg_hover);
     }
-    let text_color = if *enabled { color } else { p::TEXT_FAINT };
+    let text_color = if *enabled { color } else { p().text_faint };
     painter.text(
         rect.center(),
         Align2::CENTER_CENTER,

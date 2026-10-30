@@ -78,7 +78,7 @@ impl OutlinerPanel {
         self.actions.clear();
         self.drop_target = None;
 
-        egui::Frame::new().fill(p::BG_PANEL).show(ui, |ui| {
+        egui::Frame::new().fill(p().bg_panel).show(ui, |ui| {
             ScrollArea::vertical()
                 .id_salt("grid4d.outliner.scroll")
                 .auto_shrink([false; 2])
@@ -156,7 +156,7 @@ impl OutlinerPanel {
         egui::Frame::new().inner_margin(Margin::symmetric(6, 3)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
-                icons::paint(ui.painter(), rect, Icon::NavZoom, p::TEXT_DIM);
+                icons::paint(ui.painter(), rect, Icon::NavZoom, p().text_dim);
                 ui.add(
                     TextEdit::singleline(&mut self.filter)
                         .hint_text("Search objects")
@@ -193,13 +193,13 @@ impl OutlinerPanel {
         // Background.
         if selected {
             let fill = if active {
-                p::ACCENT_BG
+                p().accent_bg
             } else {
-                p::ACCENT_BG.gamma_multiply(0.65)
+                p().accent_bg.gamma_multiply(0.65)
             };
             painter.rect_filled(rect, CornerRadius::ZERO, fill);
         } else if response.hovered() {
-            painter.rect_filled(rect, CornerRadius::ZERO, p::BG_HOVER.gamma_multiply(0.55));
+            painter.rect_filled(rect, CornerRadius::ZERO, p().bg_hover.gamma_multiply(0.55));
         }
 
         // A material from the Material Manager: dropped on this row assigns it.
@@ -209,7 +209,7 @@ impl OutlinerPanel {
             painter.rect_stroke(
                 rect.shrink(1.0),
                 CornerRadius::same(2),
-                Stroke::new(1.5, p::HIGHLIGHT),
+                Stroke::new(1.5, p().highlight),
                 StrokeKind::Inside,
             );
             if ui.input(|i| i.pointer.any_released()) {
@@ -227,7 +227,7 @@ impl OutlinerPanel {
             painter.rect_stroke(
                 rect.shrink(1.0),
                 CornerRadius::same(2),
-                Stroke::new(1.5, p::ACCENT),
+                Stroke::new(1.5, p().accent),
                 StrokeKind::Inside,
             );
         }
@@ -247,7 +247,7 @@ impl OutlinerPanel {
                 &painter,
                 fold_rect,
                 icon,
-                if fold.hovered() { p::TEXT_STRONG } else { p::TEXT_DIM },
+                if fold.hovered() { p().text_strong } else { p().text_dim },
             );
             if fold.clicked() {
                 self.actions.push(RowAction::ToggleFold(id));
@@ -261,7 +261,7 @@ impl OutlinerPanel {
         if tag == ObjectKindTag::Camera {
             let linked = editor.view_camera == Some(id);
             if linked {
-                painter.rect_filled(icon_rect.expand(2.0), CornerRadius::same(3), p::ACCENT);
+                painter.rect_filled(icon_rect.expand(2.0), CornerRadius::same(3), p().accent);
             }
             let hit = ui
                 .interact(icon_rect, ui.scope_id().with(("camera", id)), Sense::click())
@@ -292,11 +292,11 @@ impl OutlinerPanel {
                 painter.rect_stroke(
                     icon_rect.expand(1.5),
                     CornerRadius::same(2),
-                    Stroke::new(1.5, p::HIGHLIGHT),
+                    Stroke::new(1.5, p().highlight),
                     StrokeKind::Inside,
                 );
             }
-            let color = if hit.hovered() { p::TEXT_STRONG } else { p::TAG };
+            let color = if hit.hovered() { p().text_strong } else { p().tag };
             // A Material tag shows its material's colour.
             let material = match tag {
                 Tag::Material { material } => material.and_then(|m| scene.materials().get(m).map(|mat| (m, mat))),
@@ -348,9 +348,9 @@ impl OutlinerPanel {
             }
         } else {
             let color = match (selected, node.data.enabled) {
-                (_, false) => p::TEXT_FAINT,
-                (true, true) => p::TEXT_STRONG,
-                (false, true) => p::TEXT,
+                (_, false) => p().text_faint,
+                (true, true) => p().text_strong,
+                (false, true) => p().text,
             };
             ui.painter_at(name_rect).text(
                 pos2(name_rect.left(), cy),
@@ -373,7 +373,7 @@ impl OutlinerPanel {
                 ui.scope_id().with(("vis", id, offset.to_bits())),
                 Sense::click(),
             );
-            let color = if visible { p::VIS_DEFAULT } else { p::VIS_HIDDEN };
+            let color = if visible { p().vis_default } else { p().vis_hidden };
             painter.circle_filled(center, if hit.hovered() { 3.4 } else { 2.8 }, color);
             if hit
                 .on_hover_text("Visibility (upper: editor, lower: renderer)")
@@ -387,9 +387,9 @@ impl OutlinerPanel {
         let check_rect = Rect::from_center_size(pos2(rect.right() - 14.0, cy), Vec2::splat(13.0));
         let check = ui.interact(check_rect, ui.scope_id().with(("enabled", id)), Sense::click());
         let (icon, color) = if node.data.enabled {
-            (Icon::Check, p::ENABLED)
+            (Icon::Check, p().enabled)
         } else {
-            (Icon::Cross, p::VIS_HIDDEN)
+            (Icon::Cross, p().vis_hidden)
         };
         icons::paint(&painter, check_rect, icon, color);
         if check.on_hover_text("Enable / disable object").clicked() {
@@ -450,7 +450,7 @@ impl OutlinerPanel {
             self.drop_target = Some(DropTarget::Root);
             ui.painter().line_segment(
                 [rect.left_top() + vec2(4.0, 1.0), rect.right_top() + vec2(-4.0, 1.0)],
-                Stroke::new(2.0, p::ACCENT),
+                Stroke::new(2.0, p().accent),
             );
         }
     }
@@ -463,10 +463,10 @@ impl OutlinerPanel {
             let painter = ui
                 .ctx()
                 .layer_painter(LayerId::new(Order::Tooltip, Id::unique("grid4d.outliner.drag")));
-            let text = painter.layout_no_wrap(node.data.name.clone(), FontId::proportional(12.0), p::TEXT_STRONG);
+            let text = painter.layout_no_wrap(node.data.name.clone(), FontId::proportional(12.0), p().text_strong);
             let bg = Rect::from_min_size(pointer + vec2(14.0, 6.0), text.size() + vec2(10.0, 4.0));
-            painter.rect_filled(bg, CornerRadius::same(3), p::ACCENT_BG);
-            painter.galley(bg.min + vec2(5.0, 2.0), text, p::TEXT_STRONG);
+            painter.rect_filled(bg, CornerRadius::same(3), p().accent_bg);
+            painter.galley(bg.min + vec2(5.0, 2.0), text, p().text_strong);
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         }
 

@@ -159,7 +159,7 @@ impl AttributesPanel {
             ui.label(
                 RichText::new(format!("Material [{}]", material.name))
                     .strong()
-                    .color(p::TEXT_STRONG),
+                    .color(p().text_strong),
             );
         });
         section_heading(ui, "Material");
@@ -197,7 +197,7 @@ impl AttributesPanel {
         ui.add_space(4.0);
         ui.label(
             RichText::new("The viewport shows the colour; roughness, metallic and luminance shade it from Phase 7")
-                .color(p::TEXT_DIM),
+                .color(p().text_dim),
         );
         if doc.scene.materials().get(id).is_some_and(|m| *m != material)
             && let Some(m) = doc.scene.materials_mut().get_mut(id)
@@ -234,11 +234,11 @@ impl AttributesPanel {
             // Title: "Phong Tag [Cube]"
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                icons::paint(ui.painter(), rect, Icon::Tag(kind), p::TAG);
+                icons::paint(ui.painter(), rect, Icon::Tag(kind), p().tag);
                 ui.label(
                     RichText::new(format!("{} Tag [{}]", kind.label(), data.name))
                         .strong()
-                        .color(p::TEXT_STRONG),
+                        .color(p().text_strong),
                 );
             });
             ui.add_space(4.0);
@@ -257,10 +257,10 @@ impl AttributesPanel {
             ui.label(
                 RichText::new(format!("{} Object [{}]", data.kind.label(), data.name))
                     .strong()
-                    .color(p::TEXT_STRONG),
+                    .color(p().text_strong),
             );
             if selection_len > 1 {
-                ui.label(RichText::new(format!("+{} more", selection_len - 1)).color(p::TEXT_DIM));
+                ui.label(RichText::new(format!("+{} more", selection_len - 1)).color(p().text_dim));
             }
         });
         ui.add_space(4.0);
@@ -478,10 +478,10 @@ enum KeyClick {
 fn key_button(ui: &mut Ui, state: KeyState) -> Option<KeyClick> {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(11.0), Sense::click());
     let (color, filled) = match state {
-        KeyState::Unanimated => (p::TEXT_FAINT, false),
-        KeyState::Track => (p::RECORD, false),
-        KeyState::Key => (p::RECORD, true),
-        KeyState::Changed { key } => (p::KEY_CHANGED, key),
+        KeyState::Unanimated => (p().text_faint, false),
+        KeyState::Track => (p().record, false),
+        KeyState::Key => (p().record, true),
+        KeyState::Changed { key } => (p().key_changed, key),
     };
     let color = if response.hovered() {
         color.gamma_multiply(1.4)
@@ -605,7 +605,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
             ObjectKind::Null => {
                 ui.label(
                     RichText::new("A Null groups objects. Drag objects onto it in the Object Manager.")
-                        .color(p::TEXT_DIM),
+                        .color(p().text_dim),
                 );
                 ui.end_row();
             }
@@ -785,7 +785,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
                     });
                 ui.end_row();
                 ui.label("");
-                ui.label(RichText::new("Smooths its first child (the cage)").color(p::TEXT_DIM));
+                ui.label(RichText::new("Smooths its first child (the cage)").color(p().text_dim));
                 ui.end_row();
             }
             ObjectKind::Extrude {
@@ -854,7 +854,7 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
     ui.label(
         RichText::new(format!("{} [Tool]", tool.label()))
             .strong()
-            .color(p::TEXT_STRONG),
+            .color(p().text_strong),
     );
     section_heading(ui, "Options");
     let s = &mut editor.selection_settings;
@@ -889,14 +889,14 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 ui.add(
                     egui::Label::new(
                         RichText::new("With nothing selected, drag a point, edge or polygon to move just it")
-                            .color(p::TEXT_DIM),
+                            .color(p().text_dim),
                     )
                     .wrap(),
                 );
                 ui.end_row();
             }
             Tool::Scale | Tool::Rotate => {
-                ui.label(RichText::new("This tool has no options yet.").color(p::TEXT_DIM));
+                ui.label(RichText::new("This tool has no options yet.").color(p().text_dim));
                 ui.end_row();
             }
             Tool::Extrude => {
@@ -968,7 +968,7 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 check_row(ui, "Delete Original Polygons", &mut m.delete_originals);
             }
             Tool::Weld => {
-                ui.label(RichText::new("No options").color(p::TEXT_DIM));
+                ui.label(RichText::new("No options").color(p().text_dim));
                 ui.end_row();
             }
             Tool::Pen => {
@@ -1008,13 +1008,13 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
         {
             editor.commands.push(EditorCommand::BridgeSelected);
         }
-        ui.label(RichText::new("Or drag from one polygon or border edge to another").color(p::TEXT_DIM));
+        ui.label(RichText::new("Or drag from one polygon or border edge to another").color(p().text_dim));
     }
     if tool == Tool::Weld {
         ui.add_space(6.0);
         ui.label(
             RichText::new("Click one of the selected points to weld onto it, anywhere else for their centre")
-                .color(p::TEXT_DIM),
+                .color(p().text_dim),
         );
     }
     if tool.is_cut_tool() {
@@ -1023,7 +1023,7 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
             Tool::LoopCut => "Hover an edge to see the loop, click to cut it",
             _ => "Drag a line across the object; release cuts, Esc cancels",
         };
-        ui.label(RichText::new(how).color(p::TEXT_DIM));
+        ui.label(RichText::new(how).color(p().text_dim));
     }
     if tool.is_mesh_tool() {
         ui.add_space(6.0);
@@ -1037,7 +1037,9 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
         {
             editor.commands.push(EditorCommand::ApplyMeshTool);
         }
-        ui.label(RichText::new("Or drag left/right in the viewport: every drag is a new operation").color(p::TEXT_DIM));
+        ui.label(
+            RichText::new("Or drag left/right in the viewport: every drag is a new operation").color(p().text_dim),
+        );
     }
 }
 
@@ -1055,7 +1057,7 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
                     angle_row(ui, k, "Phong Angle", angle, 0.0..=180.0);
                 } else {
                     attr_label(ui, "Phong Angle", LABEL_WIDTH);
-                    ui.label(RichText::new("no limit (180°)").color(p::TEXT_DIM));
+                    ui.label(RichText::new("no limit (180°)").color(p().text_dim));
                     ui.end_row();
                 }
             }
@@ -1089,7 +1091,7 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
         },
     };
     ui.add_space(4.0);
-    ui.label(RichText::new(hint).color(p::TEXT_DIM));
+    ui.label(RichText::new(hint).color(p().text_dim));
 }
 
 /// A Dynamics tag: how the body moves, its shape, its surface and mass, its
@@ -1269,7 +1271,7 @@ fn snap_section(ui: &mut Ui, snap: &mut crate::SnapSettings) {
                 check_row(ui, kind.label(), snap.targets.flag_mut(kind));
             }
         });
-    ui.label(RichText::new("The gizmo's centre (or the tweaked element) snaps while you move it").color(p::TEXT_DIM));
+    ui.label(RichText::new("The gizmo's centre (or the tweaked element) snaps while you move it").color(p().text_dim));
 }
 
 /// A length that may be negative (a tool's offset).
@@ -1645,7 +1647,7 @@ fn extrude_rows(ui: &mut Ui, k: &mut KeyRows, extrusion: &mut Extrusion, hierarc
         &mut extrusion.cap_type,
     );
     ui.label("");
-    ui.label(RichText::new("Extrudes its first child spline").color(p::TEXT_DIM));
+    ui.label(RichText::new("Extrudes its first child spline").color(p().text_dim));
     ui.end_row();
 }
 
@@ -1668,7 +1670,7 @@ fn lathe_rows(ui: &mut Ui, k: &mut KeyRows, lathe: &mut Lathe) {
     ui.end_row();
     cap_rows(ui, &mut lathe.start_cap, &mut lathe.end_cap, &mut lathe.cap_type);
     ui.label("");
-    ui.label(RichText::new("Turns its first child spline around Y").color(p::TEXT_DIM));
+    ui.label(RichText::new("Turns its first child spline around Y").color(p().text_dim));
     ui.end_row();
 }
 
@@ -1687,7 +1689,7 @@ fn sweep_rows(ui: &mut Ui, k: &mut KeyRows, sweep: &mut Sweep) {
     ui.end_row();
     cap_rows(ui, &mut sweep.start_cap, &mut sweep.end_cap, &mut sweep.cap_type);
     ui.label("");
-    ui.label(RichText::new("Child 1: profile; child 2: path").color(p::TEXT_DIM));
+    ui.label(RichText::new("Child 1: profile; child 2: path").color(p().text_dim));
     ui.end_row();
 }
 
@@ -1785,7 +1787,7 @@ fn cloner_rows(
         }
     }
     ui.label("");
-    ui.label(RichText::new("Clones repeat its children").color(p::TEXT_DIM));
+    ui.label(RichText::new("Clones repeat its children").color(p().text_dim));
     ui.end_row();
 }
 
@@ -1883,7 +1885,7 @@ fn effector_rows(ui: &mut Ui, k: &mut KeyRows, effector: &mut Effector, random: 
         }
     }
     ui.label("");
-    ui.label(RichText::new("Add it to a Cloner's Effectors").color(p::TEXT_DIM));
+    ui.label(RichText::new("Add it to a Cloner's Effectors").color(p().text_dim));
     ui.end_row();
 }
 
@@ -1973,7 +1975,7 @@ fn fit_row(ui: &mut Ui, k: &mut KeyRows, hint: &str) {
     }
     ui.end_row();
     ui.label("");
-    ui.label(RichText::new(hint).color(p::TEXT_DIM));
+    ui.label(RichText::new(hint).color(p().text_dim));
     ui.end_row();
 }
 
@@ -2050,7 +2052,7 @@ fn loft_rows(ui: &mut Ui, loft: &mut Loft) {
     ui.end_row();
     cap_rows(ui, &mut loft.start_cap, &mut loft.end_cap, &mut loft.cap_type);
     ui.label("");
-    ui.label(RichText::new("A skin over its child splines").color(p::TEXT_DIM));
+    ui.label(RichText::new("A skin over its child splines").color(p().text_dim));
     ui.end_row();
 }
 
@@ -2105,7 +2107,7 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
     ui.label(
         RichText::new(format!("Project [{}]", doc.name))
             .strong()
-            .color(p::TEXT_STRONG),
+            .color(p().text_strong),
     );
     section_heading(ui, "Project Settings");
     let time = &mut doc.time;
@@ -2198,7 +2200,7 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
             ui.end_row();
         });
     ui.add_space(8.0);
-    ui.label(RichText::new("Select an object to edit its attributes.").color(p::TEXT_DIM));
+    ui.label(RichText::new("Select an object to edit its attributes.").color(p().text_dim));
 }
 
 /// A segment count, from `min` up to what the geometry generators accept.
@@ -2284,7 +2286,7 @@ fn length_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
 }
 
 fn small_label(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).color(p::TEXT_DIM).size(11.5));
+    ui.label(RichText::new(text).color(p().text_dim).size(11.5));
 }
 
 #[cfg(test)]

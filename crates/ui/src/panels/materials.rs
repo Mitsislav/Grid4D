@@ -64,7 +64,7 @@ impl MaterialsPanel {
                 egui::Align2::CENTER_CENTER,
                 "No materials: double-click here or press Ctrl+N to make one",
                 FontId::proportional(12.5),
-                p::TEXT_DIM,
+                p().text_dim,
             );
         }
         // Empty space: a click clears the selection, a double-click makes a material.
@@ -142,26 +142,26 @@ fn cell(ui: &mut Ui, doc: &Document, editor: &mut EditorState, id: MaterialId) -
     let selected = editor.materials.selected == Some(id);
     let painter = ui.painter();
     if selected {
-        painter.rect_filled(rect, CornerRadius::same(3), p::ACCENT_BG);
+        painter.rect_filled(rect, CornerRadius::same(3), p().accent_bg);
         painter.rect_stroke(
             rect,
             CornerRadius::same(3),
-            Stroke::new(1.0, p::ACCENT),
+            Stroke::new(1.0, p().accent),
             StrokeKind::Inside,
         );
     } else if response.hovered() {
-        painter.rect_filled(rect, CornerRadius::same(3), p::BG_HOVER);
+        painter.rect_filled(rect, CornerRadius::same(3), p().bg_hover);
     }
     let ball = Rect::from_center_size(pos2(rect.center().x, rect.top() + 4.0 + BALL * 0.5), vec2(BALL, BALL));
     icons::paint_material_ball(painter, ball, material.color);
     let name = painter.layout(
         material.name.clone(),
         FontId::proportional(11.5),
-        if selected { p::TEXT_STRONG } else { p::TEXT },
+        if selected { p().text_strong } else { p().text },
         CELL - 4.0,
     );
     let at = pos2(rect.center().x - name.size().x * 0.5, ball.bottom() + 3.0);
-    painter.with_clip_rect(rect).galley(at, name, p::TEXT);
+    painter.with_clip_rect(rect).galley(at, name, p().text);
 
     if response.drag_started() {
         editor.materials.drag = Some(MaterialDrag { material: id });

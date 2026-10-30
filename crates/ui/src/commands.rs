@@ -2041,15 +2041,15 @@ fn has_selected_ancestor(scene: &Scene, selection: &Selection, id: NodeId) -> bo
 #[must_use]
 pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
     match tag {
-        ObjectKindTag::Null => palette::ICON_NULL,
-        ObjectKindTag::Camera => palette::ICON_CAMERA,
-        ObjectKindTag::Light => palette::ICON_LIGHT,
+        ObjectKindTag::Null => palette().icon_null,
+        ObjectKindTag::Camera => palette().icon_camera,
+        ObjectKindTag::Light => palette().icon_light,
         ObjectKindTag::SubdivisionSurface
         | ObjectKindTag::Extrude
         | ObjectKindTag::Lathe
         | ObjectKindTag::Sweep
         | ObjectKindTag::Loft
-        | ObjectKindTag::Cloner => palette::ICON_GENERATOR,
+        | ObjectKindTag::Cloner => palette().icon_generator,
         ObjectKindTag::Circle
         | ObjectKindTag::Rectangle
         | ObjectKindTag::Arc
@@ -2058,13 +2058,13 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Helix
         | ObjectKindTag::Flower
         | ObjectKindTag::Text
-        | ObjectKindTag::Spline => palette::ICON_SPLINE,
+        | ObjectKindTag::Spline => palette().icon_spline,
         ObjectKindTag::Bend
         | ObjectKindTag::Twist
         | ObjectKindTag::Taper
         | ObjectKindTag::Bulge
-        | ObjectKindTag::Ffd => palette::ICON_DEFORMER,
-        ObjectKindTag::PlainEffector | ObjectKindTag::RandomEffector => palette::ICON_EFFECTOR,
+        | ObjectKindTag::Ffd => palette().icon_deformer,
+        ObjectKindTag::PlainEffector | ObjectKindTag::RandomEffector => palette().icon_effector,
         ObjectKindTag::Cube
         | ObjectKindTag::Sphere
         | ObjectKindTag::Cylinder
@@ -2073,7 +2073,7 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Torus
         | ObjectKindTag::Disc
         | ObjectKindTag::Capsule
-        | ObjectKindTag::Polygon => palette::ICON_PRIMITIVE,
+        | ObjectKindTag::Polygon => palette().icon_primitive,
     }
 }
 

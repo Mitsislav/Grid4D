@@ -141,13 +141,13 @@ impl RenderSettingsPanel {
     fn page_list(&mut self, ui: &mut Ui) {
         // A well of its own height (a separator would stretch the window).
         Frame::new()
-            .fill(p::BG_WELL)
+            .fill(p().bg_well)
             .inner_margin(4)
             .corner_radius(3)
             .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.set_width(PAGE_LIST_WIDTH);
-                    ui.label(RichText::new("Path Tracer").size(11.0).color(p::TEXT_DIM));
+                    ui.label(RichText::new("Path Tracer").size(11.0).color(p().text_dim));
                     ui.add_space(2.0);
                     for page in Page::ALL {
                         let button =
@@ -209,7 +209,7 @@ fn output_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, ratio: (u3
             ui.checkbox(&mut s.lock_ratio, "");
             ui.end_row();
             attr_label(ui, "Aspect", LABEL_WIDTH);
-            ui.label(RichText::new(aspect_text(s.width, s.height)).color(p::TEXT_DIM));
+            ui.label(RichText::new(aspect_text(s.width, s.height)).color(p().text_dim));
             ui.end_row();
         });
 
@@ -268,13 +268,13 @@ fn output_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, ratio: (u3
             attr_label(ui, "Frames", LABEL_WIDTH);
             let count = s.frame_count(time);
             let span = s.frame_span(time);
-            ui.label(RichText::new(format!("{count} (from {} to {})", span.start(), span.end())).color(p::TEXT_DIM));
+            ui.label(RichText::new(format!("{count} (from {} to {})", span.start(), span.end())).color(p().text_dim));
             ui.end_row();
         });
     ui.label(
         RichText::new("Render to Picture Viewer renders every frame of the range; the Render View the current one.")
             .size(11.0)
-            .color(p::TEXT_FAINT),
+            .color(p().text_faint),
     );
 }
 
@@ -341,7 +341,7 @@ fn save_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, editor: &mut
             None => "Relative to the document's folder: renders are saved once the document is saved.".to_owned(),
         },
     };
-    ui.add(egui::Label::new(RichText::new(hint).size(11.0).color(p::TEXT_DIM)).wrap());
+    ui.add(egui::Label::new(RichText::new(hint).size(11.0).color(p().text_dim)).wrap());
 }
 
 fn sampling_page(ui: &mut Ui, s: &mut RenderSettings) {

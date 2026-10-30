@@ -487,7 +487,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
             ui.menu_button(
                 RichText::new(format!("Layout: {}", editor.panes.current.label()))
-                    .color(p::TEXT_DIM)
+                    .color(p().text_dim)
                     .size(11.5),
                 |ui| {
                     for layout in PaneLayout::ALL {

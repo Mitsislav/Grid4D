@@ -7,7 +7,7 @@ use grid4d_render::{OrbitCamera, ViewFilter};
 use grid4d_scene::LightType;
 
 use super::project;
-use crate::{Selection, theme::palette as p};
+use crate::{Selection, theme::view_palette as p};
 
 /// Cinema 4D-style corner brackets on the bounding box of each selected object
 /// whose type the view shows.
@@ -22,7 +22,7 @@ pub(super) fn selection_brackets(
     if selection.is_empty() {
         return;
     }
-    let stroke = Stroke::new(1.5, p::HIGHLIGHT.gamma_multiply(0.9));
+    let stroke = Stroke::new(1.5, p().highlight.gamma_multiply(0.9));
     for node in scene.nodes() {
         let world = node.world;
         if selection.contains(node.id)
@@ -55,10 +55,10 @@ pub(super) fn selection_brackets(
 /// Vertical gradient behind the 3D content.
 pub(super) fn background(painter: &Painter, rect: Rect) {
     let mut mesh = Mesh::default();
-    mesh.colored_vertex(rect.left_top(), p::VIEWPORT_TOP);
-    mesh.colored_vertex(rect.right_top(), p::VIEWPORT_TOP);
-    mesh.colored_vertex(rect.right_bottom(), p::VIEWPORT_BOTTOM);
-    mesh.colored_vertex(rect.left_bottom(), p::VIEWPORT_BOTTOM);
+    mesh.colored_vertex(rect.left_top(), p().viewport_top);
+    mesh.colored_vertex(rect.right_top(), p().viewport_top);
+    mesh.colored_vertex(rect.right_bottom(), p().viewport_bottom);
+    mesh.colored_vertex(rect.left_bottom(), p().viewport_bottom);
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
     painter.add(Shape::mesh(mesh));
@@ -71,17 +71,17 @@ pub(super) fn view_label(painter: &Painter, rect: Rect, label: &str) {
         Align2::LEFT_TOP,
         label,
         FontId::proportional(12.5),
-        p::TEXT.gamma_multiply(0.85),
+        p().text.gamma_multiply(0.85),
     );
 }
 
 /// The Render View's status, in the view's bottom-left corner on a dark band.
 pub(super) fn render_view_status(painter: &Painter, rect: Rect, text: &str) {
-    let galley = painter.layout_no_wrap(text.to_owned(), FontId::proportional(12.0), p::TEXT_STRONG);
+    let galley = painter.layout_no_wrap(text.to_owned(), FontId::proportional(12.0), p().text_strong);
     let pos = rect.left_bottom() + vec2(10.0, -10.0 - galley.size().y);
     let band = Rect::from_min_size(pos, galley.size()).expand2(vec2(6.0, 3.0));
     painter.rect_filled(band, 3.0, egui::Color32::from_black_alpha(170));
-    painter.galley(pos, galley, p::TEXT_STRONG);
+    painter.galley(pos, galley, p().text_strong);
 }
 
 /// Every visible camera object except the one the view looks through (`linked`),
@@ -118,9 +118,9 @@ pub(super) fn camera_frustums(
             centre + right * half_w - up * half_h,
         ];
         let colour = if selection.contains(node.id) {
-            p::HIGHLIGHT
+            p().highlight
         } else {
-            p::ICON_CAMERA.gamma_multiply(0.8)
+            p().icon_camera.gamma_multiply(0.8)
         };
         let stroke = Stroke::new(1.2, colour);
         let line = |a: Vec3, b: Vec3| {
@@ -156,9 +156,9 @@ pub(super) fn light_shapes(
     const RIM: u8 = 24;
     for light in evaluated.lights() {
         let colour = if selection.contains(light.id) {
-            p::HIGHLIGHT
+            p().highlight
         } else {
-            p::ICON_LIGHT.gamma_multiply(0.8)
+            p().icon_light.gamma_multiply(0.8)
         };
         let stroke = Stroke::new(1.2, colour);
         let line = |a: Vec3, b: Vec3| {
@@ -205,7 +205,7 @@ pub(super) fn autokey_frame(painter: &Painter, rect: Rect) {
     painter.rect_stroke(
         rect.shrink(1.5),
         CornerRadius::ZERO,
-        Stroke::new(3.0, p::RECORD),
+        Stroke::new(3.0, p().record),
         StrokeKind::Inside,
     );
 }
@@ -215,9 +215,9 @@ pub(super) fn axis_triad(painter: &Painter, rect: Rect, camera: &OrbitCamera) {
     let center = rect.left_bottom() + vec2(44.0, -44.0);
     let view = camera.view();
     let mut axes = [
-        (Vec3::X, "X", p::AXIS_X),
-        (Vec3::Y, "Y", p::AXIS_Y),
-        (Vec3::Z, "Z", p::AXIS_Z),
+        (Vec3::X, "X", p().axis_x),
+        (Vec3::Y, "Y", p().axis_y),
+        (Vec3::Z, "Z", p().axis_z),
     ]
     .map(|(axis, label, color)| (view.transform_vector3(axis), label, color));
     // Draw the axis pointing most towards the viewer last.
@@ -234,7 +234,7 @@ pub(super) fn axis_triad(painter: &Painter, rect: Rect, camera: &OrbitCamera) {
             faded,
         );
     }
-    painter.circle_filled(center, 2.5, p::TEXT_DIM);
+    painter.circle_filled(center, 2.5, p().text_dim);
 }
 
 /// Bottom-right HUD, like C4D's "Grid Spacing : 100 cm".
@@ -247,21 +247,21 @@ pub(super) fn hud(painter: &Painter, rect: Rect, camera: &OrbitCamera) {
             crate::preferences::units(painter.ctx()).format(f64::from(camera.grid_spacing()), 2, "")
         ),
         FontId::proportional(11.5),
-        p::TEXT_DIM,
+        p().text_dim,
     );
 }
 
 /// The Live Selection brush around the pointer.
 pub(super) fn brush(painter: &Painter, center: Pos2, radius: f32) {
-    painter.circle_stroke(center, radius, Stroke::new(1.0, p::TEXT_STRONG.gamma_multiply(0.8)));
+    painter.circle_stroke(center, radius, Stroke::new(1.0, p().text_strong.gamma_multiply(0.8)));
 }
 
 /// The Rectangle Selection frame being dragged.
 /// Line Cut: the line being drawn, with its ends.
 pub(super) fn cut_line(painter: &Painter, start: Pos2, end: Pos2) {
-    painter.line_segment([start, end], Stroke::new(1.5, p::ACCENT));
+    painter.line_segment([start, end], Stroke::new(1.5, p().accent));
     for end in [start, end] {
-        painter.circle_filled(end, 3.0, p::ACCENT);
+        painter.circle_filled(end, 3.0, p().accent);
     }
 }
 
@@ -269,17 +269,17 @@ pub(super) fn cut_line(painter: &Painter, start: Pos2, end: Pos2) {
 pub(super) fn cut_preview(painter: &Painter, rect: Rect, view_proj: &Mat4, segments: &[[Vec3; 2]]) {
     for &[a, b] in segments {
         if let (Some(a), Some(b)) = (project(view_proj, rect, a), project(view_proj, rect, b)) {
-            painter.line_segment([a, b], Stroke::new(1.5, p::ACCENT));
+            painter.line_segment([a, b], Stroke::new(1.5, p().accent));
         }
     }
 }
 
 pub(super) fn marquee(painter: &Painter, frame: Rect) {
-    painter.rect_filled(frame, CornerRadius::ZERO, p::ACCENT.gamma_multiply(0.12));
+    painter.rect_filled(frame, CornerRadius::ZERO, p().accent.gamma_multiply(0.12));
     painter.rect_stroke(
         frame,
         CornerRadius::ZERO,
-        Stroke::new(1.0, p::ACCENT),
+        Stroke::new(1.0, p().accent),
         StrokeKind::Inside,
     );
 }
@@ -287,7 +287,7 @@ pub(super) fn marquee(painter: &Painter, frame: Rect) {
 /// The snap target a drag is stuck to: a marker on the point (and the edge or
 /// grid line drawn over), with the target's name.
 pub(super) fn snap_target(painter: &Painter, rect: Rect, view_proj: &Mat4, hit: &grid4d_render::SnapHit) {
-    let stroke = Stroke::new(2.0, p::SNAP);
+    let stroke = Stroke::new(2.0, p().snap);
     if let Some([a, b]) = hit.segment
         && let (Some(a), Some(b)) = (project(view_proj, rect, a), project(view_proj, rect, b))
     {
@@ -302,13 +302,13 @@ pub(super) fn snap_target(painter: &Painter, rect: Rect, view_proj: &Mat4, hit: 
         stroke,
         StrokeKind::Middle,
     );
-    painter.circle_filled(at, 2.0, p::SNAP);
-    let galley = painter.layout_no_wrap(hit.kind.label().to_owned(), FontId::proportional(11.5), p::SNAP);
+    painter.circle_filled(at, 2.0, p().snap);
+    let galley = painter.layout_no_wrap(hit.kind.label().to_owned(), FontId::proportional(11.5), p().snap);
     let corner = at + vec2(11.0, -11.0 - galley.size().y);
     painter.rect_filled(
         Rect::from_min_size(corner, galley.size()).expand(3.0),
         CornerRadius::same(3),
         egui::Color32::from_black_alpha(180),
     );
-    painter.galley(corner, galley, p::SNAP);
+    painter.galley(corner, galley, p().snap);
 }

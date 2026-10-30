@@ -97,7 +97,7 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 11.3, 11.5 | [`simulation-cache.md`](simulation-cache.md) — start state, the cache, Bake / Clear, playback and renders, saved caches | implemented 2026-10-30 |
 | 11.4 | [`simulation-clones.md`](simulation-clones.md) — clones as bodies | implemented 2026-10-30 |
 | 12.1 | [`workspace-layouts.md`](workspace-layouts.md) — docking panels, the Standard / Modeling / Animate layouts, Reset Layout | implemented 2026-10-30 |
-| 12.2–12.3 | [`workspace-preferences.md`](workspace-preferences.md) — units, undo depth, autosave, viewport defaults, themes | 12.2 implemented 2026-10-30 |
+| 12.2–12.3 | [`workspace-preferences.md`](workspace-preferences.md) — units, undo depth, autosave, viewport defaults, themes | implemented 2026-10-30 |
 | 12.4 | `manager-layer.md` — layers and their switches, the Layer Manager | todo |
 | 12.5 | `manager-take.md` — takes, overrides, Auto Take, rendering a take | todo |
 | 12.6 | `workspace-language.md` — the interface's languages, Greek | todo |

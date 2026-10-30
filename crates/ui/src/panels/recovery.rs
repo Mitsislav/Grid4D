@@ -28,10 +28,10 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
             RichText::new("Recover Unsaved Work?")
                 .size(15.0)
                 .strong()
-                .color(p::TEXT_STRONG),
+                .color(p().text_strong),
         );
         ui.add_space(6.0);
-        ui.label(RichText::new(message).color(p::TEXT_DIM));
+        ui.label(RichText::new(message).color(p().text_dim));
         ui.add_space(14.0);
         ui.horizontal(|ui| {
             if ui.button("Recover").clicked() {

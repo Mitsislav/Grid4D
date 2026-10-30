@@ -393,11 +393,11 @@ impl Behavior<Pane> for Dispatch<'_> {
     }
 
     fn tab_bar_color(&self, _visuals: &Visuals) -> Color32 {
-        p::BG_HEADER
+        p().bg_header
     }
 
     fn tab_bg_color(&self, _visuals: &Visuals, _tiles: &Tiles<Pane>, _tile_id: TileId, state: &TabState) -> Color32 {
-        if state.active { p::BG_PANEL } else { p::BG_HEADER }
+        if state.active { p().bg_panel } else { p().bg_header }
     }
 
     fn tab_outline_stroke(
@@ -415,25 +415,25 @@ impl Behavior<Pane> for Dispatch<'_> {
     }
 
     fn tab_text_color(&self, _visuals: &Visuals, _tiles: &Tiles<Pane>, _tile_id: TileId, state: &TabState) -> Color32 {
-        if state.active { p::TEXT_STRONG } else { p::TEXT_DIM }
+        if state.active { p().text_strong } else { p().text_dim }
     }
 
     fn resize_stroke(&self, _style: &egui::Style, state: egui_tiles::ResizeState) -> Stroke {
         match state {
-            egui_tiles::ResizeState::Idle => Stroke::new(2.0, p::BG_WELL),
-            egui_tiles::ResizeState::Hovering | egui_tiles::ResizeState::Dragging => Stroke::new(2.0, p::ACCENT),
+            egui_tiles::ResizeState::Idle => Stroke::new(2.0, p().bg_well),
+            egui_tiles::ResizeState::Hovering | egui_tiles::ResizeState::Dragging => Stroke::new(2.0, p().accent),
         }
     }
 
     fn drag_preview_color(&self, _visuals: &Visuals) -> Color32 {
-        p::ACCENT.gamma_multiply(0.25)
+        p().accent.gamma_multiply(0.25)
     }
 }
 
 /// A pane whose manager is still to come.
 fn planned(ui: &mut Ui, text: &str) {
     ui.add_space(12.0);
-    ui.vertical_centered(|ui| ui.label(egui::RichText::new(text).color(p::TEXT_DIM)));
+    ui.vertical_centered(|ui| ui.label(egui::RichText::new(text).color(p().text_dim)));
 }
 
 /// A tab group of `panes`, the first in front.

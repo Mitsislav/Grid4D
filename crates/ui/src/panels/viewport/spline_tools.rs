@@ -11,7 +11,7 @@ use grid4d_scene::{Document, NodeData, NodeId, ObjectKind, SceneEdit, SplineHand
 use super::{ViewportPanel, project, select_tools::Gesture, to_ndc};
 use crate::{
     EditMode, EditorCommand, EditorState, SelectMode,
-    theme::{metrics, palette as p},
+    theme::{metrics, view_palette as p},
 };
 
 /// Half the size of a drawn control point, in points.
@@ -314,8 +314,8 @@ impl ViewportPanel {
             .map(|(_, _, c)| c.selected().points.clone())
             .unwrap_or_default();
         for handle in self.spline_handles(rect, node) {
-            painter.line_segment([handle.base, handle.end], Stroke::new(1.0, p::TEXT_DIM));
-            painter.circle_filled(handle.end, HANDLE_RADIUS, p::HIGHLIGHT);
+            painter.line_segment([handle.base, handle.end], Stroke::new(1.0, p().text_dim));
+            painter.circle_filled(handle.end, HANDLE_RADIUS, p().highlight);
         }
         let hovered = ui
             .input(|i| i.pointer.hover_pos())
@@ -326,7 +326,11 @@ impl ViewportPanel {
             let Some(at) = screen.filter(|_| !hidden.contains(i)) else {
                 continue;
             };
-            let fill = if selected.contains(i) { p::HIGHLIGHT } else { p::ACCENT };
+            let fill = if selected.contains(i) {
+                p().highlight
+            } else {
+                p().accent
+            };
             let square = Rect::from_center_size(at, vec2(POINT_HALF, POINT_HALF) * 2.0);
             painter.rect_filled(square, 0.0, fill);
             if hovered == Some(i) {

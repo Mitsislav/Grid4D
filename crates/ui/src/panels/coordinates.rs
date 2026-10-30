@@ -124,7 +124,7 @@ impl CoordinatesPanel {
         scroll.show(ui, |ui| {
             egui::Frame::new().inner_margin(Margin::symmetric(8, 6)).show(ui, |ui| {
                 let Some(target) = target else {
-                    ui.label(RichText::new("Select an object to edit its coordinates.").color(p::TEXT_DIM));
+                    ui.label(RichText::new("Select an object to edit its coordinates.").color(p().text_dim));
                     return;
                 };
                 let title = match target {
@@ -138,10 +138,10 @@ impl CoordinatesPanel {
                         format!("{what} of {}", n.data.name)
                     }),
                 };
-                ui.label(RichText::new(title.unwrap_or_default()).strong().color(p::TEXT_STRONG));
+                ui.label(RichText::new(title.unwrap_or_default()).strong().color(p().text_strong));
                 ui.add_space(4.0);
                 let Some(mut fields) = self.fields else {
-                    ui.label(RichText::new("Nothing selected").color(p::TEXT_DIM));
+                    ui.label(RichText::new("Nothing selected").color(p().text_dim));
                     return;
                 };
                 let locks = match target {
@@ -195,7 +195,7 @@ impl CoordinatesPanel {
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new("Rotation is relative: it turns the selection by that much around its centre")
-                            .color(p::TEXT_DIM),
+                            .color(p().text_dim),
                     );
                 }
 
@@ -267,7 +267,7 @@ fn fields_grid(ui: &mut Ui, fields: &mut Fields, middle: Middle, locks: grid4d_s
         .spacing([4.0, 4.0])
         .show(ui, |ui| {
             for title in ["", "Position", "", middle_title, "", "Rotation"] {
-                ui.label(RichText::new(title).color(p::TEXT_DIM).size(11.5));
+                ui.label(RichText::new(title).color(p().text_dim).size(11.5));
             }
             ui.end_row();
             for (axis, [pl, ml, rl]) in [["X", "X", "H"], ["Y", "Y", "P"], ["Z", "Z", "B"]]
@@ -305,7 +305,7 @@ fn fields_grid(ui: &mut Ui, fields: &mut Fields, middle: Middle, locks: grid4d_s
                             .changed();
                     }
                     None => {
-                        ui.label(RichText::new("—").color(p::TEXT_FAINT));
+                        ui.label(RichText::new("—").color(p().text_faint));
                     }
                 }
                 small(ui, rl);
@@ -328,7 +328,7 @@ fn fields_grid(ui: &mut Ui, fields: &mut Fields, middle: Middle, locks: grid4d_s
 }
 
 fn small(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).color(p::TEXT_DIM).size(11.5));
+    ui.label(RichText::new(text).color(p().text_dim).size(11.5));
 }
 
 /// The fields for `target` at `frame`.

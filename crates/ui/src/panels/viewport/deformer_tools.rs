@@ -9,7 +9,7 @@ use glam::{Mat4, Vec3};
 use grid4d_scene::{Document, NodeData, NodeId, ObjectKind, SceneEdit};
 
 use super::{ViewportPanel, project, to_ndc};
-use crate::{EditMode, EditorCommand, EditorState, keys::Keying, theme::palette as p};
+use crate::{EditMode, EditorCommand, EditorState, keys::Keying, theme::view_palette as p};
 
 /// The handle is grabbed within this many points.
 const GRAB: f32 = 8.0;
@@ -190,8 +190,8 @@ impl ViewportPanel {
             return;
         };
         if let Some(at) = self.deformer_handle_screen(rect, world, &kind) {
-            painter.circle_filled(at, RADIUS, p::HIGHLIGHT);
-            painter.circle_stroke(at, RADIUS + 1.0, egui::Stroke::new(1.0, p::BG_WELL));
+            painter.circle_filled(at, RADIUS, p().highlight);
+            painter.circle_stroke(at, RADIUS + 1.0, egui::Stroke::new(1.0, p().bg_well));
         }
     }
 }

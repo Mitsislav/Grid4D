@@ -7,8 +7,8 @@
 > The reference's Preferences shortcut (Ctrl+E in third-party lists) is not in
 > Maxon's own shortcut pages, so it is not bound yet.
 >
-> Covers implementation-plan step **12.2** (themes follow in 12.3, the
-> language in 12.6).
+> Covers implementation-plan steps **12.2** and **12.3** (themes; the
+> language follows in 12.6).
 
 ## Purpose
 
@@ -20,6 +20,13 @@ look. They are the same for every document and survive a restart.
 
 - **Edit ▸ Preferences…** opens the Preferences window (not modal: the scene
   stays usable). Changes take effect at once; there is no OK button.
+- **Theme.** *Dark* (default), *Darker* or *Light* changes every panel,
+  menu, window and icon tint at once. What is drawn over the 3D view (its HUD,
+  axis triad, gizmo, handles, selection frames) keeps the view's own darker
+  colours in every theme, as the view's grey does; Darker also darkens the
+  view. Text stays readable in every theme: at least 4.5 : 1 against its
+  backgrounds, at least 3 : 1 for dimmed text, the accent, the highlight and
+  the icons.
 - **Units.** *Length Unit*: Centimetres (default), Metres, Millimetres, Inches
   or Feet. Every length field (positions, sizes, radii, offsets, tolerances,
   the Coordinate Manager) and the speeds and gravity built on lengths show
@@ -61,6 +68,7 @@ look. They are the same for every document and survive a restart.
 | The Preferences window; the Recover dialog | `ui::panels::{preferences, recovery}` |
 | `EditorCommand::{ApplyViewDefaults, Recover}`; `ViewportPanel::apply_defaults` | `ui::commands`, `ui::panels::viewport` |
 | Saved by the binary in eframe storage; the recovery folder next to it | `src/app.rs` |
+| `theme::{Palette, ColorTheme}` (`Palette::{DARK, DARKER, LIGHT}`), `theme::palette()` (the theme in use, kept in an atomic), `theme::view_palette()` (over the 3D view), `theme::{apply, follow}` (egui's style per theme); `Preferences::theme` | `ui::theme`, `ui::preferences` |
 
 ## Decisions (2026-10-30)
 
@@ -87,3 +95,9 @@ look. They are the same for every document and survive a restart.
 - [x] New views take the default shading, grid, axis and HUD; Apply to Views
       sets them on the open views.
 - [x] Preferences survive a restart.
+
+12.3:
+
+- [x] Dark, Darker and Light switch the whole interface at once and come
+      back after a restart; the view's overlays stay readable.
+- [x] A test checks every theme's contrast.

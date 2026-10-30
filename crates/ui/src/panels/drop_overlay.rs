@@ -12,11 +12,11 @@ pub fn show(ctx: &egui::Context) {
     };
     let rect = ctx.content_rect();
     let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::unique("grid4d.drop_overlay")));
-    painter.rect_filled(rect, CornerRadius::ZERO, p::SCRIM);
+    painter.rect_filled(rect, CornerRadius::ZERO, p().scrim);
     painter.rect_stroke(
         rect.shrink(12.0),
         CornerRadius::same(6),
-        Stroke::new(2.0, p::ACCENT),
+        Stroke::new(2.0, p().accent),
         StrokeKind::Inside,
     );
     painter.text(
@@ -24,7 +24,7 @@ pub fn show(ctx: &egui::Context) {
         Align2::CENTER_CENTER,
         label,
         FontId::proportional(20.0),
-        p::TEXT_STRONG,
+        p().text_strong,
     );
 }
 

@@ -118,6 +118,12 @@ Changes take effect at once; close the window with its **×**.
 
 ![Preferences with lengths in metres: the Cube's position reads 1 m and the view's grid spacing 1 m; the grid is off for the views](images/manual/preferences.png)
 
+- **Interface ▸ Theme** — **Dark** (the usual look), **Darker** (deeper
+  greys, for dim rooms) or **Light** (light panels and dark text). The 3D view
+  keeps its grey in every theme, so objects, the grid and the handles look the
+  same.
+
+  ![The Light theme](images/manual/themes.png)
 - **Units ▸ Length Unit** — Centimetres, Metres, Millimetres, Inches or Feet.
   Every length field (positions, sizes, radii, offsets, the Coordinate Manager,
   speeds and gravity) and the view's *Grid Spacing* show that unit. A number you

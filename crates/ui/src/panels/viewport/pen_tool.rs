@@ -12,7 +12,7 @@ use grid4d_scene::{Document, NodeId};
 use super::{ViewportPanel, project, to_ndc};
 use crate::{
     EditorCommand, EditorState, Tool,
-    theme::{metrics, palette as p},
+    theme::{metrics, view_palette as p},
 };
 
 /// Screen distance (points) a press must move to pull tangents.
@@ -170,7 +170,7 @@ impl ViewportPanel {
         if let Some(drawn) = &drawn {
             for &q in &drawn.points {
                 if let Some(at) = screen(q) {
-                    square(at, p::ACCENT);
+                    square(at, p().accent);
                 }
             }
         }
@@ -178,7 +178,7 @@ impl ViewportPanel {
             .as_ref()
             .filter(|d| d.open_start.is_some())
             .and_then(|d| d.points.last().copied());
-        let dashed = Stroke::new(1.0, p::HIGHLIGHT);
+        let dashed = Stroke::new(1.0, p().highlight);
         if let Some((position, _)) = self.pen.press {
             if let (Some(from), Some(to)) = (last.and_then(screen), screen(position)) {
                 painter.line_segment([from, to], dashed);
@@ -186,13 +186,13 @@ impl ViewportPanel {
             if let Some(end) = self.pen.pull {
                 let back = position * 2.0 - end;
                 if let (Some(a), Some(b)) = (screen(back), screen(end)) {
-                    painter.line_segment([a, b], Stroke::new(1.0, p::TEXT_DIM));
-                    painter.circle_filled(a, 3.0, p::HIGHLIGHT);
-                    painter.circle_filled(b, 3.0, p::HIGHLIGHT);
+                    painter.line_segment([a, b], Stroke::new(1.0, p().text_dim));
+                    painter.circle_filled(a, 3.0, p().highlight);
+                    painter.circle_filled(b, 3.0, p().highlight);
                 }
             }
             if let Some(at) = screen(position) {
-                square(at, p::HIGHLIGHT);
+                square(at, p().highlight);
             }
         } else if let (Some(from), Some(to)) = (last.and_then(screen), self.pen.hover.and_then(screen)) {
             painter.line_segment([from, to], dashed);

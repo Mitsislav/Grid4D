@@ -126,7 +126,7 @@ impl PictureViewerPanel {
             if ui.button("+").on_hover_text("Zoom in").clicked() {
                 self.zoom_by(current, 2.0);
             }
-            ui.label(RichText::new(format!("{:.0} %", current * 100.0)).color(p::TEXT_DIM));
+            ui.label(RichText::new(format!("{:.0} %", current * 100.0)).color(p().text_dim));
         });
     }
 
@@ -147,14 +147,14 @@ impl PictureViewerPanel {
         let (rect, response) = ui.allocate_exact_size(size, Sense::drag());
         self.last_area = rect.size();
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 2.0, p::BG_WELL);
+        painter.rect_filled(rect, 2.0, p().bg_well);
         let Some(picture) = renders.shown_picture() else {
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "Render ▸ Render to Picture Viewer (Shift+R)",
                 egui::FontId::proportional(13.0),
-                p::TEXT_DIM,
+                p().text_dim,
             );
             return;
         };
@@ -164,7 +164,7 @@ impl PictureViewerPanel {
                 egui::Align2::CENTER_CENTER,
                 "Preparing the scene…",
                 egui::FontId::proportional(13.0),
-                p::TEXT_DIM,
+                p().text_dim,
             );
             return;
         }
@@ -251,7 +251,7 @@ impl PictureViewerPanel {
 fn history(ui: &mut Ui, renders: &mut Renders, height: f32) {
     ui.vertical(|ui| {
         ui.set_width(HISTORY_WIDTH);
-        ui.label(RichText::new("History").size(11.0).color(p::TEXT_DIM));
+        ui.label(RichText::new("History").size(11.0).color(p().text_dim));
         let shown = renders.shown_picture().map(|picture| picture.number);
         let mut chosen = None;
         ScrollArea::vertical()
@@ -327,7 +327,7 @@ fn status_line(ui: &mut Ui, renders: &Renders) {
             } else {
                 format!("{summary} · {}", picture.note)
             };
-            ui.label(RichText::new(text).size(11.5).color(p::TEXT_DIM));
+            ui.label(RichText::new(text).size(11.5).color(p().text_dim));
         }
     }
 }

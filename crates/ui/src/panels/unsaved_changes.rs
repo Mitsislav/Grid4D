@@ -19,10 +19,10 @@ pub fn show(ctx: &egui::Context, doc: &Document, editor: &mut EditorState) {
             RichText::new(format!("Save changes to “{}”?", editor.file.display_name(doc)))
                 .size(15.0)
                 .strong()
-                .color(p::TEXT_STRONG),
+                .color(p().text_strong),
         );
         ui.add_space(6.0);
-        ui.label(RichText::new(consequence(action)).color(p::TEXT_DIM));
+        ui.label(RichText::new(consequence(action)).color(p().text_dim));
         ui.add_space(14.0);
         ui.horizontal(|ui| {
             if ui.button("Save").clicked() {

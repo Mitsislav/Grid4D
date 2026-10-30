@@ -8,6 +8,7 @@ use crate::{
     EditorCommand, EditorState,
     panels::viewport::shading_label,
     preferences::{Preferences, Units},
+    theme::ColorTheme,
     widgets::{attr_label, section_heading},
 };
 
@@ -39,6 +40,19 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
 
 /// The settings; returns whether Apply to Views was clicked.
 fn contents(ui: &mut Ui, prefs: &mut Preferences) -> bool {
+    section_heading(ui, "Interface");
+    Grid::new("grid4d.preferences.interface").num_columns(2).show(ui, |ui| {
+        attr_label(ui, "Theme", LABEL_WIDTH);
+        ComboBox::from_id_salt("grid4d.preferences.theme")
+            .selected_text(prefs.theme.label())
+            .show_ui(ui, |ui| {
+                for theme in ColorTheme::ALL {
+                    ui.selectable_value(&mut prefs.theme, theme, theme.label());
+                }
+            });
+        ui.end_row();
+    });
+
     section_heading(ui, "Units");
     Grid::new("grid4d.preferences.units").num_columns(2).show(ui, |ui| {
         attr_label(ui, "Length Unit", LABEL_WIDTH);

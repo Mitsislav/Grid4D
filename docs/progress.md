@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 12 — Workspace (v0.12) |
-| Last step done | 12.2 — Preferences (2026-10-30) |
-| Next step | 12.3 — Themes |
-| Tests | 697, all passing; clippy and rustfmt clean |
+| Last step done | 12.3 — Themes (2026-10-30) |
+| Next step | 12.4 — Layers |
+| Tests | 699, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1606,6 +1606,7 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
 | — | Phase 12 planned in detail: docking layouts on `egui_tiles` with Standard / Modeling / Animate presets, Preferences (units, undo depth, autosave, viewport defaults), Dark / Darker / Light themes, Layers, Takes (the document holds the active take; switching is an undoable swap; Auto Take), the interface in Greek (`tr` with English keys) (`IMPLEMENTATION_PLAN.md`) | 683 |
 | 12.1 | Docking layouts on `egui_tiles`: every manager and the viewport a pane that docks as a tab or a split, closes and reopens from the Window menu; Standard / Modeling / Animate layouts, Reset Layout; the arrangement remembered between runs | 689 |
 | 12.2 | Preferences (Edit ▸ Preferences…): the length unit for every length field and the grid HUD (typed units converted), Undo Depth, Autosave with crash recovery, view defaults; saved between runs | 697 |
+| 12.3 | Dark, Darker and Light themes (Preferences ▸ Interface ▸ Theme) for every panel, menu, window and icon; the 3D view keeps its own colours; a contrast test for every theme | 699 |
 
 **Planning notes:**
 - **The docking library.** The plan named `egui_dock`, to be checked against
@@ -1688,6 +1689,31 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
   was then ended abruptly, and on the next start *Recover Unsaved Work?* came
   up; Recover brought the document back with the extra cube and an asterisk
   in the title.
+
+**12.3 — Themes**
+
+*Problems and solutions:*
+- **Constants everywhere.** About 270 uses of `theme::palette::NAME` in 26
+  files read compile-time constants. They became fields of a `Palette` value
+  returned by `theme::palette()`, which reads the theme from an atomic (no
+  lock, no allocation, so hot paths are unaffected); the rewrite was a single
+  mechanical substitution (`p::TEXT_DIM` → `p().text_dim`). One binding named
+  `p` in the F-Curve editor shadowed the function and was renamed.
+- **The view in a light theme.** The view's background stays a darker grey (as
+  in the reference), so dark text or light-theme accents drawn over it would
+  vanish. What is painted over the view — the HUD, the axis triad, the
+  gizmo, spline and deformer handles, the Pen, snapping marks and the
+  component colours — reads `theme::view_palette()`: the Dark palette in
+  Light, the Darker palette in Darker.
+- **Contrast.** A test computes WCAG contrast for every theme. It caught the
+  Light theme's orange highlight at 2.9 : 1 against the headers; it was
+  darkened to pass 3 : 1.
+- **egui's own theme.** Light installs its style in egui's light slot
+  (`dark_mode` off), so egui's built-in widgets (combo arrows, check marks,
+  text cursors) pick light-theme defaults too.
+- **On-screen testing:** Preferences ▸ Theme switched to Light at once
+  (panels, menus, icons; the view unchanged), it was still Light after a
+  restart, and Darker deepened every panel and the view.
 
 ---
 

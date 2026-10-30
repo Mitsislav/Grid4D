@@ -44,9 +44,9 @@ fn display_scale(param: Param) -> f64 {
 fn color(param: Param) -> Color32 {
     let axis = match param {
         Param::Position(a) | Param::Rotation(a) | Param::Scale(a) => a,
-        Param::Object(p) => return p::PARAM_CURVES[p.index() % p::PARAM_CURVES.len()],
+        Param::Object(param) => return p().param_curves[param.index() % p().param_curves.len()],
     };
-    let base = p::AXIS[axis.index()];
+    let base = p().axis[axis.index()];
     match param {
         // Lighter / darker shades keep the channels apart.
         Param::Rotation(_) => base.lerp_to_gamma(Color32::WHITE, 0.35),
@@ -244,7 +244,7 @@ impl FCurvePanel {
                     } else {
                         format!("{n} keys selected")
                     };
-                    ui.label(RichText::new(text).color(p::TEXT_DIM).size(11.5));
+                    ui.label(RichText::new(text).color(p().text_dim).size(11.5));
                     return;
                 };
                 let Some(mut data) = doc.scene.get(key.node).map(|n| n.data.clone()) else {
@@ -260,7 +260,7 @@ impl FCurvePanel {
                 else {
                     return;
                 };
-                ui.label(RichText::new(key.param.label()).color(p::TEXT_DIM).size(11.5));
+                ui.label(RichText::new(key.param.label()).color(p().text_dim).size(11.5));
                 #[expect(clippy::cast_possible_truncation, reason = "key frames are within the i32 range")]
                 let mut frame = found.frame.round() as i32;
                 let mut value = f64::from(found.value) * k;
@@ -699,7 +699,7 @@ impl FCurvePanel {
 
     fn paint(&self, ui: &Ui, rect: Rect, plot: Rect, doc: &Document, editor: &EditorState, shown: &[Shown]) {
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, CornerRadius::ZERO, p::BG_WELL);
+        painter.rect_filled(rect, CornerRadius::ZERO, p().bg_well);
         let small = FontId::proportional(10.5);
         let view = &self.view;
 
@@ -710,14 +710,14 @@ impl FCurvePanel {
             let x = view.x(plot, f);
             painter.line_segment(
                 [pos2(x, plot.top()), pos2(x, plot.bottom())],
-                Stroke::new(1.0, p::BG_HEADER),
+                Stroke::new(1.0, p().bg_header),
             );
             painter.text(
                 pos2(x + 3.0, rect.top() + 2.0),
                 Align2::LEFT_TOP,
                 format_value(f, frame_step),
                 small.clone(),
-                p::TEXT_DIM,
+                p().text_dim,
             );
             f += frame_step;
         }
@@ -726,20 +726,20 @@ impl FCurvePanel {
         while v <= view.value_at(plot, plot.top()) {
             let y = view.y(plot, v);
             let zero = v.abs() < value_step * 1e-6;
-            let stroke = Stroke::new(1.0, if zero { p::SEPARATOR } else { p::BG_HEADER });
+            let stroke = Stroke::new(1.0, if zero { p().separator } else { p().bg_header });
             painter.line_segment([pos2(plot.left(), y), pos2(plot.right(), y)], stroke);
             painter.text(
                 pos2(plot.left() - 4.0, y),
                 Align2::RIGHT_CENTER,
                 format_value(v, value_step),
                 small.clone(),
-                p::TEXT_DIM,
+                p().text_dim,
             );
             v += value_step;
         }
         painter.line_segment(
             [pos2(rect.left(), plot.top()), pos2(rect.right(), plot.top())],
-            Stroke::new(1.0, p::SEPARATOR),
+            Stroke::new(1.0, p().separator),
         );
 
         // The current frame.
@@ -747,7 +747,7 @@ impl FCurvePanel {
         if x >= plot.left() {
             painter.line_segment(
                 [pos2(x, rect.top()), pos2(x, plot.bottom())],
-                Stroke::new(1.5, p::ACCENT),
+                Stroke::new(1.5, p().accent),
             );
         }
 
@@ -793,26 +793,26 @@ impl FCurvePanel {
                 if selected {
                     for (_, end) in handle_ends(curve, i, k) {
                         let end = view.pos(plot, end.0, end.1);
-                        plot_painter.line_segment([pos, end], Stroke::new(1.0, p::TEXT_DIM));
+                        plot_painter.line_segment([pos, end], Stroke::new(1.0, p().text_dim));
                         plot_painter.rect_filled(
                             Rect::from_center_size(end, vec2(5.0, 5.0)),
                             CornerRadius::ZERO,
-                            p::TEXT,
+                            p().text,
                         );
                     }
                 }
-                let fill = if selected { p::HIGHLIGHT } else { p::KEY };
+                let fill = if selected { p().highlight } else { p().key };
                 plot_painter.circle_filled(pos, 3.5, fill);
-                plot_painter.circle_stroke(pos, 3.5, Stroke::new(1.0, p::BORDER));
+                plot_painter.circle_stroke(pos, 3.5, Stroke::new(1.0, p().border));
             }
         }
         if let Some(CurveDrag::Box { from, to, .. }) = &self.drag {
             let area = Rect::from_two_pos(*from, *to);
-            plot_painter.rect_filled(area, CornerRadius::ZERO, p::ACCENT.gamma_multiply(0.2));
+            plot_painter.rect_filled(area, CornerRadius::ZERO, p().accent.gamma_multiply(0.2));
             plot_painter.rect_stroke(
                 area,
                 CornerRadius::ZERO,
-                Stroke::new(1.0, p::ACCENT),
+                Stroke::new(1.0, p().accent),
                 StrokeKind::Inside,
             );
         }
@@ -827,7 +827,7 @@ impl FCurvePanel {
                 Align2::CENTER_CENTER,
                 text,
                 FontId::proportional(13.0),
-                p::TEXT_DIM,
+                p().text_dim,
             );
         }
     }
@@ -958,7 +958,7 @@ fn format_value(value: f64, step: f64) -> String {
 /// shows only that track, Shift+click adds or removes it, a click on an object
 /// shows all tracks again.
 fn track_list(ui: &mut Ui, rect: Rect, doc: &Document, editor: &mut EditorState) {
-    ui.painter().rect_filled(rect, CornerRadius::ZERO, p::BG_PANEL);
+    ui.painter().rect_filled(rect, CornerRadius::ZERO, p().bg_panel);
     ui.scope_builder(UiBuilder::new().max_rect(rect.shrink2(vec2(4.0, 2.0))), |ui| {
         ScrollArea::vertical()
             .id_salt("grid4d.fcurve.tracks")
@@ -972,7 +972,7 @@ fn track_list(ui: &mut Ui, rect: Rect, doc: &Document, editor: &mut EditorState)
                         continue;
                     }
                     let name = ui.add(
-                        egui::Label::new(RichText::new(&n.data.name).strong().color(p::TEXT_STRONG))
+                        egui::Label::new(RichText::new(&n.data.name).strong().color(p().text_strong))
                             .sense(Sense::click()),
                     );
                     if name.clicked() {
@@ -983,9 +983,9 @@ fn track_list(ui: &mut Ui, rect: Rect, doc: &Document, editor: &mut EditorState)
                         let (row, response) = ui
                             .allocate_exact_size(vec2(ui.available_width(), metrics::ROW_HEIGHT - 3.0), Sense::click());
                         if picked {
-                            ui.painter().rect_filled(row, CornerRadius::same(2), p::ACCENT_BG);
+                            ui.painter().rect_filled(row, CornerRadius::same(2), p().accent_bg);
                         } else if response.hovered() {
-                            ui.painter().rect_filled(row, CornerRadius::same(2), p::BG_HOVER);
+                            ui.painter().rect_filled(row, CornerRadius::same(2), p().bg_hover);
                         }
                         let swatch = Rect::from_center_size(pos2(row.left() + 14.0, row.center().y), vec2(10.0, 3.0));
                         ui.painter().rect_filled(swatch, CornerRadius::ZERO, color(param));
@@ -994,7 +994,7 @@ fn track_list(ui: &mut Ui, rect: Rect, doc: &Document, editor: &mut EditorState)
                             Align2::LEFT_CENTER,
                             param.label(),
                             FontId::proportional(12.0),
-                            p::TEXT,
+                            p().text,
                         );
                         if response.clicked() {
                             if shift {

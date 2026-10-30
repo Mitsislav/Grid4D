@@ -59,14 +59,14 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
     }
     let response = Modal::new(Id::unique("grid4d.about")).show(ctx, |ui| {
         ui.set_width(460.0);
-        ui.label(RichText::new("Grid4D").size(20.0).strong().color(p::TEXT_STRONG));
+        ui.label(RichText::new("Grid4D").size(20.0).strong().color(p().text_strong));
         ui.label(
             RichText::new(concat!(
                 "Version ",
                 env!("CARGO_PKG_VERSION"),
                 " · open-source 3D content creation suite"
             ))
-            .color(p::TEXT_DIM),
+            .color(p().text_dim),
         );
         ui.add_space(10.0);
         ui.label(RichText::new("Keyboard & mouse").strong());
@@ -80,7 +80,7 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
                 .striped(true)
                 .show(ui, |ui| {
                     for (keys, action) in SHORTCUTS {
-                        ui.label(RichText::new(keys).monospace().color(p::TEXT_STRONG));
+                        ui.label(RichText::new(keys).monospace().color(p().text_strong));
                         ui.label(action);
                         ui.end_row();
                     }
@@ -93,7 +93,7 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
                  It is not affiliated with or endorsed by Maxon. Cinema 4D is a trademark of Maxon Computer GmbH.",
             )
             .size(11.0)
-            .color(p::TEXT_FAINT),
+            .color(p().text_faint),
         );
         ui.add_space(8.0);
         ui.vertical_centered(|ui| ui.button("Close").clicked()).inner

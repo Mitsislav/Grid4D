@@ -609,7 +609,7 @@ impl ViewportPanel {
                 ui.painter().rect_stroke(
                     cell.expand(0.5),
                     egui::CornerRadius::ZERO,
-                    egui::Stroke::new(1.0, p::ACCENT.gamma_multiply(0.8)),
+                    egui::Stroke::new(1.0, p().accent.gamma_multiply(0.8)),
                     egui::StrokeKind::Outside,
                 );
             }
@@ -799,7 +799,7 @@ impl ViewportPanel {
                 Align2::CENTER_CENTER,
                 "3D viewport unavailable: wgpu renderer not initialised",
                 egui::FontId::proportional(14.0),
-                p::TEXT_DIM,
+                crate::theme::view_palette().text_dim,
             );
         }
 
@@ -1070,7 +1070,7 @@ impl ViewportPanel {
 
     fn header(&mut self, ui: &mut Ui, doc: &Document, editor: &mut EditorState, index: usize) {
         egui::Frame::new()
-            .fill(p::BG_HEADER)
+            .fill(p().bg_header)
             .inner_margin(Margin::symmetric(6, 0))
             .show(ui, |ui| {
                 ui.set_height(metrics::HEADER_HEIGHT);
@@ -1146,7 +1146,7 @@ impl ViewportPanel {
                             }
                             ui.label(
                                 egui::RichText::new("Grid, World Axis and HUD: Filter menu")
-                                    .color(p::TEXT_DIM)
+                                    .color(p().text_dim)
                                     .size(11.0),
                             );
                         });
@@ -1185,7 +1185,7 @@ impl ViewportPanel {
                             }
                             ui.label(
                                 egui::RichText::new("Middle-click a view to show it alone or in place")
-                                    .color(p::TEXT_DIM)
+                                    .color(p().text_dim)
                                     .size(11.0),
                             );
                         });
@@ -1253,7 +1253,7 @@ impl ViewportPanel {
         }
         ui.label(
             egui::RichText::new("Ctrl+click: show only this")
-                .color(p::TEXT_DIM)
+                .color(p().text_dim)
                 .size(11.0),
         );
     }
@@ -1464,9 +1464,9 @@ fn local(pos: Pos2, rect: Rect) -> GVec2 {
 fn component_style(pixels_per_point: f32) -> ComponentStyle {
     let linear = |c: egui::Color32| egui::Rgba::from(c).to_array();
     ComponentStyle {
-        wire: linear(p::ACCENT),
-        selected: linear(p::HIGHLIGHT),
-        hover: linear(p::TEXT_STRONG),
+        wire: linear(crate::theme::view_palette().accent),
+        selected: linear(crate::theme::view_palette().highlight),
+        hover: linear(crate::theme::view_palette().text_strong),
         point_size: metrics::COMPONENT_POINT * pixels_per_point,
         edge_width: metrics::COMPONENT_EDGE * pixels_per_point,
         selected_edge_width: metrics::COMPONENT_EDGE_SELECTED * pixels_per_point,

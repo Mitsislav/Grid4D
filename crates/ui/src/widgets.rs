@@ -80,11 +80,11 @@ pub(crate) fn icon_button_bare(ui: &mut Ui, icon: Icon, style: IconStyle) -> Res
         let hovered = style.enabled && response.hovered();
         let pressed = style.enabled && response.is_pointer_button_down_on();
         let bg = if pressed {
-            Some(p::BG_ACTIVE)
+            Some(p().bg_active)
         } else if style.selected {
-            Some(p::ACCENT_BG)
+            Some(p().accent_bg)
         } else if hovered {
-            Some(p::BG_HOVER)
+            Some(p().bg_hover)
         } else {
             None
         };
@@ -96,18 +96,18 @@ pub(crate) fn icon_button_bare(ui: &mut Ui, icon: Icon, style: IconStyle) -> Res
             painter.rect_stroke(
                 frame,
                 CornerRadius::same(3),
-                Stroke::new(1.0, p::ACCENT.gamma_multiply(0.6)),
+                Stroke::new(1.0, p().accent.gamma_multiply(0.6)),
                 StrokeKind::Inside,
             );
         }
         let color = if !style.enabled {
-            p::TEXT_FAINT
+            p().text_faint
         } else if let Some(tint) = style.tint {
             tint
         } else if style.selected || hovered {
-            p::TEXT_STRONG
+            p().text_strong
         } else {
-            p::TEXT
+            p().text
         };
         icons::paint(painter, rect.shrink(style.size * 0.21), icon, color);
     }
@@ -118,7 +118,7 @@ pub(crate) fn icon_button_bare(ui: &mut Ui, icon: Icon, style: IconStyle) -> Res
 /// Returns its rect.
 pub(crate) fn header_row(ui: &mut Ui) -> Rect {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), metrics::HEADER_HEIGHT), Sense::hover());
-    ui.painter_at(rect).rect_filled(rect, CornerRadius::ZERO, p::BG_HEADER);
+    ui.painter_at(rect).rect_filled(rect, CornerRadius::ZERO, p().bg_header);
     rect
 }
 
@@ -130,13 +130,13 @@ pub(crate) fn attr_label(ui: &mut Ui, text: &str, width: f32) {
     }
     let painter = ui.painter();
     let font = TextStyle::Body.resolve(ui.style());
-    let galley = painter.layout_no_wrap(text.to_owned(), font, p::TEXT);
+    let galley = painter.layout_no_wrap(text.to_owned(), font, p().text);
     let text_pos = pos2(rect.left() + 2.0, rect.center().y - galley.size().y * 0.5);
     let mut x = text_pos.x + galley.size().x + 5.0;
-    painter.galley(text_pos, galley, p::TEXT);
+    painter.galley(text_pos, galley, p().text);
     let y = rect.center().y + 4.0;
     while x < rect.right() - 6.0 {
-        painter.circle_filled(pos2(x, y), 0.75, p::TEXT_FAINT);
+        painter.circle_filled(pos2(x, y), 0.75, p().text_faint);
         x += 4.0;
     }
 }
@@ -146,13 +146,13 @@ pub(crate) fn section_heading(ui: &mut Ui, text: &str) {
     ui.add_space(4.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::same(2), p::BG_HEADER.gamma_multiply(0.8));
+    painter.rect_filled(rect, CornerRadius::same(2), p().bg_header.gamma_multiply(0.8));
     painter.text(
         rect.left_center() + vec2(8.0, 0.0),
         egui::Align2::LEFT_CENTER,
         text,
         FontId::proportional(12.0),
-        p::TEXT_STRONG,
+        p().text_strong,
     );
     ui.add_space(2.0);
 }

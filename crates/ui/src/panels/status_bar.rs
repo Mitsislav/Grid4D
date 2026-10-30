@@ -15,7 +15,7 @@ pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
         match editor.simulation.baking() {
             Some((done, target)) => ui.label(
                 RichText::new(format!("Simulating: frame {done} of {target} — Esc stops"))
-                    .color(p::TEXT_STRONG)
+                    .color(p().text_strong)
                     .size(11.5),
             ),
             None if editor.simulation.is_full() => ui.label(
@@ -23,15 +23,15 @@ pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
                     "The simulation cache is full ({} MB): raise Cache Memory in the Project settings",
                     doc.simulation.memory_limit_mb
                 ))
-                .color(p::WARNING)
+                .color(p().warning)
                 .size(11.5),
             ),
-            None => ui.label(RichText::new(hint).color(p::TEXT_DIM).size(11.5)),
+            None => ui.label(RichText::new(hint).color(p().text_dim).size(11.5)),
         };
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.label(
                 RichText::new(editor.renderer_info.as_str())
-                    .color(p::TEXT_FAINT)
+                    .color(p().text_faint)
                     .size(11.0),
             );
             ui.separator();
@@ -39,7 +39,7 @@ pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
             let selected = editor.selection.len();
             ui.label(
                 RichText::new(format!("{objects} objects · {selected} selected"))
-                    .color(p::TEXT_DIM)
+                    .color(p().text_dim)
                     .size(11.0),
             );
         });

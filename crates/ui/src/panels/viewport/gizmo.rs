@@ -16,7 +16,7 @@ use super::{
     project,
     snapping::{Snapper, generators_above},
 };
-use crate::{CommandQueue, EditorCommand, EditorState, Tool, keys::Keying, theme::palette as p};
+use crate::{CommandQueue, EditorCommand, EditorState, Tool, keys::Keying, theme::view_palette as p};
 
 /// On-screen length of the axis handles, in points.
 const HANDLE_PX: f32 = 90.0;
@@ -198,7 +198,11 @@ impl GizmoGeometry {
             if !self.enabled[axis] {
                 continue;
             }
-            let color = if hot == Some(axis) { p::HIGHLIGHT } else { p::AXIS[axis] };
+            let color = if hot == Some(axis) {
+                p().highlight
+            } else {
+                p().axis[axis]
+            };
             let stroke = Stroke::new(2.2, color);
             match self.tool {
                 Tool::Rotate => {
@@ -237,7 +241,7 @@ impl GizmoGeometry {
                 | Tool::Pen => {}
             }
         }
-        painter.circle_filled(self.origin_px, 3.5, p::TEXT_STRONG);
+        painter.circle_filled(self.origin_px, 3.5, p().text_strong);
         painter.circle_stroke(self.origin_px, 3.5, Stroke::new(1.0, Color32::from_black_alpha(160)));
     }
 }
