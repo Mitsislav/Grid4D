@@ -1,32 +1,23 @@
 //! The application shell: owns the document and every panel, and lays out the
-//! Cinema 4D "Standard" workspace each frame.
+//! fixed bars around the docked workspace each frame.
 
 use egui::{CentralPanel, Margin, Panel};
 use grid4d_scene::Document;
 use grid4d_ui::{
-    AttributesPanel, BottomPanel, CoordinatesPanel, EditorCommand, EditorState, FCurvePanel, ManagerTab,
-    MaterialsPanel, OutlinerPanel, PictureViewerPanel, RecentFiles, RenderSettingsPanel, TimelinePanel, ViewportPanel,
-    commands, file,
+    EditorCommand, EditorState, PictureViewerPanel, RecentFiles, RenderSettingsPanel, ViewportPanel, commands, file,
     panels::{about, alert, drop_overlay, menu_bar, mode_palette, optimize, status_bar, toolbar, unsaved_changes},
     recent, shortcuts,
     theme::{self, metrics},
     window::WindowFit,
+    workspace::{self, Panels, Workspace},
 };
-
-const MIN_MANAGERS_WIDTH: f32 = 280.0;
-const MIN_FCURVE_HEIGHT: f32 = 160.0;
-const MIN_MATERIALS_HEIGHT: f32 = 110.0;
 
 pub struct Grid4DApp {
     doc: Document,
     editor: EditorState,
-    viewport: ViewportPanel,
-    outliner: OutlinerPanel,
-    attributes: AttributesPanel,
-    coordinates: CoordinatesPanel,
-    timeline: TimelinePanel,
-    fcurve: FCurvePanel,
-    materials: MaterialsPanel,
+    /// The docked panels and their arrangement.
+    panels: Panels,
+    workspace: Workspace,
     render_settings: RenderSettingsPanel,
     picture_viewer: PictureViewerPanel,
     /// Time of the previous playback tick (egui clock, seconds).
@@ -71,13 +62,13 @@ impl Grid4DApp {
         Self {
             doc,
             editor,
-            viewport,
-            outliner: OutlinerPanel::default(),
-            attributes: AttributesPanel::default(),
-            coordinates: CoordinatesPanel::default(),
-            timeline: TimelinePanel::default(),
-            fcurve: FCurvePanel::default(),
-            materials: MaterialsPanel,
+            panels: Panels::new(viewport),
+            // The arrangement the user left, repaired if it lacks a pane.
+            workspace: cc
+                .storage
+                .and_then(|s| eframe::get_value::<Workspace>(s, workspace::STORAGE_KEY))
+                .map(Workspace::repaired)
+                .unwrap_or_default(),
             render_settings: RenderSettingsPanel::default(),
             picture_viewer: PictureViewerPanel::default(),
             last_tick: None,
@@ -91,6 +82,7 @@ impl eframe::App for Grid4DApp {
     /// are persisted by eframe itself (the `persistence` feature).
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(recent::STORAGE_KEY, self.editor.file.recent.to_storage());
+        eframe::set_value(storage, workspace::STORAGE_KEY, &self.workspace);
     }
 
     /// Tab over the bottom panel switches its tab, before egui moves focus with it.
@@ -117,9 +109,8 @@ impl eframe::App for Grid4DApp {
         shortcuts::handle(&ctx, &mut self.doc, &mut self.editor);
         file::accept_dropped_files(&ctx, &mut self.editor);
 
-        // Order matters: top/bottom bars span the full width, then the right-hand
-        // managers take full height, then the left palette and the timeline
-        // (under the viewport only), and finally the viewport fills the rest.
+        // Order matters: the top and bottom bars span the full width, then the
+        // mode palette takes the left edge and the docked panes fill the rest.
         Panel::top("grid4d.menu_bar")
             .frame(theme::header_frame())
             .exact_size(metrics::MENU_BAR_HEIGHT)
@@ -137,63 +128,17 @@ impl eframe::App for Grid4DApp {
         // The status bar shows last frame's hint; panels below set this frame's.
         self.editor.status_hint = None;
 
-        // Limits are relative to the window so the viewport and timeline always keep room.
-        let max_managers_width = (ui.available_width() * 0.45).max(MIN_MANAGERS_WIDTH);
-        Panel::right("grid4d.managers")
-            .frame(theme::panel_frame())
-            .resizable(true)
-            .default_size(370.0)
-            .size_range(MIN_MANAGERS_WIDTH..=max_managers_width)
-            .show(ui, |ui| {
-                let max_outliner_height = (ui.available_height() - 160.0).max(140.0);
-                Panel::top("grid4d.object_manager")
-                    .frame(theme::panel_frame())
-                    .resizable(true)
-                    .default_size(330.0)
-                    .size_range(140.0..=max_outliner_height)
-                    .show(ui, |ui| self.outliner.show(ui, &mut self.doc, &mut self.editor));
-                CentralPanel::no_frame().show(ui, |ui| match self.editor.managers {
-                    ManagerTab::Attributes => self.attributes.show(ui, &mut self.doc, &mut self.editor),
-                    ManagerTab::Coordinates => self.coordinates.show(ui, &mut self.doc, &mut self.editor),
-                });
-            });
-
         Panel::left("grid4d.mode_palette")
             .frame(theme::panel_frame())
             .resizable(false)
             .exact_size(40.0)
             .show(ui, |ui| mode_palette::show(ui, &self.doc, &mut self.editor));
 
-        // The bottom panel's tabs: the Timeline, or the taller F-Curve editor.
-        match self.editor.bottom {
-            BottomPanel::Timeline => {
-                Panel::bottom("grid4d.timeline")
-                    .frame(theme::panel_frame())
-                    .resizable(false)
-                    .exact_size(grid4d_ui::panels::timeline::HEIGHT)
-                    .show(ui, |ui| self.timeline.show(ui, &mut self.doc, &mut self.editor));
-            }
-            BottomPanel::FCurve => {
-                let max_height = (ui.available_height() * 0.65).max(MIN_FCURVE_HEIGHT);
-                Panel::bottom("grid4d.fcurve")
-                    .frame(theme::panel_frame())
-                    .resizable(true)
-                    .default_size(grid4d_ui::panels::fcurve::DEFAULT_HEIGHT)
-                    .size_range(MIN_FCURVE_HEIGHT..=max_height)
-                    .show(ui, |ui| self.fcurve.show(ui, &mut self.doc, &mut self.editor));
-            }
-            BottomPanel::Materials => {
-                let max_height = (ui.available_height() * 0.5).max(MIN_MATERIALS_HEIGHT);
-                Panel::bottom("grid4d.materials")
-                    .frame(theme::panel_frame())
-                    .resizable(true)
-                    .default_size(grid4d_ui::panels::materials::DEFAULT_HEIGHT)
-                    .size_range(MIN_MATERIALS_HEIGHT..=max_height)
-                    .show(ui, |ui| self.materials.show(ui, &mut self.doc, &mut self.editor));
-            }
-        }
-
-        CentralPanel::no_frame().show(ui, |ui| self.viewport.show(ui, &mut self.doc, &mut self.editor));
+        // The viewport and the managers, docked as the user arranged them.
+        CentralPanel::no_frame().show(ui, |ui| {
+            self.workspace
+                .show(ui, &mut self.panels, &mut self.doc, &mut self.editor);
+        });
 
         self.render_settings.show(&ctx, &mut self.doc, &mut self.editor);
         self.picture_viewer.show(&ctx, &mut self.editor);
@@ -203,7 +148,7 @@ impl eframe::App for Grid4DApp {
         alert::show(&ctx, &mut self.editor);
         drop_overlay::show(&ctx);
 
-        if commands::apply_pending(&mut self.doc, &mut self.editor, &mut self.viewport) {
+        if commands::apply_pending(&mut self.doc, &mut self.editor, &mut self.panels.viewport) {
             ctx.request_repaint();
         }
         // Title, close button and confirmed quit follow the document's file state.

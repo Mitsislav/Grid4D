@@ -8,8 +8,8 @@
 use std::collections::HashSet;
 
 use egui::{
-    Align2, Button, CornerRadius, FontId, Id, Key, LayerId, Margin, Order, Rect, RichText, ScrollArea, Sense, Stroke,
-    StrokeKind, TextEdit, TextStyle, Ui, Vec2, pos2, vec2,
+    Align2, Button, CornerRadius, FontId, Id, Key, LayerId, Margin, Order, Rect, ScrollArea, Sense, Stroke, StrokeKind,
+    TextEdit, TextStyle, Ui, Vec2, pos2, vec2,
 };
 use grid4d_scene::{Body, Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit, Tag, TagKind};
 
@@ -18,7 +18,6 @@ use crate::{
     commands::tag_color,
     icons::{self, Icon},
     theme::{metrics, palette as p},
-    widgets::manager_tabs,
 };
 
 const INDENT: f32 = 16.0;
@@ -60,7 +59,6 @@ enum DropTarget {
 
 #[derive(Debug, Default)]
 pub struct OutlinerPanel {
-    tab: usize,
     collapsed: HashSet<NodeId>,
     filter: String,
     renaming: Option<NodeId>,
@@ -74,15 +72,6 @@ pub struct OutlinerPanel {
 
 impl OutlinerPanel {
     pub fn show(&mut self, ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
-        if let Some(tab) = manager_tabs(ui, &["Objects", "Takes"], self.tab) {
-            self.tab = tab;
-        }
-        if self.tab != 0 {
-            ui.add_space(12.0);
-            ui.vertical_centered(|ui| ui.label(RichText::new("Takes — planned").color(p::TEXT_DIM)));
-            return;
-        }
-
         self.menu(ui, &doc.scene, editor);
         self.search_field(ui);
 
@@ -531,7 +520,7 @@ impl OutlinerPanel {
                 RowAction::ShowMaterial(material) => {
                     editor.materials.selected = Some(material);
                     editor.materials.shown = true;
-                    editor.managers = crate::ManagerTab::Attributes;
+                    editor.panes.show = Some(crate::workspace::Pane::Attributes);
                 }
                 RowAction::ToggleFold(id) => {
                     if !self.collapsed.remove(&id) {

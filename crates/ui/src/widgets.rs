@@ -99,85 +99,12 @@ pub(crate) fn icon_button_bare(ui: &mut Ui, icon: Icon, style: IconStyle) -> Res
     response
 }
 
-/// A C4D-style manager tab strip ("Objects | Takes"). Returns the clicked tab.
-pub(crate) fn manager_tabs(ui: &mut Ui, tabs: &[&str], active: usize) -> Option<usize> {
-    let height = metrics::HEADER_HEIGHT;
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, CornerRadius::ZERO, p::BG_HEADER);
-
-    let font = FontId::proportional(12.0);
-    let mut x = rect.left() + 4.0;
-    let mut clicked = None;
-    for (i, &tab) in tabs.iter().enumerate() {
-        let is_active = i == active;
-        let color = if is_active { p::TEXT_STRONG } else { p::TEXT_DIM };
-        let galley = painter.layout_no_wrap(tab.to_owned(), font.clone(), color);
-        let width = galley.size().x + 22.0;
-        let tab_rect = Rect::from_min_size(pos2(x, rect.top() + 4.0), vec2(width, height - 4.0));
-        let response = ui.interact(tab_rect, ui.scope_id().with(("manager_tab", i)), Sense::click());
-        if is_active {
-            painter.rect_filled(
-                tab_rect,
-                CornerRadius {
-                    nw: 3,
-                    ne: 3,
-                    sw: 0,
-                    se: 0,
-                },
-                p::BG_PANEL,
-            );
-            painter.line_segment(
-                [
-                    tab_rect.left_top() + vec2(3.0, 0.5),
-                    tab_rect.right_top() + vec2(-3.0, 0.5),
-                ],
-                Stroke::new(1.5, p::ACCENT),
-            );
-        } else if response.hovered() {
-            painter.rect_filled(tab_rect, CornerRadius::same(3), p::BG_RAISED.gamma_multiply(0.6));
-        }
-        painter.galley(tab_rect.center() - galley.size() * 0.5, galley, color);
-        if response.clicked() {
-            clicked = Some(i);
-        }
-        x += width + 2.0;
-    }
-    clicked
-}
-
-/// The bottom panel's tabs (Timeline | F-Curve): a click switches
-/// `editor.bottom`. Returns the strip's rect (the panel may add to its right).
-pub(crate) fn bottom_tabs(ui: &mut Ui, editor: &mut crate::EditorState) -> Rect {
-    let rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), metrics::HEADER_HEIGHT));
-    let tabs = crate::BottomPanel::ALL.map(crate::BottomPanel::label);
-    let active = crate::BottomPanel::ALL
-        .iter()
-        .position(|&b| b == editor.bottom)
-        .unwrap_or(0);
-    if let Some(i) = manager_tabs(ui, &tabs, active)
-        && let Some(&tab) = crate::BottomPanel::ALL.get(i)
-    {
-        editor.bottom = tab;
-    }
-    // Tab over the panel switches (read by the shortcuts next frame).
-    editor.bottom_hovered = ui.rect_contains_pointer(ui.max_rect());
+/// A header row across the panel (the F-Curve editor's key fields sit in it).
+/// Returns its rect.
+pub(crate) fn header_row(ui: &mut Ui) -> Rect {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), metrics::HEADER_HEIGHT), Sense::hover());
+    ui.painter_at(rect).rect_filled(rect, CornerRadius::ZERO, p::BG_HEADER);
     rect
-}
-
-/// The lower right manager's tabs (Attributes | Coordinates | Layers): a click
-/// switches `editor.managers` (Layers is a placeholder).
-pub(crate) fn manager_area_tabs(ui: &mut Ui, editor: &mut crate::EditorState) {
-    use crate::ManagerTab;
-    let active = match editor.managers {
-        ManagerTab::Attributes => 0,
-        ManagerTab::Coordinates => 1,
-    };
-    match manager_tabs(ui, &["Attributes", "Coordinates", "Layers"], active) {
-        Some(0) => editor.managers = ManagerTab::Attributes,
-        Some(1) => editor.managers = ManagerTab::Coordinates,
-        Some(_) | None => {}
-    }
 }
 
 /// Attribute label with Cinema 4D's dotted leader: `Name . . . . . .`

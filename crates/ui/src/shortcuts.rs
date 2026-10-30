@@ -39,7 +39,7 @@ use egui::{Event, Key};
 use grid4d_render::{DisplayStyle, ShadingMode};
 use grid4d_scene::Document;
 
-use crate::{BottomPanel, EditorCommand, EditorState, FrameCurves, ManagerTab, Tool};
+use crate::{EditorCommand, EditorState, FrameCurves, Tool, workspace::Pane};
 
 /// The first key of a two-key shortcut, Cinema 4D style (`U~L`: U, then L).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,7 +130,12 @@ impl Chord {
 /// is taken out of the input before egui sees it (call from
 /// `eframe::App::raw_input_hook`). Nothing happens while a widget has focus.
 pub fn take_tab(ctx: &egui::Context, editor: &mut EditorState, input: &mut egui::RawInput) {
-    if !editor.bottom_hovered || ctx.memory(|m| m.focused().is_some()) {
+    let other = match editor.panes.hovered {
+        Some(Pane::Timeline) => Pane::FCurve,
+        Some(Pane::FCurve) => Pane::Timeline,
+        _ => return,
+    };
+    if ctx.memory(|m| m.focused().is_some()) {
         return;
     }
     let is_tab = |event: &Event| matches!(event, Event::Key { key: Key::Tab, modifiers, .. } if modifiers.is_none());
@@ -153,7 +158,7 @@ pub fn take_tab(ctx: &egui::Context, editor: &mut EditorState, input: &mut egui:
     }
     input.events.retain(|e| !is_tab(e));
     if pressed % 2 == 1 {
-        editor.bottom = editor.bottom.other();
+        editor.panes.show = Some(other);
     }
 }
 
@@ -221,7 +226,7 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                 }
             }
             // Over the F-Curve graph, H and S frame the curves.
-            let curves = editor.bottom == BottomPanel::FCurve && editor.curves.hovered;
+            let curves = editor.panes.is_shown(Pane::FCurve) && editor.curves.hovered;
             if i.key_pressed(Key::H) {
                 if curves {
                     editor.curves.frame = Some(FrameCurves::All);
@@ -244,21 +249,21 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
             if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
                 // After a click in the timeline's key strip or the F-Curve graph,
                 // Delete removes keys; in the Material Manager, the material.
-                let command = match (editor.bottom, editor.materials.selected) {
-                    (BottomPanel::FCurve, _) if editor.curves.focused && !editor.curves.keys.is_empty() => {
-                        EditorCommand::EditCurveKeys {
-                            op: crate::keys::CurveOp::Delete,
-                        }
+                let shown = |pane| editor.panes.is_shown(pane);
+                let material = editor
+                    .materials
+                    .selected
+                    .filter(|_| shown(Pane::Materials) && editor.materials.focused);
+                let command = if shown(Pane::FCurve) && editor.curves.focused && !editor.curves.keys.is_empty() {
+                    EditorCommand::EditCurveKeys {
+                        op: crate::keys::CurveOp::Delete,
                     }
-                    (BottomPanel::Timeline, _) if editor.keys.focused && !editor.keys.frames.is_empty() => {
-                        EditorCommand::DeleteKeys
-                    }
-                    (BottomPanel::Materials, Some(material)) if editor.materials.focused => {
-                        EditorCommand::DeleteMaterial(material)
-                    }
-                    (BottomPanel::FCurve | BottomPanel::Timeline | BottomPanel::Materials, _) => {
-                        EditorCommand::DeleteSelected
-                    }
+                } else if shown(Pane::Timeline) && editor.keys.focused && !editor.keys.frames.is_empty() {
+                    EditorCommand::DeleteKeys
+                } else if let Some(material) = material {
+                    EditorCommand::DeleteMaterial(material)
+                } else {
+                    EditorCommand::DeleteSelected
                 };
                 editor.commands.push(command);
             }
@@ -300,14 +305,14 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         if i.modifiers.shift_only() && i.key_pressed(Key::R) {
             editor.commands.push(EditorCommand::RenderToPictureViewer);
         }
-        if i.modifiers.shift_only() && i.key_pressed(Key::F2) {
-            editor.bottom = BottomPanel::Materials;
-        }
-        if i.modifiers.shift_only() && i.key_pressed(Key::F5) {
-            editor.managers = ManagerTab::Attributes;
-        }
-        if i.modifiers.shift_only() && i.key_pressed(Key::F7) {
-            editor.managers = ManagerTab::Coordinates;
+        for (key, pane) in [
+            (Key::F2, Pane::Materials),
+            (Key::F5, Pane::Attributes),
+            (Key::F7, Pane::Coordinates),
+        ] {
+            if i.modifiers.shift_only() && i.key_pressed(key) {
+                editor.panes.show = Some(pane);
+            }
         }
         let ctrl_only = i.modifiers.command && !i.modifiers.shift && !i.modifiers.alt;
         if ctrl_only && i.key_pressed(Key::F9) {
@@ -352,13 +357,11 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         if i.modifiers.command && !i.pointer.any_down() {
             if i.key_pressed(Key::N) {
                 // Over the Material Manager, Ctrl+N makes a material.
-                editor
-                    .commands
-                    .push(if editor.bottom == BottomPanel::Materials && editor.bottom_hovered {
-                        EditorCommand::NewMaterial
-                    } else {
-                        EditorCommand::NewDocument
-                    });
+                editor.commands.push(if editor.panes.hovered == Some(Pane::Materials) {
+                    EditorCommand::NewMaterial
+                } else {
+                    EditorCommand::NewDocument
+                });
             } else if i.key_pressed(Key::O) {
                 editor.commands.push(if i.modifiers.shift {
                     EditorCommand::Merge
@@ -707,7 +710,7 @@ mod tests {
     #[test]
     fn over_the_f_curve_graph_keys_act_on_curves() {
         let (mut doc, mut editor) = (Document::default(), EditorState::default());
-        editor.bottom = BottomPanel::FCurve;
+        editor.panes.mark_shown(Pane::FCurve);
         editor.curves.hovered = true;
         press_on(&mut doc, &mut editor, Key::H, Modifiers::NONE);
         press_on(&mut doc, &mut editor, Key::S, Modifiers::NONE);
@@ -755,11 +758,11 @@ mod tests {
             ..RawInput::default()
         };
         take_tab(&ctx, &mut editor, &mut input);
-        assert_eq!(editor.bottom, BottomPanel::Timeline, "not over the panel");
+        assert_eq!(editor.panes.show, None, "not over the panel");
         assert_eq!(input.events.len(), 2, "left for egui");
-        editor.bottom_hovered = true;
+        editor.panes.hovered = Some(Pane::Timeline);
         take_tab(&ctx, &mut editor, &mut input);
-        assert_eq!(editor.bottom, BottomPanel::FCurve);
+        assert_eq!(editor.panes.show, Some(Pane::FCurve));
         assert!(input.events.is_empty(), "taken out");
     }
 

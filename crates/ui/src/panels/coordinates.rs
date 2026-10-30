@@ -12,10 +12,7 @@ use glam::{Mat4, Quat, Vec3};
 use grid4d_geom::{Component, selection};
 use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, Scene, SceneEdit, Tags, Transform};
 
-use crate::{
-    EditorCommand, EditorState, keys::Keying, live_edit::interaction_ongoing, theme::palette as p,
-    widgets::manager_area_tabs,
-};
+use crate::{EditorCommand, EditorState, keys::Keying, live_edit::interaction_ongoing, theme::palette as p};
 
 /// How positions and rotations are read.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -110,7 +107,6 @@ pub struct CoordinatesPanel {
 
 impl CoordinatesPanel {
     pub fn show(&mut self, ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
-        manager_area_tabs(ui, editor);
         let keying = Keying::of(doc, editor);
         let target = target(doc, editor);
         // The selection or mode changed during an edit: finish it.

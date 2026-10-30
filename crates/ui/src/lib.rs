@@ -32,12 +32,13 @@ pub mod simulation;
 pub mod theme;
 mod widgets;
 pub mod window;
+pub mod workspace;
 
 pub use commands::{CommandQueue, EditorCommand, SelectMode, SplineOp};
 pub use editor::{
-    AnimationSettings, BottomPanel, CurveKey, CurveSelection, EditMode, EditorState, FrameCurves, KeySelection,
-    ManagerTab, MaterialDrag, MaterialSelection, ModelingSettings, Selection, SelectionSettings, SnapSettings,
-    SnapType, TagRef, Tool, TransformSettings,
+    AnimationSettings, CurveKey, CurveSelection, EditMode, EditorState, FrameCurves, KeySelection, MaterialDrag,
+    MaterialSelection, ModelingSettings, Selection, SelectionSettings, SnapSettings, SnapType, TagRef, Tool,
+    TransformSettings,
 };
 pub use file::{DocumentFile, FileAction, FileDialogs, NativeDialogs, UnsavedChoice};
 pub use history::{History, UndoGroup};

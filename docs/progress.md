@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 12 — Workspace (v0.12) |
-| Last step done | Phase 12 planned (2026-10-30) |
-| Next step | 12.1 — Docking layouts |
-| Tests | 683, all passing; clippy and rustfmt clean |
+| Last step done | 12.1 — Docking layouts (2026-10-30) |
+| Next step | 12.2 — Preferences |
+| Tests | 689, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1604,6 +1604,7 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
 | Step | What was built | Tests |
 |------|----------------|-------|
 | — | Phase 12 planned in detail: docking layouts on `egui_tiles` with Standard / Modeling / Animate presets, Preferences (units, undo depth, autosave, viewport defaults), Dark / Darker / Light themes, Layers, Takes (the document holds the active take; switching is an undoable swap; Auto Take), the interface in Greek (`tr` with English keys) (`IMPLEMENTATION_PLAN.md`) | 683 |
+| 12.1 | Docking layouts on `egui_tiles`: every manager and the viewport a pane that docks as a tab or a split, closes and reopens from the Window menu; Standard / Modeling / Animate layouts, Reset Layout; the arrangement remembered between runs | 689 |
 
 **Planning notes:**
 - **The docking library.** The plan named `egui_dock`, to be checked against
@@ -1616,6 +1617,40 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
   evaluation and the path tracer need no changes; only edits (recorded as
   overrides while a take is active) and renders (which apply a take to their
   copy) know about takes (decision D14).
+
+**12.1 — Docking layouts**
+
+*Problems and solutions:*
+- **Panels that showed their own tabs.** The Object, Attribute and Coordinate
+  Managers and the timeline, F-Curve editor and Material Manager each drew a
+  tab strip and kept which tab was in front in editor state
+  (`ManagerTab`, `BottomPanel`). Those strips are gone: each panel now draws
+  only its contents and the tile tree owns the tabs; the F-Curve editor kept
+  its header row (`widgets::header_row`).
+- **Keys meant for a manager.** Delete, Ctrl+N, H, S and Tab asked which
+  bottom tab or manager was in front. They now ask `EditorState::panes`: the
+  panes drawn this frame (`is_shown`) and the one under the pointer
+  (`hovered`), both marked by the tile `Behavior` while it draws them.
+  Shortcuts that show a manager set a request (`panes.show`) that the
+  workspace handles at the start of the next frame.
+- **Where a reopened pane goes.** Each pane names the panes it usually sits
+  with (`Pane::neighbours`); a reopened pane joins the first of their groups
+  that is still open, or wraps the whole tree in a split when none is.
+- **A saved tree from elsewhere.** A saved arrangement may hold a pane twice
+  or nothing at all (another version); `Workspace::repaired` gives the preset
+  back then, and adds the Viewport if it is missing. A first version also
+  added every missing pane — which would have reopened closed managers on
+  every start; closed panes now stay closed (a test saves and loads one).
+- **Name clashes.** `egui::Layout` and the workspace's `Layout` meet in the
+  menu bar (imported as `PaneLayout`); `Tree::new` needs a stable `Id`.
+- **Clicks on tabs in the on-screen driver.** Posted mouse messages open menus
+  but never reached the tabs (which sense both clicks and drags), so a test
+  clicks them instead: it finds the Coordinates tab and its × through egui's
+  accessibility tree and sends real pointer events — the tab comes to the
+  front, the × closes it.
+- **On-screen testing:** Standard, Modeling and Animate switched from the
+  Layout menu; the Window menu highlights the panes that are showing; after a
+  restart the Modeling arrangement came back as it was left.
 
 ---
 

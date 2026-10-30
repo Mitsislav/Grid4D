@@ -18,7 +18,7 @@ use crate::{
     keys::CurveOp,
     live_edit::{LiveEdit, interaction_ongoing},
     theme::{metrics, palette as p},
-    widgets::bottom_tabs,
+    widgets::header_row,
 };
 
 /// Default height of the panel.
@@ -212,7 +212,7 @@ impl FCurvePanel {
             editor.curves.keys.retain(|k| key_exists(doc, *k));
         }
 
-        let header = bottom_tabs(ui, editor);
+        let header = header_row(ui);
         self.key_fields(ui, header, doc, editor);
         let body = ui.available_rect_before_wrap();
         ui.allocate_rect(body, Sense::hover());
@@ -1040,7 +1040,7 @@ mod tests {
             let mut editor = EditorState::default();
             let cube = doc.scene.roots()[0];
             editor.selection.set_single(cube);
-            editor.bottom = crate::BottomPanel::FCurve;
+            editor.panes.mark_shown(crate::workspace::Pane::FCurve);
             let data = &mut doc.scene.get_mut(cube).unwrap().data;
             data.record([PX], 0.0, 0.0);
             data.set_value_at(PX, 100.0, 15.0, true);

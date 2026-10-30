@@ -4,7 +4,11 @@
 use egui::{Button, Layout, RichText, Ui};
 use grid4d_scene::{Document, ObjectKindTag, SceneEdit};
 
-use crate::{EditMode, EditorCommand, EditorState, Tool, theme::palette as p};
+use crate::{
+    EditMode, EditorCommand, EditorState, Tool,
+    theme::palette as p,
+    workspace::{Layout as PaneLayout, Pane},
+};
 
 pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
     egui::MenuBar::new().ui(ui, |ui| {
@@ -134,7 +138,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 .clicked()
             {
                 editor.commands.push(EditorCommand::NewMaterial);
-                editor.bottom = crate::BottomPanel::Materials;
+                editor.panes.show = Some(Pane::Materials);
                 ui.close();
             }
         });
@@ -438,32 +442,35 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             command(ui, editor, "Frame Selected Objects", "O", EditorCommand::FrameSelected);
             command(ui, editor, "Reset View", "", EditorCommand::ResetView);
             ui.separator();
-            let materials = Button::new("Material Manager")
-                .shortcut_text("Shift+F2")
-                .selected(editor.bottom == crate::BottomPanel::Materials);
-            if ui.add(materials).clicked() {
-                editor.bottom = crate::BottomPanel::Materials;
-                ui.close();
+            for pane in Pane::ALL {
+                let shortcut = match pane {
+                    Pane::Materials => "Shift+F2",
+                    Pane::Attributes => "Shift+F5",
+                    Pane::Coordinates => "Shift+F7",
+                    _ => "",
+                };
+                let item = Button::new(pane.window_label())
+                    .shortcut_text(shortcut)
+                    .selected(editor.panes.is_shown(pane));
+                if ui.add(item).clicked() {
+                    editor.panes.show = Some(pane);
+                    ui.close();
+                }
             }
             let viewer = Button::new("Picture Viewer").selected(editor.renders.viewer_open);
             if ui.add(viewer).clicked() {
                 editor.renders.viewer_open = !editor.renders.viewer_open;
                 ui.close();
             }
-            for (tab, label, shortcut) in [
-                (crate::ManagerTab::Attributes, "Attribute Manager", "Shift+F5"),
-                (crate::ManagerTab::Coordinates, "Coordinate Manager", "Shift+F7"),
-            ] {
-                let item = Button::new(label)
-                    .shortcut_text(shortcut)
-                    .selected(editor.managers == tab);
-                if ui.add(item).clicked() {
-                    editor.managers = tab;
-                    ui.close();
-                }
-            }
             ui.separator();
-            planned(ui, "Customize Layout…", "");
+            if ui
+                .button("Reset Layout")
+                .on_hover_text("Put the current layout back as it was")
+                .clicked()
+            {
+                editor.panes.reset = true;
+                ui.close();
+            }
         });
 
         ui.menu_button("Help", |ui| {
@@ -474,7 +481,20 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
         });
 
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new("Layout: Standard").color(p::TEXT_DIM).size(11.5));
+            ui.menu_button(
+                RichText::new(format!("Layout: {}", editor.panes.current.label()))
+                    .color(p::TEXT_DIM)
+                    .size(11.5),
+                |ui| {
+                    for layout in PaneLayout::ALL {
+                        let item = Button::new(layout.label()).selected(editor.panes.current == layout);
+                        if ui.add(item).clicked() {
+                            editor.panes.layout = Some(layout);
+                            ui.close();
+                        }
+                    }
+                },
+            );
         });
     });
 }

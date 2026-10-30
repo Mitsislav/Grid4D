@@ -30,7 +30,7 @@ use crate::{
     keys::Keying,
     live_edit::{LiveEdit, interaction_ongoing},
     theme::palette as p,
-    widgets::{attr_label, manager_area_tabs, section_heading},
+    widgets::{attr_label, section_heading},
 };
 
 const LABEL_WIDTH: f32 = 128.0;
@@ -97,7 +97,6 @@ impl AttributesPanel {
             editor.materials.shown = false;
         }
 
-        manager_area_tabs(ui, editor);
         egui::Frame::new().inner_margin(Margin::symmetric(4, 1)).show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("Mode", |ui| {

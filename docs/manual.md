@@ -76,6 +76,40 @@ managers to make them wider.
 
 **Hover any button or menu entry**: its tooltip and the status bar explain it.
 
+### 2.1 Arranging the panels and layouts
+
+The viewport and the managers (Objects, Takes, Attributes, Coordinates, Layers,
+Timeline, F-Curve, Materials) are **panels** you can move around. Every panel
+except the viewport has a tab with its name.
+
+![The Modeling layout with the Window menu open: the panels that are showing are highlighted](images/manual/workspace-layouts.png)
+
+- **Move a panel:** drag its tab. Drop it on another group's tabs to add it
+  there as a tab; drop it on the edge of a panel to split that panel and put it
+  on that side.
+- **Resize:** drag the line between two panels.
+- **Close a panel:** click the **×** on its tab (the viewport cannot be closed).
+- **Open a panel again:** choose it in the **Window** menu. It comes back as a
+  tab beside the panels it usually sits with; if it is open, its tab comes to
+  the front. The panels that are showing are highlighted in the menu.
+- **Layouts:** the **Layout** menu at the right end of the menu bar switches
+  the whole arrangement:
+  - **Standard** — the Object Manager above the Attribute Manager on the right,
+    the timeline under the viewport;
+  - **Modeling** — a larger viewport, the Attribute and Coordinate Managers side
+    by side, the Material Manager as a tab beside the Object Manager and a short
+    timeline;
+  - **Animate** — the F-Curve editor large under the viewport, with the
+    timeline and the Material Manager as its tabs.
+- **Window ▸ Reset Layout** puts the current layout back the way it was before
+  you moved anything.
+
+Grid4D remembers your arrangement and opens with it the next time.
+
+The shortcuts that show a manager (**Shift+F2** Material Manager, **Shift+F5**
+Attribute Manager, **Shift+F7** Coordinate Manager, **Tab** over the timeline or
+the F-Curve editor) bring its tab to the front, opening it if it was closed.
+
 ## 3. Navigating the viewport
 
 | Action | Mouse | Alternative |
@@ -2061,6 +2095,7 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   DPI and film aspect; movie files, multi-pass and layered files, 32-bit
   OpenEXR, OpenEXR from Save As; a render queue, and the Picture Viewer's
   filters, channels, comparison and animation playback.
+- **Workspace**: panels in windows of their own, saving your own layouts.
 - The Takes, Layers and Filter panels are placeholders.
 
 See [`progress.md`](progress.md) for what changed in each step.

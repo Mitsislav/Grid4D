@@ -11,7 +11,7 @@ use egui::{
 };
 use grid4d_scene::{Document, MaterialId};
 
-use crate::{EditorCommand, EditorState, ManagerTab, MaterialDrag, icons, theme::palette as p, widgets::bottom_tabs};
+use crate::{EditorCommand, EditorState, MaterialDrag, icons, theme::palette as p};
 
 /// Default height of the panel.
 pub const DEFAULT_HEIGHT: f32 = 150.0;
@@ -38,7 +38,6 @@ impl MaterialsPanel {
         }
 
         ui.spacing_mut().item_spacing.y = 0.0;
-        bottom_tabs(ui, editor);
         menu(ui, editor);
         let area = ui.available_rect_before_wrap();
         let background = ui.interact(area, Id::unique("grid4d.materials.area"), Sense::click());
@@ -171,7 +170,7 @@ fn cell(ui: &mut Ui, doc: &Document, editor: &mut EditorState, id: MaterialId) -
     if clicked {
         editor.materials.selected = Some(id);
         editor.materials.shown = true;
-        editor.managers = ManagerTab::Attributes;
+        editor.panes.show = Some(crate::workspace::Pane::Attributes);
     }
     let response = response.on_hover_text(format!("{} · drag onto an object to assign it", material.name));
     response.context_menu(|ui| {
@@ -230,10 +229,7 @@ mod tests {
                 ctx: egui::Context::default(),
                 time: 0.0,
                 doc: Document::with_demo_scene(),
-                editor: EditorState {
-                    bottom: crate::BottomPanel::Materials,
-                    ..EditorState::default()
-                },
+                editor: EditorState::default(),
                 panel: MaterialsPanel,
             };
             h.frame(vec![]);

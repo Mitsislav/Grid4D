@@ -18,13 +18,17 @@ grid4d-raytrace.workspace = true
 grid4d-sim.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
+egui_tiles.workspace = true
 glam.workspace = true
 log.workspace = true
 slotmap.workspace = true
 rfd.workspace = true
+# The workspace's arrangement only (saved by the binary in eframe storage).
+serde.workspace = true
 
 [dev-dependencies]
 png.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

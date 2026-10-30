@@ -43,6 +43,8 @@ grid4d-ui = { path = "crates/ui" }
 eframe = "0.37"
 egui = "0.37"
 egui-wgpu = "0.37"
+# Docking panels (tabs, splits, drag to re-dock); grid4d-ui only. Serialisable tree.
+egui_tiles = "0.18"
 # Native file dialogs (Win32 / Cocoa / XDG desktop portal on Linux — no GTK needed).
 rfd = "0.17"
 # Icon + version info in the Windows executable (build.rs; nothing on other targets).
