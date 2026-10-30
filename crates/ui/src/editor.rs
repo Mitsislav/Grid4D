@@ -732,6 +732,12 @@ pub struct EditorState {
     pub renders: crate::rendering::Renders,
     /// The rigid body simulation and its cache.
     pub simulation: crate::simulation::Sim,
+    /// The user's preferences (Edit ▸ Preferences…); the binary loads and saves them.
+    pub preferences: crate::preferences::Preferences,
+    /// The Preferences window is open.
+    pub show_preferences: bool,
+    /// Recovery copies of unsaved work, and one offered after a crash.
+    pub autosave: crate::autosave::Autosave,
 }
 
 impl EditorState {
@@ -782,6 +788,9 @@ impl Default for EditorState {
             show_render_settings: false,
             renders: crate::rendering::Renders::default(),
             simulation: crate::simulation::Sim::default(),
+            preferences: crate::preferences::Preferences::default(),
+            show_preferences: false,
+            autosave: crate::autosave::Autosave::default(),
         }
     }
 }

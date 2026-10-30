@@ -242,7 +242,10 @@ pub(super) fn hud(painter: &Painter, rect: Rect, camera: &OrbitCamera) {
     painter.text(
         pos2(rect.right() - 12.0, rect.bottom() - 10.0),
         Align2::RIGHT_BOTTOM,
-        format!("Grid Spacing : {} cm", camera.grid_spacing()),
+        format!(
+            "Grid Spacing : {}",
+            crate::preferences::units(painter.ctx()).format(f64::from(camera.grid_spacing()), 2, "")
+        ),
         FontId::proportional(11.5),
         p::TEXT_DIM,
     );

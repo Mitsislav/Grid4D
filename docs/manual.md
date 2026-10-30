@@ -110,6 +110,28 @@ The shortcuts that show a manager (**Shift+F2** Material Manager, **Shift+F5**
 Attribute Manager, **Shift+F7** Coordinate Manager, **Tab** over the timeline or
 the F-Curve editor) bring its tab to the front, opening it if it was closed.
 
+### 2.2 Preferences
+
+**Edit ▸ Preferences…** opens your settings. They are yours, not the
+document's: they apply to every document and Grid4D keeps them between runs.
+Changes take effect at once; close the window with its **×**.
+
+![Preferences with lengths in metres: the Cube's position reads 1 m and the view's grid spacing 1 m; the grid is off for the views](images/manual/preferences.png)
+
+- **Units ▸ Length Unit** — Centimetres, Metres, Millimetres, Inches or Feet.
+  Every length field (positions, sizes, radii, offsets, the Coordinate Manager,
+  speeds and gravity) and the view's *Grid Spacing* show that unit. A number you
+  type is in that unit; type a unit after it to use another one: `2 m`, `15mm`,
+  `3 in`. Your documents do not change — only how their lengths read.
+- **Undo ▸ Undo Depth** — how many steps **Undo** can go back (1 – 10 000,
+  100 at first). Lowering it forgets the oldest steps at once.
+- **Autosave** — while a document has unsaved changes, Grid4D keeps a recovery
+  copy of it, renewed **Every** few minutes (5 at first). It never touches your
+  own file, and it is deleted when you save or when Grid4D closes normally.
+- **Views** — the **Shading** and whether the **Grid**, **World Axis** and
+  **HUD** show in the views when Grid4D starts. **Apply to Views** gives the
+  open views these settings now.
+
 ## 3. Navigating the viewport
 
 | Action | Mouse | Alternative |
@@ -494,7 +516,8 @@ positions, sizes and rotations.
 - Everything that changes the document can be undone: creating, deleting and
   re-parenting objects, every drag and typed value, renames, selections of points,
   edges and polygons, and every modelling operation.
-- Up to 100 steps are kept.
+- Up to 100 steps are kept; change it in **Edit ▸ Preferences… ▸ Undo Depth**
+  ([§2.2](#22-preferences)).
 
 ## 9. Files
 
@@ -517,6 +540,13 @@ positions, sizes and rotations.
   window), Grid4D asks: **Save**, **Don't Save** or **Cancel**.
 - Saving writes a temporary file first and then replaces the old one, so a failed
   save never leaves a broken document behind.
+- **After a crash.** With Autosave on ([§2.2](#22-preferences)), Grid4D asks on
+  the next start whether to **Recover** the unsaved work it kept or
+  **Discard** it. Recovered work opens with unsaved changes (an asterisk in the
+  title); **Save** writes it to the file it came from, **Save As** keeps both.
+  Press **Esc** to decide on the next start instead.
+
+  ![Recover Unsaved Work? after Grid4D stopped unexpectedly](images/manual/recovery.png)
 - `.g4d` files keep everything in the document: objects, hierarchy, parameters, the
   meshes of polygon objects, and their selected and hidden points, edges and
   polygons. Editor state (tool, mode, camera) is not saved.
@@ -2096,6 +2126,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   OpenEXR, OpenEXR from Save As; a render queue, and the Picture Viewer's
   filters, channels, comparison and animation playback.
 - **Workspace**: panels in windows of their own, saving your own layouts.
+- **Preferences**: a shortcut for the window; the F-Curve editor's values and
+  the status bar in the chosen unit; a scale per document.
 - The Takes, Layers and Filter panels are placeholders.
 
 See [`progress.md`](progress.md) for what changed in each step.

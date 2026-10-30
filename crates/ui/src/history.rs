@@ -66,6 +66,22 @@ impl History {
         }
     }
 
+    /// Undo steps kept at most.
+    #[must_use]
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    /// Keeps at most `limit` undo steps (at least one) from now on, dropping
+    /// the oldest at once and purging the nodes only they could restore.
+    pub fn set_limit(&mut self, doc: &mut Document, limit: usize) {
+        self.limit = limit.max(1);
+        let excess = self.undo.len().saturating_sub(self.limit);
+        for oldest in self.undo.drain(..excess) {
+            purge_unreachable(doc, &oldest);
+        }
+    }
+
     #[must_use]
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()

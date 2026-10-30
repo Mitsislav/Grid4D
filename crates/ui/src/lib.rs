@@ -15,6 +15,7 @@
 //! * GPU work is delegated to `grid4d-render`, which draws the 3D view into its own
 //!   offscreen target; this crate only shows that target as an egui texture.
 
+pub mod autosave;
 pub mod commands;
 mod current_state;
 pub mod editor;
@@ -25,6 +26,7 @@ pub mod keys;
 mod live_edit;
 mod modeling;
 pub mod panels;
+pub mod preferences;
 pub mod recent;
 pub mod rendering;
 pub mod shortcuts;

@@ -1,6 +1,6 @@
 //! Mesh ▸ Optimize… dialog: the options, then OK runs the command.
 
-use egui::{DragValue, Grid, Id, Modal, RichText};
+use egui::{Grid, Id, Modal, RichText};
 
 use crate::{EditorCommand, EditorState, theme::palette as p};
 
@@ -25,11 +25,10 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
             ui.label("Tolerance");
             ui.add_enabled(
                 options.merge_points,
-                DragValue::new(&mut options.tolerance)
+                crate::widgets::length(ui, &mut options.tolerance)
                     .speed(0.01)
                     .range(0.0..=1000.0)
-                    .max_decimals(3)
-                    .suffix(" cm"),
+                    .max_decimals(3),
             );
             ui.end_row();
             ui.label("Unused Points");

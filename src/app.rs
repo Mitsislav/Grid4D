@@ -4,8 +4,14 @@
 use egui::{CentralPanel, Margin, Panel};
 use grid4d_scene::Document;
 use grid4d_ui::{
-    EditorCommand, EditorState, PictureViewerPanel, RecentFiles, RenderSettingsPanel, ViewportPanel, commands, file,
-    panels::{about, alert, drop_overlay, menu_bar, mode_palette, optimize, status_bar, toolbar, unsaved_changes},
+    EditorCommand, EditorState, PictureViewerPanel, RecentFiles, RenderSettingsPanel, ViewportPanel,
+    autosave::Autosave,
+    commands, file,
+    panels::{
+        about, alert, drop_overlay, menu_bar, mode_palette, optimize, preferences as preferences_window, recovery,
+        status_bar, toolbar, unsaved_changes,
+    },
+    preferences::{self, Preferences},
     recent, shortcuts,
     theme::{self, metrics},
     window::WindowFit,
@@ -31,7 +37,7 @@ impl Grid4DApp {
         theme::apply(&cc.egui_ctx);
 
         let render_state = cc.wgpu_render_state.as_ref();
-        let viewport = ViewportPanel::new(render_state);
+        let mut viewport = ViewportPanel::new(render_state);
 
         let mut editor = EditorState {
             renderer_info: render_state.map_or_else(
@@ -46,6 +52,18 @@ impl Grid4DApp {
         log::info!("Renderer: {}", editor.renderer_info);
         if let Some(stored) = cc.storage.and_then(|s| s.get_string(recent::STORAGE_KEY)) {
             editor.file.recent = RecentFiles::from_storage(&stored);
+        }
+        if let Some(stored) = cc
+            .storage
+            .and_then(|s| eframe::get_value::<Preferences>(s, preferences::STORAGE_KEY))
+        {
+            editor.preferences = stored.checked();
+        }
+        viewport.apply_defaults(&editor.preferences.views);
+        // Recovery copies live beside the stored settings; one a crashed run
+        // left is offered on the first frame.
+        if let Some(dir) = eframe::storage_dir("grid4d") {
+            editor.autosave = Autosave::new(dir.join("recovery"));
         }
 
         let doc = Document::with_demo_scene();
@@ -83,6 +101,12 @@ impl eframe::App for Grid4DApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(recent::STORAGE_KEY, self.editor.file.recent.to_storage());
         eframe::set_value(storage, workspace::STORAGE_KEY, &self.workspace);
+        eframe::set_value(storage, preferences::STORAGE_KEY, &self.editor.preferences);
+    }
+
+    /// A normal exit: the recovery copy is no longer needed.
+    fn on_exit(&mut self) {
+        self.editor.autosave.finish();
     }
 
     /// Tab over the bottom panel switches its tab, before egui moves focus with it.
@@ -106,6 +130,7 @@ impl eframe::App for Grid4DApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.window_fit.check(&ctx);
+        preferences::set_units(&ctx, self.editor.preferences.units);
         shortcuts::handle(&ctx, &mut self.doc, &mut self.editor);
         file::accept_dropped_files(&ctx, &mut self.editor);
 
@@ -143,6 +168,8 @@ impl eframe::App for Grid4DApp {
         self.render_settings.show(&ctx, &mut self.doc, &mut self.editor);
         self.picture_viewer.show(&ctx, &mut self.editor);
         about::show(&ctx, &mut self.editor);
+        preferences_window::show(&ctx, &mut self.editor);
+        recovery::show(&ctx, &mut self.editor);
         optimize::show(&ctx, &mut self.editor);
         unsaved_changes::show(&ctx, &self.doc, &mut self.editor);
         alert::show(&ctx, &mut self.editor);
@@ -153,5 +180,6 @@ impl eframe::App for Grid4DApp {
         }
         // Title, close button and confirmed quit follow the document's file state.
         file::sync_window(&ctx, &self.doc, &mut self.editor);
+        file::autosave(&ctx, &self.doc, &mut self.editor);
     }
 }

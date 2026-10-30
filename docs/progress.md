@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 12 — Workspace (v0.12) |
-| Last step done | 12.1 — Docking layouts (2026-10-30) |
-| Next step | 12.2 — Preferences |
-| Tests | 689, all passing; clippy and rustfmt clean |
+| Last step done | 12.2 — Preferences (2026-10-30) |
+| Next step | 12.3 — Themes |
+| Tests | 697, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1605,6 +1605,7 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
 |------|----------------|-------|
 | — | Phase 12 planned in detail: docking layouts on `egui_tiles` with Standard / Modeling / Animate presets, Preferences (units, undo depth, autosave, viewport defaults), Dark / Darker / Light themes, Layers, Takes (the document holds the active take; switching is an undoable swap; Auto Take), the interface in Greek (`tr` with English keys) (`IMPLEMENTATION_PLAN.md`) | 683 |
 | 12.1 | Docking layouts on `egui_tiles`: every manager and the viewport a pane that docks as a tab or a split, closes and reopens from the Window menu; Standard / Modeling / Animate layouts, Reset Layout; the arrangement remembered between runs | 689 |
+| 12.2 | Preferences (Edit ▸ Preferences…): the length unit for every length field and the grid HUD (typed units converted), Undo Depth, Autosave with crash recovery, view defaults; saved between runs | 697 |
 
 **Planning notes:**
 - **The docking library.** The plan named `egui_dock`, to be checked against
@@ -1651,6 +1652,42 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
 - **On-screen testing:** Standard, Modeling and Animate switched from the
   Layout menu; the Window menu highlights the panes that are showing; after a
   restart the Modeling arrangement came back as it was left.
+
+**12.2 — Preferences**
+
+*Problems and solutions:*
+- **Units without threading them through every panel.** Lengths are edited in
+  dozens of row helpers that never see the editor state. The unit is put on
+  the egui context each frame (`preferences::set_units`) and read by
+  `widgets::length`, a `DragValue` over the stored centimetres with a custom
+  formatter and parser; tests that never set it see centimetres. Ranges and
+  drag speeds stay in centimetres, so no caller changed beyond the widget.
+- **Decimals.** A centimetre field with two decimals would show metres to the
+  centimetre only; each unit adds the decimals it needs (metres and feet two,
+  inches one) and trailing zeros are dropped, so what a field shows reads back
+  as the same length (a round-trip test over every unit).
+- **Whose recovery copy is it?** A copy found at startup could belong to
+  another Grid4D still running. Each session holds a lock on its own
+  `.lock` file (`File::try_lock`, in std since Rust 1.89); the system releases
+  it when the process ends however it ends, so a copy whose lock can be taken
+  is a crashed session's. A recovered copy becomes this session's own (renamed
+  and locked), so it survives a second crash before the next autosave.
+- **Writing without a hitch.** The copy is written by a thread from a clone of
+  the document (cheap: meshes are shared handles), to a `.part` name renamed
+  when complete. The app asks to be woken when the next copy is due, so an
+  idle window still autosaves.
+- **The undo depth** changes outside commands, so `commands::apply_pending`
+  compares it with the history's limit each frame and trims at once, purging
+  deleted objects only the dropped steps could restore.
+- **Clippy** asked for a by-value `ShadingMode` in the serde helper, whose
+  signature serde fixes (an `expect` with the reason).
+- **On-screen testing:** Edit ▸ Preferences… opened the window; choosing
+  Metres turned the Cube's P.Y into "1 m" and the HUD into "Grid Spacing : 1
+  m"; the grid switched off with Apply to Views and stayed off after a restart.
+  With Autosave at one minute, a new cube left a copy after a minute; the app
+  was then ended abruptly, and on the next start *Recover Unsaved Work?* came
+  up; Recover brought the document back with the extra cube and an asterisk
+  in the title.
 
 ---
 

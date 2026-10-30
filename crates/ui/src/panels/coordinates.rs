@@ -12,7 +12,7 @@ use glam::{Mat4, Quat, Vec3};
 use grid4d_geom::{Component, selection};
 use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, Scene, SceneEdit, Tags, Transform};
 
-use crate::{EditorCommand, EditorState, keys::Keying, live_edit::interaction_ongoing, theme::palette as p};
+use crate::{EditorCommand, EditorState, keys::Keying, live_edit::interaction_ongoing, theme::palette as p, widgets};
 
 /// How positions and rotations are read.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -258,9 +258,9 @@ fn target(doc: &Document, editor: &EditorState) -> Option<Target> {
 /// The three columns of fields; returns whether a value changed.
 fn fields_grid(ui: &mut Ui, fields: &mut Fields, middle: Middle, locks: grid4d_scene::Protection) -> bool {
     let mut changed = false;
-    let (middle_title, middle_suffix, middle_speed) = match middle {
-        Middle::Scale => ("Scale", "", 0.01),
-        Middle::Size | Middle::SizePlus => ("Size", " cm", 1.0),
+    let (middle_title, middle_is_length, middle_speed) = match middle {
+        Middle::Scale => ("Scale", false, 0.01),
+        Middle::Size | Middle::SizePlus => ("Size", true, 1.0),
     };
     Grid::new("grid4d.coordinates.fields")
         .num_columns(6)
@@ -279,9 +279,8 @@ fn fields_grid(ui: &mut Ui, fields: &mut Fields, middle: Middle, locks: grid4d_s
                     .add_enabled_ui(!locks.position, |ui| {
                         ui.add_sized(
                             Vec2::new(70.0, 19.0),
-                            DragValue::new(&mut fields.position[axis])
+                            widgets::length(ui, &mut fields.position[axis])
                                 .speed(1.0)
-                                .suffix(" cm")
                                 .max_decimals(2),
                         )
                     })
@@ -292,13 +291,14 @@ fn fields_grid(ui: &mut Ui, fields: &mut Fields, middle: Middle, locks: grid4d_s
                     Some(m) => {
                         changed |= ui
                             .add_enabled_ui(!locks.scale, |ui| {
+                                let field = if middle_is_length {
+                                    widgets::length(ui, &mut m[axis])
+                                } else {
+                                    DragValue::new(&mut m[axis])
+                                };
                                 ui.add_sized(
                                     Vec2::new(64.0, 19.0),
-                                    DragValue::new(&mut m[axis])
-                                        .speed(middle_speed)
-                                        .range(0.001..=1.0e7)
-                                        .suffix(middle_suffix)
-                                        .max_decimals(3),
+                                    field.speed(middle_speed).range(0.001..=1.0e7).max_decimals(3),
                                 )
                             })
                             .inner

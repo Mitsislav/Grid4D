@@ -54,6 +54,10 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             ui.separator();
             // With nothing selected the Attribute Manager shows the project settings.
             command(ui, editor, "Project Settings…", "", EditorCommand::DeselectAll);
+            if ui.button("Preferences…").clicked() {
+                editor.show_preferences = true;
+                ui.close();
+            }
         });
 
         ui.menu_button("Create", |ui| {

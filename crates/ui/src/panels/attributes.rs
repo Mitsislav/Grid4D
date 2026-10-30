@@ -30,7 +30,7 @@ use crate::{
     keys::Keying,
     live_edit::{LiveEdit, interaction_ongoing},
     theme::palette as p,
-    widgets::{attr_label, section_heading},
+    widgets::{self, attr_label, section_heading},
 };
 
 const LABEL_WIDTH: f32 = 128.0;
@@ -409,10 +409,7 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData, keying: Keying) -> Option<&'stati
                 ui.add_enabled_ui(!protection.position, |ui| {
                     ui.add_sized(
                         [64.0, 19.0],
-                        DragValue::new(&mut t.position[axis])
-                            .speed(1.0)
-                            .suffix(" cm")
-                            .max_decimals(2),
+                        widgets::length(ui, &mut t.position[axis]).speed(1.0).max_decimals(2),
                     )
                 });
                 label(ui, Param::Scale(axis_id), sl);
@@ -1131,9 +1128,7 @@ fn body_rows(ui: &mut Ui, body: &mut Body) {
         attr_label(ui, label, LABEL_WIDTH);
         ui.add_sized(
             [FIELD_WIDTH, 19.0],
-            DragValue::new(&mut body.initial_velocity[axis])
-                .speed(1.0)
-                .suffix(" cm/s"),
+            widgets::length_per(ui, &mut body.initial_velocity[axis], "/s").speed(1.0),
         );
         ui.end_row();
     }
@@ -1282,7 +1277,7 @@ fn offset_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
     attr_label(ui, label, LABEL_WIDTH);
     ui.add_sized(
         [FIELD_WIDTH, 19.0],
-        DragValue::new(value).speed(0.5).suffix(" cm").max_decimals(2),
+        widgets::length(ui, value).speed(0.5).max_decimals(2),
     );
     k.button(ui, label);
     ui.end_row();
@@ -1554,10 +1549,9 @@ fn interpolation_rows(ui: &mut Ui, interpolation: &mut Interpolation) {
             attr_label(ui, "Maximum Length", LABEL_WIDTH);
             ui.add_sized(
                 [FIELD_WIDTH, 19.0],
-                DragValue::new(max_length)
+                widgets::length(ui, max_length)
                     .speed(0.5)
                     .range(Interpolation::MIN_LENGTH..=1_000_000.0)
-                    .suffix(" cm")
                     .max_decimals(2),
             );
             ui.end_row();
@@ -2167,9 +2161,7 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
                 attr_label(ui, label, LABEL_WIDTH);
                 ui.add_sized(
                     [FIELD_WIDTH, 19.0],
-                    DragValue::new(&mut simulation.gravity[axis])
-                        .speed(1.0)
-                        .suffix(" cm/s²"),
+                    widgets::length_per(ui, &mut simulation.gravity[axis], "/s²").speed(1.0),
                 );
                 ui.end_row();
             }
@@ -2259,10 +2251,9 @@ fn light_details(ui: &mut Ui, k: &mut KeyRows, light_type: LightType, details: &
             attr_label(ui, "Radius/Decay", LABEL_WIDTH);
             ui.add_sized(
                 [FIELD_WIDTH, 19.0],
-                DragValue::new(&mut details.radius)
+                widgets::length(ui, &mut details.radius)
                     .speed(1.0)
-                    .range(LightDetails::MIN_RADIUS..=1_000_000.0)
-                    .suffix(" cm"),
+                    .range(LightDetails::MIN_RADIUS..=1_000_000.0),
             );
             k.button(ui, "Radius/Decay");
             ui.end_row();
@@ -2283,10 +2274,9 @@ fn length_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
     attr_label(ui, label, LABEL_WIDTH);
     ui.add_sized(
         [FIELD_WIDTH, 19.0],
-        DragValue::new(value)
+        widgets::length(ui, value)
             .speed(1.0)
             .range(0.0..=1_000_000.0)
-            .suffix(" cm")
             .max_decimals(2),
     );
     k.button(ui, label);

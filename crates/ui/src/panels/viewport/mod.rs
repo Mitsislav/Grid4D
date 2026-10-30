@@ -144,6 +144,14 @@ const SHADING_MENU: [(ShadingMode, &str, &str); 8] = [
     (ShadingMode::Lines, "Lines", "N~G"),
 ];
 
+/// A shading mode's name in the Display menu.
+pub(crate) fn shading_label(mode: ShadingMode) -> &'static str {
+    SHADING_MENU
+        .iter()
+        .find(|(m, _, _)| *m == mode)
+        .map_or("", |(_, label, _)| label)
+}
+
 /// The Display menu's styles: what is drawn of each object.
 const STYLE_MENU: [(DisplayStyle, &str, &str); 2] = [
     (DisplayStyle::Wireframe, "Wireframe", "N~H"),
@@ -344,6 +352,27 @@ impl ViewportPanel {
 
     pub fn reset_view(&mut self) {
         self.camera = OrbitCamera::default();
+    }
+
+    /// Gives every view the preferred shading and grid, axis and HUD
+    /// (Preferences ▸ Views); the rest of each view's settings stay.
+    pub fn apply_defaults(&mut self, defaults: &crate::preferences::ViewDefaults) {
+        let apply = |display: &mut DisplayMode, filter: &mut ViewFilter| {
+            display.shading = defaults.shading;
+            filter.set(FilterItem::Grid, defaults.grid);
+            filter.set(FilterItem::WorldAxis, defaults.world_axis);
+            filter.set(FilterItem::Hud, defaults.hud);
+        };
+        for view in &mut self.views {
+            apply(&mut view.display, &mut view.filter);
+        }
+        apply(&mut self.display, &mut self.filter);
+    }
+
+    /// What the active view shows (Filter menu).
+    #[must_use]
+    pub fn filter(&self) -> ViewFilter {
+        self.filter
     }
 
     pub fn frame_scene(&mut self, scene: &Scene) {

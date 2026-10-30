@@ -7,6 +7,21 @@ use crate::{
     theme::{metrics, palette as p},
 };
 
+/// A length field: `value` is in centimetres, shown and typed in the
+/// preferred unit (a typed unit symbol converts). Chain `speed`, `range` and
+/// `max_decimals` as for any `DragValue`, in centimetres.
+pub(crate) fn length<'a>(ui: &Ui, value: &'a mut f32) -> egui::DragValue<'a> {
+    length_per(ui, value, "")
+}
+
+/// [`length`] of a rate: `per` follows the unit (`"/s"`, `"/s²"`).
+pub(crate) fn length_per<'a>(ui: &Ui, value: &'a mut f32, per: &'static str) -> egui::DragValue<'a> {
+    let units = crate::preferences::units(ui.ctx());
+    egui::DragValue::new(value)
+        .custom_formatter(move |cm, decimals| units.format(cm, *decimals.end(), per))
+        .custom_parser(move |text| units.parse(text, per))
+}
+
 /// The snapping settings as menu entries (the snap button's menu, Tools ▸ Snap).
 pub(crate) fn snap_menu(ui: &mut Ui, snap: &mut crate::SnapSettings) {
     ui.checkbox(&mut snap.enabled, "Enable Snapping  (Shift+S)");
@@ -140,4 +155,75 @@ pub(crate) fn section_heading(ui: &mut Ui, text: &str) {
         p::TEXT_STRONG,
     );
     ui.add_space(2.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::{Event, Key, Modifiers, PointerButton, RawInput, Shape};
+
+    use super::*;
+    use crate::preferences::{self, Units};
+
+    /// Runs one frame of a single length field; returns its rect and the texts drawn.
+    fn field(ctx: &egui::Context, value: &mut f32, events: Vec<Event>) -> (Rect, Vec<String>) {
+        let mut rect = Rect::NOTHING;
+        let mut output = ctx.run_ui(
+            RawInput {
+                events,
+                ..RawInput::default()
+            },
+            |ui| rect = ui.add(length(ui, value).speed(1.0).max_decimals(2)).rect,
+        );
+        output.textures_delta.clear();
+        let texts = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        (rect, texts)
+    }
+
+    #[test]
+    fn a_length_field_shows_and_takes_the_preferred_unit() {
+        let ctx = egui::Context::default();
+        let mut value = 150.0;
+        assert!(field(&ctx, &mut value, Vec::new()).1.contains(&"150 cm".to_owned()));
+        preferences::set_units(&ctx, Units::Metres);
+        let (rect, texts) = field(&ctx, &mut value, Vec::new());
+        assert!(texts.contains(&"1.5 m".to_owned()), "{texts:?}");
+
+        // A click edits the text; a typed length with its own unit converts.
+        let pos = rect.center();
+        let button = |pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        field(&ctx, &mut value, vec![Event::PointerMoved(pos)]);
+        field(&ctx, &mut value, vec![button(true)]);
+        field(&ctx, &mut value, vec![button(false)]);
+        let key = |key, modifiers| Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        field(
+            &ctx,
+            &mut value,
+            vec![
+                key(Key::A, Modifiers::COMMAND),
+                Event::Text("25 mm".to_owned()),
+                key(Key::Enter, Modifiers::NONE),
+            ],
+        );
+        assert!((value - 2.5).abs() < 1e-6, "25 mm is 2.5 cm, got {value}");
+        let (_, texts) = field(&ctx, &mut value, Vec::new());
+        assert!(texts.contains(&"0.025 m".to_owned()), "{texts:?}");
+    }
 }

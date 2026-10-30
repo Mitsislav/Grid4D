@@ -144,6 +144,10 @@ pub enum EditorCommand {
     Quit,
     /// The answer to a pending "Save changes?" prompt.
     AnswerUnsaved(UnsavedChoice),
+    /// The answer to "Recover Unsaved Work?" after a crash.
+    Recover(crate::autosave::RecoveryChoice),
+    /// Gives every view the preferred shading, grid, axis and HUD.
+    ApplyViewDefaults,
     CreateObject(ObjectKindTag),
     /// Creates an object under the active one (Shift + create for deformers),
     /// a deformer fitted to it; at the top without an active object.
@@ -351,6 +355,10 @@ pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mu
     // A new frame: temporary values give way to the curves (not an undo step).
     let frame = doc.time.frame();
     let mut changed = false;
+    // Preferences ▸ Undo Depth.
+    if editor.history.limit() != editor.preferences.undo_depth {
+        editor.history.set_limit(doc, editor.preferences.undo_depth);
+    }
     if editor.seen_frame != Some(frame) {
         editor.seen_frame = Some(frame);
         changed = doc.scene.discard_unkeyed(f64::from(frame));
@@ -492,6 +500,8 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         }
         EditorCommand::Quit => file::request(FileAction::Quit, doc, editor, viewport),
         EditorCommand::AnswerUnsaved(choice) => file::answer(choice, doc, editor, viewport),
+        EditorCommand::Recover(choice) => file::recover(choice, doc, editor, viewport),
+        EditorCommand::ApplyViewDefaults => viewport.apply_defaults(&editor.preferences.views),
         EditorCommand::CreateObject(tag) if ObjectKindTag::EFFECTORS.contains(&tag) => {
             create_effector(doc, editor, viewport, tag);
         }
@@ -2070,9 +2080,8 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grid4d_render::FilterItem;
     use grid4d_scene::{Axis, Param};
-
-    use crate::History;
 
     /// A headless viewport: without a wgpu render state it only keeps the camera.
     fn viewport() -> ViewportPanel {
@@ -3278,7 +3287,7 @@ mod tests {
     #[test]
     fn the_history_limit_purges_what_falls_off() {
         let (mut doc, mut editor, mut vp) = demo();
-        editor.history = History::with_limit(2);
+        editor.preferences.undo_depth = 2;
         let ids = ["Cube", "Sphere", "Light"].map(|name| id_of(&doc, name));
         for id in ids {
             editor.selection.set_single(id);
@@ -3299,6 +3308,81 @@ mod tests {
         );
         assert!(!doc.scene.contains(ids[0]));
         assert!(doc.scene.contains(ids[1]) && doc.scene.contains(ids[2]));
+    }
+
+    #[test]
+    fn lowering_the_undo_depth_drops_the_oldest_steps_at_once() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let ids = ["Cube", "Sphere", "Light"].map(|name| id_of(&doc, name));
+        for id in ids {
+            editor.selection.set_single(id);
+            run(&mut doc, &mut editor, &mut vp, &[EditorCommand::DeleteSelected]);
+        }
+        assert_eq!(editor.history.undo_len(), 3);
+        editor.preferences.undo_depth = 1;
+        apply_pending(&mut doc, &mut editor, &mut vp);
+        assert_eq!((editor.history.limit(), editor.history.undo_len()), (1, 1));
+        assert_eq!(
+            doc.scene.detached_roots(),
+            &ids[2..],
+            "only the newest delete can come back"
+        );
+        editor.preferences.undo_depth = 50;
+        apply_pending(&mut doc, &mut editor, &mut vp);
+        assert_eq!((editor.history.limit(), editor.history.undo_len()), (50, 1));
+    }
+
+    #[test]
+    fn apply_to_views_gives_every_view_the_preferred_look() {
+        let (mut doc, mut editor, mut vp) = demo();
+        editor.preferences.views = crate::preferences::ViewDefaults {
+            shading: ShadingMode::QuickLines,
+            grid: false,
+            world_axis: true,
+            hud: false,
+        };
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::ShowView(Some(3)), EditorCommand::ApplyViewDefaults],
+        );
+        for view in [3, 0] {
+            run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ShowView(Some(view))]);
+            let filter = vp.filter();
+            assert_eq!(vp.display().shading, ShadingMode::QuickLines, "view {view}");
+            assert!(!filter.shows(FilterItem::Grid) && !filter.shows(FilterItem::Hud));
+            assert!(filter.shows(FilterItem::WorldAxis) && filter.shows(FilterItem::Camera));
+        }
+    }
+
+    #[test]
+    fn recovering_opens_the_copy_unsaved_and_linked_to_its_file() {
+        use crate::autosave::{Autosave, RecoveryChoice};
+        let (mut doc, mut editor, mut vp) = demo();
+        let dir = crate::autosave::tests::folder("recover-command");
+        grid4d_io::save(&Document::new("Crashed Work"), &dir.join("7-7.g4d")).unwrap();
+        std::fs::write(dir.join("7-7.txt"), "D:/shots/work.g4d").unwrap();
+        editor.autosave = Autosave::new(dir.clone());
+        assert!(editor.autosave.offer.is_some());
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Recover(RecoveryChoice::Recover)],
+        );
+        assert_eq!(doc.name, "Crashed Work");
+        assert_eq!(editor.file.path(), Some(std::path::Path::new("D:/shots/work.g4d")));
+        assert!(editor.file.is_dirty(&editor.history), "recovered work is unsaved");
+        assert_eq!(editor.autosave.offer, None);
+        editor.autosave.finish();
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            0,
+            "nothing left after a normal exit"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

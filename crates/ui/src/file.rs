@@ -221,6 +221,16 @@ impl DocumentFile {
         history.state_id() != self.saved_state
     }
 
+    /// Treats the document as changed since it was saved (a recovered copy).
+    pub fn mark_unsaved(&mut self) {
+        self.saved_state = u64::MAX;
+    }
+
+    /// Treats the document as saved in its current state.
+    pub fn mark_saved(&mut self, history: &History) {
+        self.saved_state = history.state_id();
+    }
+
     /// The action waiting for an answer to "Save changes?", if any.
     #[must_use]
     pub fn pending(&self) -> Option<&FileAction> {
@@ -356,6 +366,48 @@ fn replace(
     viewport.reset_view();
     editor.file.path = path;
     editor.file.saved_state = editor.history.state_id();
+}
+
+/// Resolves "Recover Unsaved Work?": Recover opens the crashed session's copy
+/// as the document, unsaved and linked to the file it came from; either way
+/// the copies are cleared.
+pub(crate) fn recover(
+    choice: crate::autosave::RecoveryChoice,
+    doc: &mut Document,
+    editor: &mut EditorState,
+    viewport: &mut ViewportPanel,
+) {
+    let Some(recovery) = editor.autosave.resolve(choice) else {
+        return;
+    };
+    match grid4d_io::load(&recovery.copy) {
+        Ok(recovered) => {
+            replace(doc, editor, viewport, recovered, recovery.original);
+            editor.file.mark_unsaved();
+            viewport.frame_scene(&doc.scene);
+        }
+        Err(err) => {
+            editor.file.alert = Some(Alert {
+                title: "Could Not Recover Document",
+                message: format!(
+                    "{}
+
+{err}",
+                    recovery.copy.display()
+                ),
+            });
+        }
+    }
+}
+
+/// Keeps a recovery copy of unsaved work (Preferences ▸ Autosave), waking the
+/// app when the next one is due.
+pub fn autosave(ctx: &egui::Context, doc: &Document, editor: &mut EditorState) {
+    let now = ctx.input(|i| i.time);
+    let interval = editor.preferences.autosave_interval();
+    if let Some(due) = editor.autosave.tick(doc, &editor.history, &editor.file, interval, now) {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(due));
+    }
 }
 
 /// File ▸ Merge: adds the objects of `path` (a glTF file or a Grid4D document)
