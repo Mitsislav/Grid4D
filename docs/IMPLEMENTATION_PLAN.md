@@ -34,10 +34,10 @@ references, no `unsafe`, no `unwrap`, exhaustive `match`, and
 13. [Phase 9 — Splines & spline generators](#phase-9--splines--spline-generators-v09)
 14. [Phase 10 — Deformers & MoGraph](#phase-10--deformers--mograph-v010)
 15. [Phase 11 — Simulation](#phase-11--simulation-v011)
-    · [Phase 12 — Workspace](#phase-12--workspace-v012)
+16. [Phase 12 — Workspace](#phase-12--workspace-v012)
     · [Phase 13 — Extensibility](#phase-13--extensibility-v013)
-16. [Cross-cutting: testing, performance, CI, docs](#cross-cutting-testing-performance-ci-docs)
-17. [Risks & open decisions](#risks--open-decisions)
+17. [Cross-cutting: testing, performance, CI, docs](#cross-cutting-testing-performance-ci-docs)
+18. [Risks & open decisions](#risks--open-decisions)
 
 Size legend for steps: **S** ≈ one small PR (< 300 lines), **M** ≈ one focused PR
 (300–1000 lines), **L** ≈ several PRs.
@@ -118,7 +118,7 @@ grid4d-render  grid4d-raytrace  │     (raytrace: Phase 8)
 | `grid4d-raytrace` | Phase 8 | eval, scene, geom, `rayon` | wgpu (CPU first), egui |
 | `grid4d-text` | Phase 9 | geom, `ttf-parser`, `epaint_default_fonts` (font bytes only) | scene, wgpu, egui |
 | `grid4d-sim` | Phase 11 | eval, scene, geom, `rapier3d` (its types never leave the crate) | wgpu, egui |
-| `grid4d-ui` | exists | all of the above, `egui`, `rfd` | — |
+| `grid4d-ui` | exists | all of the above, `egui`, `rfd`, `egui_tiles` (Phase 12) | — |
 
 \* Keeping serde out of `grid4d-scene` means the file format is a separate,
 versioned DTO layer in `grid4d-io`; in-memory types can change without breaking files.
@@ -150,7 +150,7 @@ Two architectural moves carry most of the later phases:
 | v0.9 | Splines | 9 | Spline objects and primitives, point editing and the Pen, Extrude / Lathe / Sweep / Loft, Text |
 | v0.10 | Deformers & MoGraph | 10 | Animated parameters; Bend / Twist / Taper / Bulge / FFD; Current State to Object; Cloner (Linear, Radial, Grid, Object) with Plain and Random effectors |
 | v0.11 | Simulation | 11 | Rigid and collider bodies (rapier3d) on objects and clones, cached per frame and saved when baked; renders and export show the simulation |
-| v0.12 | Workspace | 12 | Docking layouts, Layers, Takes, Preferences, Greek translation |
+| v0.12 | Workspace | 12 | Docking layouts with presets (egui_tiles), Preferences (units, undo depth, autosave, themes), Layers, Takes, the interface in Greek |
 | v0.13 | Extensibility | 13 | Plugin trait for objects / tags / tools, then scripting |
 | v1.0 | Stabilisation | — | File format frozen (with migrations), docs, packaging, perf budget met |
 
@@ -872,17 +872,116 @@ which works the same way (a static mesh collider) but has no test of its own.
 
 ## Phase 12 — Workspace (v0.12)
 
-* **Docking layouts:** panels in an `egui_dock` tree (check it follows egui
-  0.37 first; otherwise our own splitter tree), saved per user, a few presets
-  (Standard, Modeling, Animate), *Reset Layout*.
-* **Layers** (the placeholder panel): colour-coded layers with visibility,
-  render, lock and selection switches per layer; objects reference a layer by id.
-* **Takes** (the placeholder panel): overrides of parameters per take, the
-  render picks a take.
-* **Preferences** window: units display, undo depth, autosave, viewport
-  defaults, theme variants (dark / darker / light), language.
-* **Internationalisation:** UI strings through one table; English first, Greek
-  as the first translation.
+**Goal:** the workspace becomes the user's own. Panels dock, split, tab and
+float where you drag them, with a few ready layouts; **Layers** sort a scene
+into switchable groups; **Takes** keep variations of one scene (another camera,
+another colour, an object hidden) and render the one you pick; **Preferences**
+hold the user's units, undo depth, autosave, theme and language; and the whole
+interface reads in **Greek** as well as English.
+
+**Behaviour specs** (written per step before implementing, from the public
+manual — clean-room): `reference/workspace-layouts.md` (12.1),
+`workspace-preferences.md` (12.2–12.3), `manager-layer.md` (12.4),
+`manager-take.md` (12.5), `workspace-language.md` (12.6).
+
+### Design
+
+* **Docking (12.1): `egui_tiles` 0.18**, not `egui_dock`. The plan asked to
+  check `egui_dock` first: its newest release (0.21.1, 2026-08) is still on
+  egui 0.36, while `egui_tiles` 0.18 (2026-10-19; MIT OR Apache-2.0, MSRV 1.95,
+  from egui's own authors) is built for egui 0.37 and serialises its tree
+  (decision D13). A `ui::workspace::Workspace` owns an `egui_tiles::Tree<Pane>`
+  whose panes are the existing panels — Viewport, Objects, Takes, Attributes,
+  Coordinates, Layers, Timeline, F-Curve, Materials — in tab containers and
+  splits; the menu bar, command palette, mode palette and status bar stay
+  fixed around it. Its `Behavior` dispatches each pane to its panel's `show`,
+  so panels stay independent; the hand-made tab strips
+  (`widgets::manager_tabs`, the bottom tabs) and `EditorState::{managers,
+  bottom}` give way to the tree, and commands that "show" a panel
+  (Shift+F2, Shift+F5, Tab over the bottom panel) focus its tab, opening it if
+  it was closed. Tabs drag to another container or to an edge to split; a
+  pane's tab can be closed except the Viewport's. **Layouts:** *Standard*
+  (today's arrangement), *Modeling* (a larger viewport, the Coordinate
+  Manager beside the Attribute Manager, no timeline), *Animate* (the F-Curve
+  editor tall under the viewport, the timeline beside it); the menu bar's
+  "Layout:" label becomes a menu of them, Window ▸ Reset Layout restores the
+  current preset, and the tree is saved with the window (eframe storage — the
+  binary saves it, as it saves recent files).
+* **Preferences (12.2)** are user settings, not document data: a
+  `Preferences` struct in `EditorState`, edited in **Edit ▸ Preferences…**
+  (a window, Ctrl+E as in the reference if verified), saved by the binary in
+  eframe storage. Contents: **units** for showing lengths (cm, m, mm, inch,
+  foot — values stay centimetres inside; every length field goes through one
+  `widgets::length` that converts and suffixes), **undo depth**
+  (`History::with_limit`), **autosave** (off / every *n* minutes: a recovery
+  copy in the user data folder while the document has unsaved changes,
+  offered on the next start after a crash), **viewport defaults** (shading,
+  grid and HUD for new views), and the theme and language of 12.3 and 12.6.
+* **Themes (12.3):** *Dark* (today), *Darker* and *Light*. The palette's
+  colours are constants today; they become a `Palette` struct with one value
+  per theme, read through `theme::palette()` (the current theme kept in an
+  atomic, so reading stays free), and egui's own visuals follow. A test checks
+  every palette keeps its text readable against its backgrounds (contrast
+  ratio ≥ 4.5).
+* **Layers (12.4)** are document data like materials: an ordered `Layers`
+  table with stable `LayerId`s in `Scene` (`SceneEdit::SetLayers`), each with a
+  name, colour and switches — **Solo**, **View** (editor), **Render**,
+  **Manager** (listed in the Object Manager), **Locked** (not selectable or
+  editable), **Animation** (off: shown unanimated), **Generators**,
+  **Deformers** (off: they act as off); `NodeData::layer: Option<LayerId>`
+  (children inherit it unless they have their own). Evaluation reads the
+  switches (`Purpose::shows` grows a layer check; generators, deformers and
+  animation honour theirs); picking and selection skip locked objects; the
+  Object Manager shows a layer colour chip and hides Manager-off objects. The
+  **Layer Manager** is the Layers pane: create, rename, recolour, the switch
+  columns, drag objects onto a layer, select a layer's objects. `.g4d` v3
+  additive; Merge remaps layers like materials.
+* **Takes (12.5)** are variations of the document kept in `Document::takes`:
+  the **Main** take (the document as it is) and named takes, each holding
+  overrides per object by group — transform, visibility switches, the
+  object's parameters (`kind`), its tags (material links), display colour —
+  plus an optional camera and render settings. The document always holds the
+  **active** take's state, so every panel, evaluation and the renderer work
+  unchanged: switching takes is one undoable `SceneEdit::SwitchTake` that
+  swaps the overridden groups in and the previous take's out (Main's values
+  for every overridden object are kept beside the takes). While a take other
+  than Main is active, every edit is recorded as an override of that take
+  (**Auto Take**, always on — the reference's default workflow), and the
+  Take Manager (the Takes pane) lists takes with their overrides, makes one
+  active, adds, renames, deletes, and clears an override. Render Settings
+  gain **Take** (Current or a named one): a render job applies that take to
+  its copy of the document (`Takes::apply`, pure). `.g4d` v3 additive.
+* **Language (12.6):** every UI string goes through `i18n::tr("English text")`
+  (the English text is its own key, so code stays readable and an untranslated
+  string still shows in English); a `Language` preference picks the table —
+  English (the keys) or **Greek** (`i18n/el.rs`, a sorted table of pairs).
+  Formatted strings use numbered placeholders (`tr_args("{0} objects", …)`).
+  A test scans the sources for `tr("…")` literals and fails if the Greek table
+  lacks one, so new strings cannot be forgotten. The manual stays in English
+  (a Greek manual is later). Shortcut letters do not change with the language.
+* **Not in Phase 12:** floating panels in separate OS windows, layout files
+  shared between machines, take hierarchies and Render Marked Takes, override
+  groups, a Greek manual, right-to-left languages, plugin-defined panes.
+
+### Steps
+
+| Step | Size | Work |
+|------|------|------|
+| 12.1 | L | **Docking layouts:** spec `workspace-layouts.md`; `egui_tiles` 0.18; `ui::workspace::Workspace` (tree of `Pane`s, a `Behavior` that shows each panel and its tab title and icon); the fixed bars around it; the manager and bottom tab strips replaced by tile tabs, `EditorState::{managers, bottom}` by focus requests; Standard / Modeling / Animate presets, the Layout menu, Window ▸ Reset Layout and a Window entry per panel (reopens a closed one); the tree saved in eframe storage; tests: presets contain every pane once, a closed pane reopens, the idle-frame test still holds with every pane shown |
+| 12.2 | M | **Preferences:** spec `workspace-preferences.md`; `Preferences` in `EditorState`, Edit ▸ Preferences… window, saved by the binary; units through `widgets::length` (every length field), undo depth, autosave with crash recovery, viewport defaults for new views; tests: unit round trips, the undo limit, autosave writes only while dirty and recovery offers the newest copy |
+| 12.3 | M | **Themes:** `theme::Palette` (Dark, Darker, Light) read through `theme::palette()`, egui visuals per theme, the theme preference; the icon tints and viewport overlay colours per theme; a contrast test |
+| 12.4 | L | **Layers:** spec `manager-layer.md`; `scene::{Layer, LayerId, Layers}`, `SceneEdit::SetLayers`, `NodeData::layer` (inherited); evaluation honours View / Render / Solo / Animation / Generators / Deformers; Locked in picking, selection and editing; the Object Manager's layer chips and Manager switch; the Layer Manager pane; `.g4d` v3 additive; Merge remaps layers |
+| 12.5 | L | **Takes:** spec `manager-take.md`; `scene::{Take, TakeId, Takes}` in `Document`, `SceneEdit::SwitchTake`, Auto Take recording in `commands::commit` while a take is active, per-take camera and render settings; the Take Manager pane (list, active take, overrides, add / rename / delete / clear override); Render Settings ▸ Take; renders apply their take to their copy; `.g4d` v3 additive; undo of switches and recordings |
+| 12.6 | L | **Greek:** spec `workspace-language.md`; `ui::i18n` (`tr`, `tr_args`, `Language`), every UI string through it, the Greek table, the language preference (a restart-free switch), the completeness test; the About window credits the translation |
+
+**Acceptance:** dragging the Attribute Manager under the Object Manager and
+the timeline beside the viewport survives a restart, and *Animate* / *Reset
+Layout* arrange the panels at once; lengths show in metres when the units say
+so; the Light theme is readable everywhere; a scene's lights on a layer switched
+off for the renderer do not render, a locked layer cannot be picked; a take with
+another camera, a hidden object and a red material renders differently from
+Main and switching back restores Main exactly; the whole interface reads in
+Greek; everything undoable where it is document data, and saved.
 
 ## Phase 13 — Extensibility (v0.13)
 
@@ -953,6 +1052,9 @@ per steady-state frame" for the hot path, complementing `extract_reuses_capacity
 | D10 | Physics engine | `rapier3d` 0.36 in its own crate (`grid4d-sim`), single-threaded for determinism; it brings glam 0.33 (via `glamx`) beside our 0.34, converted through arrays at the crate's edge — accepted until rapier moves to glam 0.34 (a hand-written solver would cost far more and be less robust) | Phase 11 |
 | D11 | Simulation units | Metres inside the engine (its tolerances assume them), centimetres everywhere else; gravity shown in cm/s² | Phase 11 |
 | D12 | Where the cache lives | Editor state, filled on demand within a frame budget and keyed by the simulation's inputs (selection and unrelated edits keep it); a baked cache is also saved in the `.g4d` (11.5) | Phase 11 |
+| D13 | Docking library | `egui_tiles` 0.18 (egui 0.37, from egui's authors, serialisable tree) instead of `egui_dock`, whose newest release (0.21.1) is still on egui 0.36; no own splitter tree needed | Phase 12 |
+| D14 | How takes reach panels and renders | The document always holds the active take's state; switching is one undoable swap of the overridden groups (Main's values kept beside the takes), edits in a take are recorded as its overrides (Auto Take), and renders apply a take to their own copy — so panels, evaluation and the renderer need no take awareness | Phase 12 |
+| D15 | Translation keys | The English text is the key (`tr("Object Manager")`): readable code, English as the fallback, a test that finds every `tr` literal missing from the Greek table | Phase 12 |
 | R3 | Scope creep | Ship the release train in order; each phase must leave the app usable and tests green | ongoing |
 
 ---

@@ -12,9 +12,9 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 11 — Simulation (v0.11) |
-| Last step done | 11.5 — Saved caches and limits (2026-10-30); Phase 11 complete |
-| Next step | Phase 12 — Workspace: plan it in detail |
+| Current phase | 12 — Workspace (v0.12) |
+| Last step done | Phase 12 planned (2026-10-30) |
+| Next step | 12.1 — Docking layouts |
 | Tests | 683, all passing; clippy and rustfmt clean |
 
 ---
@@ -1596,6 +1596,26 @@ parameters, are undoable, saved, picked, exported and rendered.
 
 Phase 11 is complete: rigid and collider bodies on objects and clones,
 simulated with rapier3d, cached, baked, saved, rendered and exported.
+
+---
+
+## Phase 12 — Workspace (2026-10-30 – )
+
+| Step | What was built | Tests |
+|------|----------------|-------|
+| — | Phase 12 planned in detail: docking layouts on `egui_tiles` with Standard / Modeling / Animate presets, Preferences (units, undo depth, autosave, viewport defaults), Dark / Darker / Light themes, Layers, Takes (the document holds the active take; switching is an undoable swap; Auto Take), the interface in Greek (`tr` with English keys) (`IMPLEMENTATION_PLAN.md`) | 683 |
+
+**Planning notes:**
+- **The docking library.** The plan named `egui_dock`, to be checked against
+  egui 0.37 first: its newest release (0.21.1) still needs egui 0.36. Rather
+  than write a splitter tree, Phase 12 uses `egui_tiles` 0.18, released for
+  egui 0.37 by egui's own authors, which also serialises its layout
+  (decision D13).
+- **Takes without take-aware panels.** Keeping the active take's state in the
+  document and making a switch one undoable swap means the panels, the
+  evaluation and the path tracer need no changes; only edits (recorded as
+  overrides while a take is active) and renders (which apply a take to their
+  copy) know about takes (decision D14).
 
 ---
 
