@@ -252,7 +252,8 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
             | ObjectKind::Ffd { .. }
             | ObjectKind::SplinePrimitive(_)
             | ObjectKind::Text(_)
-            | ObjectKind::Spline { .. } => continue,
+            | ObjectKind::Spline { .. }
+            | ObjectKind::Plugin(_) => continue,
         };
         let mesh = mesh.mesh();
         if !finite(&world.to_cols_array()) {

@@ -675,6 +675,25 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.disc((0.24, 0.22), 0.045);
             c.disc((0.76, 0.42), 0.045);
         }
+        ObjectKindTag::Plugin => {
+            // A cog: whatever a plugin makes.
+            let cog: Vec<P> = (0..48)
+                .map(|i| {
+                    let a = TAU * i as f32 / 48.0;
+                    let r = if (i / 3) % 2 == 0 { 0.4 } else { 0.31 };
+                    (0.5 + r * a.cos(), 0.5 - r * a.sin())
+                })
+                .collect();
+            c.fill_with(&cog, soft);
+            c.polyline(&cog, true);
+            let hole: Vec<P> = (0..16)
+                .map(|i| {
+                    let a = TAU * i as f32 / 16.0;
+                    (0.5 + 0.12 * a.cos(), 0.5 - 0.12 * a.sin())
+                })
+                .collect();
+            c.polyline(&hole, true);
+        }
     }
 }
 

@@ -420,6 +420,29 @@ The light's settings are on the Attribute Manager's **Object** tab:
 how sharp the highlights are, metals reflect in their own colour, and luminance
 makes a surface glow whatever the light.
 
+### 4.2 Plugins
+
+Plugins add kinds of objects that Grid4D does not have itself. **Create ▸
+Plugins** lists the plugins of this Grid4D; hover one to see what it makes,
+click it to create one (at the top of the Object Manager, selected). Grid4D
+comes with one plugin as an example:
+
+| Plugin | Parameters (Attribute Manager ▸ Object) |
+|--------|-------------------------------------------|
+| Gear | Teeth, Radius (to the tips), Tooth Depth, Tooth Width (share of the space between teeth), Thickness, Hole Radius (0: no hole) |
+
+![A Gear made from Create ▸ Plugins, its parameters on the Object tab](images/manual/plugin-gear.png)
+
+A plugin's object works like any other: move and scale it, give it a
+material, put it on a layer, bend it with a deformer, change its parameters
+in a take, render and export it; **Make Editable** (C) turns it into a
+polygon object.
+
+**If a document uses a plugin this Grid4D does not have**, it still opens:
+the object keeps its place and its values but shows nothing, and its Object
+tab names the missing plugin and lists the values. Saving keeps them, so the
+file works again where the plugin is installed.
+
 ## 5. Selecting and transforming objects
 
 **Selecting** (in Model mode):

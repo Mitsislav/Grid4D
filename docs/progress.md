@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 13 — Extensibility (v0.13) |
-| Last step done | Phase 13 planned (2026-10-30) |
-| Next step | 13.1 — Plugin API and generator plugins |
-| Tests | 717, all passing; clippy and rustfmt clean |
+| Last step done | 13.1 — Plugin API and generator plugins (2026-10-30) |
+| Next step | 13.2 — Deformer plugins and animated plugin parameters |
+| Tests | 726, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1832,6 +1832,7 @@ the interface in Greek.
 | Step | What was built | Tests |
 |------|----------------|-------|
 | — | Phase 13 planned in detail: plugins as Rust crates built in and registered from a list (`grid4d-plugin`: parameter schema, generator, deformer and command traits; `ObjectKind::Plugin`; missing plugins kept), scripting in Rhai through `SceneEdit`s (one undo step per run, an operations limit), the Script Manager, SDK documentation (`IMPLEMENTATION_PLAN.md`) | 716 |
+| 13.1 | Plugins: the `grid4d-plugin` API (parameter descriptions, generator plugins, the registry), plugin objects in documents (kept when their plugin is missing), Create ▸ Plugins, parameters in the Attribute Manager, the example Gear | 726 |
 
 **Planning notes:**
 - **Why plugins are built in.** Loading plugin libraries at run time would
@@ -1853,6 +1854,37 @@ sessions made within one millisecond (as the recovery test does, quickly on
 fast runners) got the same name, so discarding treated the other's copy as
 its own and left it. Names now also count the sessions of the process; a
 test makes fifty at once.
+
+**13.1 — Plugin API and generator plugins**
+
+*Problems and solutions:*
+- **One more kind, no plugin awareness.** `ObjectKind::Plugin` holds only a
+  type id and values by name, so undo, takes, layers, Merge and the file
+  format needed no plugin knowledge; the exhaustive matches pointed at the
+  ten places that had to say what a plugin object is (none, a group, or "a
+  generator" for the view filter).
+- **Where the registry lives.** Evaluation runs in library code that the
+  path tracer, exports and tests call, so the plugins are installed once
+  into a `OnceLock` by the binary (`src/plugins.rs`), and each test binary
+  installs the Gear once through a `std::sync::Once`.
+- **Values by name, checked when read.** Documents keep values as they
+  were set; `Values` gives the plugin each one in range, or its default
+  when it is missing or of another type, so plugins can change their
+  parameters without breaking old files — and values a plugin does not know
+  survive a save.
+- **The gear's faces.** The outline is built counter-clockwise seen from +Y;
+  a test checks with Newell's normals that every wall, cap and the hole face
+  outwards, with and without a hole (a fan around a centre point without).
+- **Translating plugins' texts.** Plugin names, descriptions, parameter
+  names, hints and choices are English keys too; the translation scanner
+  now reads the `plugins/` crates.
+- **On screen:** a long "missing plugin" sentence widened the Attribute
+  Manager's label column and pushed the values out of sight; it became a
+  "Missing Plugin" row with the type id, the explanation in its tooltip.
+- **On-screen testing:** Create ▸ Plugins ▸ Gear made a shaded gear with its
+  hole and twelve teeth, titled "Gear Object", its parameters in centimetres
+  and percent; a document naming a plugin Grid4D lacks opened with the
+  object's values listed under "Missing Plugin".
 
 ---
 

@@ -167,6 +167,8 @@ pub struct EvaluatedScene {
     shown: HashMap<NodeId, Shown>,
     /// Each enabled generator's result, rebuilt only when its inputs change.
     generated: HashMap<NodeId, Generated>,
+    /// Each plugin object's mesh, built again only when its values change.
+    plugin_meshes: HashMap<NodeId, PluginMesh>,
     /// The visible splines' sampled curves, by id (drawing and picking).
     curves: HashMap<CurveId, CurveHandle>,
     /// Each spline's curve, sampled again only when the spline changes.
@@ -276,6 +278,7 @@ impl EvaluatedScene {
         let (nodes, meshes, polygons, shown) = (&mut self.nodes, &mut self.meshes, &mut self.polygons, &mut self.shown);
         let (curves, curve_cache, splines) = (&mut self.curves, &mut self.curve_cache, &mut self.splines);
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
+        let plugin_meshes = &mut self.plugin_meshes;
         let material_stack = &mut self.material_stack;
         material_stack.clear();
         let layer_stack = &mut self.layer_stack;
@@ -430,6 +433,25 @@ impl EvaluatedScene {
             } else {
                 kind.local_bounds()
             };
+            // A plugin's mesh, drawn and picked like a polygon object's
+            // (nothing when its plugin is missing: it acts as a group).
+            if let ObjectKind::Plugin(object) = &*kind
+                && let Some(mesh) = plugin_mesh(plugin_meshes, id, object, revision)
+            {
+                meshes.insert(mesh.id(), mesh.clone());
+                bounds = mesh.bounds();
+                pick = PickShape::Mesh(mesh.id());
+                drawable = Some(Drawable {
+                    key: MeshKey::Polygon(mesh.id()),
+                    shading: Shading::from_angle(data.tags.smoothing_angle()),
+                    scale: Vec3::ONE,
+                    color: own_material.map_or(data.display_color, |m| m.color),
+                    surface: own_material.map_or_else(Surface::default, Surface::of),
+                    unlit: false,
+                    marker: false,
+                });
+                surface = Some(mesh);
+            }
             if let Some(options) = generator.filter(|_| data.enabled) {
                 if let Some(result) = generated_mesh(
                     generated, inputs, cage_stack, scene, id, options, revision, purpose, frame,
@@ -597,6 +619,7 @@ impl EvaluatedScene {
         // Objects gone, hidden or with nothing hidden any more.
         self.shown.retain(|_, entry| self.meshes.contains_key(&entry.mesh.id()));
         self.generated.retain(|_, entry| entry.seen == revision);
+        self.plugin_meshes.retain(|_, entry| entry.seen == revision);
         self.deformed.retain(|_, entry| entry.seen == revision);
         self.curve_cache.retain(|_, entry| entry.seen == revision);
         let used = &self.cloning.used;
@@ -1018,6 +1041,49 @@ fn look_rotation(forward: Vec3, up: Vec3) -> Option<glam::Quat> {
     Some(glam::Quat::from_mat3(&glam::Mat3::from_cols(side, true_up, back)))
 }
 
+/// A plugin object's mesh and the values it was built from.
+#[derive(Debug)]
+struct PluginMesh {
+    object: grid4d_scene::PluginObject,
+    /// `None`: its plugin is missing, failed or built nothing.
+    mesh: Option<MeshHandle>,
+    /// The scene revision of the last update that used it.
+    seen: u64,
+}
+
+/// `id`'s plugin mesh for `object`, built only when the values changed.
+fn plugin_mesh(
+    cache: &mut HashMap<NodeId, PluginMesh>,
+    id: NodeId,
+    object: &grid4d_scene::PluginObject,
+    revision: u64,
+) -> Option<MeshHandle> {
+    let entry = match cache.entry(id) {
+        std::collections::hash_map::Entry::Occupied(entry) => {
+            let entry = entry.into_mut();
+            if entry.object != *object {
+                entry.object.clone_from(object);
+                entry.mesh = build_plugin(object);
+            }
+            entry
+        }
+        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(PluginMesh {
+            object: object.clone(),
+            mesh: build_plugin(object),
+            seen: revision,
+        }),
+    };
+    entry.seen = revision;
+    entry.mesh.clone()
+}
+
+fn build_plugin(object: &grid4d_scene::PluginObject) -> Option<MeshHandle> {
+    grid4d_plugin::registry()
+        .build(object)
+        .filter(|mesh| mesh.face_count() > 0)
+        .map(MeshHandle::new)
+}
+
 /// A generator's result and what it was built from.
 #[derive(Debug)]
 struct Generated {
@@ -1135,7 +1201,9 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Ffd { .. }
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Text(_)
-        | ObjectKind::Spline { .. } => PickShape::None,
+        | ObjectKind::Spline { .. }
+        // A plugin's mesh is set during evaluation.
+        | ObjectKind::Plugin(_) => PickShape::None,
         ObjectKind::Cloner { .. } => PickShape::Clones,
         // Picked by its lines (set during evaluation).
         ObjectKind::PlainEffector(_) | ObjectKind::RandomEffector(_) => PickShape::None,
@@ -2258,6 +2326,64 @@ mod tests {
         doc.scene.get_mut(bend).unwrap().data.enabled = false;
         eval.update(&doc.scene);
         assert!(matches!(node(&eval, a).drawable.unwrap().key, MeshKey::Cube { .. }));
+    }
+
+    /// The test plugins, installed once for this test binary.
+    fn plugins() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let mut registry = grid4d_plugin::Registry::default();
+            registry.add_generator(grid4d_plugin_gear::Gear);
+            grid4d_plugin::install(registry);
+        });
+    }
+
+    #[test]
+    fn plugin_objects_draw_their_plugins_mesh_cached_by_values() {
+        use grid4d_scene::{PluginObject, PluginValue};
+        plugins();
+        let gear = grid4d_plugin::registry().generator("grid4d.gear").unwrap();
+        let mut doc = Document::new("plugins");
+        let id = doc.scene.insert(Node::new(
+            "Gear",
+            ObjectKind::Plugin(grid4d_plugin::Registry::new_object(gear)),
+        ));
+        let missing = doc.scene.insert(Node::new(
+            "Missing",
+            ObjectKind::Plugin(PluginObject::new("nobody.nothing")),
+        ));
+        let child = doc.scene.insert_child(missing, tall_cube()).unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let shown = node(&eval, id);
+        let Some(Drawable {
+            key: MeshKey::Polygon(first),
+            ..
+        }) = shown.drawable
+        else {
+            panic!("drawn as a polygon object")
+        };
+        assert_eq!(shown.pick, PickShape::Mesh(first));
+        assert!((shown.bounds.unwrap().max.x - 100.0).abs() < 1.0);
+
+        // Another edit elsewhere keeps the mesh; a value change builds a new one.
+        doc.scene.get_mut(child).unwrap().data.name = "Box".to_owned();
+        eval.update(&doc.scene);
+        assert_eq!(node(&eval, id).pick, PickShape::Mesh(first), "cached");
+        let ObjectKind::Plugin(object) = &mut doc.scene.get_mut(id).unwrap().data.kind else {
+            unreachable!()
+        };
+        object.set("Radius", PluginValue::Float(200.0));
+        eval.update(&doc.scene);
+        assert_ne!(node(&eval, id).pick, PickShape::Mesh(first));
+        // The tips sit a little off the X axis: within 1 %.
+        assert!((node(&eval, id).bounds.unwrap().max.x - 200.0).abs() < 2.0);
+        assert!(crate::editable_mesh(&doc.scene.get(id).unwrap().data.kind).is_some());
+
+        // A missing plugin: a group, its children shown as they are.
+        assert!(node(&eval, missing).drawable.is_none());
+        assert_eq!(node(&eval, missing).pick, PickShape::None);
+        assert!(node(&eval, child).drawable.is_some());
     }
 
     #[test]

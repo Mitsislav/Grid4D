@@ -258,7 +258,7 @@ impl AttributesPanel {
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
             icons::paint(ui.painter(), rect, Icon::Object(tag), tag_color(tag));
             ui.label(
-                RichText::new(trf("{0} Object [{1}]", &[&tr(data.kind.label()), &data.name]))
+                RichText::new(trf("{0} Object [{1}]", &[&tr(kind_label(&data.kind)), &data.name]))
                     .strong()
                     .color(p().text_strong),
             );
@@ -631,6 +631,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
         .num_columns(3)
         .spacing([6.0, 4.0])
         .show(ui, |ui| match kind {
+            ObjectKind::Plugin(object) => plugin_rows(ui, object),
             ObjectKind::Null => {
                 ui.label(
                     RichText::new(tr("A Null groups objects. Drag objects onto it in the Object Manager."))
@@ -2350,6 +2351,132 @@ fn length_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
     );
     k.button(ui, label);
     ui.end_row();
+}
+
+/// What the object is: its kind's name, or its plugin's.
+fn kind_label(kind: &ObjectKind) -> &'static str {
+    match kind {
+        ObjectKind::Plugin(object) => grid4d_plugin::registry()
+            .generator(&object.type_id)
+            .map_or(kind.label(), |plugin| plugin.name()),
+        _ => kind.label(),
+    }
+}
+
+/// A plugin object's parameters, laid out from its plugin's description (a
+/// value is written only when it is changed). A missing plugin's values are
+/// listed as they are kept.
+fn plugin_rows(ui: &mut Ui, object: &mut grid4d_scene::PluginObject) {
+    use grid4d_plugin::{ParamKind, Unit, Values};
+    use grid4d_scene::PluginValue;
+    let Some(plugin) = grid4d_plugin::registry().generator(&object.type_id) else {
+        attr_label(ui, "Missing Plugin", LABEL_WIDTH);
+        ui.label(RichText::new(&object.type_id).color(p().warning))
+            .on_hover_text(trf(
+                "The plugin “{0}” is not installed: this object keeps its values and saves them unchanged.",
+                &[&object.type_id],
+            ));
+        ui.end_row();
+        for (name, value) in &object.values {
+            attr_label(ui, name, LABEL_WIDTH);
+            let text = match *value {
+                PluginValue::Float(v) => format!("{v}"),
+                PluginValue::Int(v) => format!("{v}"),
+                PluginValue::Bool(v) => tr(if v { key("On") } else { key("Off") }).to_owned(),
+                PluginValue::Choice(v) => format!("#{v}"),
+                PluginValue::Vector(v) => format!("{} {} {}", v.x, v.y, v.z),
+                PluginValue::Color(c) => format!("{} {} {}", c[0], c[1], c[2]),
+            };
+            ui.label(RichText::new(text).color(p().text_dim));
+            ui.end_row();
+        }
+        return;
+    };
+    for spec in plugin.params() {
+        let current = Values::new(plugin.params(), object)
+            .get(spec.name)
+            .unwrap_or(spec.default);
+        let mut value = current;
+        attr_label(ui, spec.name, LABEL_WIDTH);
+        let response = match (spec.kind, &mut value) {
+            (ParamKind::Float { min, max, unit }, PluginValue::Float(v)) => match unit {
+                Unit::Length => ui.add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    widgets::length(ui, v).speed(1.0).range(min..=max).max_decimals(2),
+                ),
+                Unit::Angle => {
+                    let mut degrees = v.to_degrees();
+                    let response = ui.add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut degrees)
+                            .speed(0.5)
+                            .range(min.to_degrees()..=max.to_degrees())
+                            .suffix("°"),
+                    );
+                    if response.changed() {
+                        *v = degrees.to_radians();
+                    }
+                    response
+                }
+                Unit::Percent => {
+                    let mut percent = *v * 100.0;
+                    let response = ui.add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut percent)
+                            .speed(0.5)
+                            .range(min * 100.0..=max * 100.0)
+                            .suffix(" %"),
+                    );
+                    if response.changed() {
+                        *v = percent / 100.0;
+                    }
+                    response
+                }
+                Unit::None => ui.add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    DragValue::new(v).speed(0.01).range(min..=max).max_decimals(3),
+                ),
+            },
+            (ParamKind::Int { min, max }, PluginValue::Int(v)) => {
+                ui.add_sized([FIELD_WIDTH, 19.0], DragValue::new(v).speed(0.1).range(min..=max))
+            }
+            (ParamKind::Bool, PluginValue::Bool(v)) => ui.checkbox(v, ""),
+            (ParamKind::Choice(choices), PluginValue::Choice(v)) => {
+                let shown = choices.get(*v as usize).copied().unwrap_or_default();
+                egui::ComboBox::from_id_salt(("grid4d.attr.plugin", spec.name))
+                    .selected_text(tr(shown))
+                    .show_ui(ui, |ui| {
+                        for (index, choice) in (0u32..).zip(choices.iter()) {
+                            ui.selectable_value(v, index, tr(choice));
+                        }
+                    })
+                    .response
+            }
+            (ParamKind::Vector { unit }, PluginValue::Vector(v)) => {
+                ui.horizontal(|ui| {
+                    for axis in 0..3 {
+                        let field = if unit == Unit::Length {
+                            widgets::length(ui, &mut v[axis])
+                        } else {
+                            DragValue::new(&mut v[axis])
+                        };
+                        ui.add_sized([56.0, 19.0], field.speed(0.5).max_decimals(2));
+                    }
+                })
+                .response
+            }
+            (ParamKind::Color, PluginValue::Color(c)) => colour_button(ui, c),
+            // `Values::get` gives each parameter its own type.
+            _ => ui.label(""),
+        };
+        if !spec.hint.is_empty() {
+            response.on_hover_text(tr(spec.hint));
+        }
+        ui.end_row();
+        if value != current {
+            object.set(spec.name, value);
+        }
+    }
 }
 
 fn small_label(ui: &mut Ui, text: &str) {

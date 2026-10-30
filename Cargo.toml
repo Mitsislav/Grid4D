@@ -12,13 +12,15 @@
 #
 #  grid4d-text (text splines' glyph outlines) depends only on grid4d-geom; eval and ui use it.
 #  grid4d-sim (rigid bodies, rapier3d) depends on grid4d-scene; ui uses it.
+#  grid4d-plugin (the plugin API) depends on geom and scene; eval and ui use it.
+#  Plugins (plugins/*) depend on grid4d-plugin; the binary lists them (src/plugins.rs).
 #
 #  See ARCHITECTURE.md for the architectural rules.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [workspace]
 resolver = "3"
-members = ["crates/geom", "crates/text", "crates/scene", "crates/eval", "crates/render", "crates/raytrace", "crates/sim", "crates/io", "crates/ui"]
+members = ["crates/geom", "crates/text", "crates/scene", "crates/plugin", "crates/eval", "crates/render", "crates/raytrace", "crates/sim", "crates/io", "crates/ui", "plugins/gear"]
 
 [workspace.package]
 version = "0.1.0"
@@ -32,6 +34,8 @@ publish = false
 grid4d-geom = { path = "crates/geom" }
 grid4d-text = { path = "crates/text" }
 grid4d-scene = { path = "crates/scene" }
+grid4d-plugin = { path = "crates/plugin" }
+grid4d-plugin-gear = { path = "plugins/gear" }
 grid4d-eval = { path = "crates/eval" }
 grid4d-render = { path = "crates/render" }
 grid4d-raytrace = { path = "crates/raytrace" }
@@ -130,6 +134,9 @@ default-run = "grid4d"
 [dependencies]
 grid4d-scene.workspace = true
 grid4d-ui.workspace = true
+# Plugins built into Grid4D (registered in src/plugins.rs).
+grid4d-plugin.workspace = true
+grid4d-plugin-gear.workspace = true
 # `persistence`: window size/position, panel splitters (egui memory) and app data
 # such as recent files survive restarts. Only the binary owns storage.
 eframe = { workspace = true, features = ["persistence"] }

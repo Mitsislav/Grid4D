@@ -364,6 +364,8 @@ impl ObjectKind {
             | Self::SubdivisionSurface { .. }
             | Self::Loft(_)
             | Self::Spline { .. }
+            // Animated plugin parameters come in step 13.2.
+            | Self::Plugin(_)
             // The lattice is edited, not keyed.
             | Self::Ffd { .. } => &[],
         };

@@ -16,6 +16,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (" · stopped", " · διακόπηκε"),
     (" · {0} frames", " · {0} καρέ"),
     ("+{0} more", "+{0} ακόμη"),
+    ("0: no hole", "0: χωρίς τρύπα"),
     ("1 override", "1 παράκαμψη"),
     ("2 Views Side-by-Side", "2 προβολές δίπλα-δίπλα"),
     ("2 Views Stacked", "2 προβολές η μία πάνω στην άλλη"),
@@ -55,6 +56,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "A skin over its child splines",
         "Μια επιφάνεια πάνω από τις θυγατρικές καμπύλες του",
     ),
+    ("A toothed wheel", "Ένας οδοντωτός τροχός"),
     ("Absolute", "Απόλυτη"),
     ("Adaptive", "Προσαρμοστική"),
     ("Add Arc", "Προσθήκη Τόξου"),
@@ -146,6 +148,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Προσθήκη αντιγράφου της επιλογής όπως φαίνεται τώρα: παραμορφωμένης, παραγμένης, σε αυτό το καρέ",
     ),
     ("Add a layer", "Προσθήκη στρώματος"),
+    (
+        "Add a plugin's object from Create ▸ Plugins",
+        "Προσθέστε αντικείμενο plugin από Δημιουργία ▸ Plugins",
+    ),
     (
         "Add a take and make it active: changes are then recorded in it",
         "Προσθήκη λήψης και ενεργοποίησή της: οι αλλαγές καταγράφονται έπειτα σε αυτήν",
@@ -560,7 +566,12 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Frames", "Καρέ"),
     ("Friction", "Τριβή"),
     ("From", "Από"),
+    (
+        "From the centre to the tips of the teeth",
+        "Από το κέντρο ως τις άκρες των δοντιών",
+    ),
     ("Front", "Μπροστά"),
+    ("Gear", "Γρανάζι"),
     ("Generator", "Γεννήτρια"),
     (
         "Generators: generators build (off: they act as switched off)",
@@ -620,11 +631,13 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Hide Unselected", "Απόκρυψη μη επιλεγμένων"),
     ("Hierarchical", "Ιεραρχική"),
     ("History", "Ιστορικό"),
+    ("Hole Radius", "Ακτίνα τρύπας"),
     ("Horizontal Spacing", "Οριζόντια απόσταση"),
     (
         "Hover an edge to see the loop, click to cut it",
         "Περάστε πάνω από μια ακμή για να δείτε τον βρόχο, κλικ για να τον κόψετε",
     ),
+    ("How far the teeth stand out", "Πόσο προεξέχουν τα δόντια"),
     (
         "How frame numbers join the file names of an animation",
         "Πώς οι αριθμοί καρέ μπαίνουν στα ονόματα αρχείων μιας κίνησης",
@@ -633,6 +646,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "How many steps Undo can go back; lowering it drops the oldest at once",
         "Πόσα βήματα πίσω μπορεί να πάει η Αναίρεση· η μείωση πετάει αμέσως τα παλαιότερα",
     ),
+    ("How many teeth go round the wheel", "Πόσα δόντια έχει ο τροχός"),
     (
         "How often light bounces between surfaces (0: direct light only)",
         "Πόσες φορές αναπηδά το φως ανάμεσα στις επιφάνειες (0: μόνο άμεσο φως)",
@@ -841,6 +855,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Millimetres", "Χιλιοστά"),
     ("Minimum Time", "Ελάχιστος χρόνος"),
+    ("Missing Plugin", "Plugin που λείπει"),
     ("Mode", "Λειτουργία"),
     ("Model", "Μοντέλο"),
     ("Model mode", "Λειτουργία μοντέλου"),
@@ -907,6 +922,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "No overrides yet: what you change now is recorded in this take.",
         "Δεν υπάρχουν ακόμη παρακάμψεις: ό,τι αλλάζετε τώρα καταγράφεται σε αυτή τη λήψη.",
     ),
+    ("No plugins installed", "Κανένα εγκατεστημένο plugin"),
     ("No recent documents", "Κανένα πρόσφατο έγγραφο"),
     ("None", "Κανένα"),
     (
@@ -939,8 +955,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Object Manager", "Διαχείριση Αντικειμένων"),
     ("Object Properties", "Ιδιότητες αντικειμένου"),
     ("Objects", "Αντικείμενα"),
+    ("Off", "Όχι"),
     ("Offset", "Μετατόπιση"),
     ("Omni", "Πανκατευθυντικό"),
+    ("On", "Ναι"),
     (
         "Only Grid4D documents (.g4d) and models (.gltf, .glb, .obj) can be dropped",
         "Μπορούν να αφεθούν μόνο έγγραφα Grid4D (.g4d) και μοντέλα (.gltf, .glb, .obj)",
@@ -1013,6 +1031,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Play Backwards (F6)", "Αναπαραγωγή προς τα πίσω (F6)"),
     ("Play Forwards", "Αναπαραγωγή"),
     ("Play Forwards (F8)", "Αναπαραγωγή (F8)"),
+    ("Plugin", "Plugin"),
+    ("Plugins", "Plugins"),
     ("Points", "Σημεία"),
     (
         "Points mode edits the lattice",
@@ -1416,6 +1436,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Tapers its parent's subtree", "Κάνει κωνικό το υποδέντρο του γονέα του"),
     ("Target", "Στόχος"),
     ("Target Object", "Αντικείμενο στόχος"),
+    ("Teeth", "Δόντια"),
     ("Text", "Κείμενο"),
     ("The Render View is not saved.", "Η Προβολή απόδοσης δεν αποθηκεύεται."),
     (
@@ -1445,6 +1466,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "The object turns its forward axis (−Z) towards the target; Pitch off keeps it level",
         "Το αντικείμενο στρέφει τον μπροστινό άξονά του (−Z) προς τον στόχο· χωρίς Κλίση μένει οριζόντιο",
     ),
+    (
+        "The plugin “{0}” is not installed: this object keeps its values and saves them unchanged.",
+        "Το plugin «{0}» δεν είναι εγκατεστημένο: το αντικείμενο κρατά τις τιμές του και τις αποθηκεύει αμετάβλητες.",
+    ),
     ("The scene as it is", "Η σκηνή όπως είναι"),
     (
         "The selected objects are not animated: record keys with F9",
@@ -1457,6 +1482,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "The take renders show; Current: the active one",
         "Η λήψη που δείχνουν οι αποδόσεις· Τρέχουσα: η ενεργή",
+    ),
+    (
+        "The tip of a tooth, as a share of the space from one tooth to the next",
+        "Η άκρη ενός δοντιού, ως ποσοστό της απόστασης από το ένα δόντι στο επόμενο",
     ),
     (
         "The type of a new spline; points added to a spline keep its type",
@@ -1489,6 +1518,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Then hover an edge and click (Loop/Path Cut) or drag a line (Line Cut) in the viewport",
         "Μετά περάστε πάνω από ακμή και κάντε κλικ (Κοπή βρόχου/διαδρομής) ή σύρετε γραμμή (Κοπή γραμμής) στην προβολή",
     ),
+    ("Thickness", "Πάχος"),
     (
         "This tool has no options yet.",
         "Αυτό το εργαλείο δεν έχει ακόμη επιλογές.",
@@ -1506,6 +1536,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Tolerant Selection", "Ανεκτική επιλογή"),
     ("Tool", "Εργαλείο"),
     ("Tools", "Εργαλεία"),
+    ("Tooth Depth", "Βάθος δοντιού"),
+    ("Tooth Width", "Πλάτος δοντιού"),
     ("Top", "Πάνω"),
     ("Top Radius", "Πάνω ακτίνα"),
     ("Torus", "Τόρος"),

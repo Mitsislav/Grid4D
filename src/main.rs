@@ -8,6 +8,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod plugins;
 
 use app::Grid4DApp;
 
@@ -21,6 +22,9 @@ fn main() -> eframe::Result {
     // `grid4d scene.g4d` opens that document (how "Open with" and file
     // associations launch the app).
     let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
+
+    // The plugins built into this Grid4D, before anything evaluates a scene.
+    grid4d_plugin::install(plugins::registry());
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Grid4D")

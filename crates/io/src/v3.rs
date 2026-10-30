@@ -34,8 +34,8 @@ use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
     FrameRange, ImageFormat, Inherit, Interpolation, Key, Layer, LayerId, LayerSwitches, LightDetails, LightShadow,
     LightType, MassMode, Material, MaterialId, MeshHandle, MeshId, Motion, NodeData, NodeId, ObjectKind,
-    ObjectOverrides, ObjectParam, Override, Param, RenderSettings, SimulationCache, SimulationSettings, SplineHandle,
-    Tag, Take, TakeId, Takes, Tangents, TimeSettings, Track, Transform,
+    ObjectOverrides, ObjectParam, Override, Param, PluginObject, PluginValue, RenderSettings, SimulationCache,
+    SimulationSettings, SplineHandle, Tag, Take, TakeId, Takes, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -1231,6 +1231,52 @@ impl TagDto {
     }
 }
 
+/// One value of a plugin object: `{"name": "Teeth", "int": 12}`.
+#[derive(Debug, Serialize, Deserialize)]
+struct PluginValueDto {
+    name: String,
+    #[serde(flatten)]
+    value: PluginValueKindDto,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PluginValueKindDto {
+    Float(f32),
+    Int(i32),
+    Bool(bool),
+    Choice(u32),
+    Vector([f32; 3]),
+    /// Linear RGB.
+    Color([f32; 3]),
+}
+
+impl From<PluginValue> for PluginValueKindDto {
+    fn from(value: PluginValue) -> Self {
+        match value {
+            PluginValue::Float(v) => Self::Float(v),
+            PluginValue::Int(v) => Self::Int(v),
+            PluginValue::Bool(v) => Self::Bool(v),
+            PluginValue::Choice(v) => Self::Choice(v),
+            PluginValue::Vector(v) => Self::Vector(v.to_array()),
+            PluginValue::Color(c) => Self::Color(c),
+        }
+    }
+}
+
+impl From<PluginValueKindDto> for PluginValue {
+    fn from(value: PluginValueKindDto) -> Self {
+        match value {
+            PluginValueKindDto::Float(v) => Self::Float(v),
+            PluginValueKindDto::Int(v) => Self::Int(v),
+            PluginValueKindDto::Bool(v) => Self::Bool(v),
+            PluginValueKindDto::Choice(v) => Self::Choice(v),
+            PluginValueKindDto::Vector(v) => Self::Vector(Vec3::from_array(v)),
+            PluginValueKindDto::Color(c) => Self::Color(c),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum KindDto {
@@ -1500,6 +1546,13 @@ enum KindDto {
         reverse: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         intermediate_points: Option<SplinePointsDto>,
+    },
+    /// A plugin's object (added in step 13.1): which plugin, and its values
+    /// by name — kept as they are when the plugin is missing.
+    Plugin {
+        plugin: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        values: Vec<PluginValueDto>,
     },
     /// An editable spline (added in step 9.2), its arrays inline.
     EditableSpline {
@@ -3074,6 +3127,17 @@ impl KindDto {
     fn new(kind: &ObjectKind, object: &str, meshes: &mut MeshTable) -> Self {
         match *kind {
             ObjectKind::Null => Self::Null,
+            ObjectKind::Plugin(ref plugin) => Self::Plugin {
+                plugin: plugin.type_id.clone(),
+                values: plugin
+                    .values
+                    .iter()
+                    .map(|(name, value)| PluginValueDto {
+                        name: name.clone(),
+                        value: (*value).into(),
+                    })
+                    .collect(),
+            },
             ObjectKind::Cube { size, segments } => Self::Cube {
                 size: size.to_array(),
                 segments,
@@ -3622,6 +3686,10 @@ impl KindDto {
                     fillet,
                 },
             }),
+            Self::Plugin { plugin, values } => ObjectKind::Plugin(PluginObject {
+                type_id: plugin,
+                values: values.into_iter().map(|v| (v.name, v.value.into())).collect(),
+            }),
             Self::Text {
                 text,
                 height,
@@ -3849,6 +3917,10 @@ impl KindDto {
                 curvature,
                 ..
             } => vec![size[0], size[1], size[2], strength, curvature],
+            Self::Plugin { ref values, .. } => values
+                .iter()
+                .flat_map(|v| PluginValue::from(v.value).numbers())
+                .collect(),
             Self::Text {
                 height,
                 horizontal_spacing,
@@ -4303,6 +4375,31 @@ mod tests {
             !document_json(&Document::with_demo_scene()).contains("\"takes\""),
             "omitted when there are none"
         );
+    }
+
+    #[test]
+    fn plugin_objects_round_trip_whether_or_not_the_plugin_is_here() {
+        let mut doc = Document::new("plugins");
+        let mut gear = PluginObject::new("grid4d.gear");
+        gear.set("Teeth", PluginValue::Int(20));
+        gear.set("Radius", PluginValue::Float(80.0));
+        gear.set("Spin", PluginValue::Bool(true));
+        gear.set("Mode", PluginValue::Choice(2));
+        gear.set("Axis", PluginValue::Vector(Vec3::new(0.0, 1.0, 0.0)));
+        gear.set("Tint", PluginValue::Color([1.0, 0.5, 0.0]));
+        doc.scene.insert(Node::new("Gear", ObjectKind::Plugin(gear.clone())));
+        let loaded = round_trip(&doc);
+        let (_, node) = loaded.scene.iter().next().unwrap();
+        assert_eq!(node.data.kind, ObjectKind::Plugin(gear), "type and values, in order");
+        let json = document_json(&doc);
+        assert!(json.contains("\"plugin\": \"grid4d.gear\""), "{json}");
+        assert!(json.contains("\"int\": 20"), "{json}");
+
+        let mut broken = Document::new("broken");
+        let mut bad = PluginObject::new("grid4d.gear");
+        bad.set("Radius", PluginValue::Float(f32::INFINITY));
+        broken.scene.insert(Node::new("Gear", ObjectKind::Plugin(bad)));
+        assert!(to_bytes(&broken).is_err(), "numbers that are not finite are refused");
     }
 
     #[test]

@@ -118,6 +118,8 @@ fn shown_texts() -> BTreeSet<String> {
     for crate_dir in ["../scene/src", "../render/src", "../geom/src"] {
         sources(&root.join(crate_dir), &mut others);
     }
+    let mut plugins = Vec::new();
+    sources(&root.join("../../plugins"), &mut plugins);
     let mut texts = BTreeSet::new();
     let label_fns = ["fn label(", "fn hint(", "fn title(", "fn window_label("];
     for (path, is_ui) in ui.iter().map(|p| (p, true)).chain(others.iter().map(|p| (p, false))) {
@@ -190,6 +192,42 @@ fn shown_texts() -> BTreeSet<String> {
                 }
                 from = quote + 1;
             }
+        }
+    }
+    // Plugins: their names, descriptions, parameter names, hints and choices.
+    for path in &plugins {
+        let Ok(full) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let text = &full[..test_module(&full)];
+        for name in ["fn name(", "fn description("] {
+            let mut from = 0;
+            while let Some(found) = text[from..].find(name) {
+                let start = from + found;
+                let Some(open) = text[start..].find('{').map(|o| start + o) else {
+                    break;
+                };
+                let end = closing(text, open, (b'{', b'}'));
+                texts.extend(literals_in(text, open, end));
+                from = end;
+            }
+        }
+        for field in ["name: \"", "hint: \""] {
+            let mut from = 0;
+            while let Some(found) = text[from..].find(field) {
+                let quote = from + found + field.len() - 1;
+                if let Some(value) = literal(text, quote) {
+                    texts.insert(value);
+                }
+                from = quote + 1;
+            }
+        }
+        let mut from = 0;
+        while let Some(found) = text[from..].find("Choice(&[") {
+            let open = from + found + "Choice(&".len();
+            let end = closing(text, open, (b'[', b']'));
+            texts.extend(literals_in(text, open, end));
+            from = end;
         }
     }
     texts.retain(|t| t.chars().filter(|c| c.is_alphabetic()).count() >= 2 && !t.starts_with("grid4d."));

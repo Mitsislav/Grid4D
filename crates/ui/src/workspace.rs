@@ -689,8 +689,15 @@ mod tests {
             .apply(grid4d_scene::SceneEdit::SetData { id: first, data: moved })
             .unwrap();
         doc.record_in_take(&[inverse]).unwrap();
+        crate::test_plugins();
+        let gear = grid4d_plugin::registry().generator("grid4d.gear").unwrap();
+        let gear = doc.scene.insert(grid4d_scene::Node::new(
+            "Gear",
+            grid4d_scene::ObjectKind::Plugin(grid4d_plugin::Registry::new_object(gear)),
+        ));
         let mut editor = EditorState::default();
-        editor.selection.set_single(first);
+        // Its parameters in the Attribute Manager, read from the plugin.
+        editor.selection.set_single(gear);
         let ctx = egui::Context::default();
         for layout in Layout::ALL {
             let mut workspace = Workspace::new(layout);

@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 grid4d-scene.workspace = true
+grid4d-plugin.workspace = true
 grid4d-geom.workspace = true
 grid4d-eval.workspace = true
 grid4d-text.workspace = true
@@ -27,6 +28,7 @@ rfd.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+grid4d-plugin-gear.workspace = true
 png.workspace = true
 serde_json.workspace = true
 

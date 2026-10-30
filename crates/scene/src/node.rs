@@ -170,6 +170,9 @@ pub enum ObjectKind {
         interpolation: Interpolation,
         components: Components,
     },
+    /// An object a plugin makes: its type id and parameter values (what they
+    /// build is the plugin's; see `docs/reference/extend-plugins.md`).
+    Plugin(crate::PluginObject),
 }
 
 /// Field-less discriminant of [`ObjectKind`] — for icons, menus and dispatch tables.
@@ -209,6 +212,9 @@ pub enum ObjectKindTag {
     Flower,
     Text,
     Spline,
+    /// Any plugin's object (not in [`ObjectKindTag::ALL`]: plugins are created
+    /// by their type id).
+    Plugin,
 }
 
 impl ObjectKindTag {
@@ -328,6 +334,7 @@ impl ObjectKindTag {
             Self::Flower => "Flower",
             Self::Text => "Text",
             Self::Spline => "Spline",
+            Self::Plugin => "Plugin",
         }
     }
 
@@ -470,6 +477,8 @@ impl ObjectKindTag {
                 interpolation: Interpolation::default(),
                 components: Components::default(),
             },
+            // No plugin: made with a type id (`grid4d_plugin::Registry`).
+            Self::Plugin => ObjectKind::Plugin(crate::PluginObject::default()),
         }
     }
 
@@ -566,6 +575,7 @@ impl ObjectKind {
             },
             Self::Text(_) => ObjectKindTag::Text,
             Self::Spline { .. } => ObjectKindTag::Spline,
+            Self::Plugin(_) => ObjectKindTag::Plugin,
         }
     }
 
@@ -604,7 +614,8 @@ impl ObjectKind {
             | Self::Bulge(_)
             | Self::Ffd { .. }
             | Self::PlainEffector(_)
-            | Self::RandomEffector(_) => 0,
+            | Self::RandomEffector(_)
+            | Self::Plugin(_) => 0,
         }
     }
 
@@ -727,7 +738,9 @@ impl ObjectKind {
             | Self::Lathe(_)
             | Self::Sweep(_)
             | Self::Loft(_)
-            | Self::Cloner { .. } => {
+            | Self::Cloner { .. }
+            // A plugin's mesh: evaluation knows its extent.
+            | Self::Plugin(_) => {
                 return None;
             }
             Self::Cube { size, .. } => size * 0.5,

@@ -1,0 +1,350 @@
+//! # grid4d-plugin
+//!
+//! The API plugins are written against (see `docs/reference/extend-plugins.md`
+//! and `docs/plugins.md`). A plugin is a crate built into Grid4D: it describes
+//! its parameters ([`ParamSpec`]) and implements a trait —
+//! [`GeneratorPlugin`] builds a mesh from them. The binary adds every plugin to
+//! a [`Registry`] and [`install`]s it once at start; evaluation and the
+//! interface find plugins there by their type id.
+//!
+//! Documents keep only a plugin object's type id and values
+//! ([`grid4d_scene::PluginObject`]); a plugin reads them through [`Values`],
+//! which supplies defaults for missing values and keeps them in range.
+
+use std::sync::OnceLock;
+
+use glam::Vec3;
+use grid4d_geom::PolyMesh;
+use grid4d_scene::{PluginObject, PluginValue};
+
+/// What a number means, for how the interface shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unit {
+    /// A plain number.
+    None,
+    /// A length in centimetres (shown in the user's length unit).
+    Length,
+    /// An angle in radians (shown in degrees).
+    Angle,
+    /// A fraction 0 … 1 (shown as 0 … 100 %).
+    Percent,
+}
+
+/// A parameter's type and range.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ParamKind {
+    Float {
+        min: f32,
+        max: f32,
+        unit: Unit,
+    },
+    Int {
+        min: i32,
+        max: i32,
+    },
+    Bool,
+    /// One of these (English names, translated where shown).
+    Choice(&'static [&'static str]),
+    Vector {
+        unit: Unit,
+    },
+    /// Linear RGB.
+    Color,
+}
+
+/// One parameter of a plugin: its name (shown in the Attribute Manager and
+/// the key of its value in documents), type, default and a hint.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParamSpec {
+    pub name: &'static str,
+    pub kind: ParamKind,
+    pub default: PluginValue,
+    /// A short explanation (the field's tooltip); may be empty.
+    pub hint: &'static str,
+}
+
+impl ParamSpec {
+    /// `value` brought to this parameter's type and range; a value of
+    /// another type gives the default.
+    #[must_use]
+    pub fn checked(&self, value: PluginValue) -> PluginValue {
+        match (self.kind, value) {
+            (ParamKind::Float { min, max, .. }, PluginValue::Float(v)) if v.is_finite() => {
+                PluginValue::Float(v.clamp(min, max))
+            }
+            (ParamKind::Int { min, max }, PluginValue::Int(v)) => PluginValue::Int(v.clamp(min, max)),
+            (ParamKind::Bool, PluginValue::Bool(v)) => PluginValue::Bool(v),
+            (ParamKind::Choice(choices), PluginValue::Choice(v)) => {
+                let last = u32::try_from(choices.len().saturating_sub(1)).unwrap_or(0);
+                PluginValue::Choice(v.min(last))
+            }
+            (ParamKind::Vector { .. }, PluginValue::Vector(v)) if v.is_finite() => PluginValue::Vector(v),
+            (ParamKind::Color, PluginValue::Color(c)) if c.iter().all(|x| x.is_finite()) => {
+                PluginValue::Color(c.map(|x| x.clamp(0.0, 1.0)))
+            }
+            _ => self.default,
+        }
+    }
+}
+
+/// A plugin object's values as its plugin reads them: by name, with the
+/// defaults of its description for missing ones and ranges applied.
+#[derive(Clone, Copy, Debug)]
+pub struct Values<'a> {
+    params: &'a [ParamSpec],
+    object: &'a PluginObject,
+}
+
+impl<'a> Values<'a> {
+    #[must_use]
+    pub const fn new(params: &'a [ParamSpec], object: &'a PluginObject) -> Self {
+        Self { params, object }
+    }
+
+    /// The value of the parameter named `name`, checked; `None` if the
+    /// description has no such parameter.
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<PluginValue> {
+        let spec = self.params.iter().find(|p| p.name == name)?;
+        Some(self.object.get(name).map_or(spec.default, |v| spec.checked(v)))
+    }
+
+    /// A float parameter (0 if there is none of that name and type).
+    #[must_use]
+    pub fn float(&self, name: &str) -> f32 {
+        match self.get(name) {
+            Some(PluginValue::Float(v)) => v,
+            _ => 0.0,
+        }
+    }
+
+    /// An integer parameter (0 if there is none of that name and type).
+    #[must_use]
+    pub fn int(&self, name: &str) -> i32 {
+        match self.get(name) {
+            Some(PluginValue::Int(v)) => v,
+            _ => 0,
+        }
+    }
+
+    #[must_use]
+    pub fn bool(&self, name: &str) -> bool {
+        matches!(self.get(name), Some(PluginValue::Bool(true)))
+    }
+
+    /// A choice's index.
+    #[must_use]
+    pub fn choice(&self, name: &str) -> u32 {
+        match self.get(name) {
+            Some(PluginValue::Choice(v)) => v,
+            _ => 0,
+        }
+    }
+
+    #[must_use]
+    pub fn vector(&self, name: &str) -> Vec3 {
+        match self.get(name) {
+            Some(PluginValue::Vector(v)) => v,
+            _ => Vec3::ZERO,
+        }
+    }
+
+    #[must_use]
+    pub fn color(&self, name: &str) -> [f32; 3] {
+        match self.get(name) {
+            Some(PluginValue::Color(c)) => c,
+            _ => [0.0; 3],
+        }
+    }
+}
+
+/// A plugin that makes a kind of object from its parameters (like a
+/// primitive): Create ▸ Plugins lists it, the Attribute Manager shows its
+/// parameters, evaluation calls [`GeneratorPlugin::build`].
+pub trait GeneratorPlugin: Send + Sync {
+    /// Its id, unique and stable (it is saved in documents):
+    /// `"<author or project>.<name>"`, e.g. `"grid4d.gear"`.
+    fn type_id(&self) -> &'static str;
+    /// Its name in English (menus, new objects' names).
+    fn name(&self) -> &'static str;
+    /// One sentence on what it makes (the menu's tooltip).
+    fn description(&self) -> &'static str;
+    /// Its parameters, in Attribute Manager order.
+    fn params(&self) -> &'static [ParamSpec];
+    /// The mesh for `values`, in the object's own space (centimetres, Y up,
+    /// faces counter-clockwise seen from outside). An empty mesh draws
+    /// nothing. Must not panic: return what you can.
+    fn build(&self, values: &Values<'_>) -> PolyMesh;
+}
+
+/// The installed plugins.
+#[derive(Default)]
+pub struct Registry {
+    generators: Vec<Box<dyn GeneratorPlugin>>,
+}
+
+impl std::fmt::Debug for Registry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Registry")
+            .field(
+                "generators",
+                &self.generators.iter().map(|g| g.type_id()).collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+impl Registry {
+    /// Adds a generator plugin; one whose type id is already taken is left out
+    /// (the first one stays) and reported in the log.
+    pub fn add_generator(&mut self, plugin: impl GeneratorPlugin + 'static) -> &mut Self {
+        if self.generator(plugin.type_id()).is_some() {
+            log::warn!("plugin {} registered twice; the first one stays", plugin.type_id());
+        } else {
+            self.generators.push(Box::new(plugin));
+        }
+        self
+    }
+
+    /// The generator plugin with this type id.
+    #[must_use]
+    pub fn generator(&self, type_id: &str) -> Option<&dyn GeneratorPlugin> {
+        self.generators
+            .iter()
+            .find(|g| g.type_id() == type_id)
+            .map(AsRef::as_ref)
+    }
+
+    /// Every generator plugin, in the order they were added.
+    pub fn generators(&self) -> impl Iterator<Item = &dyn GeneratorPlugin> {
+        self.generators.iter().map(AsRef::as_ref)
+    }
+
+    /// A new object of `plugin`'s with every value at its default.
+    #[must_use]
+    pub fn new_object(plugin: &dyn GeneratorPlugin) -> PluginObject {
+        PluginObject {
+            type_id: plugin.type_id().to_owned(),
+            values: plugin.params().iter().map(|p| (p.name.to_owned(), p.default)).collect(),
+        }
+    }
+
+    /// The mesh `object`'s plugin builds, checked: `None` when the plugin is
+    /// missing or its mesh has points that are not finite.
+    #[must_use]
+    pub fn build(&self, object: &PluginObject) -> Option<PolyMesh> {
+        let plugin = self.generator(&object.type_id)?;
+        let mesh = plugin.build(&Values::new(plugin.params(), object));
+        if mesh.points().iter().all(|p| p.is_finite()) {
+            Some(mesh)
+        } else {
+            log::warn!("plugin {} built points that are not finite numbers", object.type_id);
+            None
+        }
+    }
+}
+
+static REGISTRY: OnceLock<Registry> = OnceLock::new();
+
+/// Installs the plugins (once, at start). Returns `false` if a registry was
+/// installed already (the first one stays).
+pub fn install(registry: Registry) -> bool {
+    REGISTRY.set(registry).is_ok()
+}
+
+/// The installed plugins (none before [`install`]).
+#[must_use]
+pub fn registry() -> &'static Registry {
+    static EMPTY: OnceLock<Registry> = OnceLock::new();
+    REGISTRY.get().unwrap_or_else(|| EMPTY.get_or_init(Registry::default))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Slab;
+
+    const SLAB: &[ParamSpec] = &[
+        ParamSpec {
+            name: "Width",
+            kind: ParamKind::Float {
+                min: 1.0,
+                max: 1000.0,
+                unit: Unit::Length,
+            },
+            default: PluginValue::Float(100.0),
+            hint: "",
+        },
+        ParamSpec {
+            name: "Steps",
+            kind: ParamKind::Int { min: 1, max: 8 },
+            default: PluginValue::Int(2),
+            hint: "",
+        },
+        ParamSpec {
+            name: "Shape",
+            kind: ParamKind::Choice(&["Flat", "Round"]),
+            default: PluginValue::Choice(0),
+            hint: "",
+        },
+    ];
+
+    impl GeneratorPlugin for Slab {
+        fn type_id(&self) -> &'static str {
+            "test.slab"
+        }
+        fn name(&self) -> &'static str {
+            "Slab"
+        }
+        fn description(&self) -> &'static str {
+            "A square"
+        }
+        fn params(&self) -> &'static [ParamSpec] {
+            SLAB
+        }
+        fn build(&self, values: &Values<'_>) -> PolyMesh {
+            let w = values.float("Width") * 0.5;
+            let points = vec![
+                Vec3::new(-w, 0.0, w),
+                Vec3::new(w, 0.0, w),
+                Vec3::new(w, 0.0, -w),
+                Vec3::new(-w, if values.int("Steps") > 7 { f32::NAN } else { 0.0 }, -w),
+            ];
+            PolyMesh::from_faces(points, [[0, 1, 2, 3]]).unwrap_or_default()
+        }
+    }
+
+    #[test]
+    fn values_take_defaults_and_ranges() {
+        let mut object = PluginObject::new("test.slab");
+        let values = |o: &PluginObject| {
+            let v = Values::new(SLAB, o);
+            (v.float("Width"), v.int("Steps"), v.choice("Shape"))
+        };
+        assert_eq!(values(&object), (100.0, 2, 0), "missing: the defaults");
+        object.set("Width", PluginValue::Float(5000.0));
+        object.set("Steps", PluginValue::Bool(true));
+        object.set("Shape", PluginValue::Choice(9));
+        object.set("Unknown", PluginValue::Int(1));
+        assert_eq!(values(&object), (1000.0, 2, 1), "clamped; a wrong type is the default");
+        assert_eq!(Values::new(SLAB, &object).get("Unknown"), None);
+        object.set("Width", PluginValue::Float(f32::NAN));
+        assert_eq!(values(&object).0, 100.0);
+    }
+
+    #[test]
+    fn the_registry_finds_builds_and_rejects() {
+        let mut registry = Registry::default();
+        registry.add_generator(Slab).add_generator(Slab);
+        assert_eq!(registry.generators().count(), 1, "one per type id");
+        let plugin = registry.generator("test.slab").unwrap();
+        let mut object = Registry::new_object(plugin);
+        assert_eq!(object.values.len(), 3);
+        assert_eq!(registry.build(&object).unwrap().face_count(), 1);
+        object.set("Steps", PluginValue::Int(8));
+        assert!(registry.build(&object).is_none(), "points that are not finite");
+        assert!(registry.build(&PluginObject::new("test.missing")).is_none());
+        assert!(registry.generator("test.missing").is_none());
+    }
+}

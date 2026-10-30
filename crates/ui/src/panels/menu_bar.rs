@@ -116,6 +116,25 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     }
                 }
             });
+            ui.menu_button(tr("Plugins"), |ui| {
+                let mut any = false;
+                for plugin in grid4d_plugin::registry().generators() {
+                    any = true;
+                    if ui
+                        .button(tr(plugin.name()))
+                        .on_hover_text(tr(plugin.description()))
+                        .clicked()
+                    {
+                        editor
+                            .commands
+                            .push(EditorCommand::CreatePlugin(plugin.type_id().to_owned()));
+                        ui.close();
+                    }
+                }
+                if !any {
+                    ui.add_enabled(false, Button::new(tr("No plugins installed")));
+                }
+            });
             ui.menu_button(tr("Deformer"), |ui| {
                 for tag in ObjectKindTag::DEFORMERS {
                     if ui

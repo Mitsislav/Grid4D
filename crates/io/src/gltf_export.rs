@@ -222,7 +222,9 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
             // Curves have no surface: the node keeps its place, nothing more.
             | ObjectKind::SplinePrimitive(_)
             | ObjectKind::Text(_)
-            | ObjectKind::Spline { .. } => {}
+            | ObjectKind::Spline { .. }
+            // Baked to a polygon object before export (`file::exportable`).
+            | ObjectKind::Plugin(_) => {}
         }
         nodes.push(node);
     }

@@ -157,6 +157,9 @@ pub enum EditorCommand {
     },
     /// Selects every object whose own layer is this one.
     SelectLayerObjects(grid4d_scene::LayerId),
+    /// Creates an object of the generator plugin with this type id (Create ▸
+    /// Plugins), at the top level, selected; nothing if it is not installed.
+    CreatePlugin(String),
     /// Makes a take active (`None`: Main); the view looks through its camera,
     /// if it has one.
     SwitchTake(Option<grid4d_scene::TakeId>),
@@ -546,6 +549,23 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             };
             commit(doc, editor, "Create Object", vec![edit], |inverses, selection| {
                 // The inverse of an insert is the detach of the new node.
+                if let Some(id) = inverses.first().and_then(SceneEdit::node) {
+                    selection.set_single(id);
+                }
+            });
+        }
+        EditorCommand::CreatePlugin(type_id) => {
+            let Some(plugin) = grid4d_plugin::registry().generator(&type_id) else {
+                log::warn!("no plugin {type_id} to create");
+                return;
+            };
+            let kind = ObjectKind::Plugin(grid4d_plugin::Registry::new_object(plugin));
+            let edit = SceneEdit::Insert {
+                parent: None,
+                index: usize::MAX,
+                data: NodeData::new(doc.scene.unique_name(plugin.name()), kind),
+            };
+            commit(doc, editor, key("Create Object"), vec![edit], |inverses, selection| {
                 if let Some(id) = inverses.first().and_then(SceneEdit::node) {
                     selection.set_single(id);
                 }
@@ -2134,6 +2154,7 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Torus
         | ObjectKindTag::Disc
         | ObjectKindTag::Capsule
+        | ObjectKindTag::Plugin
         | ObjectKindTag::Polygon
         | ObjectKindTag::SubdivisionSurface
         | ObjectKindTag::Extrude
@@ -2199,6 +2220,7 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Flower
         | ObjectKindTag::Text
         | ObjectKindTag::Spline => palette().icon_spline,
+        ObjectKindTag::Plugin => palette().icon_generator,
         ObjectKindTag::Bend
         | ObjectKindTag::Twist
         | ObjectKindTag::Taper
@@ -3590,6 +3612,44 @@ mod tests {
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
         assert_eq!(doc.takes.active(), Some(take));
         assert_eq!(doc.scene.get(cube).unwrap().data.transform.position.x, 250.0);
+    }
+
+    #[test]
+    fn a_plugin_object_is_created_undone_and_made_editable() {
+        crate::test_plugins();
+        let (mut doc, mut editor, mut vp) = demo();
+        let before = doc.scene.len();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreatePlugin("grid4d.gear".to_owned())],
+        );
+        let id = editor.selection.active().unwrap();
+        let data = &doc.scene.get(id).unwrap().data;
+        assert_eq!(data.name, "Gear");
+        assert!(matches!(&data.kind, ObjectKind::Plugin(o) if o.type_id == "grid4d.gear" && o.values.len() == 6));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.len(), before);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        assert!(doc.scene.contains(id));
+
+        // A plugin that is not installed: nothing happens.
+        let steps = editor.history.undo_len();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::CreatePlugin("nobody.nothing".to_owned())],
+        );
+        assert_eq!((doc.scene.len(), editor.history.undo_len()), (before + 1, steps));
+
+        editor.selection.set_single(id);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let ObjectKind::Polygon { mesh, .. } = &doc.scene.get(id).unwrap().data.kind else {
+            panic!("made editable")
+        };
+        assert_eq!(mesh.mesh().face_count(), 12 * 4 * 4, "the gear's faces, hole included");
     }
 
     #[test]
