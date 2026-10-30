@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 13 — Extensibility (v0.13) |
-| Last step done | 13.2 — Deformer plugins and animated plugin parameters (2026-10-30) |
-| Next step | 13.3 — Command plugins |
-| Tests | 732, all passing; clippy and rustfmt clean |
+| Last step done | 13.3 — Command plugins (2026-10-30) |
+| Next step | 13.4 — Scripting core |
+| Tests | 737, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1834,6 +1834,7 @@ the interface in Greek.
 | — | Phase 13 planned in detail: plugins as Rust crates built in and registered from a list (`grid4d-plugin`: parameter schema, generator, deformer and command traits; `ObjectKind::Plugin`; missing plugins kept), scripting in Rhai through `SceneEdit`s (one undo step per run, an operations limit), the Script Manager, SDK documentation (`IMPLEMENTATION_PLAN.md`) | 716 |
 | 13.1 | Plugins: the `grid4d-plugin` API (parameter descriptions, generator plugins, the registry), plugin objects in documents (kept when their plugin is missing), Create ▸ Plugins, parameters in the Attribute Manager, the example Gear | 726 |
 | 13.2 | Deformer plugins (in the deformer chain, their box, a handle, Shift-create under the selection, Fit to Parent) and keyed plugin numbers (key buttons, F-Curves, files, takes); the example Wave | 732 |
+| 13.3 | Command plugins: the Plugins menu, an options dialog from the plugin's description, changes applied as one undo step (or the plugin's message); the example Scatter | 737 |
 
 **Planning notes:**
 - **Why plugins are built in.** Loading plugin libraries at run time would
@@ -1918,6 +1919,33 @@ test makes fifty at once.
   key buttons on the numbers (Phase keyed), the F-Curve editor a "Phase"
   track; Create ▸ Plugins listed Gear, a line, Wave. Shift + click and the
   handle drag cannot be posted to the window; tests cover them.
+
+**13.3 — Command plugins**
+
+*Problems and solutions:*
+- **New objects have no ids yet.** A command returns `Changes`, not
+  `SceneEdit`s alone: an insert's parent can be the root, an existing object
+  or a `NewObject` — one the command added earlier, by its order. Grid4D
+  applies the list one change at a time (ids appear as it goes), takes all
+  of it back if any change is refused, and records the inverses as one step
+  (Auto Take included, through `History::record`).
+- **Shapes without evaluation.** `grid4d-plugin` cannot depend on
+  `grid4d-eval` (evaluation depends on it), so a command's `Context` carries
+  a function from the interface that gives an object's shape — a polygon
+  object's mesh, a generator's result, a primitive's or a plugin's mesh.
+- **One set of fields.** The options dialog and the Object tab draw a
+  plugin's parameters the same way: the fields moved into
+  `widgets::plugin_value` (with `colour_button`, which both use).
+- **Translating messages.** A command's message is shown translated; the
+  scanner reads the strings inside `Err(…)` in plugin crates, so messages are
+  written there rather than in constants.
+- **On-screen testing:** a small cube and a sphere, Select All (the sphere
+  active), Plugins ▸ Scatter… showed its options (Count, Seed, Align to
+  Surface, Random Rotation 180°, Scale Variation); OK made a "Scatter" Null
+  with 20 copies standing on the sphere, selected. With only the sphere
+  selected it said "Select the objects to scatter, then the surface last"
+  and the document stayed unchanged. Typing into the dialog's fields cannot
+  be posted to the window; tests set options directly.
 
 ---
 

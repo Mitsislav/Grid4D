@@ -194,7 +194,8 @@ fn shown_texts() -> BTreeSet<String> {
             }
         }
     }
-    // Plugins: their names, descriptions, parameter names, hints and choices.
+    // Plugins: their names, descriptions, parameter names, hints, choices and
+    // commands' messages (`Err(…)`).
     for path in &plugins {
         let Ok(full) = std::fs::read_to_string(path) else {
             continue;
@@ -226,6 +227,13 @@ fn shown_texts() -> BTreeSet<String> {
         while let Some(found) = text[from..].find("Choice(&[") {
             let open = from + found + "Choice(&".len();
             let end = closing(text, open, (b'[', b']'));
+            texts.extend(literals_in(text, open, end));
+            from = end;
+        }
+        let mut from = 0;
+        while let Some(found) = text[from..].find("Err(") {
+            let open = from + found + "Err".len();
+            let end = closing(text, open, (b'(', b')'));
             texts.extend(literals_in(text, open, end));
             from = end;
         }

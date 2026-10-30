@@ -9,6 +9,7 @@ pub fn registry() -> Registry {
     let mut registry = Registry::default();
     registry.add_generator(grid4d_plugin_gear::Gear);
     registry.add_deformer(grid4d_plugin_wave::Wave);
+    registry.add_command(grid4d_plugin_scatter::Scatter);
     registry
 }
 
@@ -19,5 +20,6 @@ mod tests {
         let registry = super::registry();
         assert!(registry.generator("grid4d.gear").is_some());
         assert!(registry.deformer("grid4d.wave").is_some());
+        assert!(registry.command("grid4d.scatter").is_some());
     }
 }

@@ -164,6 +164,13 @@ pub enum EditorCommand {
         type_id: String,
         child: bool,
     },
+    /// Runs the command plugin with this type id on the document and the
+    /// selection with these options: its changes as one undo step, or its
+    /// message when it cannot run.
+    RunPlugin {
+        type_id: String,
+        options: grid4d_scene::PluginObject,
+    },
     /// Makes a take active (`None`: Main); the view looks through its camera,
     /// if it has one.
     SwitchTake(Option<grid4d_scene::TakeId>),
@@ -558,6 +565,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 }
             });
         }
+        EditorCommand::RunPlugin { type_id, options } => run_plugin(doc, editor, &type_id, options),
         EditorCommand::CreatePlugin { type_id, child } => {
             let registry = grid4d_plugin::registry();
             let Some(plugin) = registry.plugin(&type_id) else {
@@ -1890,6 +1898,122 @@ pub fn can_bake_current_state(doc: &Document, selection: &Selection) -> bool {
             .get(id)
             .is_some_and(|node| !grid4d_eval::is_deformer(&node.data.kind))
     })
+}
+
+/// An object's shape in its own space at `frame`, for command plugins: a
+/// polygon object's mesh, a generator's result, a primitive's or a
+/// generator plugin's mesh.
+fn shape_of(scene: &Scene, id: NodeId, frame: f64) -> Option<PolyMesh> {
+    let kind = scene.get(id)?.data.kind_at(frame);
+    match &*kind {
+        ObjectKind::Polygon { mesh, .. } => Some(mesh.mesh().clone()),
+        kind if kind.is_generator() => grid4d_eval::generator_mesh(scene, id, frame),
+        kind => grid4d_eval::editable_mesh(kind),
+    }
+}
+
+/// Runs a command plugin: its changes become one undo step named after it,
+/// the new top-level objects selected; its message, when it cannot run, is
+/// shown. The options are kept for its dialog.
+fn run_plugin(doc: &mut Document, editor: &mut EditorState, type_id: &str, options: grid4d_scene::PluginObject) {
+    let Some(plugin) = grid4d_plugin::registry().command(type_id) else {
+        log::warn!("no command plugin {type_id}");
+        return;
+    };
+    *editor.plugin_commands.options_mut(plugin) = options.clone();
+    let frame = f64::from(doc.time.frame());
+    let result = {
+        let shapes = |id: NodeId| shape_of(&doc.scene, id, frame);
+        let context = grid4d_plugin::Context::new(
+            doc,
+            editor.selection.as_slice(),
+            editor.selection.active(),
+            frame,
+            &shapes,
+        );
+        plugin.run(&context, &grid4d_plugin::Values::new(plugin.params(), &options))
+    };
+    match result {
+        Ok(changes) => apply_changes(doc, editor, plugin.name(), changes),
+        Err(message) => {
+            editor.file.alert = Some(file::Alert {
+                title: plugin.name(),
+                message: crate::i18n::tr(&message).to_owned(),
+            });
+        }
+    }
+}
+
+/// Applies a command plugin's changes in order as one undo step named
+/// `label` (all or nothing) and selects the new top-level objects.
+fn apply_changes(doc: &mut Document, editor: &mut EditorState, label: &'static str, changes: grid4d_plugin::Changes) {
+    use grid4d_plugin::{Change, Parent};
+    if changes.is_empty() {
+        return;
+    }
+    let selection_before = editor.selection.clone();
+    let mut inverses = Vec::new();
+    let mut created: Vec<NodeId> = Vec::new();
+    let mut tops = Vec::new();
+    for change in changes.into_list() {
+        let edit = match change {
+            Change::Insert { parent, data } => {
+                let parent = match parent {
+                    Parent::Root => Ok(None),
+                    Parent::Object(id) => Ok(Some(id)),
+                    Parent::New(new) => created
+                        .get(new.index())
+                        .map(|&id| Some(id))
+                        .ok_or_else(|| "a new object's parent is added after it".to_owned()),
+                };
+                parent.map(|parent| {
+                    (
+                        SceneEdit::Insert {
+                            parent,
+                            index: usize::MAX,
+                            data,
+                        },
+                        parent.is_none_or(|p| !created.contains(&p)),
+                    )
+                })
+            }
+            Change::Edit(edit) => Ok((edit, false)),
+        };
+        let applied = edit.and_then(|(edit, top)| {
+            let insert = matches!(edit, SceneEdit::Insert { .. });
+            doc.apply(edit)
+                .map(|inverse| (inverse, insert, top))
+                .map_err(|err| err.to_string())
+        });
+        match applied {
+            Ok((inverse, insert, top)) => {
+                if insert && let Some(id) = inverse.node() {
+                    created.push(id);
+                    if top {
+                        tops.push(id);
+                    }
+                }
+                inverses.push(inverse);
+            }
+            Err(err) => {
+                // All or nothing: take back what was done.
+                for inverse in inverses.into_iter().rev() {
+                    let _ = doc.apply(inverse);
+                }
+                log::warn!("{label} rejected: {err}");
+                return;
+            }
+        }
+    }
+    inverses.reverse();
+    if !tops.is_empty() {
+        editor.selection.set_all(tops);
+    }
+    editor.selection.retain_existing(&doc.scene);
+    let selection_after = editor.selection.clone();
+    editor
+        .history
+        .record(doc, label, inverses, selection_before, selection_after);
 }
 
 /// Inserts the copies [`crate::current_state::bake`] makes as one undo step and
@@ -3705,6 +3829,67 @@ mod tests {
         assert_eq!(amplitude(&doc), Some(PluginValue::Float(20.0)), "Main's value");
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SwitchTake(Some(take))]);
         assert_eq!(amplitude(&doc), Some(PluginValue::Float(55.0)), "the take's");
+    }
+
+    #[test]
+    fn a_command_plugin_runs_as_one_step_or_says_why_it_cannot() {
+        use grid4d_scene::PluginValue;
+        crate::test_plugins();
+        let (mut doc, mut editor, mut vp) = demo();
+        let scatter = |count: i32| {
+            let mut options = grid4d_scene::PluginObject::new("grid4d.scatter");
+            options.set("Count", PluginValue::Int(count));
+            EditorCommand::RunPlugin {
+                type_id: "grid4d.scatter".to_owned(),
+                options,
+            }
+        };
+        // Nothing selected: a message, no change.
+        editor.selection.clear();
+        let (len, steps) = (doc.scene.len(), editor.history.undo_len());
+        run(&mut doc, &mut editor, &mut vp, &[scatter(5)]);
+        assert!(
+            editor
+                .file
+                .alert
+                .take()
+                .is_some_and(|a| a.message.contains("surface last"))
+        );
+        assert_eq!((doc.scene.len(), editor.history.undo_len()), (len, steps));
+
+        // The Sphere over the Cube: a group and five copies, one step.
+        let (cube, sphere) = (id_of(&doc, "Cube"), id_of(&doc, "Sphere"));
+        editor.selection.set_all(vec![sphere, cube]);
+        assert_eq!(editor.selection.active(), Some(cube));
+        run(&mut doc, &mut editor, &mut vp, &[scatter(5)]);
+        assert!(editor.file.alert.is_none());
+        assert_eq!(doc.scene.len(), len + 6);
+        assert_eq!(editor.history.undo_len(), steps + 1);
+        let group = editor.selection.active().unwrap();
+        let node = doc.scene.get(group).unwrap();
+        assert_eq!((node.data.name.as_str(), node.children().len()), ("Scatter", 5));
+        assert_eq!(editor.selection.as_slice(), [group], "the new group selected");
+        // Copies sit on the cube's faces (in its own space).
+        let bounds = doc.scene.get(cube).unwrap().data.kind.local_bounds().unwrap();
+        let into_cube = doc.scene.world_matrix(cube).inverse();
+        for &copy in node.children() {
+            let p = into_cube.transform_point3(doc.scene.world_matrix(copy).w_axis.truncate());
+            let on_face = (0..3).any(|a| (p[a].abs() - bounds.max[a]).abs() < 1e-2);
+            assert!(on_face && p.abs().max_element() <= 100.0 + 1e-2, "{p}");
+        }
+        let options = editor
+            .plugin_commands
+            .options_mut(grid4d_plugin::registry().command("grid4d.scatter").unwrap());
+        assert_eq!(
+            options.get("Count"),
+            Some(PluginValue::Int(5)),
+            "remembered for the dialog"
+        );
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.len(), len, "one undo takes it all back");
+        assert_eq!(editor.selection.as_slice(), [sphere, cube]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        assert_eq!(doc.scene.len(), len + 6);
     }
 
     #[test]

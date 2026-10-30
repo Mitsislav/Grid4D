@@ -459,6 +459,30 @@ pub struct CurveKey {
     pub frame: f64,
 }
 
+/// Command plugins' options (Plugins ▸): the dialog open, and the values each
+/// command had when it last ran or was edited, for the next time (this
+/// session only).
+#[derive(Debug, Default)]
+pub struct PluginCommands {
+    /// The type id of the command whose options dialog is open.
+    pub open: Option<String>,
+    options: Vec<grid4d_scene::PluginObject>,
+}
+
+impl PluginCommands {
+    /// `plugin`'s options, at their defaults the first time.
+    pub fn options_mut(&mut self, plugin: &dyn grid4d_plugin::CommandPlugin) -> &mut grid4d_scene::PluginObject {
+        let index = match self.options.iter().position(|o| o.type_id == plugin.type_id()) {
+            Some(index) => index,
+            None => {
+                self.options.push(grid4d_plugin::Registry::new_object(plugin));
+                self.options.len() - 1
+            }
+        };
+        &mut self.options[index]
+    }
+}
+
 /// What H or S over the F-Curve graph asked for (applied by the panel).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameCurves {
@@ -726,6 +750,9 @@ pub struct EditorState {
     pub show_about: bool,
     /// Mesh ▸ Optimize… dialog is open.
     pub show_optimize: bool,
+    /// Plugins ▸: the command whose options dialog is open, and each
+    /// command's options as last set.
+    pub plugin_commands: PluginCommands,
     /// The Render Settings window is open (Ctrl+B).
     pub show_render_settings: bool,
     /// The session's renders and the Picture Viewer (Shift+R).
@@ -788,6 +815,7 @@ impl Default for EditorState {
             renderer_info: String::new(),
             show_about: false,
             show_optimize: false,
+            plugin_commands: PluginCommands::default(),
             show_render_settings: false,
             renders: crate::rendering::Renders::default(),
             simulation: crate::simulation::Sim::default(),

@@ -495,6 +495,32 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             }
         });
 
+        ui.menu_button(tr("Plugins"), |ui| {
+            let mut any = false;
+            for plugin in grid4d_plugin::registry().commands() {
+                any = true;
+                // An ellipsis: its options come first.
+                let label = if plugin.params().is_empty() {
+                    tr(plugin.name()).to_owned()
+                } else {
+                    format!("{}…", tr(plugin.name()))
+                };
+                if ui.button(label).on_hover_text(tr(plugin.description())).clicked() {
+                    if plugin.params().is_empty() {
+                        editor.commands.push(EditorCommand::RunPlugin {
+                            type_id: plugin.type_id().to_owned(),
+                            options: grid4d_plugin::Registry::new_object(plugin),
+                        });
+                    } else {
+                        editor.plugin_commands.open = Some(plugin.type_id().to_owned());
+                    }
+                    ui.close();
+                }
+            }
+            if !any {
+                ui.add_enabled(false, Button::new(tr("No commands installed")));
+            }
+        });
         ui.menu_button(tr("Window"), |ui| {
             command(ui, editor, "Frame Scene", "H", EditorCommand::FrameScene);
             command(ui, editor, "Frame Selected Objects", "O", EditorCommand::FrameSelected);

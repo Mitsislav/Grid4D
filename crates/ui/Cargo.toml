@@ -30,6 +30,7 @@ serde.workspace = true
 [dev-dependencies]
 grid4d-plugin-gear.workspace = true
 grid4d-plugin-wave.workspace = true
+grid4d-plugin-scatter.workspace = true
 png.workspace = true
 serde_json.workspace = true
 

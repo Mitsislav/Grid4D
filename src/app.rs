@@ -8,8 +8,8 @@ use grid4d_ui::{
     autosave::Autosave,
     commands, file,
     panels::{
-        about, alert, drop_overlay, menu_bar, mode_palette, optimize, preferences as preferences_window, recovery,
-        status_bar, toolbar, unsaved_changes,
+        about, alert, drop_overlay, menu_bar, mode_palette, optimize, plugin_command,
+        preferences as preferences_window, recovery, status_bar, toolbar, unsaved_changes,
     },
     preferences::{self, Preferences},
     recent, shortcuts,
@@ -172,6 +172,7 @@ impl eframe::App for Grid4DApp {
         preferences_window::show(&ctx, &mut self.editor);
         recovery::show(&ctx, &mut self.editor);
         optimize::show(&ctx, &mut self.editor);
+        plugin_command::show(&ctx, &mut self.editor);
         unsaved_changes::show(&ctx, &self.doc, &mut self.editor);
         alert::show(&ctx, &mut self.editor);
         drop_overlay::show(&ctx);

@@ -23,6 +23,7 @@ pub mod mode_palette;
 pub mod optimize;
 pub mod outliner;
 pub mod picture_viewer;
+pub mod plugin_command;
 pub mod preferences;
 pub mod recovery;
 pub mod render_settings;

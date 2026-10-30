@@ -172,7 +172,7 @@ impl AttributesPanel {
                 ui.add(TextEdit::singleline(&mut material.name).desired_width(f32::INFINITY));
                 ui.end_row();
                 attr_label(ui, "Color", LABEL_WIDTH);
-                colour_button(ui, &mut material.color);
+                widgets::colour_button(ui, &mut material.color);
                 ui.end_row();
                 for (label, value) in [
                     (key("Roughness"), &mut material.roughness),
@@ -192,7 +192,7 @@ impl AttributesPanel {
                     ui.end_row();
                 }
                 attr_label(ui, "Luminance", LABEL_WIDTH);
-                colour_button(ui, &mut material.emission);
+                widgets::colour_button(ui, &mut material.emission);
                 ui.end_row();
             });
         ui.add_space(4.0);
@@ -371,7 +371,7 @@ fn basic_tab(ui: &mut Ui, data: &mut NodeData, layers: &grid4d_scene::Layers) {
             ui.end_row();
 
             attr_label(ui, "Display Color", LABEL_WIDTH);
-            colour_button(ui, &mut data.display_color);
+            widgets::colour_button(ui, &mut data.display_color);
             ui.end_row();
 
             attr_label(ui, "Enabled", LABEL_WIDTH);
@@ -750,7 +750,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
                 shadow,
             } => {
                 attr_label(ui, "Color", LABEL_WIDTH);
-                colour_button(ui, color);
+                widgets::colour_button(ui, color);
                 ui.end_row();
                 attr_label(ui, "Intensity", LABEL_WIDTH);
                 let mut percent = *intensity * 100.0;
@@ -1937,7 +1937,7 @@ fn effector_rows(ui: &mut Ui, k: &mut KeyRows, effector: &mut Effector, random: 
     check_row(ui, "Color", &mut effector.use_color);
     if effector.use_color && !random {
         attr_label(ui, "Effector Color", LABEL_WIDTH);
-        colour_button(ui, &mut effector.color);
+        widgets::colour_button(ui, &mut effector.color);
         ui.end_row();
     }
     let falloff = &mut effector.falloff;
@@ -2280,19 +2280,6 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
     ui.label(RichText::new(tr("Select an object to edit its attributes.")).color(p().text_dim));
 }
 
-/// A segment count, from `min` up to what the geometry generators accept.
-/// A colour swatch with its picker. The picker converts the colour on every
-/// frame (0.9 comes back as 0.90000004), so the value is written back only when
-/// the user changes it: showing a colour must not edit the document.
-fn colour_button(ui: &mut Ui, colour: &mut [f32; 3]) -> egui::Response {
-    let mut shown = *colour;
-    let response = ui.color_edit_button_rgb(&mut shown);
-    if response.changed() {
-        *colour = shown;
-    }
-    response
-}
-
 /// A light's Details: the cone of a spot, the falloff of a light with a position.
 fn light_details(ui: &mut Ui, k: &mut KeyRows, light_type: LightType, details: &mut LightDetails) {
     if light_type == LightType::Spot {
@@ -2377,7 +2364,7 @@ fn kind_label(kind: &ObjectKind) -> &'static str {
 /// a deformer's Fit to Parent. A missing plugin's values are listed as they
 /// are kept.
 fn plugin_rows(ui: &mut Ui, k: &mut KeyRows, object: &mut grid4d_scene::PluginObject) {
-    use grid4d_plugin::{ParamKind, Unit, Values};
+    use grid4d_plugin::Values;
     use grid4d_scene::PluginValue;
     let registry = grid4d_plugin::registry();
     let Some(plugin) = registry.plugin(&object.type_id) else {
@@ -2409,77 +2396,7 @@ fn plugin_rows(ui: &mut Ui, k: &mut KeyRows, object: &mut grid4d_scene::PluginOb
             .unwrap_or(spec.default);
         let mut value = current;
         attr_label(ui, spec.name, LABEL_WIDTH);
-        let response = match (spec.kind, &mut value) {
-            (ParamKind::Float { min, max, unit }, PluginValue::Float(v)) => match unit {
-                Unit::Length => ui.add_sized(
-                    [FIELD_WIDTH, 19.0],
-                    widgets::length(ui, v).speed(1.0).range(min..=max).max_decimals(2),
-                ),
-                Unit::Angle => {
-                    let mut degrees = v.to_degrees();
-                    let response = ui.add_sized(
-                        [FIELD_WIDTH, 19.0],
-                        DragValue::new(&mut degrees)
-                            .speed(0.5)
-                            .range(min.to_degrees()..=max.to_degrees())
-                            .suffix("°"),
-                    );
-                    if response.changed() {
-                        *v = degrees.to_radians();
-                    }
-                    response
-                }
-                Unit::Percent => {
-                    let mut percent = *v * 100.0;
-                    let response = ui.add_sized(
-                        [FIELD_WIDTH, 19.0],
-                        DragValue::new(&mut percent)
-                            .speed(0.5)
-                            .range(min * 100.0..=max * 100.0)
-                            .suffix(" %"),
-                    );
-                    if response.changed() {
-                        *v = percent / 100.0;
-                    }
-                    response
-                }
-                Unit::None => ui.add_sized(
-                    [FIELD_WIDTH, 19.0],
-                    DragValue::new(v).speed(0.01).range(min..=max).max_decimals(3),
-                ),
-            },
-            (ParamKind::Int { min, max }, PluginValue::Int(v)) => {
-                ui.add_sized([FIELD_WIDTH, 19.0], DragValue::new(v).speed(0.1).range(min..=max))
-            }
-            (ParamKind::Bool, PluginValue::Bool(v)) => ui.checkbox(v, ""),
-            (ParamKind::Choice(choices), PluginValue::Choice(v)) => {
-                let shown = choices.get(*v as usize).copied().unwrap_or_default();
-                egui::ComboBox::from_id_salt(("grid4d.attr.plugin", spec.name))
-                    .selected_text(tr(shown))
-                    .show_ui(ui, |ui| {
-                        for (index, choice) in (0u32..).zip(choices.iter()) {
-                            ui.selectable_value(v, index, tr(choice));
-                        }
-                    })
-                    .response
-            }
-            (ParamKind::Vector { unit }, PluginValue::Vector(v)) => {
-                ui.horizontal(|ui| {
-                    for axis in 0..3 {
-                        let field = if unit == Unit::Length {
-                            widgets::length(ui, &mut v[axis])
-                        } else {
-                            DragValue::new(&mut v[axis])
-                        };
-                        ui.add_sized([56.0, 19.0], field.speed(0.5).max_decimals(2));
-                    }
-                })
-                .response
-            }
-            (ParamKind::Color, PluginValue::Color(c)) => colour_button(ui, c),
-            // `Values::get` gives each parameter its own type.
-            _ => ui.label(""),
-        };
+        let response = widgets::plugin_value(ui, spec, &mut value, FIELD_WIDTH);
         if !spec.hint.is_empty() {
             response.on_hover_text(tr(spec.hint));
         }
@@ -2549,7 +2466,7 @@ mod tests {
         let mut colour = [0.9, 0.62, 0.64];
         for _ in 0..3 {
             ctx.run_ui(egui::RawInput::default(), |ui| {
-                colour_button(ui, &mut colour);
+                widgets::colour_button(ui, &mut colour);
             })
             .drop_without_applying_deltas();
         }

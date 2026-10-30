@@ -73,6 +73,38 @@ without changing its core, so they look and behave like the built-in ones.
   wave — Size, Amplitude (the handle), Wavelength, Phase, Direction (Along
   X, Along Z, Radial), Within Box (only points inside the box move).
 
+## Behaviour (13.3)
+
+- **Command plugins** do something to the document once, when chosen —
+  like a menu command. The **Plugins** menu (in the menu bar, before
+  Window) lists them by name, the description as the tooltip; "No commands
+  installed" when there are none.
+- **Options:** a command with parameters opens a small dialog laid out from
+  its description, like the Object tab (lengths in the length unit,
+  angles, percent, whole numbers, check boxes, choices, vectors, colours;
+  hints as tooltips), with **OK** and **Cancel**. The values are remembered
+  for the next time in this session. A command without parameters runs at
+  once.
+- **What it may do:** read the document (objects, their placement and
+  shapes at the current frame, the selection and the active object) and
+  return changes: new objects (also under other new ones), and any edit an
+  undo step can hold. They become **one undo step** named after the
+  command, all or nothing; the new top-level objects are selected.
+- **When it cannot run** it says why in a message (translated like
+  everything else) and changes nothing — e.g. nothing selected.
+- **The Scatter** (an example command): copies of the selected objects (each
+  with everything under it) spread at random over the surface of the
+  **active** object (select it last), as many as Count, under a new Null
+  named "Scatter". Each copy goes to a point chosen evenly over the
+  surface's area, picks one of the objects at random, stands up along the
+  surface (Align to Surface), turns about its up axis by up to Random
+  Rotation and is scaled by up to ± Scale Variation. The same Seed always
+  gives the same result. The surface is the object as its own shape at the
+  current frame (a primitive, a polygon object, a generator's result, a
+  plugin's mesh), placed where it is; deformers are not taken into account.
+  Without a surface with polygons, or with only the surface selected, it
+  says what to select.
+
 ## Grid4D mapping
 
 | Piece | Where |
@@ -90,6 +122,9 @@ without changing its core, so they look and behave like the built-in ones.
 | `ParamDto::Plugin(name)` | `grid4d-io::v3` |
 | The deformer section of Create ▸ Plugins, `CreatePlugin { child }`, Fit to Parent, key buttons, the handle, F-Curve names and units | `grid4d-ui` |
 | The Wave | `plugins/wave` (`grid4d-plugin-wave`) |
+| `CommandPlugin` (`run(Context, Values) → Result<Changes, message>`), `Context` (document, selection, active object, frame, shapes), `Changes` (inserts under existing or new objects, `SceneEdit`s) | `grid4d-plugin` |
+| The Plugins menu, the options dialog (`panels/plugin_command.rs`), `EditorCommand::RunPlugin`, applying `Changes` as one step | `grid4d-ui` |
+| The Scatter | `plugins/scatter` (`grid4d-plugin-scatter`) |
 
 ## Decisions (2026-10-30)
 
@@ -105,8 +140,15 @@ without changing its core, so they look and behave like the built-in ones.
    values are only ever added at the end, so the place never changes.
 6. **Plugin objects share the Generator entry of the views' Filter** (the
    filter goes by kind of object; a plugin's kind is not known there).
-7. **Later (13.3):** command plugins. Not planned: plugins reading child
-   objects as inputs.
+7. **Commands return changes, never touch the document:** Grid4D applies
+   them, so undo, takes (Auto Take) and the all-or-nothing rule hold for
+   plugins as for its own commands. New objects are referred to by the
+   order they were added, since they have no ids before they exist.
+8. **Shapes come from Grid4D** (`Context::mesh`): the API crate cannot
+   evaluate the scene, so the interface hands commands the shapes it
+   evaluates.
+9. Not planned: plugins reading child objects as inputs, commands that
+   take pointer input in the views.
 
 ## Acceptance criteria
 
@@ -120,3 +162,7 @@ without changing its core, so they look and behave like the built-in ones.
       Amplitude.
 - [x] Plugin numbers have key buttons and F-Curves under their own names;
       their keys are saved and load back.
+- [x] Plugins ▸ Scatter… opens its options; OK spreads copies over the
+      active object as one undo step; the same seed gives the same result.
+- [x] With nothing (or only the surface) selected, it says what to select
+      and changes nothing.

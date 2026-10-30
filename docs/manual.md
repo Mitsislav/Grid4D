@@ -456,6 +456,36 @@ with Autokeying like any parameter. Its curve appears in the F-Curve editor
 under the plugin's name for it. Key the Wave's Phase from 0° to −360° over a
 second or two, and the ripples run outwards.
 
+**Plugin commands** do a job once, like a menu command. The **Plugins** menu
+(between Render and Window) lists them; one whose name ends in "…" first
+asks for its options in a small window — click **OK** to run it, **Cancel**
+to leave things as they are. The options you set are kept until you quit.
+Whatever a command does is one step: **Ctrl+Z** takes all of it back. When
+it cannot run (nothing suitable selected, say), it tells you why and
+changes nothing. Grid4D comes with one command as an example:
+
+**Plugins ▸ Scatter…** spreads copies of objects over the surface of
+another. Select the objects to copy, then the surface **last** (Shift +
+click in the Object Manager), and choose Scatter….
+
+| Option | What it does |
+|--------|--------------|
+| Count | How many copies (each one picks one of the selected objects at random) |
+| Seed | Which random arrangement: the same seed always gives the same result |
+| Align to Surface | Each copy stands up along the surface where it lands |
+| Random Rotation | Turns each copy about its up axis by up to this much either way |
+| Scale Variation | Makes each copy bigger or smaller by up to this much |
+
+![Scatter's options](images/manual/plugin-scatter-options.png)
+
+The copies (each with everything under it) go under a new Null named
+"Scatter", which is selected afterwards; the originals stay as they are.
+The surface is used as its own shape at the current frame — a primitive, a
+polygon object, a generator's result or a plugin object — without its
+deformers.
+
+![Twenty pebbles scattered over a sphere, under the new Scatter Null](images/manual/plugin-scatter.png)
+
 **If a document uses a plugin this Grid4D does not have**, it still opens:
 the object keeps its place and its values but shows nothing, and its Object
 tab names the missing plugin and lists the values. Saving keeps them, so the

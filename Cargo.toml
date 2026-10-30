@@ -20,7 +20,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/geom", "crates/text", "crates/scene", "crates/plugin", "crates/eval", "crates/render", "crates/raytrace", "crates/sim", "crates/io", "crates/ui", "plugins/gear", "plugins/wave"]
+members = ["crates/geom", "crates/text", "crates/scene", "crates/plugin", "crates/eval", "crates/render", "crates/raytrace", "crates/sim", "crates/io", "crates/ui", "plugins/gear", "plugins/wave", "plugins/scatter"]
 
 [workspace.package]
 version = "0.1.0"
@@ -37,6 +37,7 @@ grid4d-scene = { path = "crates/scene" }
 grid4d-plugin = { path = "crates/plugin" }
 grid4d-plugin-gear = { path = "plugins/gear" }
 grid4d-plugin-wave = { path = "plugins/wave" }
+grid4d-plugin-scatter = { path = "plugins/scatter" }
 grid4d-eval = { path = "crates/eval" }
 grid4d-render = { path = "crates/render" }
 grid4d-raytrace = { path = "crates/raytrace" }
@@ -139,6 +140,7 @@ grid4d-ui.workspace = true
 grid4d-plugin.workspace = true
 grid4d-plugin-gear.workspace = true
 grid4d-plugin-wave.workspace = true
+grid4d-plugin-scatter.workspace = true
 # `persistence`: window size/position, panel splitters (egui memory) and app data
 # such as recent files survive restarts. Only the binary owns storage.
 eframe = { workspace = true, features = ["persistence"] }

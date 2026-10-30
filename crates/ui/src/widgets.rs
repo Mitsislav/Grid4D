@@ -164,6 +164,101 @@ pub(crate) fn section_heading(ui: &mut Ui, text: &str) {
     ui.add_space(2.0);
 }
 
+/// A colour swatch with its picker. The picker converts the colour on every
+/// frame (0.9 comes back as 0.90000004), so the value is written back only when
+/// the user changes it: showing a colour must not edit the document.
+pub fn colour_button(ui: &mut Ui, colour: &mut [f32; 3]) -> Response {
+    let mut shown = *colour;
+    let response = ui.color_edit_button_rgb(&mut shown);
+    if response.changed() {
+        *colour = shown;
+    }
+    response
+}
+
+/// The field of a plugin's parameter, `width` wide, as its description says:
+/// a length in the user's unit, an angle in degrees, a fraction in percent,
+/// a whole number, a check box, a choice, a vector or a colour (within its
+/// range). `value` changes only when the user changes it.
+pub fn plugin_value(
+    ui: &mut Ui,
+    spec: &grid4d_plugin::ParamSpec,
+    value: &mut grid4d_scene::PluginValue,
+    width: f32,
+) -> Response {
+    use egui::DragValue;
+    use grid4d_plugin::{ParamKind, Unit};
+    use grid4d_scene::PluginValue;
+    match (spec.kind, value) {
+        (ParamKind::Float { min, max, unit }, PluginValue::Float(v)) => match unit {
+            Unit::Length => ui.add_sized([width, 19.0], length(ui, v).speed(1.0).range(min..=max).max_decimals(2)),
+            Unit::Angle => {
+                let mut degrees = v.to_degrees();
+                let response = ui.add_sized(
+                    [width, 19.0],
+                    DragValue::new(&mut degrees)
+                        .speed(0.5)
+                        .range(min.to_degrees()..=max.to_degrees())
+                        .suffix("°"),
+                );
+                if response.changed() {
+                    *v = degrees.to_radians();
+                }
+                response
+            }
+            Unit::Percent => {
+                let mut percent = *v * 100.0;
+                let response = ui.add_sized(
+                    [width, 19.0],
+                    DragValue::new(&mut percent)
+                        .speed(0.5)
+                        .range(min * 100.0..=max * 100.0)
+                        .suffix(" %"),
+                );
+                if response.changed() {
+                    *v = percent / 100.0;
+                }
+                response
+            }
+            Unit::None => ui.add_sized(
+                [width, 19.0],
+                DragValue::new(v).speed(0.01).range(min..=max).max_decimals(3),
+            ),
+        },
+        (ParamKind::Int { min, max }, PluginValue::Int(v)) => {
+            ui.add_sized([width, 19.0], DragValue::new(v).speed(0.1).range(min..=max))
+        }
+        (ParamKind::Bool, PluginValue::Bool(v)) => ui.checkbox(v, ""),
+        (ParamKind::Choice(choices), PluginValue::Choice(v)) => {
+            let shown = choices.get(*v as usize).copied().unwrap_or_default();
+            egui::ComboBox::from_id_salt(("grid4d.attr.plugin", spec.name))
+                .selected_text(tr(shown))
+                .show_ui(ui, |ui| {
+                    for (index, choice) in (0u32..).zip(choices.iter()) {
+                        ui.selectable_value(v, index, tr(choice));
+                    }
+                })
+                .response
+        }
+        (ParamKind::Vector { unit }, PluginValue::Vector(v)) => {
+            ui.horizontal(|ui| {
+                for axis in 0..3 {
+                    let field = if unit == Unit::Length {
+                        length(ui, &mut v[axis])
+                    } else {
+                        DragValue::new(&mut v[axis])
+                    };
+                    ui.add_sized([(width * 0.6).max(40.0), 19.0], field.speed(0.5).max_decimals(2));
+                }
+            })
+            .response
+        }
+        (ParamKind::Color, PluginValue::Color(c)) => colour_button(ui, c),
+        // `Values::get` gives each parameter its own type.
+        _ => ui.label(""),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use egui::{Event, Key, Modifiers, PointerButton, RawInput, Shape};

@@ -167,6 +167,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Akima", "Akima"),
     ("Align", "Στοίχιση"),
     ("Align Clone", "Ευθυγράμμιση κλώνου"),
+    ("Align to Surface", "Ευθυγράμμιση στην επιφάνεια"),
     ("All", "Όλα"),
     ("All Frames", "Όλα τα καρέ"),
     ("All Views", "Όλες οι προβολές"),
@@ -358,6 +359,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Σύστημα συντεταγμένων: Κόσμου (κλικ για Αντικειμένου)",
     ),
     ("Coordinates", "Συντεταγμένες"),
+    (
+        "Copies stand up along the surface",
+        "Τα αντίγραφα στέκονται κάθετα στην επιφάνεια",
+    ),
     ("Copy", "Αντιγραφή"),
     ("Could Not Export", "Η εξαγωγή απέτυχε"),
     ("Could Not Merge File", "Η συγχώνευση του αρχείου απέτυχε"),
@@ -646,6 +651,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "How frame numbers join the file names of an animation",
         "Πώς οι αριθμοί καρέ μπαίνουν στα ονόματα αρχείων μιας κίνησης",
     ),
+    ("How many copies to place", "Πόσα αντίγραφα θα τοποθετηθούν"),
     (
         "How many steps Undo can go back; lowering it drops the oldest at once",
         "Πόσα βήματα πίσω μπορεί να πάει η Αναίρεση· η μείωση πετάει αμέσως τα παλαιότερα",
@@ -811,6 +817,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Μετατροπή σε επεξεργάσιμο (πρωτογενές → πολυγωνικό αντικείμενο)",
     ),
     (
+        "Makes each copy bigger or smaller by up to this much",
+        "Μεγαλώνει ή μικραίνει κάθε αντίγραφο έως τόσο",
+    ),
+    (
         "Manager: listed in the Object Manager",
         "Διαχείριση: εμφανίζεται στη Διαχείριση Αντικειμένων",
     ),
@@ -908,6 +918,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("New material", "Νέο υλικό"),
     ("Next Frame", "Επόμενο καρέ"),
     ("No cameras in the scene", "Δεν υπάρχουν κάμερες στη σκηνή"),
+    ("No commands installed", "Δεν υπάρχουν εντολές plugin"),
     (
         "No file: renders are not saved.",
         "Χωρίς αρχείο: οι αποδόσεις δεν αποθηκεύονται.",
@@ -1112,6 +1123,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Radius Y", "Ακτίνα Y"),
     ("Radius/Decay", "Ακτίνα/Απόσβεση"),
     ("Random", "Τυχαίος"),
+    ("Random Rotation", "Τυχαία περιστροφή"),
     ("Raytraced (Hard)", "Ιχνηλατημένη (σκληρή)"),
     ("Re-parent (Object Manager)", "Αλλαγή γονέα (Διαχείριση Αντικειμένων)"),
     ("Record", "Καταγραφή"),
@@ -1290,11 +1302,13 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Scale Edges", "Κλιμάκωση ακμών"),
     ("Scale Points", "Κλιμάκωση σημείων"),
     ("Scale Polygons", "Κλιμάκωση πολυγώνων"),
+    ("Scale Variation", "Διακύμανση κλίμακας"),
     (
         "Scale: drag an axis handle to scale along it · Alt+drag to navigate",
         "Κλίμακα: σύρετε μια λαβή άξονα για κλιμάκωση κατά μήκος του · Alt+σύρσιμο για πλοήγηση",
     ),
     ("Scaling", "Κλιμάκωση"),
+    ("Scatter", "Διασπορά"),
     ("Search objects", "Αναζήτηση αντικειμένων"),
     ("Sector", "Τομέας"),
     ("Seed", "Σπόρος"),
@@ -1346,6 +1360,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Select the objects to copy as they are shown",
         "Επιλέξτε τα αντικείμενα για αντιγραφή όπως φαίνονται",
+    ),
+    (
+        "Select the objects to scatter, then the surface last",
+        "Επιλέξτε τα αντικείμενα για διασπορά και τελευταία την επιφάνεια",
     ),
     (
         "Select the objects to tag first",
@@ -1420,6 +1438,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Spin Steps", "Βήματα περιστροφής"),
     ("Spline", "Καμπύλη"),
     ("Spot", "Προβολέας"),
+    (
+        "Spreads copies of the selected objects over the surface of the one selected last",
+        "Σκορπίζει αντίγραφα των επιλεγμένων αντικειμένων στην επιφάνεια αυτού που επιλέχθηκε τελευταίο",
+    ),
     ("Square 1080 × 1080", "Τετράγωνο 1080 × 1080"),
     ("Standard", "Τυπική"),
     ("Star", "Αστέρι"),
@@ -1491,12 +1513,20 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Το αντικείμενο και τα παιδιά του χωρίς δική τους ετικέτα υλικού δείχνουν αυτό το υλικό· σύρετε ένα υλικό σε αντικείμενο για ανάθεση",
     ),
     (
+        "The object selected last has no polygons to scatter on",
+        "Το αντικείμενο που επιλέχθηκε τελευταίο δεν έχει πολύγωνα για διασπορά",
+    ),
+    (
         "The object turns its forward axis (−Z) towards the target; Pitch off keeps it level",
         "Το αντικείμενο στρέφει τον μπροστινό άξονά του (−Z) προς τον στόχο· χωρίς Κλίση μένει οριζόντιο",
     ),
     (
         "The plugin “{0}” is not installed: this object keeps its values and saves them unchanged.",
         "Το plugin «{0}» δεν είναι εγκατεστημένο: το αντικείμενο κρατά τις τιμές του και τις αποθηκεύει αμετάβλητες.",
+    ),
+    (
+        "The same seed always gives the same result",
+        "Ο ίδιος σπόρος δίνει πάντα το ίδιο αποτέλεσμα",
     ),
     ("The scene as it is", "Η σκηνή όπως είναι"),
     (
@@ -1572,6 +1602,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Transform", "Μετασχηματισμός"),
     ("Transform Components", "Μετασχηματισμός στοιχείων"),
     ("Triangles", "Τρίγωνα"),
+    (
+        "Turns each copy about its up axis by up to this much either way",
+        "Στρέφει κάθε αντίγραφο γύρω από τον κατακόρυφο άξονά του έως τόσο προς κάθε πλευρά",
+    ),
     (
         "Turns its first child spline around Y",
         "Περιστρέφει την πρώτη θυγατρική καμπύλη του γύρω από τον Y",

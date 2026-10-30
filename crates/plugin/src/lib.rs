@@ -4,7 +4,8 @@
 //! A plugin is a crate built into Grid4D: it describes itself and its
 //! parameters ([`Plugin`], [`ParamSpec`]) and does one job —
 //! [`GeneratorPlugin`] builds a mesh from them, [`DeformerPlugin`] reshapes the
-//! objects below its parent. The binary adds every plugin to a [`Registry`]
+//! objects below its parent, [`CommandPlugin`] changes the document once when
+//! chosen (returning [`Changes`]). The binary adds every plugin to a [`Registry`]
 //! and [`install`]s it once at start; evaluation and the interface find
 //! plugins there by their type id.
 //!
@@ -14,9 +15,9 @@
 
 use std::sync::OnceLock;
 
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 use grid4d_geom::{PolyMesh, spline::Polyline};
-use grid4d_scene::{PluginObject, PluginValue};
+use grid4d_scene::{Document, NodeData, NodeId, PluginObject, PluginValue, SceneEdit};
 
 /// What a number means, for how the interface shows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -203,11 +204,154 @@ pub trait DeformerPlugin: Plugin {
     fn deform(&self, values: &Values<'_>, points: &mut [Vec3]);
 }
 
+/// What a command sees when it runs: the document as it is, the selection
+/// and the current frame, and the shapes of objects as Grid4D evaluates them.
+pub struct Context<'a> {
+    pub document: &'a Document,
+    /// The selected objects, in the order they were selected.
+    pub selection: &'a [NodeId],
+    /// The active object (usually the one selected last).
+    pub active: Option<NodeId>,
+    pub frame: f64,
+    shapes: &'a dyn Fn(NodeId) -> Option<PolyMesh>,
+}
+
+impl std::fmt::Debug for Context<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Context")
+            .field("selection", &self.selection)
+            .field("active", &self.active)
+            .field("frame", &self.frame)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a> Context<'a> {
+    /// `shapes` gives an object's shape in its own space at `frame` (Grid4D
+    /// passes its evaluation; tests their own).
+    #[must_use]
+    pub fn new(
+        document: &'a Document,
+        selection: &'a [NodeId],
+        active: Option<NodeId>,
+        frame: f64,
+        shapes: &'a dyn Fn(NodeId) -> Option<PolyMesh>,
+    ) -> Self {
+        Self {
+            document,
+            selection,
+            active,
+            frame,
+            shapes,
+        }
+    }
+
+    /// `id`'s shape in its own space at the frame — a primitive's, a polygon
+    /// object's, a generator's result or a plugin's mesh (not deformed);
+    /// `None` for objects without one.
+    #[must_use]
+    pub fn mesh(&self, id: NodeId) -> Option<PolyMesh> {
+        (self.shapes)(id)
+    }
+
+    /// `id`'s placement in the world at the frame.
+    #[must_use]
+    pub fn world_matrix(&self, id: NodeId) -> Mat4 {
+        self.document.scene.world_matrix_at(id, self.frame)
+    }
+}
+
+/// An object a command adds, before it exists: see [`Changes::insert`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NewObject(usize);
+
+impl NewObject {
+    /// The order it was added in among the command's new objects.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// Where a new object goes: last among the children of its parent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Parent {
+    /// The top level.
+    Root,
+    /// An object of the document.
+    Object(NodeId),
+    /// An object the same command added before.
+    New(NewObject),
+}
+
+/// One change a command asks for.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Change {
+    /// A new object.
+    Insert { parent: Parent, data: NodeData },
+    /// Any edit of the document (an object's data, a move, a deletion, the
+    /// materials …).
+    Edit(SceneEdit),
+}
+
+/// What a command does to the document, in order. Grid4D applies it as one
+/// undo step, all or nothing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Changes {
+    changes: Vec<Change>,
+    inserted: usize,
+}
+
+impl Changes {
+    /// Adds an object under `parent`; returns how to refer to it (as a
+    /// parent of later objects).
+    pub fn insert(&mut self, parent: Parent, data: NodeData) -> NewObject {
+        self.changes.push(Change::Insert { parent, data });
+        self.inserted += 1;
+        NewObject(self.inserted - 1)
+    }
+
+    /// Adds an edit.
+    pub fn edit(&mut self, edit: SceneEdit) {
+        self.changes.push(Change::Edit(edit));
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty()
+    }
+
+    /// The changes, in order.
+    #[must_use]
+    pub fn list(&self) -> &[Change] {
+        &self.changes
+    }
+
+    #[must_use]
+    pub fn into_list(self) -> Vec<Change> {
+        self.changes
+    }
+}
+
+/// A plugin that changes the document once, when chosen in the Plugins
+/// menu; its parameters are options asked for in a dialog first.
+pub trait CommandPlugin: Plugin {
+    /// What to change, from the document, the selection and the options; or,
+    /// when it cannot run, why — an English sentence (`Err("…".into())`),
+    /// translated where it is shown. Must not panic.
+    ///
+    /// # Errors
+    ///
+    /// The message to show when the command cannot do its work.
+    fn run(&self, context: &Context<'_>, options: &Values<'_>) -> Result<Changes, String>;
+}
+
 /// The installed plugins.
 #[derive(Default)]
 pub struct Registry {
     generators: Vec<Box<dyn GeneratorPlugin>>,
     deformers: Vec<Box<dyn DeformerPlugin>>,
+    commands: Vec<Box<dyn CommandPlugin>>,
 }
 
 impl std::fmt::Debug for Registry {
@@ -245,19 +389,39 @@ impl Registry {
         self
     }
 
+    /// Adds a command plugin (type ids as [`Registry::add_generator`]).
+    pub fn add_command(&mut self, plugin: impl CommandPlugin + 'static) -> &mut Self {
+        if self.is_free(plugin.type_id()) {
+            self.commands.push(Box::new(plugin));
+        }
+        self
+    }
+
+    /// The command plugin with this type id.
+    #[must_use]
+    pub fn command(&self, type_id: &str) -> Option<&dyn CommandPlugin> {
+        self.commands.iter().find(|c| c.type_id() == type_id).map(AsRef::as_ref)
+    }
+
+    /// Every command plugin, in the order they were added.
+    pub fn commands(&self) -> impl Iterator<Item = &dyn CommandPlugin> {
+        self.commands.iter().map(AsRef::as_ref)
+    }
+
     /// The plugin with this type id, of any kind.
     #[must_use]
     pub fn plugin(&self, type_id: &str) -> Option<&dyn Plugin> {
         self.plugins().find(|p| p.type_id() == type_id)
     }
 
-    /// Every plugin: the generators, then the deformers, in the order they
-    /// were added.
+    /// Every plugin: the generators, the deformers, then the commands, in
+    /// the order they were added.
     pub fn plugins(&self) -> impl Iterator<Item = &dyn Plugin> {
         self.generators
             .iter()
             .map(|g| g.as_ref() as &dyn Plugin)
             .chain(self.deformers.iter().map(|d| d.as_ref() as &dyn Plugin))
+            .chain(self.commands.iter().map(|c| c.as_ref() as &dyn Plugin))
     }
 
     /// The deformer plugin with this type id.
@@ -563,6 +727,60 @@ mod tests {
         let mut points = [Vec3::ONE];
         assert!(!lift.deform_checked(&object, &mut points));
         assert_eq!(points, [Vec3::ONE], "kept as they were");
+    }
+
+    /// Adds a Null with a child, or refuses without a selection.
+    struct Pair;
+
+    impl Plugin for Pair {
+        fn type_id(&self) -> &'static str {
+            "test.pair"
+        }
+        fn name(&self) -> &'static str {
+            "Pair"
+        }
+        fn description(&self) -> &'static str {
+            "Two objects"
+        }
+        fn params(&self) -> &'static [ParamSpec] {
+            &[]
+        }
+    }
+
+    impl CommandPlugin for Pair {
+        fn run(&self, context: &Context<'_>, _: &Values<'_>) -> Result<Changes, String> {
+            if context.selection.is_empty() {
+                return Err("Select something".into());
+            }
+            let mut changes = Changes::default();
+            let parent = changes.insert(Parent::Root, NodeData::new("A", grid4d_scene::ObjectKind::Null));
+            changes.insert(Parent::New(parent), NodeData::new("B", grid4d_scene::ObjectKind::Null));
+            Ok(changes)
+        }
+    }
+
+    #[test]
+    fn command_plugins_return_changes_that_refer_to_new_objects() {
+        let mut registry = Registry::default();
+        registry.add_command(Pair).add_generator(Slab).add_command(Pair);
+        assert_eq!(registry.commands().count(), 1);
+        assert_eq!(registry.plugins().count(), 2);
+        let pair = registry.command("test.pair").unwrap();
+        let document = Document::new("d");
+        let shapes = |_: NodeId| None;
+        let options = PluginObject::new("test.pair");
+        let values = Values::new(pair.params(), &options);
+        let nothing = Context::new(&document, &[], None, 0.0, &shapes);
+        assert_eq!(pair.run(&nothing, &values), Err("Select something".to_owned()));
+        let some = [NodeId::default()];
+        let context = Context::new(&document, &some, None, 0.0, &shapes);
+        let changes = pair.run(&context, &values).unwrap();
+        assert_eq!(changes.list().len(), 2);
+        assert!(matches!(
+            changes.list()[1],
+            Change::Insert { parent: Parent::New(first), .. } if first.index() == 0
+        ));
+        assert!(context.mesh(some[0]).is_none());
     }
 
     #[test]

@@ -1,0 +1,17 @@
+[package]
+name = "grid4d-plugin-scatter"
+description = "An example Grid4D plugin: a command that scatters copies over a surface."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+grid4d-plugin.workspace = true
+grid4d-geom.workspace = true
+grid4d-scene.workspace = true
+glam.workspace = true
+
+[lints]
+workspace = true
