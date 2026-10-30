@@ -15,7 +15,7 @@ solved them. Newest steps at the bottom of each phase.
 | Current phase | 13 — Extensibility (v0.13) |
 | Last step done | Phase 13 planned (2026-10-30) |
 | Next step | 13.1 — Plugin API and generator plugins |
-| Tests | 716, all passing; clippy and rustfmt clean |
+| Tests | 717, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1846,6 +1846,13 @@ the interface in Greek.
   `ObjectKind` with a type id and values, so undo, takes, layers, animation,
   files and the path tracer handle them like any object; only evaluation and
   the Attribute Manager ask the registry.
+
+**Fix (12.2's autosave, found by CI on Linux and macOS):** a recovery
+session was named after the process and the millisecond it started; two
+sessions made within one millisecond (as the recovery test does, quickly on
+fast runners) got the same name, so discarding treated the other's copy as
+its own and left it. Names now also count the sessions of the process; a
+test makes fifty at once.
 
 ---
 

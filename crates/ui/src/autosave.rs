@@ -65,13 +65,17 @@ impl Autosave {
     /// copy a crashed session left there.
     #[must_use]
     pub fn new(dir: PathBuf) -> Self {
+        /// Sessions made by this process so far: two made within the same
+        /// millisecond still get names of their own.
+        static SESSIONS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let started = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis());
+        let session = SESSIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let offer = newest_orphan(&dir);
         Self {
             dir: Some(dir),
-            name: format!("{}-{started}", std::process::id()),
+            name: format!("{}-{started}-{session}", std::process::id()),
             offer,
             ..Self::default()
         }
@@ -380,6 +384,14 @@ pub(crate) mod tests {
         assert_eq!(again.offer.as_ref().map(|o| &o.copy), Some(&recovered.copy));
         assert_eq!(again.resolve(RecoveryChoice::Discard), None);
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "discarded");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sessions_made_at_once_have_names_of_their_own() {
+        let dir = folder("names");
+        let names: std::collections::HashSet<String> = (0..50).map(|_| Autosave::new(dir.clone()).name).collect();
+        assert_eq!(names.len(), 50, "even within one millisecond");
         let _ = fs::remove_dir_all(dir);
     }
 }
