@@ -460,6 +460,42 @@ Every drag is one undo step.
 - **Search**: type in the search field to show only matching objects.
 - **Tags** appear as icons after the name; click one to edit it ([§18](#18-tags)).
 - Right-click a row for Rename, Frame Object, Move to Top Level, Add Tag and Delete.
+- A small coloured square before the tags shows the object's **layer** (hover
+  it for the layer's name; see §6.1).
+
+### 6.1 Layers
+
+Layers sort a scene into groups you can hide, lock or switch off together —
+all the lights, the set, the rough proxies — without touching the objects.
+Open the **Layers** tab (beside Attributes, or **Window ▸ Layer Manager**).
+
+![The Layer Manager: Props soloed, so only the crate and the ball show; the Set layer is locked, the Proxies layer was hidden](images/manual/layers.png)
+
+- **New Layer** adds a layer, each in a new colour. Click its colour to change
+  it; double-click its name to rename it.
+- **Put objects on a layer:** drag them from the Object Manager onto the
+  layer, or select them and right-click the layer ▸ **Add Selected Objects**.
+  An object's own layer can also be picked in the Attribute Manager's
+  **Basic** tab (**Layer**). Children are on their parent's layer unless they
+  have one of their own.
+- **Right-click a layer** for **Add Selected Objects**, **Remove Selected
+  Objects**, **Select Objects**, **Rename** and **Delete Layer** (its objects
+  are then on no layer).
+- **The switches** (click a letter to turn it on or off):
+
+  | | Switch | When on |
+  |---|---|---|
+  | S | Solo | Only soloed layers' objects show (any layer soloed). |
+  | V | View | The objects show in the views. |
+  | R | Render | The objects show in renders. |
+  | M | Manager | The objects are listed in the Object Manager. |
+  | L | Locked | The objects cannot be picked in the views or moved by the tools (select them in the Object Manager). |
+  | A | Animation | The objects are animated; off, they stay where they are without animation. |
+  | G | Generators | Generators build; off, they act like groups. |
+  | D | Deformers | Deformers deform; off, they do nothing. |
+
+Every change to layers is one undo step and is saved with the document;
+**File ▸ Merge** brings a file's layers along.
 
 ## 7. The Attribute Manager
 
@@ -2134,6 +2170,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Workspace**: panels in windows of their own, saving your own layouts.
 - **Preferences**: a shortcut for the window; the F-Curve editor's values and
   the status bar in the chosen unit; a scale per document.
-- The Takes, Layers and Filter panels are placeholders.
+- **Layers**: folders of layers, the Expressions and XRef switches, layer
+  colours in the views.
+- The Takes and Filter panels are placeholders.
 
 See [`progress.md`](progress.md) for what changed in each step.

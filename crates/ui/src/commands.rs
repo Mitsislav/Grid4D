@@ -148,6 +148,14 @@ pub enum EditorCommand {
     Recover(crate::autosave::RecoveryChoice),
     /// Gives every view the preferred shading, grid, axis and HUD.
     ApplyViewDefaults,
+    /// Puts `objects` on `layer` (`None`: on no layer of their own), one undo
+    /// step; objects already there are left alone.
+    AssignLayer {
+        layer: Option<grid4d_scene::LayerId>,
+        objects: Vec<NodeId>,
+    },
+    /// Selects every object whose own layer is this one.
+    SelectLayerObjects(grid4d_scene::LayerId),
     CreateObject(ObjectKindTag),
     /// Creates an object under the active one (Shift + create for deformers),
     /// a deformer fitted to it; at the top without an active object.
@@ -1016,6 +1024,36 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             editor.selection.set_all(ids);
         }
         EditorCommand::DeselectAll => editor.selection.clear(),
+        EditorCommand::AssignLayer { layer, objects } => {
+            let layer = layer.filter(|&l| doc.scene.layers().contains(l));
+            let edits: Vec<SceneEdit> = objects
+                .iter()
+                .filter_map(|&id| {
+                    let node = doc.scene.get(id).filter(|n| n.data.layer != layer)?;
+                    let mut data = node.data.clone();
+                    data.layer = layer;
+                    Some(SceneEdit::SetData { id, data })
+                })
+                .collect();
+            if !edits.is_empty() {
+                let label = if layer.is_some() {
+                    "Add to Layer"
+                } else {
+                    "Remove from Layer"
+                };
+                commit(doc, editor, label, edits, |_, _| {});
+            }
+        }
+        EditorCommand::SelectLayerObjects(layer) => {
+            let mut ids = Vec::new();
+            doc.scene.walk(&mut Vec::new(), |id, node, _, _| {
+                if node.data.layer == Some(layer) {
+                    ids.push(id);
+                }
+                true
+            });
+            editor.selection.set_all(ids);
+        }
         EditorCommand::Reparent { node, new_parent } => {
             let current_parent = doc.scene.get(node).map(Node::parent);
             if current_parent.is_some_and(|parent| parent != new_parent)
@@ -2017,6 +2055,7 @@ fn is_current_state(doc: &Document, edit: &SceneEdit) -> bool {
         SceneEdit::SetTime(settings) => doc.time.settings() == *settings,
         SceneEdit::SetName(name) => doc.name == *name,
         SceneEdit::SetMaterials(materials) => doc.scene.materials() == materials,
+        SceneEdit::SetLayers(layers) => doc.scene.layers() == layers,
         SceneEdit::SetRender(settings) => doc.render == *settings,
         SceneEdit::SetSimulation(settings) => doc.simulation == *settings,
         // Structural changes are never made live; record them as given.
@@ -3308,6 +3347,73 @@ mod tests {
         );
         assert!(!doc.scene.contains(ids[0]));
         assert!(doc.scene.contains(ids[1]) && doc.scene.contains(ids[2]));
+    }
+
+    #[test]
+    fn objects_go_on_and_off_layers_in_one_undoable_step() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let layer = doc.scene.layers_mut().insert(grid4d_scene::Layer::new("Set", [1.0; 3]));
+        let (cube, sphere) = (id_of(&doc, "Cube"), id_of(&doc, "Sphere"));
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AssignLayer {
+                layer: Some(layer),
+                objects: vec![cube, sphere],
+            }],
+        );
+        let on = |doc: &Document, id| doc.scene.get(id).unwrap().data.layer;
+        assert_eq!((on(&doc, cube), on(&doc, sphere)), (Some(layer), Some(layer)));
+        assert_eq!(editor.history.undo_label(), Some("Add to Layer"));
+        assert_eq!(editor.history.undo_len(), 1);
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::SelectLayerObjects(layer)],
+        );
+        assert_eq!(editor.selection.as_slice(), &[cube, sphere]);
+
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AssignLayer {
+                layer: None,
+                objects: vec![sphere],
+            }],
+        );
+        assert_eq!(on(&doc, sphere), None);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Undo, EditorCommand::Undo],
+        );
+        assert_eq!((on(&doc, cube), on(&doc, sphere)), (None, None));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        assert_eq!(on(&doc, cube), Some(layer));
+
+        // Nothing to change: no step.
+        let steps = editor.history.undo_len();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AssignLayer {
+                layer: Some(layer),
+                objects: vec![cube],
+            }],
+        );
+        assert_eq!(editor.history.undo_len(), steps);
+
+        // A locked layer's object keeps its place under the gizmo.
+        doc.scene.layers_mut().get_mut(layer).unwrap().switches.locked = true;
+        let protection = doc.scene.protection(cube);
+        assert!(protection.position && protection.rotation && protection.scale);
+        assert!(!doc.scene.protection(id_of(&doc, "Light")).position);
     }
 
     #[test]

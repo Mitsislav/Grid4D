@@ -32,9 +32,10 @@ use grid4d_geom::{
 };
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
-    FrameRange, ImageFormat, Inherit, Interpolation, Key, LightDetails, LightShadow, LightType, MassMode, Material,
-    MaterialId, MeshHandle, MeshId, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, RenderSettings,
-    SimulationCache, SimulationSettings, SplineHandle, Tag, Tangents, TimeSettings, Track, Transform,
+    FrameRange, ImageFormat, Inherit, Interpolation, Key, Layer, LayerId, LayerSwitches, LightDetails, LightShadow,
+    LightType, MassMode, Material, MaterialId, MeshHandle, MeshId, Motion, NodeData, NodeId, ObjectKind, ObjectParam,
+    Param, RenderSettings, SimulationCache, SimulationSettings, SplineHandle, Tag, Tangents, TimeSettings, Track,
+    Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -70,6 +71,10 @@ struct DocumentDto {
     /// Material tags refer to them by index.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     materials: Vec<MaterialDto>,
+    /// Added in the course of version 3 (step 12.4); absent when there are
+    /// none. Objects refer to them by index.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    layers: Vec<LayerDto>,
     /// Added in the course of version 3 (step 8.2); absent while they are the
     /// defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -81,6 +86,63 @@ struct DocumentDto {
     /// Added in step 11.5: the simulated frames, when saved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     simulation_cache: Option<SimCacheDto>,
+}
+
+/// A layer; its colour is linear RGB.
+#[derive(Debug, Serialize, Deserialize)]
+#[expect(clippy::struct_excessive_bools, reason = "the Layer Manager's switches")]
+struct LayerDto {
+    name: String,
+    color: [f32; 3],
+    solo: bool,
+    view: bool,
+    render: bool,
+    manager: bool,
+    locked: bool,
+    animation: bool,
+    generators: bool,
+    deformers: bool,
+}
+
+impl LayerDto {
+    fn new(layer: &Layer) -> Self {
+        let s = layer.switches;
+        Self {
+            name: layer.name.clone(),
+            color: layer.color,
+            solo: s.solo,
+            view: s.view,
+            render: s.render,
+            manager: s.manager,
+            locked: s.locked,
+            animation: s.animation,
+            generators: s.generators,
+            deformers: s.deformers,
+        }
+    }
+
+    fn into_layer(self) -> Result<Layer, IoError> {
+        if !self.color.iter().all(|v| v.is_finite()) {
+            return Err(IoError::Invalid(format!(
+                "layer \"{}\" has a colour that is not a finite number",
+                self.name
+            )));
+        }
+        Ok(Layer {
+            name: self.name,
+            color: self.color,
+            switches: LayerSwitches {
+                solo: self.solo,
+                view: self.view,
+                render: self.render,
+                manager: self.manager,
+                locked: self.locked,
+                animation: self.animation,
+                generators: self.generators,
+                deformers: self.deformers,
+            },
+        })
+    }
 }
 
 /// A material; colours are linear RGB.
@@ -132,6 +194,7 @@ fn check_material_finite(material: &Material) -> Result<(), IoError> {
 struct Refs {
     objects: HashMap<NodeId, usize>,
     materials: HashMap<MaterialId, usize>,
+    layers: HashMap<LayerId, usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -311,6 +374,10 @@ struct ObjectDto {
     /// Added in the course of version 3; absent when the object is not animated.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     tracks: Vec<TrackDto>,
+    /// Added in the course of version 3 (step 12.4): its own layer's index in
+    /// `layers`; absent without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    layer: Option<usize>,
 }
 
 /// An animated parameter and its keys.
@@ -2475,6 +2542,14 @@ pub(crate) fn write(doc: &Document, cache: Option<&SimulationCache>) -> Result<V
             .enumerate()
             .map(|(i, &id)| (id, i))
             .collect(),
+        layers: doc
+            .scene
+            .layers()
+            .ids()
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| (id, i))
+            .collect(),
     };
     let mut objects = Vec::with_capacity(order.len());
     let mut table = MeshTable::default();
@@ -2485,6 +2560,14 @@ pub(crate) fn write(doc: &Document, cache: Option<&SimulationCache>) -> Result<V
     }
     for (_, material) in doc.scene.materials().iter() {
         check_material_finite(material)?;
+    }
+    for (_, layer) in doc.scene.layers().iter() {
+        if !layer.color.iter().all(|v| v.is_finite()) {
+            return Err(IoError::Invalid(format!(
+                "layer \"{}\" has a colour that is not a finite number",
+                layer.name
+            )));
+        }
     }
     for object in &objects {
         object.check_finite()?;
@@ -2508,6 +2591,7 @@ pub(crate) fn write(doc: &Document, cache: Option<&SimulationCache>) -> Result<V
             },
             objects,
             materials: doc.scene.materials().iter().map(|(_, m)| MaterialDto::new(m)).collect(),
+            layers: doc.scene.layers().iter().map(|(_, l)| LayerDto::new(l)).collect(),
             render: RenderDto::new(&doc.render),
             simulation: SimulationDto::new(&doc.simulation),
             simulation_cache,
@@ -2575,6 +2659,7 @@ impl File {
             time,
             objects,
             materials,
+            layers,
             render,
             simulation,
             simulation_cache,
@@ -2583,6 +2668,11 @@ impl File {
             .into_iter()
             .map(MaterialDto::into_material)
             .collect::<Result<Vec<_>, IoError>>()?;
+        let layers = layers
+            .into_iter()
+            .map(LayerDto::into_layer)
+            .collect::<Result<Vec<_>, IoError>>()?;
+        let object_layers: Vec<Option<usize>> = objects.iter().map(|o| o.layer).collect();
         let mut tags: Vec<Vec<TagDto>> = Vec::with_capacity(objects.len());
         let mut links: Vec<(Option<usize>, Vec<usize>)> = Vec::with_capacity(objects.len());
         let objects = objects
@@ -2615,6 +2705,18 @@ impl File {
             .into_iter()
             .map(|material| doc.scene.materials_mut().insert(material))
             .collect();
+        let layer_ids: Vec<LayerId> = layers
+            .into_iter()
+            .map(|layer| doc.scene.layers_mut().insert(layer))
+            .collect();
+        // An index that names no layer leaves the object on none.
+        for (&id, layer) in ids.iter().zip(object_layers) {
+            if let Some(index) = layer
+                && let Some(node) = doc.scene.get_mut(id)
+            {
+                node.data.layer = layer_ids.get(index).copied();
+            }
+        }
         // Object links and tags last: they may refer to any object.
         for (&id, (link, effector_links)) in ids.iter().zip(links) {
             if (link.is_some() || !effector_links.is_empty())
@@ -2674,6 +2776,7 @@ impl ObjectDto {
             enabled: data.enabled,
             tags: data.tags.iter().map(|tag| TagDto::new(tag, refs)).collect(),
             tracks: data.tracks.iter().map(TrackDto::new).collect(),
+            layer: data.layer.and_then(|l| refs.layers.get(&l).copied()),
         }
     }
 
@@ -2702,6 +2805,7 @@ impl ObjectDto {
                 tracks
             }),
             unkeyed: None,
+            layer: None,
         })
         .map(|data| (data, self.tags))
     }
@@ -3891,6 +3995,50 @@ mod tests {
     }
 
     #[test]
+    fn layers_and_objects_on_them_round_trip() {
+        let mut doc = Document::with_demo_scene();
+        let id = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+        let mut lights = Layer::new("Lights", [0.9, 0.7, 0.1]);
+        lights.switches.render = false;
+        lights.switches.locked = true;
+        let lights_id = doc.scene.layers_mut().insert(lights.clone());
+        let set = Layer::new("Set", [0.1, 0.2, 0.8]);
+        let set_id = doc.scene.layers_mut().insert(set.clone());
+        let gone = doc.scene.layers_mut().insert(Layer::new("Gone", [0.0; 3]));
+        doc.scene.layers_mut().remove(gone);
+        doc.scene.get_mut(id(&doc, "Light")).unwrap().data.layer = Some(lights_id);
+        doc.scene.get_mut(id(&doc, "Group")).unwrap().data.layer = Some(set_id);
+        doc.scene.get_mut(id(&doc, "Cube")).unwrap().data.layer = Some(gone);
+
+        let loaded = round_trip(&doc);
+        let layers: Vec<Layer> = loaded.scene.layers().iter().map(|(_, l)| l.clone()).collect();
+        assert_eq!(layers, [lights, set], "in Layer Manager order, switches and all");
+        let layer_name = |name: &str| {
+            let node = loaded.scene.get(id(&loaded, name)).unwrap();
+            node.data
+                .layer
+                .map(|l| loaded.scene.layers().get(l).unwrap().name.clone())
+        };
+        assert_eq!(layer_name("Light").as_deref(), Some("Lights"));
+        assert_eq!(layer_name("Group").as_deref(), Some("Set"));
+        assert_eq!(layer_name("Box"), None, "inherited, not its own");
+        assert_eq!(
+            loaded.scene.effective_layer(id(&loaded, "Box")),
+            loaded.scene.get(id(&loaded, "Group")).unwrap().data.layer
+        );
+        assert_eq!(layer_name("Cube"), None, "a link to a deleted layer is dropped");
+        assert!(document_json(&doc).contains("\"layers\""));
+        assert!(
+            !document_json(&Document::with_demo_scene()).contains("\"layer"),
+            "omitted when there are none"
+        );
+
+        doc.scene.layers_mut().get_mut(set_id).unwrap().color[1] = f32::INFINITY;
+        let err = to_bytes(&doc).unwrap_err();
+        assert!(err.to_string().contains("\"Set\""), "{err}");
+    }
+
+    #[test]
     fn materials_and_material_tags_round_trip() {
         let mut doc = Document::with_demo_scene();
         let mut red = Material::new("Red");
@@ -4348,6 +4496,7 @@ mod tests {
         let refs = Refs {
             objects: HashMap::new(),
             materials: HashMap::new(),
+            layers: HashMap::new(),
         };
         let json = serde_json::to_string(&TagDto::new(&rigid, &refs)).unwrap();
         assert_eq!(

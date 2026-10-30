@@ -72,6 +72,8 @@ pub struct OutlinerPanel {
 
 impl OutlinerPanel {
     pub fn show(&mut self, ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
+        // The row being dragged, for other panels to drop (the Layer Manager).
+        editor.object_drag = self.dragging;
         self.menu(ui, &doc.scene, editor);
         self.search_field(ui);
 
@@ -168,6 +170,10 @@ impl OutlinerPanel {
 
     fn tree(&mut self, ui: &mut Ui, scene: &Scene, id: NodeId, depth: u32, editor: &EditorState) {
         let Some(node) = scene.get(id) else { return };
+        // A layer with Manager off keeps its objects (and their children) out.
+        if !scene.layer_switches(id).manager {
+            return;
+        }
         let filtering = !self.filter.is_empty();
         if !filtering || contains_ignore_ascii_case(&node.data.name, &self.filter) {
             self.row(ui, scene, id, node, if filtering { 0 } else { depth }, editor);
@@ -327,10 +333,27 @@ impl OutlinerPanel {
             });
         }
 
+        // Its own layer's colour, left of the tags.
+        let mut name_right = tags_left - 4.0;
+        if let Some(layer) = node.data.layer.and_then(|l| scene.layers().get(l)) {
+            let chip = Rect::from_center_size(pos2(tags_left - 9.0, cy), Vec2::splat(9.0));
+            let [r, g, b] = layer.color;
+            painter.rect_filled(chip, CornerRadius::same(2), egui::Rgba::from_rgb(r, g, b));
+            painter.rect_stroke(
+                chip,
+                CornerRadius::same(2),
+                Stroke::new(1.0, p().border),
+                StrokeKind::Inside,
+            );
+            ui.interact(chip, ui.scope_id().with(("layer", id)), Sense::hover())
+                .on_hover_text(format!("Layer: {}", layer.name));
+            name_right = chip.left() - 4.0;
+        }
+
         // Name (or the inline rename editor).
         let name_rect = Rect::from_min_max(
             pos2(x, rect.top() + 1.0),
-            pos2((tags_left - 4.0).max(x + 20.0), rect.bottom() - 1.0),
+            pos2(name_right.max(x + 20.0), rect.bottom() - 1.0),
         );
         if self.renaming == Some(id) {
             let edit = ui.put(
@@ -823,6 +846,49 @@ mod tests {
         // Clicking the object's name shows the object again.
         click(pos2(120.0, row_y), &mut doc, &mut editor);
         assert_eq!(editor.tag_selection, None);
+    }
+
+    #[test]
+    fn a_layer_with_manager_off_keeps_its_objects_out_and_others_show_a_chip() {
+        let mut doc = Document::with_demo_scene();
+        let mut editor = EditorState::default();
+        let mut panel = super::OutlinerPanel::default();
+        let find = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+        let (group, light) = (find(&doc, "Group"), find(&doc, "Light"));
+        let hidden = doc
+            .scene
+            .layers_mut()
+            .insert(grid4d_scene::Layer::new("Hidden", [1.0; 3]));
+        let shown = doc
+            .scene
+            .layers_mut()
+            .insert(grid4d_scene::Layer::new("Lights", [1.0; 3]));
+        doc.scene.get_mut(group).unwrap().data.layer = Some(hidden);
+        doc.scene.get_mut(light).unwrap().data.layer = Some(shown);
+        doc.scene.layers_mut().get_mut(hidden).unwrap().switches.manager = false;
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| panel.show(ui, &mut doc, &mut editor));
+        output.textures_delta.clear();
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        for name in ["Cube", "Sphere", "Light", "Camera"] {
+            assert!(texts.iter().any(|t| t == name), "{name} listed: {texts:?}");
+        }
+        for name in ["Group", "Cylinder", "Box"] {
+            assert!(!texts.iter().any(|t| t == name), "{name} kept out");
+        }
+        let chips = output
+            .shapes
+            .iter()
+            .filter(|c| matches!(&c.shape, egui::Shape::Rect(r) if r.rect.width() == 9.0))
+            .count();
+        assert!(chips >= 1, "the Light's layer chip");
     }
 
     #[test]

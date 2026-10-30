@@ -10,7 +10,7 @@ use egui::{Color32, CornerRadius, PointerButton, Pos2, Rect, Response, Shape, St
 use glam::{Mat3, Mat4, Quat, Vec3};
 use grid4d_geom::{BitSet, Component, selection};
 use grid4d_render::OrbitCamera;
-use grid4d_scene::{MeshHandle, NodeData, NodeId, ObjectKind, Scene, SceneEdit, SplineHandle, Tags};
+use grid4d_scene::{MeshHandle, NodeData, NodeId, ObjectKind, Scene, SceneEdit, SplineHandle};
 
 use super::{
     project,
@@ -72,7 +72,8 @@ impl GizmoGeometry {
         let node = scene.get(id)?;
         // A Protection tag keeps the tool's channel of the object as it is.
         if editor.mode.component().is_none() {
-            let protection = node.data.tags.protection();
+            // A locked layer protects every channel.
+            let protection = scene.protection(id);
             let locked = match editor.tool {
                 Tool::Move => protection.position,
                 Tool::Scale => protection.scale,

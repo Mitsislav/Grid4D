@@ -174,6 +174,7 @@ pub struct Panels {
     pub timeline: TimelinePanel,
     pub fcurve: FCurvePanel,
     pub materials: MaterialsPanel,
+    pub layers: crate::panels::LayersPanel,
 }
 
 impl Panels {
@@ -187,6 +188,7 @@ impl Panels {
             timeline: TimelinePanel::default(),
             fcurve: FCurvePanel::default(),
             materials: MaterialsPanel,
+            layers: crate::panels::LayersPanel::default(),
         }
     }
 }
@@ -352,7 +354,7 @@ impl Behavior<Pane> for Dispatch<'_> {
                         Pane::FCurve => panels.fcurve.show(ui, doc, editor),
                         Pane::Materials => panels.materials.show(ui, doc, editor),
                         Pane::Takes => planned(ui, "Takes come with step 12.5"),
-                        Pane::Layers => planned(ui, "Layers come with step 12.4"),
+                        Pane::Layers => panels.layers.show(ui, doc, editor),
                         Pane::Viewport => {}
                     }
                 });
@@ -677,8 +679,12 @@ mod tests {
     fn idle_frames_in_every_layout_leave_the_document_alone() {
         let mut panels = Panels::new(ViewportPanel::new(None));
         let mut doc = Document::with_demo_scene();
+        // The Layer Manager lists a layer; the Object Manager shows its chip.
+        let layer = doc.scene.layers_mut().insert(grid4d_scene::Layer::new("Set", [1.0; 3]));
+        let first = doc.scene.roots()[0];
+        doc.scene.get_mut(first).unwrap().data.layer = Some(layer);
         let mut editor = EditorState::default();
-        editor.selection.set_single(doc.scene.roots()[0]);
+        editor.selection.set_single(first);
         let ctx = egui::Context::default();
         for layout in Layout::ALL {
             let mut workspace = Workspace::new(layout);

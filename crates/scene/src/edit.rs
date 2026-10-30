@@ -53,6 +53,9 @@ pub enum SceneEdit {
     /// Replaces the document's materials (the whole table, ids included: tags
     /// keep pointing at the same materials across undo and redo).
     SetMaterials(Materials),
+    /// Replaces the document's layers (the whole table, ids included: objects
+    /// keep naming the same layers across undo and redo).
+    SetLayers(crate::Layers),
     /// Replaces the document's render settings (validated).
     SetRender(RenderSettings),
     /// Replaces the document's simulation settings (validated).
@@ -72,6 +75,7 @@ impl SceneEdit {
             | Self::SetTime(_)
             | Self::SetName(_)
             | Self::SetMaterials(_)
+            | Self::SetLayers(_)
             | Self::SetRender(_)
             | Self::SetSimulation(_) => None,
         }
@@ -133,6 +137,9 @@ impl Document {
                 self.scene.materials_mut(),
                 materials,
             ))),
+            SceneEdit::SetLayers(layers) => {
+                Ok(SceneEdit::SetLayers(std::mem::replace(self.scene.layers_mut(), layers)))
+            }
             SceneEdit::SetRender(settings) => Ok(SceneEdit::SetRender(std::mem::replace(
                 &mut self.render,
                 settings.validated(),
@@ -183,6 +190,7 @@ mod tests {
         name: String,
         time: TimeSettings,
         materials: Materials,
+        layers: crate::Layers,
         render: RenderSettings,
         simulation: crate::SimulationSettings,
         nodes: Vec<(NodeId, Option<NodeId>, u32, NodeData)>,
@@ -199,6 +207,7 @@ mod tests {
             name: doc.name.clone(),
             time: doc.time.settings(),
             materials: doc.scene.materials().clone(),
+            layers: doc.scene.layers().clone(),
             render: doc.render.clone(),
             simulation: doc.simulation,
             nodes,
@@ -526,6 +535,25 @@ mod tests {
                 })
             }
             (7, _) => SceneEdit::SetName(format!("doc {}", rng.below(100))),
+            (8, _) if rng.chance(2) => {
+                // Add a layer, switch one, or remove one (replaced whole).
+                let mut layers = doc.scene.layers().clone();
+                match rng.pick(layers.ids()) {
+                    Some(id) if rng.chance(3) => {
+                        layers.remove(id);
+                    }
+                    Some(id) if rng.chance(2) => {
+                        if let Some(layer) = layers.get_mut(id) {
+                            layer.switches.view = !layer.switches.view;
+                        }
+                    }
+                    _ => {
+                        let layer = layers.next_layer("Layer");
+                        layers.insert(layer);
+                    }
+                }
+                SceneEdit::SetLayers(layers)
+            }
             (8, _) => {
                 // Add a material or remove one (the table is replaced whole).
                 let mut materials = doc.scene.materials().clone();

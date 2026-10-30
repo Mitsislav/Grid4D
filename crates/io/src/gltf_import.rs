@@ -100,6 +100,7 @@ pub fn import_gltf(bytes: &[u8], base: Option<&Path>) -> Result<Objects, IoError
     Ok(Objects {
         nodes,
         materials,
+        layers: grid4d_scene::Layers::default(),
         sources: Vec::new(),
     })
 }

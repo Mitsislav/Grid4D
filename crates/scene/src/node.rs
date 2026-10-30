@@ -809,6 +809,8 @@ pub struct NodeData {
     pub tracks: Vec<crate::Track>,
     /// Animated parameters changed without recording a key (never saved).
     pub unkeyed: Option<crate::Unkeyed>,
+    /// Its own layer; `None`: its parent's (see [`crate::Scene::effective_layer`]).
+    pub layer: Option<crate::LayerId>,
 }
 
 impl NodeData {
@@ -828,6 +830,7 @@ impl NodeData {
             tags: Vec::new(),
             tracks: Vec::new(),
             unkeyed: None,
+            layer: None,
         }
     }
 

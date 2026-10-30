@@ -98,7 +98,12 @@ pub(crate) struct Active {
 /// Manager order, placed as they are at `frame`.
 pub(crate) fn push_children(scene: &Scene, id: NodeId, depth: u32, frame: f64, active: &mut Vec<Active>) {
     for &child in scene.children(id) {
-        let Some(data) = scene.get(child).map(|n| &n.data).filter(|d| d.enabled) else {
+        // Switched off, or on a layer whose deformers are off: it does nothing.
+        let Some(data) = scene
+            .get(child)
+            .map(|n| &n.data)
+            .filter(|d| d.enabled && scene.layer_switches(child).deformers)
+        else {
             continue;
         };
         if let Some(deformer) = Deformer::of(&data.kind_at(frame)) {
@@ -148,7 +153,11 @@ pub(crate) fn input_chain(scene: &Scene, node: NodeId, generator: NodeId, frame:
     let mut at = Some(node);
     while let Some(current) = at.filter(|&c| c != generator) {
         for &child in scene.children(current) {
-            let Some(data) = scene.get(child).map(|n| &n.data).filter(|d| d.enabled) else {
+            let Some(data) = scene
+                .get(child)
+                .map(|n| &n.data)
+                .filter(|d| d.enabled && scene.layer_switches(child).deformers)
+            else {
                 continue;
             };
             if let Some(deformer) = Deformer::of(&data.kind_at(frame)) {

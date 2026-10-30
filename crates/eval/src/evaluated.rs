@@ -8,8 +8,8 @@ use grid4d_geom::{
     spline::Polyline,
 };
 use grid4d_scene::{
-    Aabb, Components, LIGHT_MARKER_RADIUS, LightDetails, LightShadow, LightType, MaterialId, MeshHandle, MeshId,
-    NodeId, ObjectKind, ObjectKindTag, Scene, SplineHandle, TagKind, Tags, WalkItem,
+    Aabb, Components, LIGHT_MARKER_RADIUS, LayerId, LightDetails, LightShadow, LightType, MaterialId, MeshHandle,
+    MeshId, NodeId, ObjectKind, ObjectKindTag, Scene, SplineHandle, TagKind, Tags, WalkItem,
 };
 
 use crate::{
@@ -200,6 +200,8 @@ pub struct EvaluatedScene {
     /// Scratch space for materials: the material each current ancestor shows
     /// (its own Material tag's, else inherited).
     material_stack: Vec<(u32, Option<MaterialId>)>,
+    /// Scratch space for layers: the layer each current ancestor is on.
+    layer_stack: Vec<(u32, Option<LayerId>)>,
     /// [`Scene::revision`] of the scene `nodes` were built from.
     revision: Option<u64>,
     /// The viewport, or the final render.
@@ -276,6 +278,10 @@ impl EvaluatedScene {
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
         let material_stack = &mut self.material_stack;
         material_stack.clear();
+        let layer_stack = &mut self.layer_stack;
+        layer_stack.clear();
+        let layers = scene.layers();
+        let render = purpose == Purpose::Render;
         let (sources, cloner_stack) = (&mut self.sources, &mut self.cloner_stack);
         cloner_stack.clear();
         let (deformed, active, links) = (&mut self.deformed, &mut self.active, &mut self.links);
@@ -293,13 +299,32 @@ impl EvaluatedScene {
             }
             deform::leave(active, depth);
             let data = &node.data;
+            // Its layer (own, else inherited) may hide it, or switch things off.
+            while layer_stack.last().is_some_and(|&(d, _)| d >= depth) {
+                layer_stack.pop();
+            }
+            let layer = if layers.is_empty() {
+                None
+            } else {
+                let inherited = layer_stack.last().and_then(|&(_, l)| l);
+                data.layer.filter(|&l| layers.contains(l)).or(inherited)
+            };
+            if !layers.shows(layer, render) {
+                return false;
+            }
+            let switches = layers.switches(layer);
             // Its own parameters at the frame (borrowed unless animated).
-            let kind = data.kind_at(frame);
-            let generator = generator::options(&kind, purpose);
+            let kind = if switches.animation {
+                data.kind_at(frame)
+            } else {
+                std::borrow::Cow::Borrowed(&data.kind)
+            };
+            let generator = generator::options(&kind, purpose).filter(|_| switches.generators);
             // A disabled generator is a plain group: its children show as they are.
             if !purpose.shows(data) || (!data.enabled && !kind.is_generator()) {
                 return false;
             }
+            layer_stack.push((depth, layer));
             if next_cage == Some(id) {
                 cage_depth = Some(depth);
                 next_cage = None;
@@ -495,8 +520,12 @@ impl EvaluatedScene {
                 drawable = None;
                 pick = PickShape::None;
             }
-            if data.enabled && matches!(*kind, ObjectKind::Cloner { .. }) {
+            if data.enabled && switches.generators && matches!(*kind, ObjectKind::Cloner { .. }) {
                 cloner_stack.push((depth, id));
+            }
+            // A locked layer's objects cannot be picked in the views.
+            if switches.locked {
+                pick = PickShape::None;
             }
             nodes.push(EvaluatedNode {
                 id,
@@ -684,7 +713,10 @@ fn build_instances(
     nested.clear();
     used.clear();
     for (index, node) in nodes.iter().enumerate() {
-        if node.kind == ObjectKindTag::Cloner && scene.get(node.id).is_some_and(|n| n.data.enabled) {
+        if node.kind == ObjectKindTag::Cloner
+            && scene.get(node.id).is_some_and(|n| n.data.enabled)
+            && scene.layer_switches(node.id).generators
+        {
             order.push((node.depth, index));
         }
     }
@@ -904,8 +936,14 @@ fn animate(scene: &Scene, nodes: &mut [EvaluatedNode], frame: f64, stack: &mut V
         let Some(data) = scene.get(node.id).map(|n| &n.data) else {
             continue;
         };
-        // Temporary values made at this frame included.
-        let local = data.transform_at(frame).matrix();
+        // Temporary values made at this frame included; a layer with
+        // Animation off shows its objects unanimated.
+        let local = if scene.animates(node.id) {
+            data.transform_at(frame)
+        } else {
+            data.transform
+        }
+        .matrix();
         node.world = stack.last().map_or(local, |&(_, parent)| parent * local);
         stack.push((node.depth, node.world));
     }
@@ -2220,6 +2258,118 @@ mod tests {
         doc.scene.get_mut(bend).unwrap().data.enabled = false;
         eval.update(&doc.scene);
         assert!(matches!(node(&eval, a).drawable.unwrap().key, MeshKey::Cube { .. }));
+    }
+
+    #[test]
+    fn layers_hide_solo_lock_and_switch_off_animation_generators_and_deformers() {
+        use grid4d_scene::{Axis, Curve, Key, Layer, Param, Track};
+        let mut doc = Document::with_demo_scene();
+        let (cube, sphere, group, box_, light) = (
+            id_of(&doc, "Cube"),
+            id_of(&doc, "Sphere"),
+            id_of(&doc, "Group"),
+            id_of(&doc, "Box"),
+            id_of(&doc, "Light"),
+        );
+        let layer = |doc: &mut Document, name: &str, objects: &[NodeId]| {
+            let id = doc.scene.layers_mut().insert(Layer::new(name, [1.0; 3]));
+            for &object in objects {
+                doc.scene.get_mut(object).unwrap().data.layer = Some(id);
+            }
+            id
+        };
+        let set = layer(&mut doc, "Set", &[group]);
+        let lights = layer(&mut doc, "Lights", &[light]);
+        let props = layer(&mut doc, "Props", &[cube, sphere]);
+        let shown = |doc: &Document, purpose: Purpose| {
+            let mut eval = if purpose == Purpose::Render {
+                EvaluatedScene::for_render()
+            } else {
+                EvaluatedScene::new()
+            };
+            eval.update(&doc.scene);
+            eval.nodes()
+                .iter()
+                .map(|n| n.id)
+                .collect::<std::collections::HashSet<_>>()
+        };
+        assert_eq!(shown(&doc, Purpose::Editor).len(), doc.scene.len(), "every switch on");
+
+        doc.scene.layers_mut().get_mut(set).unwrap().switches.view = false;
+        doc.scene.layers_mut().get_mut(lights).unwrap().switches.render = false;
+        let (editor, render) = (shown(&doc, Purpose::Editor), shown(&doc, Purpose::Render));
+        assert!(
+            !editor.contains(&group) && !editor.contains(&box_),
+            "the group's children follow it"
+        );
+        assert!(render.contains(&box_) && editor.contains(&light) && !render.contains(&light));
+        // A child with a layer of its own is on that one.
+        doc.scene.get_mut(box_).unwrap().data.layer = Some(props);
+        doc.scene.layers_mut().get_mut(set).unwrap().switches.view = true;
+        doc.scene.layers_mut().get_mut(props).unwrap().switches.solo = true;
+        let editor = shown(&doc, Purpose::Editor);
+        assert!(editor.contains(&cube) && editor.contains(&sphere));
+        assert!(
+            !editor.contains(&light) && !editor.contains(&group),
+            "only soloed layers show"
+        );
+        assert!(!editor.contains(&box_), "inside a group that is not shown");
+        doc.scene.layers_mut().get_mut(props).unwrap().switches.solo = false;
+
+        // Locked: not pickable.
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        assert_ne!(node(&eval, cube).pick, PickShape::None);
+        doc.scene.layers_mut().get_mut(props).unwrap().switches.locked = true;
+        eval.update(&doc.scene);
+        assert_eq!(node(&eval, cube).pick, PickShape::None);
+        assert!(node(&eval, cube).drawable.is_some(), "still drawn");
+
+        // Animation off: shown where the document has it.
+        doc.scene.get_mut(cube).unwrap().data.tracks.push(Track {
+            param: Param::Position(Axis::X),
+            curve: Curve::from_keys([Key::new(0.0, 0.0), Key::new(10.0, 500.0)]),
+        });
+        eval.set_frame(10.0);
+        eval.update(&doc.scene);
+        assert_eq!(node(&eval, cube).world.w_axis.x, 500.0);
+        doc.scene.layers_mut().get_mut(props).unwrap().switches.animation = false;
+        eval.update(&doc.scene);
+        let base = doc.scene.get(cube).unwrap().data.transform.position.x;
+        assert_eq!(node(&eval, cube).world.w_axis.x, base);
+        assert_eq!(doc.scene.world_matrix_at(cube, 10.0).w_axis.x, base);
+    }
+
+    #[test]
+    fn a_layer_switches_off_its_generators_and_deformers() {
+        let mut doc = Document::new("sds");
+        let sds = doc.scene.insert(Node::new(
+            "Subdivision Surface",
+            ObjectKindTag::SubdivisionSurface.default_kind(),
+        ));
+        let cage = doc.scene.insert_child(sds, tall_cube()).unwrap();
+        let bend = doc.scene.insert_child(cage, bend_node(90.0)).unwrap();
+        let layer = doc
+            .scene
+            .layers_mut()
+            .insert(grid4d_scene::Layer::new("Proxies", [1.0; 3]));
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let bent = result_of(&eval, sds).bounds().unwrap();
+        assert!(node(&eval, cage).drawable.is_none(), "the generator shows the cage");
+
+        doc.scene.get_mut(bend).unwrap().data.layer = Some(layer);
+        doc.scene.layers_mut().get_mut(layer).unwrap().switches.deformers = false;
+        eval.update(&doc.scene);
+        let straight = result_of(&eval, sds).bounds().unwrap();
+        assert!(bent.max.x > straight.max.x + 30.0, "the bend did nothing");
+
+        doc.scene.get_mut(sds).unwrap().data.layer = Some(layer);
+        doc.scene.get_mut(bend).unwrap().data.layer = None;
+        doc.scene.layers_mut().get_mut(layer).unwrap().switches.generators = false;
+        eval.update(&doc.scene);
+        assert!(node(&eval, sds).drawable.is_none(), "a group now");
+        assert!(node(&eval, cage).drawable.is_some(), "the cage shows as it is");
     }
 
     #[test]

@@ -99,6 +99,7 @@ impl ObjectDto {
             tags: Vec::new(),
             tracks: Vec::new(),
             unkeyed: None,
+            layer: None,
         }
     }
 

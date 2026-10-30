@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 12 — Workspace (v0.12) |
-| Last step done | 12.3 — Themes (2026-10-30) |
-| Next step | 12.4 — Layers |
-| Tests | 699, all passing; clippy and rustfmt clean |
+| Last step done | 12.4 — Layers (2026-10-30) |
+| Next step | 12.5 — Takes |
+| Tests | 708, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1607,6 +1607,7 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
 | 12.1 | Docking layouts on `egui_tiles`: every manager and the viewport a pane that docks as a tab or a split, closes and reopens from the Window menu; Standard / Modeling / Animate layouts, Reset Layout; the arrangement remembered between runs | 689 |
 | 12.2 | Preferences (Edit ▸ Preferences…): the length unit for every length field and the grid HUD (typed units converted), Undo Depth, Autosave with crash recovery, view defaults; saved between runs | 697 |
 | 12.3 | Dark, Darker and Light themes (Preferences ▸ Interface ▸ Theme) for every panel, menu, window and icon; the 3D view keeps its own colours; a contrast test for every theme | 699 |
+| 12.4 | Layers: a coloured, named table in the document with Solo, View, Render, Manager, Locked, Animation, Generators and Deformers switches; objects on a layer (children inherit it); the Layer Manager, layer chips in the Object Manager, a Layer field; saved and merged | 708 |
 
 **Planning notes:**
 - **The docking library.** The plan named `egui_dock`, to be checked against
@@ -1714,6 +1715,46 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
 - **On-screen testing:** Preferences ▸ Theme switched to Light at once
   (panels, menus, icons; the view unchanged), it was still Light after a
   restart, and Darker deepened every panel and the view.
+
+**12.4 — Layers**
+
+*Problems and solutions:*
+- **Inheritance without walking up for every object.** The evaluation walk
+  already keeps a stack of inherited materials; layers got the same stack, so
+  each object's effective layer costs nothing extra. Code that looks at one
+  object on its own (deformers, the gizmo, the Object Manager) asks
+  `Scene::effective_layer`, which walks up the hierarchy — but returns at once
+  while the document has no layers.
+- **Inside generators.** A generator's inputs are read by their own walks,
+  which only reach objects under a shown generator: there an object without
+  a layer of its own shows like its parent, so only its own layer needs a
+  check (`Layers::shows_own`).
+- **Animation off everywhere.** World matrices are computed in two places —
+  the evaluation's animation pass and `Scene::world_matrix_at`, which the
+  gizmo, deformers and generator inputs use. Both read the document's own
+  transform for objects on a layer whose Animation is off, so what is drawn
+  and where the gizmo sits agree.
+- **Locked.** Rather than teach every tool about locking, a locked layer's
+  objects get no pick shape (so clicks and rectangle selection pass them by;
+  they can still be snapped to), and `Scene::protection` reports every channel protected, so the
+  gizmo and the Coordinate Manager leave them alone. The Object Manager still
+  selects them.
+- **Dragging between panels.** The Object Manager keeps its drag to itself;
+  it now reports it as `EditorState::object_drag`, set at the start of each
+  frame, so the Layer Manager sees it on the frame the button is released,
+  whichever pane is drawn first.
+- **Saving a broken colour.** The round-trip test found that a non-finite
+  layer colour was written without complaint (only reading refused it); saving
+  now refuses it too, as for materials.
+- **Layout.** The first Layer Manager placed its columns with `add_sized`,
+  which centred names and let the switch columns drift; rows now place the
+  chip, the name and each switch at fixed positions from the right edge.
+- **On-screen testing:** a scene with three layers (Set locked, Props, Proxies
+  hidden): the Proxy Box was hidden and its chip shown; clicking V showed it;
+  S on Props left only the crate and the ball; clicking the locked floor
+  selected nothing, clicking the cone selected it. Dragging rows cannot be
+  driven by posted mouse messages, so the drop onto a layer is tested in
+  code.
 
 ---
 

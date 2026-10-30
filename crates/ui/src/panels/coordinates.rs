@@ -10,7 +10,7 @@
 use egui::{Button, ComboBox, DragValue, Grid, Margin, RichText, Ui, Vec2};
 use glam::{Mat4, Quat, Vec3};
 use grid4d_geom::{Component, selection};
-use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, Scene, SceneEdit, Tags, Transform};
+use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, Scene, SceneEdit, Transform};
 
 use crate::{EditorCommand, EditorState, keys::Keying, live_edit::interaction_ongoing, theme::palette as p, widgets};
 
@@ -145,10 +145,7 @@ impl CoordinatesPanel {
                     return;
                 };
                 let locks = match target {
-                    Target::Object(id) => doc
-                        .scene
-                        .get(id)
-                        .map_or_else(Default::default, |n| n.data.tags.protection()),
+                    Target::Object(id) => doc.scene.protection(id),
                     Target::Components(..) => grid4d_scene::Protection::default(),
                 };
                 let middle = match target {

@@ -135,7 +135,11 @@ pub(crate) fn gather(
     while let Some(node_id) = stack.pop() {
         let Some(node) = scene.get(node_id) else { continue };
         let data = &node.data;
-        if !purpose.shows(data) || !data.enabled || data.kind.is_generator() {
+        if !purpose.shows(data)
+            || !scene.layers().shows_own(data.layer, purpose == Purpose::Render)
+            || !data.enabled
+            || data.kind.is_generator()
+        {
             continue; // hidden parts are left out; nested generators are not merged
         }
         let kind = data.kind_at(frame);
@@ -191,7 +195,7 @@ fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs:
             } => Source::Spline(spline.clone(), *interpolation),
             _ => break,
         };
-        if !purpose.shows(data) || !data.enabled {
+        if !purpose.shows(data) || !scene.layers().shows_own(data.layer, purpose == Purpose::Render) || !data.enabled {
             break;
         }
         let matrix = if k == 0 {
@@ -229,7 +233,7 @@ fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs: 
             } => Source::Spline(spline.clone(), *interpolation),
             _ => continue,
         };
-        if purpose.shows(data) && data.enabled {
+        if purpose.shows(data) && scene.layers().shows_own(data.layer, purpose == Purpose::Render) && data.enabled {
             inputs.push(Input {
                 source,
                 matrix: into_generator * scene.world_matrix_at(child, frame),

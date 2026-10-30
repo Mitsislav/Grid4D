@@ -280,7 +280,7 @@ impl AttributesPanel {
 
         let mut label = self.tab.edit_label();
         match self.tab {
-            Tab::Basic => basic_tab(ui, &mut data),
+            Tab::Basic => basic_tab(ui, &mut data, doc.scene.layers()),
             Tab::Coord => label = coord_tab(ui, &mut data, keying).unwrap_or(label),
             Tab::Object => {
                 let mut fit = false;
@@ -345,7 +345,7 @@ impl AttributesPanel {
     }
 }
 
-fn basic_tab(ui: &mut Ui, data: &mut NodeData) {
+fn basic_tab(ui: &mut Ui, data: &mut NodeData, layers: &grid4d_scene::Layers) {
     section_heading(ui, "Basic Properties");
     Grid::new("grid4d.attr.basic")
         .num_columns(2)
@@ -369,6 +369,28 @@ fn basic_tab(ui: &mut Ui, data: &mut NodeData) {
 
             attr_label(ui, "Enabled", LABEL_WIDTH);
             ui.checkbox(&mut data.enabled, "");
+            ui.end_row();
+
+            // Its own layer (none: its parent's).
+            attr_label(ui, "Layer", LABEL_WIDTH);
+            let current = data
+                .layer
+                .and_then(|l| layers.get(l))
+                .map_or("None", |l| l.name.as_str());
+            egui::ComboBox::from_id_salt("grid4d.attr.layer")
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(data.layer.is_none(), "None").clicked() {
+                        data.layer = None;
+                    }
+                    for (id, layer) in layers.iter() {
+                        if ui.selectable_label(data.layer == Some(id), &layer.name).clicked() {
+                            data.layer = Some(id);
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("The layer this object is on; None: its parent's");
             ui.end_row();
         });
 }

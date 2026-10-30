@@ -91,6 +91,8 @@ pub struct Scene {
     /// The document's materials (here, so evaluation sees changes through the
     /// revision).
     materials: crate::Materials,
+    /// The document's layers (here for the same reason).
+    layers: crate::Layers,
     revision: u64,
 }
 
@@ -102,6 +104,7 @@ impl Default for Scene {
             detached_roots: Vec::new(),
             detached_count: 0,
             materials: crate::Materials::default(),
+            layers: crate::Layers::default(),
             revision: next_revision(),
         }
     }
@@ -129,6 +132,70 @@ impl Scene {
     pub fn materials_mut(&mut self) -> &mut crate::Materials {
         self.touch();
         &mut self.materials
+    }
+
+    /// The document's layers.
+    #[must_use]
+    pub fn layers(&self) -> &crate::Layers {
+        &self.layers
+    }
+
+    /// Write access to the layers (marks the scene as changed).
+    pub fn layers_mut(&mut self) -> &mut crate::Layers {
+        self.touch();
+        &mut self.layers
+    }
+
+    /// The layer an object is on: its own, else the nearest ancestor's (links
+    /// to missing layers count as none).
+    #[must_use]
+    pub fn effective_layer(&self, id: NodeId) -> Option<crate::LayerId> {
+        let mut current = Some(id);
+        while let Some(c) = current {
+            let node = self.get(c)?;
+            if let Some(layer) = node.data.layer.filter(|&l| self.layers.contains(l)) {
+                return Some(layer);
+            }
+            current = node.parent;
+        }
+        None
+    }
+
+    /// The switches of the layer `id` is on (the defaults without one).
+    #[must_use]
+    pub fn layer_switches(&self, id: NodeId) -> crate::LayerSwitches {
+        if self.layers.is_empty() {
+            return crate::LayerSwitches::default();
+        }
+        self.layers.switches(self.effective_layer(id))
+    }
+
+    /// Whether `id` follows its animation (its layer's Animation switch).
+    #[must_use]
+    pub fn animates(&self, id: NodeId) -> bool {
+        self.layers.all_animate() || self.layer_switches(id).animation
+    }
+
+    /// Whether `id` is on a locked layer (not pickable or movable in the views).
+    #[must_use]
+    pub fn is_locked(&self, id: NodeId) -> bool {
+        self.layer_switches(id).locked
+    }
+
+    /// What the views may not change of `id`: its Protection tag's channels,
+    /// every channel on a locked layer.
+    #[must_use]
+    pub fn protection(&self, id: NodeId) -> crate::Protection {
+        if self.is_locked(id) {
+            return crate::Protection {
+                position: true,
+                scale: true,
+                rotation: true,
+            };
+        }
+        self.get(id).map_or_else(crate::Protection::default, |n| {
+            crate::Tags::protection(n.data.tags.as_slice())
+        })
     }
 
     /// The material an object shows: its own Material tag's, else the nearest
@@ -421,7 +488,13 @@ impl Scene {
         let mut current = Some(id);
         while let Some(c) = current {
             let Some(node) = self.get(c) else { break };
-            m = node.data.transform_at(frame).matrix() * m;
+            // A layer with Animation off shows its objects unanimated.
+            let local = if self.animates(c) {
+                node.data.transform_at(frame)
+            } else {
+                node.data.transform
+            };
+            m = local.matrix() * m;
             current = node.parent;
         }
         m

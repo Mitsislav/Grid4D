@@ -738,6 +738,9 @@ pub struct EditorState {
     pub show_preferences: bool,
     /// Recovery copies of unsaved work, and one offered after a crash.
     pub autosave: crate::autosave::Autosave,
+    /// An object being dragged from the Object Manager (other panels may take
+    /// it: the Layer Manager).
+    pub object_drag: Option<NodeId>,
 }
 
 impl EditorState {
@@ -791,6 +794,7 @@ impl Default for EditorState {
             preferences: crate::preferences::Preferences::default(),
             show_preferences: false,
             autosave: crate::autosave::Autosave::default(),
+            object_drag: None,
         }
     }
 }

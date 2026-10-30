@@ -5,7 +5,7 @@
 
 use std::{collections::HashMap, fs, path::Path};
 
-use grid4d_scene::{Document, MaterialId, Materials, Node, NodeData, NodeId, ObjectKind, Tag};
+use grid4d_scene::{Document, Layers, MaterialId, Materials, Node, NodeData, NodeId, ObjectKind, Tag};
 
 use crate::{IoError, OPEN_EXTENSIONS, gltf_export, gltf_import, load, obj};
 
@@ -22,6 +22,8 @@ pub struct Objects {
     /// The materials the nodes' Material tags refer to (their ids are this
     /// table's, not a document's).
     pub materials: Materials,
+    /// The layers the nodes are on (their ids are this table's).
+    pub layers: Layers,
     /// For objects taken from a document: each node's id there (parallel to
     /// `nodes`), so object references in tags can be carried over. Empty
     /// otherwise.
@@ -59,6 +61,7 @@ impl Objects {
         Self {
             nodes,
             materials: doc.scene.materials().clone(),
+            layers: doc.scene.layers().clone(),
             sources,
         }
     }
@@ -69,6 +72,7 @@ impl Objects {
         let mut doc = Document::new(name);
         // A new document: the table moves over with its ids, so tags stay valid.
         *doc.scene.materials_mut() = self.materials;
+        *doc.scene.layers_mut() = self.layers;
         let mut ids: Vec<NodeId> = Vec::with_capacity(self.nodes.len());
         for node in self.nodes {
             let parent = node.parent.and_then(|p| ids.get(p).copied());

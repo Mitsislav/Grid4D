@@ -443,12 +443,32 @@ pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, v
             Err(err) => return failed(editor, err.to_string()),
         }
     }
+    // Its layers too (a copy of each); its objects go on the copies.
+    let mut layer_of: HashMap<grid4d_scene::LayerId, grid4d_scene::LayerId> = HashMap::new();
+    if !imported.layers.is_empty() {
+        let mut layers = doc.scene.layers().clone();
+        for (old, layer) in imported.layers.iter() {
+            let mut layer = layer.clone();
+            layer.name = layers.unique_name(&layer.name);
+            layer_of.insert(old, layers.insert(layer));
+        }
+        match doc.apply(SceneEdit::SetLayers(layers)) {
+            Ok(inverse) => inverses.push(inverse),
+            Err(err) => {
+                for inverse in inverses.into_iter().rev() {
+                    let _ = doc.apply(inverse);
+                }
+                return failed(editor, err.to_string());
+            }
+        }
+    }
     // Object references (Target tags) are resolved once every object has its id.
     let mut later: Vec<(usize, NodeData)> = Vec::new();
     for (index, node) in imported.nodes.into_iter().enumerate() {
         let parent = node.parent.and_then(|p| ids.get(p).copied());
         let mut data = node.data;
         grid4d_io::remap_materials(&mut data, |m| material_of.get(&m).copied());
+        data.layer = data.layer.and_then(|l| layer_of.get(&l).copied());
         let refers = data.tags.iter().any(|t| {
             matches!(
                 t,
@@ -760,6 +780,7 @@ pub fn exportable_at(doc: &Document, simulated: &grid4d_eval::Overrides) -> Obje
     Objects {
         nodes,
         materials: doc.scene.materials().clone(),
+        layers: doc.scene.layers().clone(),
         sources: Vec::new(),
     }
 }
@@ -1464,6 +1485,36 @@ mod tests {
         // A dropped glTF file merges straight away.
         f.run(&[EditorCommand::MergeFile(path)]);
         assert_eq!(names(&f.doc).len(), after.len() + 2);
+    }
+
+    #[test]
+    fn merging_a_document_brings_copies_of_its_layers() {
+        use grid4d_scene::Layer;
+        let mut f = Fixture::new("merge_layers", None, None);
+        let mine = f.doc.scene.layers_mut().insert(Layer::new("Set", [1.0; 3]));
+        let mut other = Document::with_demo_scene();
+        let set = other.scene.layers_mut().insert(Layer::new("Set", [0.0, 0.0, 1.0]));
+        let light = other.scene.iter().find(|(_, n)| n.data.name == "Light").unwrap().0;
+        other.scene.get_mut(light).unwrap().data.layer = Some(set);
+        let path = f.dir.join("layered.g4d");
+        grid4d_io::save(&other, &path).unwrap();
+        f.run(&[EditorCommand::MergeFile(path)]);
+
+        let layers = f.doc.scene.layers();
+        assert_eq!(layers.len(), 2);
+        let (copy, layer) = layers.iter().find(|&(id, _)| id != mine).unwrap();
+        assert_eq!((layer.name.as_str(), layer.color), ("Set.1", [0.0, 0.0, 1.0]));
+        let merged_light = f
+            .editor
+            .selection
+            .as_slice()
+            .iter()
+            .copied()
+            .find(|&id| f.doc.scene.get(id).unwrap().data.name == "Light")
+            .unwrap();
+        assert_eq!(f.doc.scene.get(merged_light).unwrap().data.layer, Some(copy));
+        f.run(&[EditorCommand::Undo]);
+        assert_eq!(f.doc.scene.layers().ids(), &[mine], "undo takes the copies back");
     }
 
     #[test]
