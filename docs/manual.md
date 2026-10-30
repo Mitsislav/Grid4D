@@ -423,13 +423,15 @@ makes a surface glow whatever the light.
 ### 4.2 Plugins
 
 Plugins add kinds of objects that Grid4D does not have itself. **Create ▸
-Plugins** lists the plugins of this Grid4D; hover one to see what it makes,
-click it to create one (at the top of the Object Manager, selected). Grid4D
-comes with one plugin as an example:
+Plugins** lists the plugins of this Grid4D — objects first, then, after a
+line, deformers; hover one to see what it does, click it to create one (at
+the top of the Object Manager, selected). Grid4D comes with two plugins as
+examples:
 
 | Plugin | Parameters (Attribute Manager ▸ Object) |
 |--------|-------------------------------------------|
-| Gear | Teeth, Radius (to the tips), Tooth Depth, Tooth Width (share of the space between teeth), Thickness, Hole Radius (0: no hole) |
+| Gear (an object) | Teeth, Radius (to the tips), Tooth Depth, Tooth Width (share of the space between teeth), Thickness, Hole Radius (0: no hole) |
+| Wave (a deformer) | Size (its box), Amplitude (how far points move up and down), Wavelength (crest to crest), Phase (shifts the wave along), Direction (Along X, Along Z or Radial), Within Box (only points inside the box move) |
 
 ![A Gear made from Create ▸ Plugins, its parameters on the Object tab](images/manual/plugin-gear.png)
 
@@ -437,6 +439,22 @@ A plugin's object works like any other: move and scale it, give it a
 material, put it on a layer, bend it with a deformer, change its parameters
 in a take, render and export it; **Make Editable** (C) turns it into a
 polygon object.
+
+**A plugin deformer** works like the built-in ones (see [Deformers](#14-deformers)): it
+reshapes the object it is under and everything below that object. Hold
+**Shift** while you choose it in Create ▸ Plugins to put it under the
+selected object with its box fitted around it; **Fit to Parent** on its
+Object tab does the same later. Its box is drawn in the views, and the Wave's
+orange handle above the box sets its Amplitude: drag it up and down (Shift:
+whole centimetres).
+
+![A Wave deformer under a plane: the ripples, its box and handle, and its parameters with their key buttons](images/manual/plugin-wave.png)
+
+**Animating plugin parameters:** every number of a plugin (not the choices,
+check boxes or vectors) has a key button on the Object tab, and records keys
+with Autokeying like any parameter. Its curve appears in the F-Curve editor
+under the plugin's name for it. Key the Wave's Phase from 0° to −360° over a
+second or two, and the ripples run outwards.
 
 **If a document uses a plugin this Grid4D does not have**, it still opens:
 the object keeps its place and its values but shows nothing, and its Object

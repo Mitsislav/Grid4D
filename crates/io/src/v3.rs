@@ -543,7 +543,7 @@ struct TrackDto {
     keys: Vec<KeyDto>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ParamDto {
     PositionX,
@@ -599,8 +599,38 @@ enum ParamDto {
     Strength,
     Amount,
     Curvature,
+    /// A plugin object's number, by its name (added in step 13.2):
+    /// `{"plugin": "Phase"}`.
+    Plugin(String),
 }
 
+impl ParamDto {
+    /// `param` of an object of `kind` (a plugin's number by its name).
+    fn new(param: Param, kind: &ObjectKind) -> Self {
+        match param {
+            Param::Object(p @ ObjectParam::Plugin(_)) => Self::Plugin(kind.param_label(p).to_owned()),
+            _ => param.into(),
+        }
+    }
+
+    /// The parameter of an object of `kind` this names; `None` for a plugin's
+    /// number the object has no value of.
+    fn into_param(self, kind: &ObjectKind) -> Option<Param> {
+        let Self::Plugin(name) = self else {
+            return Some(self.into());
+        };
+        let ObjectKind::Plugin(object) = kind else {
+            return None;
+        };
+        let index = object.values.iter().position(|(n, _)| *n == name)?;
+        u8::try_from(index)
+            .ok()
+            .filter(|&i| usize::from(i) < ObjectParam::PLUGIN_PARAMS)
+            .map(|i| Param::Object(ObjectParam::Plugin(i)))
+    }
+}
+
+/// A built-in parameter (a plugin's needs its object: [`ParamDto::new`]).
 impl From<Param> for ParamDto {
     fn from(param: Param) -> Self {
         match param {
@@ -655,10 +685,13 @@ impl From<Param> for ParamDto {
             Param::Object(ObjectParam::Strength) => Self::Strength,
             Param::Object(ObjectParam::Amount) => Self::Amount,
             Param::Object(ObjectParam::Curvature) => Self::Curvature,
+            // Named by `ParamDto::new`, which has the object.
+            Param::Object(ObjectParam::Plugin(_)) => Self::Plugin(String::new()),
         }
     }
 }
 
+/// A built-in parameter (a plugin's needs its object: [`ParamDto::into_param`]).
 impl From<ParamDto> for Param {
     fn from(param: ParamDto) -> Self {
         match param {
@@ -713,6 +746,8 @@ impl From<ParamDto> for Param {
             ParamDto::Strength => Self::Object(ObjectParam::Strength),
             ParamDto::Amount => Self::Object(ObjectParam::Amount),
             ParamDto::Curvature => Self::Object(ObjectParam::Curvature),
+            // Resolved by `ParamDto::into_param`; never reached from there.
+            ParamDto::Plugin(_) => Self::Object(ObjectParam::Plugin(u8::MAX)),
         }
     }
 }
@@ -755,9 +790,9 @@ struct TangentsDto {
 }
 
 impl TrackDto {
-    fn new(track: &Track) -> Self {
+    fn new(track: &Track, kind: &ObjectKind) -> Self {
         Self {
-            param: track.param.into(),
+            param: ParamDto::new(track.param, kind),
             keys: track
                 .curve
                 .keys()
@@ -779,9 +814,11 @@ impl TrackDto {
         }
     }
 
-    fn into_track(self) -> Track {
-        Track {
-            param: self.param.into(),
+    /// The track of an object of `kind`; `None` if it names a plugin value
+    /// the object does not have.
+    fn into_track(self, kind: &ObjectKind) -> Option<Track> {
+        Some(Track {
+            param: self.param.into_param(kind)?,
             curve: Curve::from_keys(self.keys.into_iter().map(|key| Key {
                 frame: key.frame,
                 value: key.value,
@@ -795,7 +832,7 @@ impl TrackDto {
                     right: (t.right.0.max(0.0), t.right.1),
                 }),
             })),
-        }
+        })
     }
 
     /// `true` if every frame, value and tangent is a finite number.
@@ -3064,7 +3101,7 @@ impl ObjectDto {
             visible_in_render: data.visible_in_render,
             enabled: data.enabled,
             tags: data.tags.iter().map(|tag| TagDto::new(tag, refs)).collect(),
-            tracks: data.tracks.iter().map(TrackDto::new).collect(),
+            tracks: data.tracks.iter().map(|t| TrackDto::new(t, &data.kind)).collect(),
             layer: data.layer.and_then(|l| refs.layers.get(&l).copied()),
         }
     }
@@ -3073,6 +3110,14 @@ impl ObjectDto {
     /// objects by index (they are resolved once every object exists).
     fn into_data(self, meshes: &[MeshHandle]) -> Result<(NodeData, Vec<TagDto>), IoError> {
         let kind = self.kind.into_kind(meshes, &self.name)?;
+        // One track per parameter: a later one replaces an earlier one.
+        let tracks = self.tracks.into_iter().fold(Vec::new(), |mut tracks: Vec<Track>, dto| {
+            if let Some(track) = dto.into_track(&kind) {
+                tracks.retain(|t| t.param != track.param);
+                tracks.push(track);
+            }
+            tracks
+        });
         Ok(NodeData {
             name: self.name,
             kind,
@@ -3086,13 +3131,7 @@ impl ObjectDto {
             visible_in_render: self.visible_in_render,
             enabled: self.enabled,
             tags: Vec::new(),
-            // One track per parameter: a later one replaces an earlier one.
-            tracks: self.tracks.into_iter().fold(Vec::new(), |mut tracks: Vec<Track>, dto| {
-                let track = dto.into_track();
-                tracks.retain(|t| t.param != track.param);
-                tracks.push(track);
-                tracks
-            }),
+            tracks,
             unkeyed: None,
             layer: None,
         })
@@ -4387,13 +4426,22 @@ mod tests {
         gear.set("Mode", PluginValue::Choice(2));
         gear.set("Axis", PluginValue::Vector(Vec3::new(0.0, 1.0, 0.0)));
         gear.set("Tint", PluginValue::Color([1.0, 0.5, 0.0]));
-        doc.scene.insert(Node::new("Gear", ObjectKind::Plugin(gear.clone())));
+        let mut node = Node::new("Gear", ObjectKind::Plugin(gear.clone()));
+        // Its Radius (the second value) keyed: saved by name.
+        let radius = Track {
+            param: Param::Object(ObjectParam::Plugin(1)),
+            curve: Curve::from_keys([Key::new(0.0, 80.0), Key::new(10.0, 120.0)]),
+        };
+        node.data.tracks.push(radius.clone());
+        doc.scene.insert(node);
         let loaded = round_trip(&doc);
         let (_, node) = loaded.scene.iter().next().unwrap();
         assert_eq!(node.data.kind, ObjectKind::Plugin(gear), "type and values, in order");
+        assert_eq!(node.data.tracks, [radius], "the keyed value found by its name");
         let json = document_json(&doc);
         assert!(json.contains("\"plugin\": \"grid4d.gear\""), "{json}");
         assert!(json.contains("\"int\": 20"), "{json}");
+        assert!(json.contains("\"plugin\": \"Radius\""), "{json}");
 
         let mut broken = Document::new("broken");
         let mut bad = PluginObject::new("grid4d.gear");

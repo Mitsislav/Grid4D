@@ -101,5 +101,5 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 12.4 | [`manager-layer.md`](manager-layer.md) — layers and their switches, the Layer Manager | implemented 2026-10-30 |
 | 12.5 | [`manager-take.md`](manager-take.md) — takes, overrides, Auto Take, rendering a take | implemented 2026-10-30 |
 | 12.6 | [`workspace-language.md`](workspace-language.md) — the interface's languages, Greek | implemented 2026-10-30 |
-| 13.1–13.3 | [`extend-plugins.md`](extend-plugins.md) — plugin generators, deformers and commands; parameters; missing plugins | 13.1 implemented 2026-10-30 |
+| 13.1–13.3 | [`extend-plugins.md`](extend-plugins.md) — plugin generators, deformers and commands; parameters; missing plugins | 13.1–13.2 implemented 2026-10-30 |
 | 13.4–13.5 | `extend-scripting.md` — scripts, the document API, the Script Manager | todo |

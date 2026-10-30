@@ -117,17 +117,39 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 }
             });
             ui.menu_button(tr("Plugins"), |ui| {
+                let registry = grid4d_plugin::registry();
                 let mut any = false;
-                for plugin in grid4d_plugin::registry().generators() {
+                for plugin in registry.generators() {
                     any = true;
                     if ui
                         .button(tr(plugin.name()))
                         .on_hover_text(tr(plugin.description()))
                         .clicked()
                     {
-                        editor
-                            .commands
-                            .push(EditorCommand::CreatePlugin(plugin.type_id().to_owned()));
+                        editor.commands.push(EditorCommand::CreatePlugin {
+                            type_id: plugin.type_id().to_owned(),
+                            child: false,
+                        });
+                        ui.close();
+                    }
+                }
+                // Deformers after a line; Shift puts one under the selection.
+                for (i, plugin) in registry.deformers().enumerate() {
+                    if any && i == 0 {
+                        ui.separator();
+                    }
+                    any = true;
+                    let tip = format!(
+                        "{}\n{}",
+                        tr(plugin.description()),
+                        tr("Shift + click: under the selected object, fitted to it")
+                    );
+                    if ui.button(tr(plugin.name())).on_hover_text(tip).clicked() {
+                        let child = ui.input(|i| i.modifiers.shift);
+                        editor.commands.push(EditorCommand::CreatePlugin {
+                            type_id: plugin.type_id().to_owned(),
+                            child,
+                        });
                         ui.close();
                     }
                 }

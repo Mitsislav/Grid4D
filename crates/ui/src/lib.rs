@@ -58,6 +58,7 @@ pub(crate) fn test_plugins() {
     ONCE.call_once(|| {
         let mut registry = grid4d_plugin::Registry::default();
         registry.add_generator(grid4d_plugin_gear::Gear);
+        registry.add_deformer(grid4d_plugin_wave::Wave);
         grid4d_plugin::install(registry);
     });
 }

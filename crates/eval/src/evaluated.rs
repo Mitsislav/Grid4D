@@ -391,7 +391,7 @@ impl EvaluatedScene {
                     splines.insert(id, (lattice.clone(), components.clone()));
                     deform::Deformer::of(&kind).map(CurveSource::Deformer)
                 }
-                kind if kind.is_deformer() => deform::Deformer::of(kind).map(CurveSource::Deformer),
+                kind if deform::is_deformer(kind) => deform::Deformer::of(kind).map(CurveSource::Deformer),
                 ObjectKind::PlainEffector(effector) | ObjectKind::RandomEffector(effector) => {
                     Some(CurveSource::Effector(*effector))
                 }
@@ -428,7 +428,7 @@ impl EvaluatedScene {
                 });
                 curves.insert(handle.id(), handle);
             }
-            let mut bounds = if kind.is_spline() || kind.is_deformer() || kind.is_effector() {
+            let mut bounds = if kind.is_spline() || deform::is_deformer(&kind) || kind.is_effector() {
                 bounds_of_curve
             } else {
                 kind.local_bounds()
@@ -528,7 +528,7 @@ impl EvaluatedScene {
                 // Shown by the clones: a child of the Cloner with everything
                 // below it (deformers have done their work; light and camera
                 // markers are not cloned).
-                if !kind.is_deformer() && !kind.is_effector() {
+                if !deform::is_deformer(&kind) && !kind.is_effector() {
                     sources.push(Source {
                         cloner,
                         top: depth == cloner_depth + 1,
@@ -1163,7 +1163,9 @@ fn curve_of(kind: &ObjectKind) -> Polyline {
     match kind {
         ObjectKind::SplinePrimitive(primitive) => primitive.polyline(),
         ObjectKind::Text(text) => grid4d_text::text_spline(text).sample(text.interpolation),
-        kind if kind.is_deformer() => deform::Deformer::of(kind).map_or_else(Polyline::default, |d| d.box_lines()),
+        kind if deform::is_deformer(kind) => {
+            deform::Deformer::of(kind).map_or_else(Polyline::default, |d| d.box_lines())
+        }
         ObjectKind::PlainEffector(effector) | ObjectKind::RandomEffector(effector) => effector.lines(),
         ObjectKind::Spline {
             spline, interpolation, ..
@@ -2334,6 +2336,7 @@ mod tests {
         ONCE.call_once(|| {
             let mut registry = grid4d_plugin::Registry::default();
             registry.add_generator(grid4d_plugin_gear::Gear);
+            registry.add_deformer(grid4d_plugin_wave::Wave);
             grid4d_plugin::install(registry);
         });
     }
@@ -2384,6 +2387,73 @@ mod tests {
         assert!(node(&eval, missing).drawable.is_none());
         assert_eq!(node(&eval, missing).pick, PickShape::None);
         assert!(node(&eval, child).drawable.is_some());
+    }
+
+    #[test]
+    fn a_wave_plugin_ripples_its_parent_and_follows_its_keys() {
+        use grid4d_scene::{Interpolation, Key, ObjectParam, Param, PluginValue, Track};
+        plugins();
+        let wave = grid4d_plugin::registry().deformer("grid4d.wave").unwrap();
+        let mut doc = Document::new("wave");
+        let plane = doc.scene.insert(Node::new(
+            "Plane",
+            ObjectKind::Plane {
+                width: 200.0,
+                depth: 200.0,
+                width_segments: 40,
+                depth_segments: 1,
+            },
+        ));
+        let mut object = grid4d_plugin::Registry::new_object(wave);
+        object.set("Amplitude", PluginValue::Float(10.0));
+        let phase = object.values.iter().position(|(n, _)| n == "Phase").unwrap();
+        let mut node_data = Node::new("Wave", ObjectKind::Plugin(object));
+        // Phase keyed from 0 to a quarter turn over ten frames.
+        node_data.data.tracks.push(Track {
+            param: Param::Object(ObjectParam::Plugin(u8::try_from(phase).unwrap())),
+            curve: grid4d_scene::Curve::from_keys([(0.0, 0.0), (10.0, std::f32::consts::FRAC_PI_2)].into_iter().map(
+                |(f, v)| Key {
+                    interpolation: Interpolation::Linear,
+                    ..Key::new(f, v)
+                },
+            )),
+        });
+        let deformer = doc.scene.insert_child(plane, node_data).unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+
+        // At frame 0 the centre stays put and points a quarter wavelength along rise.
+        let height_at = |eval: &EvaluatedScene, x: f32| {
+            let mesh = eval.deformed(plane).unwrap().mesh().clone();
+            mesh.points()
+                .iter()
+                .find(|p| (p.x - x).abs() < 1e-3)
+                .map(|p| p.y)
+                .unwrap()
+        };
+        assert!(height_at(&eval, 0.0).abs() < 1e-3);
+        assert!((height_at(&eval, 25.0) - 10.0).abs() < 1e-3);
+        let box_node = node(&eval, deformer);
+        assert!(
+            matches!(box_node.pick, PickShape::Curve(_)),
+            "its box, picked like a spline"
+        );
+        assert!(box_node.drawable.is_some_and(|d| d.unlit));
+        assert!(crate::is_deformer(&doc.scene.get(deformer).unwrap().data.kind));
+
+        // Frame 10: the wave has travelled a quarter wavelength.
+        eval.set_frame(10.0);
+        eval.update(&doc.scene);
+        assert!((height_at(&eval, 0.0) - 10.0).abs() < 1e-3, "keys move it");
+
+        // Switched off: the plane is a plane again.
+        doc.scene.get_mut(deformer).unwrap().data.enabled = false;
+        eval.update(&doc.scene);
+        assert!(eval.deformed(plane).is_none());
+        assert!(matches!(
+            node(&eval, plane).drawable.unwrap().key,
+            MeshKey::Plane { .. }
+        ));
     }
 
     #[test]

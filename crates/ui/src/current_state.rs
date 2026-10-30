@@ -56,7 +56,7 @@ pub(crate) fn bake(doc: &Document, selection: &[NodeId], simulated: &Overrides) 
                 continue;
             };
             // Deformers live on in the shapes; consumed inputs in the result.
-            if original.data.kind.is_deformer() || (at > 0 && consumed(&doc.scene, node.id)) {
+            if grid4d_eval::is_deformer(&original.data.kind) || (at > 0 && consumed(&doc.scene, node.id)) {
                 skip_below = Some(node.depth);
                 continue;
             }

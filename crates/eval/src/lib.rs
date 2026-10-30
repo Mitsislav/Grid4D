@@ -30,6 +30,7 @@ mod key;
 mod overrides;
 
 pub use curve::{CurveHandle, CurveId};
+pub use deform::is_deformer;
 pub use drawable::{Drawable, Shading, Surface, drawable, editable_mesh};
 pub use evaluated::{EvaluatedInstance, EvaluatedLight, EvaluatedNode, EvaluatedScene, PickShape, Purpose};
 pub use generator::{generator_color, generator_mesh};

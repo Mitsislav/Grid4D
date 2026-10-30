@@ -170,6 +170,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("All", "Όλα"),
     ("All Frames", "Όλα τα καρέ"),
     ("All Views", "Όλες οι προβολές"),
+    ("Along X", "Κατά μήκος του X"),
+    ("Along Z", "Κατά μήκος του Z"),
     ("Alpha Channel", "Κανάλι άλφα"),
     (
         "Alt + click: around the selected object",
@@ -183,6 +185,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Ambient occlusion: darkens corners, creases and contact areas",
         "Απόκρυψη περιβάλλοντος: σκουραίνει γωνίες, πτυχές και σημεία επαφής",
     ),
+    ("Amplitude", "Πλάτος κύματος"),
     ("Angle", "Γωνία"),
     ("Angle Limit", "Όριο γωνίας"),
     ("Angular Damping", "Γωνιακή απόσβεση"),
@@ -637,6 +640,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Hover an edge to see the loop, click to cut it",
         "Περάστε πάνω από μια ακμή για να δείτε τον βρόχο, κλικ για να τον κόψετε",
     ),
+    ("How far points move up and down", "Πόσο ανεβοκατεβαίνουν τα σημεία"),
     ("How far the teeth stand out", "Πόσο προεξέχουν τα δόντια"),
     (
         "How frame numbers join the file names of an animation",
@@ -964,6 +968,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Μπορούν να αφεθούν μόνο έγγραφα Grid4D (.g4d) και μοντέλα (.gltf, .glb, .obj)",
     ),
     ("Only Select Visible Elements", "Επιλογή μόνο ορατών στοιχείων"),
+    (
+        "Only points inside the box move",
+        "Κινούνται μόνο τα σημεία μέσα στο κουτί",
+    ),
     ("Open", "Άνοιγμα"),
     ("Open Recent", "Άνοιγμα πρόσφατου"),
     ("OpenEXR (16-bit float)", "OpenEXR (16-bit float)"),
@@ -1011,6 +1019,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Perspective", "Προοπτική"),
     ("Petals", "Πέταλα"),
+    ("Phase", "Φάση"),
     ("Phong", "Phong"),
     ("Phong Angle", "Γωνία Phong"),
     ("Picture Viewer", "Προβολή Εικόνων"),
@@ -1032,6 +1041,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Play Forwards", "Αναπαραγωγή"),
     ("Play Forwards (F8)", "Αναπαραγωγή (F8)"),
     ("Plugin", "Plugin"),
+    ("Plugin Parameter", "Παράμετρος plugin"),
     ("Plugins", "Plugins"),
     ("Points", "Σημεία"),
     (
@@ -1096,6 +1106,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Quick Shading", "Γρήγορη σκίαση"),
     ("Quick Shading (Lines)", "Γρήγορη σκίαση (γραμμές)"),
     ("Quit", "Έξοδος"),
+    ("Radial", "Ακτινικά"),
     ("Radial Bias", "Ακτινική μεροληψία"),
     ("Radius", "Ακτίνα"),
     ("Radius Y", "Ακτίνα Y"),
@@ -1197,6 +1208,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Reset Layout", "Επαναφορά διάταξης"),
     ("Reset Transform", "Επαναφορά μετασχηματισμού"),
     ("Reset View", "Επαναφορά προβολής"),
+    (
+        "Reshapes its parent's subtree",
+        "Παραμορφώνει το υποδέντρο του γονέα του",
+    ),
     ("Reverse", "Αντιστροφή"),
     ("Reverse Normals", "Αντιστροφή κανονικών"),
     ("Reverse Sequence", "Αντίστροφη σειρά"),
@@ -1214,6 +1229,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Ring Selection: click to select the highlighted ring · Shift adds · Ctrl removes",
         "Επιλογή δακτυλίου: κλικ για επιλογή του τονισμένου δακτυλίου · Shift προσθέτει · Ctrl αφαιρεί",
+    ),
+    (
+        "Ripples the object it is under along a wave",
+        "Κυματίζει το αντικείμενο κάτω από το οποίο βρίσκεται",
     ),
     ("Rotate", "Περιστροφή"),
     ("Rotate (R)", "Περιστροφή (R)"),
@@ -1346,6 +1365,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Shift + click: under the selected object, fitted to it",
         "Shift + κλικ: κάτω από το επιλεγμένο αντικείμενο, προσαρμοσμένο σε αυτό",
     ),
+    (
+        "Shifts the wave along; key it to make the wave travel",
+        "Μετατοπίζει το κύμα· βάλτε της κλειδιά για να ταξιδεύει",
+    ),
     ("Show it alone / back in the arrangement", "Μόνη της / πίσω στη διάταξη"),
     ("Shrink Selection", "Συρρίκνωση επιλογής"),
     ("Sides", "Πλευρές"),
@@ -1442,6 +1465,11 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "The camera renders of this take look through",
         "Η κάμερα μέσα από την οποία βλέπουν οι αποδόσεις αυτής της λήψης",
+    ),
+    ("The deformer's box", "Το κουτί του παραμορφωτή"),
+    (
+        "The distance from one crest to the next",
+        "Η απόσταση από τη μία κορυφή στην επόμενη",
     ),
     ("The file contains no objects.", "Το αρχείο δεν περιέχει αντικείμενα."),
     (
@@ -1605,7 +1633,9 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Visible Only", "Μόνο ορατά"),
     ("Visible in Editor", "Ορατό στην επεξεργασία"),
     ("Visible in Renderer", "Ορατό στην απόδοση"),
+    ("Wave", "Κύμα"),
     ("Wavefront OBJ (.obj + .mtl)", "Wavefront OBJ (.obj + .mtl)"),
+    ("Wavelength", "Μήκος κύματος"),
     ("Weld", "Συγκόλληση"),
     (
         "Weld: click a selected point to weld onto it, or anywhere else to weld at the centre",
@@ -1615,6 +1645,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Weld: select points, then click one of them (or anywhere else for their centre)",
         "Συγκόλληση: επιλέξτε σημεία, μετά κλικ σε ένα από αυτά (ή οπουδήποτε αλλού για το κέντρο τους)",
     ),
+    ("Which way the wave runs", "Προς τα πού τρέχει το κύμα"),
     ("Width", "Πλάτος"),
     ("Width Segments", "Τμήματα πλάτους"),
     ("Window", "Παράθυρο"),

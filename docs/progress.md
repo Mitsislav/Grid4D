@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 13 — Extensibility (v0.13) |
-| Last step done | 13.1 — Plugin API and generator plugins (2026-10-30) |
-| Next step | 13.2 — Deformer plugins and animated plugin parameters |
-| Tests | 726, all passing; clippy and rustfmt clean |
+| Last step done | 13.2 — Deformer plugins and animated plugin parameters (2026-10-30) |
+| Next step | 13.3 — Command plugins |
+| Tests | 732, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1833,6 +1833,7 @@ the interface in Greek.
 |------|----------------|-------|
 | — | Phase 13 planned in detail: plugins as Rust crates built in and registered from a list (`grid4d-plugin`: parameter schema, generator, deformer and command traits; `ObjectKind::Plugin`; missing plugins kept), scripting in Rhai through `SceneEdit`s (one undo step per run, an operations limit), the Script Manager, SDK documentation (`IMPLEMENTATION_PLAN.md`) | 716 |
 | 13.1 | Plugins: the `grid4d-plugin` API (parameter descriptions, generator plugins, the registry), plugin objects in documents (kept when their plugin is missing), Create ▸ Plugins, parameters in the Attribute Manager, the example Gear | 726 |
+| 13.2 | Deformer plugins (in the deformer chain, their box, a handle, Shift-create under the selection, Fit to Parent) and keyed plugin numbers (key buttons, F-Curves, files, takes); the example Wave | 732 |
 
 **Planning notes:**
 - **Why plugins are built in.** Loading plugin libraries at run time would
@@ -1885,6 +1886,38 @@ test makes fifty at once.
   hole and twelve teeth, titled "Gear Object", its parameters in centimetres
   and percent; a document naming a plugin Grid4D lacks opened with the
   object's values listed under "Missing Plugin".
+
+**13.2 — Deformer plugins and animated plugin parameters**
+
+*Problems and solutions:*
+- **A deformer the scene cannot recognise.** `ObjectKind::is_deformer` lives
+  in `grid4d-scene`, which knows nothing of plugins, so evaluation and the
+  interface ask `grid4d_eval::is_deformer` (built-in or an installed
+  deformer plugin) wherever deformers are treated apart: the box curve,
+  bounds, cloned sources, Current State to Object and the handle.
+- **One value lookup per point.** A plugin reads its values by name; doing
+  that for every point would cost a search per point. `deform` takes the
+  whole list of points, and the chain now runs link by link over all the
+  points (the same result as point by point through every link).
+- **Animating values the scene does not describe.** `ObjectParam::Plugin(i)`
+  names a value by its place in the object's list, so the scene reads and
+  writes it with no plugin knowledge; labels come from the value's name
+  (`ObjectKind::param_label`) and units from the plugin's description where
+  the interface shows them. Files keep tracks by name and find the place
+  again when loading. `ParamSet` holds 128 bits: values past the first 64
+  are not keyed, and its bit is now checked so that no index can overflow.
+- **`impl dyn DeformerPlugin`** means `+ 'static`; the registry hands out
+  borrowed plugins, so the helpers are on `dyn DeformerPlugin + '_`.
+- **Translations:** the Wave's directions were in a constant the
+  translation scanner does not read; they are written in the `Choice(&[…])`
+  itself, as the scanner expects.
+- **On screen:** the Object tab's title said "Plugin Object" for the Wave
+  (the name was looked up among generators only); it now says "Wave Object".
+- **On-screen testing:** a plane with a Wave under it (Radial, Phase keyed)
+  showed the ripples, the wavy box and the handle; the Object tab showed
+  key buttons on the numbers (Phase keyed), the F-Curve editor a "Phase"
+  track; Create ▸ Plugins listed Gear, a line, Wave. Shift + click and the
+  handle drag cannot be posted to the window; tests cover them.
 
 ---
 

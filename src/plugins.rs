@@ -8,6 +8,7 @@ use grid4d_plugin::Registry;
 pub fn registry() -> Registry {
     let mut registry = Registry::default();
     registry.add_generator(grid4d_plugin_gear::Gear);
+    registry.add_deformer(grid4d_plugin_wave::Wave);
     registry
 }
 
@@ -17,5 +18,6 @@ mod tests {
     fn the_built_in_plugins_are_listed() {
         let registry = super::registry();
         assert!(registry.generator("grid4d.gear").is_some());
+        assert!(registry.deformer("grid4d.wave").is_some());
     }
 }

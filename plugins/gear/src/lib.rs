@@ -6,7 +6,7 @@ use std::f32::consts::TAU;
 
 use glam::Vec3;
 use grid4d_geom::PolyMesh;
-use grid4d_plugin::{GeneratorPlugin, ParamKind, ParamSpec, Unit, Values};
+use grid4d_plugin::{GeneratorPlugin, ParamKind, ParamSpec, Plugin, Unit, Values};
 use grid4d_scene::PluginValue;
 
 /// The gear generator.
@@ -72,7 +72,7 @@ const PARAMS: &[ParamSpec] = &[
     },
 ];
 
-impl GeneratorPlugin for Gear {
+impl Plugin for Gear {
     fn type_id(&self) -> &'static str {
         "grid4d.gear"
     }
@@ -88,7 +88,9 @@ impl GeneratorPlugin for Gear {
     fn params(&self) -> &'static [ParamSpec] {
         PARAMS
     }
+}
 
+impl GeneratorPlugin for Gear {
     fn build(&self, values: &Values<'_>) -> PolyMesh {
         let teeth = u32::try_from(values.int("Teeth")).unwrap_or(3).max(3);
         let tip = values.float("Radius");

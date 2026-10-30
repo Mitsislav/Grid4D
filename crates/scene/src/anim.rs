@@ -464,17 +464,24 @@ impl Tracks for [Track] {
 pub struct ParamSet(u128);
 
 impl ParamSet {
+    /// `param`'s bit (none past the 128 a set holds: plugins' values beyond
+    /// [`ObjectParam::PLUGIN_PARAMS`] are never animated).
+    const fn bit(param: Param) -> u128 {
+        let index = param.index();
+        if index < 128 { 1 << index } else { 0 }
+    }
+
     #[must_use]
     pub const fn contains(self, param: Param) -> bool {
-        self.0 & (1 << param.index()) != 0
+        self.0 & Self::bit(param) != 0
     }
 
     pub fn insert(&mut self, param: Param) {
-        self.0 |= 1 << param.index();
+        self.0 |= Self::bit(param);
     }
 
     pub fn remove(&mut self, param: Param) {
-        self.0 &= !(1 << param.index());
+        self.0 &= !Self::bit(param);
     }
 
     #[must_use]
@@ -506,6 +513,15 @@ pub enum KeyState {
 }
 
 impl NodeData {
+    /// `param`'s label for this object (a plugin's values by their names).
+    #[must_use]
+    pub fn param_label(&self, param: Param) -> &str {
+        match param {
+            Param::Object(p) => self.kind.param_label(p),
+            Param::Position(_) | Param::Rotation(_) | Param::Scale(_) => param.label(),
+        }
+    }
+
     /// `param`'s value without animation: in the base transform or the
     /// object's own parameters (0 for a parameter it does not have).
     #[must_use]

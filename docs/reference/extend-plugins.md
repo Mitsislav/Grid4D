@@ -44,6 +44,35 @@ without changing its core, so they look and behave like the built-in ones.
   Teeth, Radius, Tooth Depth, Tooth Width (percent of the pitch), Thickness,
   Hole Radius (0: no hole).
 
+## Behaviour (13.2)
+
+- **Deformer plugins** reshape, like the built-in deformers, the object they
+  are under and its subtree: they take their place in the same chain
+  (deepest first, siblings in order), inside generators' inputs too, and
+  switch off with the object or its layer's Deformers switch. Create ▸
+  Plugins lists them after the generators, below a line; with **Shift** one
+  goes under the active object, its box fitted to it (as Fit to Parent,
+  which their Object tab also has).
+- **Their box** is drawn and picked like a built-in deformer's, deformed by
+  the deformer itself; its size is the plugin's own Size parameter.
+- **A handle**, when the plugin names a parameter for it, sits above the
+  centre of the box's top, as high as the value (a length as it is; a
+  fraction or plain number times half the box's height; 90° at half the
+  box's height). Dragging it up and down sets the value (Shift: 5°, 5 % or
+  whole numbers), one undo step per drag, Esc restores.
+- **A deformer that fails** (points that are not finite numbers) leaves the
+  object as it was; Grid4D writes a warning to its log.
+- **Animated plugin parameters:** every number of a plugin object is keyed
+  like a built-in parameter — key buttons on the Object tab (Autokeying,
+  Record), a curve in the F-Curve editor named by the plugin's name for it
+  and shown in its unit (degrees, percent). Files keep tracks by that name.
+  Choices, check boxes, whole numbers, vectors and colours are not keyed.
+- **Takes** override plugin parameters like any object parameter
+  (Parameters group).
+- **The Wave** (an example deformer): moves points up and down along a sine
+  wave — Size, Amplitude (the handle), Wavelength, Phase, Direction (Along
+  X, Along Z, Radial), Within Box (only points inside the box move).
+
 ## Grid4D mapping
 
 | Piece | Where |
@@ -55,6 +84,12 @@ without changing its core, so they look and behave like the built-in ones.
 | The Object tab from a description; the missing-plugin note; **Create ▸ Plugins**; `EditorCommand::CreatePlugin` | `grid4d-ui` |
 | The registration list | `src/plugins.rs` (the binary) |
 | The Gear | `plugins/gear` (`grid4d-plugin-gear`) |
+| `Plugin` (what every plugin says), `DeformerPlugin` (size and handle parameters, `deform` on points in its space), `Registry::{add_deformer, deformer, plugin, plugins}`; the box, handle and checked deformation | `grid4d-plugin` |
+| `ObjectParam::Plugin(index)` (a plugin object's value by its place, the first 64), `ObjectKind::param_label`, `NodeData::param_label` | `grid4d-scene::param`, `anim` |
+| `Deformer::Plugin` in the chain (whole meshes at once), `is_deformer` | `grid4d-eval::deform` |
+| `ParamDto::Plugin(name)` | `grid4d-io::v3` |
+| The deformer section of Create ▸ Plugins, `CreatePlugin { child }`, Fit to Parent, key buttons, the handle, F-Curve names and units | `grid4d-ui` |
+| The Wave | `plugins/wave` (`grid4d-plugin-wave`) |
 
 ## Decisions (2026-10-30)
 
@@ -64,8 +99,14 @@ without changing its core, so they look and behave like the built-in ones.
    files still load; ranges are applied when values are read.
 3. **Plugin texts** (names, descriptions, parameter names, hints) are English
    keys translated through the interface's table like Grid4D's own.
-4. **Later (13.2–13.3):** deformer and command plugins; animated plugin
-   parameters. Not planned: plugins reading child objects as inputs.
+4. **Deformer plugins move whole lists of points** in their own space, so a
+   plugin reads its values once per object, not once per point.
+5. **Keys follow a value's place** in the object's list (names in files):
+   values are only ever added at the end, so the place never changes.
+6. **Plugin objects share the Generator entry of the views' Filter** (the
+   filter goes by kind of object; a plugin's kind is not known there).
+7. **Later (13.3):** command plugins. Not planned: plugins reading child
+   objects as inputs.
 
 ## Acceptance criteria
 
@@ -74,3 +115,8 @@ without changing its core, so they look and behave like the built-in ones.
 - [x] A document with a plugin Grid4D lacks opens, shows the object as
       missing, and saves back unchanged.
 - [x] A plugin's invalid mesh draws nothing and nothing breaks.
+- [x] The Wave, under a plane, ripples it; its box and handle show; keys on
+      its Phase move the ripples; undo removes it; a take overrides its
+      Amplitude.
+- [x] Plugin numbers have key buttons and F-Curves under their own names;
+      their keys are saved and load back.

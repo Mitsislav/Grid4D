@@ -157,9 +157,13 @@ pub enum EditorCommand {
     },
     /// Selects every object whose own layer is this one.
     SelectLayerObjects(grid4d_scene::LayerId),
-    /// Creates an object of the generator plugin with this type id (Create ▸
-    /// Plugins), at the top level, selected; nothing if it is not installed.
-    CreatePlugin(String),
+    /// Creates an object of the plugin with this type id (Create ▸ Plugins),
+    /// selected; nothing if it is not installed. `child`: a deformer goes
+    /// under the active object, fitted to it (Shift + click).
+    CreatePlugin {
+        type_id: String,
+        child: bool,
+    },
     /// Makes a take active (`None`: Main); the view looks through its camera,
     /// if it has one.
     SwitchTake(Option<grid4d_scene::TakeId>),
@@ -554,16 +558,26 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 }
             });
         }
-        EditorCommand::CreatePlugin(type_id) => {
-            let Some(plugin) = grid4d_plugin::registry().generator(&type_id) else {
+        EditorCommand::CreatePlugin { type_id, child } => {
+            let registry = grid4d_plugin::registry();
+            let Some(plugin) = registry.plugin(&type_id) else {
                 log::warn!("no plugin {type_id} to create");
                 return;
             };
             let kind = ObjectKind::Plugin(grid4d_plugin::Registry::new_object(plugin));
+            let mut data = NodeData::new(doc.scene.unique_name(plugin.name()), kind);
+            // A deformer under the active object, its box around it.
+            let parent = editor
+                .selection
+                .active()
+                .filter(|&id| child && doc.scene.contains(id) && registry.deformer(&type_id).is_some());
+            if let Some(parent) = parent {
+                fit_to_parent(doc, parent, &mut data);
+            }
             let edit = SceneEdit::Insert {
-                parent: None,
+                parent,
                 index: usize::MAX,
-                data: NodeData::new(doc.scene.unique_name(plugin.name()), kind),
+                data,
             };
             commit(doc, editor, key("Create Object"), vec![edit], |inverses, selection| {
                 if let Some(id) = inverses.first().and_then(SceneEdit::node) {
@@ -1871,10 +1885,11 @@ pub fn can_make_editable(doc: &Document, selection: &Selection) -> bool {
 /// `selection` (enables the menu entry): an object other than a deformer.
 #[must_use]
 pub fn can_bake_current_state(doc: &Document, selection: &Selection) -> bool {
-    selection
-        .as_slice()
-        .iter()
-        .any(|&id| doc.scene.get(id).is_some_and(|node| !node.data.kind.is_deformer()))
+    selection.as_slice().iter().any(|&id| {
+        doc.scene
+            .get(id)
+            .is_some_and(|node| !grid4d_eval::is_deformer(&node.data.kind))
+    })
 }
 
 /// Inserts the copies [`crate::current_state::bake`] makes as one undo step and
@@ -2079,6 +2094,18 @@ fn fit_to_parent(doc: &Document, parent: NodeId, data: &mut NodeData) -> bool {
     let Some(bounds) = bounds.filter(|b| !b.is_empty()) else {
         return false;
     };
+    // A deformer plugin's box is the parameter it names.
+    if let ObjectKind::Plugin(object) = &mut data.kind {
+        let Some(plugin) = grid4d_plugin::registry().deformer(&object.type_id) else {
+            return false;
+        };
+        plugin.set_size(object, (bounds.max - bounds.min).max(Vec3::splat(1.0)));
+        data.transform = Transform {
+            position: bounds.center(),
+            ..Transform::IDENTITY
+        };
+        return true;
+    }
     let Some(size) = data.kind.deformer_size_mut() else {
         return false;
     };
@@ -3615,16 +3642,81 @@ mod tests {
     }
 
     #[test]
-    fn a_plugin_object_is_created_undone_and_made_editable() {
+    fn a_deformer_plugin_goes_under_the_selection_fitted_and_a_take_overrides_it() {
+        use grid4d_scene::{ObjectParam, PluginValue};
         crate::test_plugins();
         let (mut doc, mut editor, mut vp) = demo();
-        let before = doc.scene.len();
+        let cube = id_of(&doc, "Cube");
+        editor.selection.set_single(cube);
+        let wave = |type_id: &str, child| EditorCommand::CreatePlugin {
+            type_id: type_id.to_owned(),
+            child,
+        };
+        run(&mut doc, &mut editor, &mut vp, &[wave("grid4d.wave", true)]);
+        let id = editor.selection.active().unwrap();
+        assert_ne!(id, cube);
+        let node = doc.scene.get(id).unwrap();
+        assert_eq!(node.parent(), Some(cube), "Shift: under the selection");
+        let ObjectKind::Plugin(object) = &node.data.kind else {
+            panic!("a plugin object")
+        };
+        let size = doc.scene.get(cube).unwrap().data.kind.local_bounds().unwrap();
+        assert_eq!(
+            object.get("Size"),
+            Some(PluginValue::Vector(size.max - size.min)),
+            "fitted to it"
+        );
+        assert!(
+            !can_bake_current_state(&doc, &editor.selection),
+            "a deformer has no state to copy"
+        );
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert!(!doc.scene.contains(id));
+        // Without Shift, or a generator with it: at the top.
+        editor.selection.set_single(cube);
+        run(&mut doc, &mut editor, &mut vp, &[wave("grid4d.gear", true)]);
+        let gear = editor.selection.active().unwrap();
+        assert_eq!(doc.scene.get(gear).unwrap().parent(), None);
+
+        // A take changes its Amplitude; Main keeps its own.
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        editor.selection.set_single(cube);
+        run(&mut doc, &mut editor, &mut vp, &[wave("grid4d.wave", true)]);
+        let id = editor.selection.active().unwrap();
+        let amplitude = |doc: &Document| match &doc.scene.get(id).unwrap().data.kind {
+            ObjectKind::Plugin(o) => o.get("Amplitude"),
+            _ => None,
+        };
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::NewTake]);
+        let take = doc.takes.ids()[0];
+        let mut data = doc.scene.get(id).unwrap().data.clone();
+        data.kind.set_param(ObjectParam::Plugin(1), 55.0);
         run(
             &mut doc,
             &mut editor,
             &mut vp,
-            &[EditorCommand::CreatePlugin("grid4d.gear".to_owned())],
+            &[EditorCommand::Edit {
+                edit: SceneEdit::SetData { id, data },
+                label: "Amplitude",
+            }],
         );
+        assert_eq!(amplitude(&doc), Some(PluginValue::Float(55.0)));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SwitchTake(None)]);
+        assert_eq!(amplitude(&doc), Some(PluginValue::Float(20.0)), "Main's value");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SwitchTake(Some(take))]);
+        assert_eq!(amplitude(&doc), Some(PluginValue::Float(55.0)), "the take's");
+    }
+
+    #[test]
+    fn a_plugin_object_is_created_undone_and_made_editable() {
+        crate::test_plugins();
+        let (mut doc, mut editor, mut vp) = demo();
+        let before = doc.scene.len();
+        let create = |type_id: &str, child: bool| EditorCommand::CreatePlugin {
+            type_id: type_id.to_owned(),
+            child,
+        };
+        run(&mut doc, &mut editor, &mut vp, &[create("grid4d.gear", false)]);
         let id = editor.selection.active().unwrap();
         let data = &doc.scene.get(id).unwrap().data;
         assert_eq!(data.name, "Gear");
@@ -3636,12 +3728,7 @@ mod tests {
 
         // A plugin that is not installed: nothing happens.
         let steps = editor.history.undo_len();
-        run(
-            &mut doc,
-            &mut editor,
-            &mut vp,
-            &[EditorCommand::CreatePlugin("nobody.nothing".to_owned())],
-        );
+        run(&mut doc, &mut editor, &mut vp, &[create("nobody.nothing", false)]);
         assert_eq!((doc.scene.len(), editor.history.undo_len()), (before + 1, steps));
 
         editor.selection.set_single(id);

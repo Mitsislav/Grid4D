@@ -2,7 +2,8 @@
 //! [`ObjectParam`] names one real-valued parameter of an [`ObjectKind`] by its
 //! meaning, so that tracks and files refer to "the radius" rather than to a
 //! field of one kind. A parameter an object does not have reads as `None` and
-//! writes nothing.
+//! writes nothing. A plugin object's numbers are [`ObjectParam::Plugin`]s: the
+//! index of the value in its list (see `docs/reference/extend-plugins.md`).
 
 use grid4d_geom::{
     cloner::Layout,
@@ -78,13 +79,21 @@ pub enum ObjectParam {
     Amount,
     /// A Taper's or Bulge's curvature (a fraction).
     Curvature,
+    /// A plugin object's number: its value at this index of
+    /// [`PluginObject::values`](crate::PluginObject::values) (below
+    /// [`ObjectParam::PLUGIN_PARAMS`]).
+    Plugin(u8),
 }
 
 impl ObjectParam {
-    /// How many there are ([`ObjectParam::index`] is below this).
+    /// How many built-in ones there are (their [`ObjectParam::index`] is below
+    /// this; a plugin's follow).
     pub const COUNT: usize = 42;
 
-    /// Every parameter, in index order.
+    /// How many of a plugin object's values can be animated (the first ones).
+    pub const PLUGIN_PARAMS: usize = 64;
+
+    /// Every built-in parameter, in index order.
     pub const ALL: [Self; Self::COUNT] = [
         Self::Size(Axis::X),
         Self::Size(Axis::Y),
@@ -175,10 +184,13 @@ impl ObjectParam {
             Self::EndGrowth => "End Growth",
             Self::Strength | Self::Amount => "Strength",
             Self::Curvature => "Curvature",
+            // Named by its plugin: see `ObjectKind::param_label`.
+            Self::Plugin(_) => "Plugin Parameter",
         }
     }
 
-    /// A distinct number below [`ObjectParam::COUNT`] (sets of parameters).
+    /// A distinct number (sets of parameters): below [`ObjectParam::COUNT`]
+    /// for the built-in ones, a plugin's after them.
     #[must_use]
     pub const fn index(self) -> usize {
         match self {
@@ -220,6 +232,7 @@ impl ObjectParam {
             Self::Strength => 39,
             Self::Amount => 40,
             Self::Curvature => 41,
+            Self::Plugin(i) => Self::COUNT + i as usize,
         }
     }
 
@@ -262,7 +275,9 @@ impl ObjectParam {
             | Self::FalloffRadius
             | Self::Offset
             | Self::Movement(_)
-            | Self::Rise => ParamUnit::Plain,
+            | Self::Rise
+            // A plugin's description says how its numbers are shown.
+            | Self::Plugin(_) => ParamUnit::Plain,
         }
     }
 }
@@ -364,17 +379,44 @@ impl ObjectKind {
             | Self::SubdivisionSurface { .. }
             | Self::Loft(_)
             | Self::Spline { .. }
-            // Animated plugin parameters come in step 13.2.
-            | Self::Plugin(_)
             // The lattice is edited, not keyed.
             | Self::Ffd { .. } => &[],
+            // Its numbers, in the order of its values.
+            Self::Plugin(object) => {
+                return (0..object.values.len().min(ObjectParam::PLUGIN_PARAMS))
+                    .filter_map(|i| u8::try_from(i).ok())
+                    .map(P::Plugin)
+                    .filter(|&p| self.param(p).is_some())
+                    .collect();
+            }
         };
         all.iter().copied().filter(|&p| self.param(p).is_some()).collect()
+    }
+
+    /// `param`'s label for this object: a plugin's value is named by its
+    /// plugin (the name it is kept under), the others by
+    /// [`ObjectParam::label`].
+    #[must_use]
+    pub fn param_label(&self, param: ObjectParam) -> &str {
+        match (self, param) {
+            (Self::Plugin(object), P::Plugin(i)) => object
+                .values
+                .get(usize::from(i))
+                .map_or(param.label(), |(name, _)| name.as_str()),
+            _ => param.label(),
+        }
     }
 
     /// The value of `param`, if this object has it (and it is on).
     #[must_use]
     pub fn param(&self, param: ObjectParam) -> Option<f32> {
+        // A plugin's values are read in place: no copy of its names.
+        if let (Self::Plugin(object), P::Plugin(i)) = (self, param) {
+            return match object.values.get(usize::from(i)) {
+                Some(&(_, crate::PluginValue::Float(v))) => Some(v),
+                _ => None,
+            };
+        }
         // A shared body for reading and writing: `slot` finds the field.
         let mut kind = self.clone();
         kind.slot(param).map(|value| *value)
@@ -449,6 +491,11 @@ impl ObjectKind {
             };
         }
         match (self, param) {
+            // A plugin's number (its plugin keeps it in range when it reads it).
+            (Self::Plugin(object), P::Plugin(i)) => match object.values.get_mut(usize::from(i)) {
+                Some((_, crate::PluginValue::Float(v))) => Some(v),
+                _ => None,
+            },
             (Self::Cube { size, .. }, P::Size(axis)) => Some(&mut size[axis.index()]),
             (Self::Sphere { radius, .. }, P::Radius)
             | (Self::Cylinder { radius, .. } | Self::Capsule { radius, .. }, P::Radius) => Some(radius),
@@ -603,6 +650,17 @@ mod tests {
             ring: None,
         };
         assert_eq!(circle.params(), [P::Radius, P::EllipseRadius]);
+        // A plugin object's numbers, by their place in its values.
+        let mut plugin = crate::PluginObject::new("test.thing");
+        plugin.set("Count", crate::PluginValue::Int(3));
+        plugin.set("Height", crate::PluginValue::Float(20.0));
+        let mut kind = ObjectKind::Plugin(plugin);
+        assert_eq!(kind.params(), [P::Plugin(1)], "numbers only");
+        assert_eq!(kind.param_label(P::Plugin(1)), "Height");
+        kind.set_param(P::Plugin(1), 35.0);
+        kind.set_param(P::Plugin(0), 35.0);
+        assert_eq!((kind.param(P::Plugin(1)), kind.param(P::Plugin(0))), (Some(35.0), None));
+        assert_eq!(P::Plugin(1).index(), ObjectParam::COUNT + 1);
         // An Omni light has no cone, and no falloff radius without a falloff.
         let mut light = ObjectKindTag::Light.default_kind();
         assert_eq!(light.params(), [P::Intensity]);

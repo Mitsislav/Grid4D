@@ -1,9 +1,10 @@
 //! Deformers in evaluation (see `docs/reference/deformer-basics.md`): which
 //! deformers reach an object, the chain of them it goes through, and the
 //! deformed mesh, cached per node and rebuilt only when the chain or the
-//! source changes.
+//! source changes. Deformer plugins (`grid4d-plugin`) take their place in the
+//! chain like the built-in ones.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use glam::{Mat4, Vec3};
 use grid4d_geom::{
@@ -11,7 +12,36 @@ use grid4d_geom::{
     deform::{Bend, Bulge, Ffd, Taper, Twist},
     spline::Polyline,
 };
-use grid4d_scene::{MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
+use grid4d_plugin::DeformerPlugin;
+use grid4d_scene::{MeshHandle, NodeId, ObjectKind, PluginObject, Scene, SplineHandle};
+
+/// `true` if `kind` deforms: a built-in deformer, or an object of an installed
+/// deformer plugin.
+#[must_use]
+pub fn is_deformer(kind: &ObjectKind) -> bool {
+    kind.is_deformer()
+        || matches!(kind, ObjectKind::Plugin(o) if grid4d_plugin::registry().deformer(&o.type_id).is_some())
+}
+
+/// A deformer plugin's object, with its plugin (shared: cloning a chain does
+/// not copy its values). Two are equal when their values are.
+#[derive(Clone)]
+pub(crate) struct PluginDeformer {
+    plugin: &'static dyn DeformerPlugin,
+    object: Arc<PluginObject>,
+}
+
+impl PartialEq for PluginDeformer {
+    fn eq(&self, other: &Self) -> bool {
+        self.object == other.object
+    }
+}
+
+impl std::fmt::Debug for PluginDeformer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.object.fmt(f)
+    }
+}
 
 /// A deformer's parameters, as a chain applies them.
 #[derive(Clone, Debug, PartialEq)]
@@ -22,6 +52,7 @@ pub(crate) enum Deformer {
     Bulge(Bulge),
     /// With its lattice (shared: cloning does not copy it).
     Ffd(Ffd, SplineHandle),
+    Plugin(PluginDeformer),
 }
 
 impl Deformer {
@@ -33,6 +64,12 @@ impl Deformer {
             ObjectKind::Taper(d) => Some(Self::Taper(*d)),
             ObjectKind::Bulge(d) => Some(Self::Bulge(*d)),
             ObjectKind::Ffd { ffd, lattice, .. } => Some(Self::Ffd(*ffd, lattice.clone())),
+            ObjectKind::Plugin(object) => grid4d_plugin::registry().deformer(&object.type_id).map(|plugin| {
+                Self::Plugin(PluginDeformer {
+                    plugin,
+                    object: Arc::new(object.clone()),
+                })
+            }),
             _ => None,
         }
     }
@@ -45,17 +82,25 @@ impl Deformer {
             Self::Taper(d) => d.box_lines(),
             Self::Bulge(d) => d.box_lines(),
             Self::Ffd(d, lattice) => d.lattice_lines(&lattice.spline().points),
+            Self::Plugin(d) => d.plugin.box_lines(&d.object),
         }
     }
 
-    /// `point`, in the deformer's space, deformed.
-    fn apply(&self, point: Vec3) -> Vec3 {
+    /// `points`, in the deformer's space, deformed.
+    fn apply(&self, points: &mut [Vec3]) {
         match self {
-            Self::Bend(d) => d.apply(point),
-            Self::Twist(d) => d.apply(point),
-            Self::Taper(d) => d.apply(point),
-            Self::Bulge(d) => d.apply(point),
-            Self::Ffd(d, lattice) => d.apply(&lattice.spline().points, point),
+            Self::Bend(d) => points.iter_mut().for_each(|p| *p = d.apply(*p)),
+            Self::Twist(d) => points.iter_mut().for_each(|p| *p = d.apply(*p)),
+            Self::Taper(d) => points.iter_mut().for_each(|p| *p = d.apply(*p)),
+            Self::Bulge(d) => points.iter_mut().for_each(|p| *p = d.apply(*p)),
+            Self::Ffd(d, lattice) => {
+                let lattice = &lattice.spline().points;
+                points.iter_mut().for_each(|p| *p = d.apply(lattice, *p));
+            }
+            // All at once: a plugin reads its values once per mesh.
+            Self::Plugin(d) => {
+                d.plugin.deform_checked(&d.object, points);
+            }
         }
     }
 }
@@ -79,9 +124,11 @@ impl Link {
         }
     }
 
-    fn apply(&self, point: Vec3) -> Vec3 {
-        self.from
-            .transform_point3(self.deformer.apply(self.to.transform_point3(point)))
+    /// `points`, in the object's space, through the deformer and back.
+    fn apply(&self, points: &mut [Vec3]) {
+        points.iter_mut().for_each(|p| *p = self.to.transform_point3(*p));
+        self.deformer.apply(points);
+        points.iter_mut().for_each(|p| *p = self.from.transform_point3(*p));
     }
 }
 
@@ -176,8 +223,8 @@ pub(crate) fn input_chain(scene: &Scene, node: NodeId, generator: NodeId, frame:
 /// `mesh` with every point passed through `links` in turn.
 pub(crate) fn deform_mesh(mesh: &PolyMesh, links: &[Link]) -> PolyMesh {
     let mut out = mesh.clone();
-    for point in out.points_mut() {
-        *point = links.iter().fold(*point, |p, link| link.apply(p));
+    for link in links {
+        link.apply(out.points_mut());
     }
     out
 }

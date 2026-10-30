@@ -11,7 +11,10 @@ use egui::{
     Align2, Color32, CornerRadius, DragValue, FontId, PointerButton, Pos2, Rect, Response, RichText, ScrollArea, Sense,
     Shape, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2,
 };
-use grid4d_scene::{Curve, Document, Interpolation, NodeData, NodeId, Param, SceneEdit, TangentPreset, Tangents};
+use grid4d_scene::{
+    Curve, Document, Interpolation, NodeData, NodeId, ObjectKind, ObjectParam, Param, ParamUnit, SceneEdit,
+    TangentPreset, Tangents,
+};
 
 use crate::i18n::{key, tr, trf};
 use crate::{
@@ -32,14 +35,40 @@ const PICK: f32 = 6.0;
 /// A curve is hit within this many points.
 const CURVE_PICK: f32 = 4.0;
 
-/// The unit a parameter is shown in: rotations and stored angles in degrees,
-/// fractions in percent.
-fn display_scale(param: Param) -> f64 {
+/// The unit a parameter of the object `data` is shown in: rotations and
+/// stored angles in degrees, fractions in percent (a plugin's numbers as its
+/// description says; as stored without the object or its plugin).
+fn display_scale(data: Option<&NodeData>, param: Param) -> f64 {
     match param {
         Param::Rotation(_) => f64::from(180.0_f32 / std::f32::consts::PI),
         Param::Position(_) | Param::Scale(_) => 1.0,
+        Param::Object(p @ ObjectParam::Plugin(_)) => data.map_or(1.0, |d| plugin_scale(&d.kind, p)),
         Param::Object(p) => p.unit().display_scale(),
     }
+}
+
+/// How a plugin object's number is shown, from its plugin's description.
+fn plugin_scale(kind: &ObjectKind, param: ObjectParam) -> f64 {
+    use grid4d_plugin::{ParamKind, Unit};
+    let ObjectKind::Plugin(object) = kind else {
+        return 1.0;
+    };
+    let name = kind.param_label(param);
+    let spec = grid4d_plugin::registry()
+        .plugin(&object.type_id)
+        .and_then(|plugin| plugin.params().iter().find(|spec| spec.name == name));
+    match spec.map(|spec| spec.kind) {
+        Some(ParamKind::Float { unit: Unit::Angle, .. }) => ParamUnit::Radians.display_scale(),
+        Some(ParamKind::Float {
+            unit: Unit::Percent, ..
+        }) => ParamUnit::Fraction.display_scale(),
+        _ => 1.0,
+    }
+}
+
+/// [`display_scale`] of `node`'s `param`.
+fn scale_of(doc: &Document, node: NodeId, param: Param) -> f64 {
+    display_scale(doc.scene.get(node).map(|n| &n.data), param)
 }
 
 fn color(param: Param) -> Color32 {
@@ -252,7 +281,7 @@ impl FCurvePanel {
                     return;
                 };
                 self.key_edit.begin(key.node, &data);
-                let k = display_scale(key.param);
+                let k = display_scale(Some(&data), key.param);
                 let Some(found) = data
                     .tracks
                     .iter()
@@ -261,7 +290,11 @@ impl FCurvePanel {
                 else {
                     return;
                 };
-                ui.label(RichText::new(tr(key.param.label())).color(p().text_dim).size(11.5));
+                ui.label(
+                    RichText::new(tr(data.param_label(key.param)))
+                        .color(p().text_dim)
+                        .size(11.5),
+                );
                 #[expect(clippy::cast_possible_truncation, reason = "key frames are within the i32 range")]
                 let mut frame = found.frame.round() as i32;
                 let mut value = f64::from(found.value) * k;
@@ -340,7 +373,7 @@ impl FCurvePanel {
             let Some(curve) = curve_of(doc, s.node, s.param) else {
                 continue;
             };
-            let k = display_scale(s.param);
+            let k = scale_of(doc, s.node, s.param);
             for key in curve.keys() {
                 if selected && !editor.curves.contains(s.node, s.param, key.frame) {
                     continue;
@@ -403,7 +436,7 @@ impl FCurvePanel {
             let Some(curve) = curve_of(doc, s.node, s.param) else {
                 continue;
             };
-            let k = display_scale(s.param);
+            let k = scale_of(doc, s.node, s.param);
             for (i, key) in curve.keys().iter().enumerate() {
                 let ck = CurveKey {
                     node: s.node,
@@ -431,7 +464,7 @@ impl FCurvePanel {
                 continue;
             };
             if let Some(v) = curve.value_at(frame) {
-                let y = self.view.y(plot, f64::from(v) * display_scale(s.param));
+                let y = self.view.y(plot, f64::from(v) * scale_of(doc, s.node, s.param));
                 consider(&mut best, (y - at.y).abs(), Hit::Curve(*s), CURVE_PICK);
             }
         }
@@ -518,7 +551,7 @@ impl FCurvePanel {
                 CurveDrag::Handle { key, side, before } => {
                     let at = (
                         self.view.frame_at(plot, pointer.x),
-                        self.view.value_at(plot, pointer.y) / display_scale(key.param),
+                        self.view.value_at(plot, pointer.y) / scale_of(doc, key.node, key.param),
                     );
                     let mut data = NodeData::clone(before);
                     if let Some(track) = data.tracks.iter_mut().find(|t| t.param == key.param) {
@@ -560,7 +593,7 @@ impl FCurvePanel {
                         let Some(curve) = curve_of(doc, s.node, s.param) else {
                             continue;
                         };
-                        let k = display_scale(s.param);
+                        let k = scale_of(doc, s.node, s.param);
                         for key in curve.keys() {
                             if area.contains(self.view.pos(plot, key.frame, f64::from(key.value) * k)) {
                                 let ck = CurveKey {
@@ -760,7 +793,7 @@ impl FCurvePanel {
             let (Some(first), Some(last)) = (curve.keys().first(), curve.keys().last()) else {
                 continue;
             };
-            let k = display_scale(s.param);
+            let k = scale_of(doc, s.node, s.param);
             let colour = color(s.param);
             // Before the first and after the last key: the held value, dimmed.
             let dim = Stroke::new(1.0, colour.gamma_multiply(0.45));
@@ -917,7 +950,7 @@ fn move_keys(doc: &mut Document, before: &[(NodeId, NodeData)], keys: &[CurveKey
         for track in &mut moved.tracks {
             let param = track.param;
             #[expect(clippy::cast_possible_truncation, reason = "values are f32")]
-            let by = (value / display_scale(param)) as f32;
+            let by = (value / display_scale(Some(data), param)) as f32;
             track.curve.shift_keys(
                 |f| keys.iter().any(|k| k.node == *id && k.param == param && k.frame == f),
                 frames,
@@ -993,7 +1026,7 @@ fn track_list(ui: &mut Ui, rect: Rect, doc: &Document, editor: &mut EditorState)
                         ui.painter().text(
                             pos2(row.left() + 26.0, row.center().y),
                             Align2::LEFT_CENTER,
-                            tr(param.label()),
+                            tr(n.data.param_label(param)),
                             FontId::proportional(12.0),
                             p().text,
                         );
@@ -1282,7 +1315,7 @@ mod tests {
                 Param::Object(ObjectParam::Height),
             ]
         );
-        assert!((display_scale(Param::Object(ObjectParam::EndRotation)) - 57.29578).abs() < 1e-3);
-        assert_eq!(display_scale(Param::Object(ObjectParam::EndGrowth)), 100.0);
+        assert!((display_scale(None, Param::Object(ObjectParam::EndRotation)) - 57.29578).abs() < 1e-3);
+        assert_eq!(display_scale(None, Param::Object(ObjectParam::EndGrowth)), 100.0);
     }
 }

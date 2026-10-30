@@ -613,7 +613,16 @@ impl KeyRows {
     /// The key button of the row labelled `label`, after its field; nothing
     /// for rows that are not an animatable parameter.
     fn button(&mut self, ui: &mut Ui, label: &str) {
-        let Some(&(param, state)) = self.states.iter().find(|(p, _)| p.label() == label) else {
+        let Some(&(param, _)) = self.states.iter().find(|(p, _)| p.label() == label) else {
+            return;
+        };
+        self.button_of(ui, param);
+    }
+
+    /// The key button of `param` (a plugin's rows name theirs directly);
+    /// nothing if the shown object cannot animate it.
+    fn button_of(&mut self, ui: &mut Ui, param: ObjectParam) {
+        let Some(&(param, state)) = self.states.iter().find(|&&(p, _)| p == param) else {
             return;
         };
         self.drawn.push(param);
@@ -631,7 +640,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
         .num_columns(3)
         .spacing([6.0, 4.0])
         .show(ui, |ui| match kind {
-            ObjectKind::Plugin(object) => plugin_rows(ui, object),
+            ObjectKind::Plugin(object) => plugin_rows(ui, k, object),
             ObjectKind::Null => {
                 ui.label(
                     RichText::new(tr("A Null groups objects. Drag objects onto it in the Object Manager."))
@@ -2357,19 +2366,21 @@ fn length_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
 fn kind_label(kind: &ObjectKind) -> &'static str {
     match kind {
         ObjectKind::Plugin(object) => grid4d_plugin::registry()
-            .generator(&object.type_id)
+            .plugin(&object.type_id)
             .map_or(kind.label(), |plugin| plugin.name()),
         _ => kind.label(),
     }
 }
 
 /// A plugin object's parameters, laid out from its plugin's description (a
-/// value is written only when it is changed). A missing plugin's values are
-/// listed as they are kept.
-fn plugin_rows(ui: &mut Ui, object: &mut grid4d_scene::PluginObject) {
+/// value is written only when it is changed), numbers with their key buttons;
+/// a deformer's Fit to Parent. A missing plugin's values are listed as they
+/// are kept.
+fn plugin_rows(ui: &mut Ui, k: &mut KeyRows, object: &mut grid4d_scene::PluginObject) {
     use grid4d_plugin::{ParamKind, Unit, Values};
     use grid4d_scene::PluginValue;
-    let Some(plugin) = grid4d_plugin::registry().generator(&object.type_id) else {
+    let registry = grid4d_plugin::registry();
+    let Some(plugin) = registry.plugin(&object.type_id) else {
         attr_label(ui, "Missing Plugin", LABEL_WIDTH);
         ui.label(RichText::new(&object.type_id).color(p().warning))
             .on_hover_text(trf(
@@ -2472,10 +2483,22 @@ fn plugin_rows(ui: &mut Ui, object: &mut grid4d_scene::PluginObject) {
         if !spec.hint.is_empty() {
             response.on_hover_text(tr(spec.hint));
         }
+        // A number's key button: the value's place in the object's list.
+        if let Some(index) = object
+            .values
+            .iter()
+            .position(|(name, _)| name == spec.name)
+            .and_then(|i| u8::try_from(i).ok())
+        {
+            k.button_of(ui, ObjectParam::Plugin(index));
+        }
         ui.end_row();
         if value != current {
             object.set(spec.name, value);
         }
+    }
+    if registry.deformer(&object.type_id).is_some() {
+        fit_row(ui, k, "Reshapes its parent's subtree");
     }
 }
 
@@ -2568,6 +2591,11 @@ mod tests {
             .unwrap()
         {
             *light_type = LightType::Spot;
+        }
+        // Plugins' objects: a generator's and a deformer's.
+        crate::test_plugins();
+        for plugin in grid4d_plugin::registry().plugins() {
+            kinds.push(ObjectKind::Plugin(grid4d_plugin::Registry::new_object(plugin)));
         }
         let ctx = egui::Context::default();
         for kind in kinds {

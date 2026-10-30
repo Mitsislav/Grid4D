@@ -1797,6 +1797,7 @@ dependencies = [
  "env_logger",
  "grid4d-plugin",
  "grid4d-plugin-gear",
+ "grid4d-plugin-wave",
  "grid4d-scene",
  "grid4d-ui",
  "log",
@@ -1811,6 +1812,7 @@ dependencies = [
  "grid4d-geom",
  "grid4d-plugin",
  "grid4d-plugin-gear",
+ "grid4d-plugin-wave",
  "grid4d-scene",
  "grid4d-text",
 ]
@@ -1852,6 +1854,16 @@ dependencies = [
 
 [[package]]
 name = "grid4d-plugin-gear"
+version = "0.1.0"
+dependencies = [
+ "glam 0.34.1",
+ "grid4d-geom",
+ "grid4d-plugin",
+ "grid4d-scene",
+]
+
+[[package]]
+name = "grid4d-plugin-wave"
 version = "0.1.0"
 dependencies = [
  "glam 0.34.1",
@@ -1930,6 +1942,7 @@ dependencies = [
  "grid4d-io",
  "grid4d-plugin",
  "grid4d-plugin-gear",
+ "grid4d-plugin-wave",
  "grid4d-raytrace",
  "grid4d-render",
  "grid4d-scene",
