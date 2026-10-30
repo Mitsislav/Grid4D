@@ -537,6 +537,8 @@ impl EvaluatedScene {
             &mut self.cloning,
             &mut self.instances,
         );
+        // Simulated clones where the simulation put them.
+        crate::overrides::apply_clones(&self.overrides, &mut self.instances, &mut self.nodes);
         // The lights where animation and Target tags put them.
         self.lights.clear();
         for node in &self.nodes {
@@ -2646,6 +2648,39 @@ mod tests {
             node(&eval, parent).world.w_axis.y,
             100.0,
             "back to the animation's place"
+        );
+    }
+
+    #[test]
+    fn clone_overrides_move_a_clones_parts_and_the_cloners_bounds() {
+        let mut doc = Document::new("clones");
+        let cloner = doc.scene.insert(Node::new("Cloner", linear(3, Vec3::X * 100.0)));
+        let group = doc
+            .scene
+            .insert_child(cloner, Node::new("Group", ObjectKind::Null))
+            .unwrap();
+        for y in [0.0, 50.0] {
+            doc.scene
+                .insert_child(
+                    group,
+                    Node::new("Cube", ObjectKindTag::Cube.default_kind()).with_position(Vec3::Y * y),
+                )
+                .unwrap();
+        }
+        let mut eval = EvaluatedScene::new();
+        let mut overrides = crate::Overrides::default();
+        overrides.set_clone(cloner, 1, Mat4::from_translation(Vec3::Y * -300.0));
+        eval.set_overrides(&overrides);
+        eval.update(&doc.scene);
+        let heights: Vec<(u32, f32)> = eval.instances().iter().map(|c| (c.index, c.world.w_axis.y)).collect();
+        assert_eq!(
+            heights,
+            [(0, 0.0), (0, 50.0), (1, -300.0), (1, -250.0), (2, 0.0), (2, 50.0)]
+        );
+        assert_eq!(
+            node(&eval, cloner).bounds.unwrap().min.y,
+            -400.0,
+            "the bounds follow the moved clone"
         );
     }
 }

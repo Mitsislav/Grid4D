@@ -637,7 +637,10 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             commit(doc, editor, "Delete", edits, |_, selection| selection.clear());
         }
         EditorCommand::MakeEditable => {
-            let edits = make_editable_edits(doc, editor.selection.as_slice());
+            // Simulated clones as they are at this frame.
+            let mut simulated = grid4d_eval::Overrides::default();
+            editor.simulation.overrides(doc.time.frame(), &mut simulated);
+            let edits = make_editable_edits(doc, editor.selection.as_slice(), &simulated);
             commit(doc, editor, "Make Editable", edits, |_, _| {});
         }
         EditorCommand::CurrentStateToObject => current_state_to_object(doc, editor),
@@ -1768,7 +1771,7 @@ fn current_state_to_object(doc: &mut Document, editor: &mut EditorState) {
 /// object; each selected, enabled generator a polygon object holding its result
 /// at the viewport level, its cage removed. Objects inside such a cage are not
 /// baked on their own (they go with it); everything else is left alone.
-fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
+fn make_editable_edits(doc: &Document, selection: &[NodeId], simulated: &grid4d_eval::Overrides) -> Vec<SceneEdit> {
     let enabled_generator = |id: NodeId| {
         doc.scene
             .get(id)
@@ -1845,6 +1848,7 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId]) -> Vec<SceneEdit> {
             let eval = evaluated.get_or_insert_with(|| {
                 let mut eval = grid4d_eval::EvaluatedScene::new();
                 eval.set_frame(frame);
+                eval.set_overrides(simulated);
                 eval.update(&doc.scene);
                 eval
             });

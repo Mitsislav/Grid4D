@@ -37,13 +37,15 @@ struct Key {
 }
 
 /// One object with a Dynamics tag: its own data and everything below it, where
-/// it starts, and what above it can move or hide it.
+/// it starts, what above it can move or hide it, and — for a Cloner — its
+/// effectors and Object mode object (where they are, what they are).
 #[derive(Debug, PartialEq)]
 struct BodyInputs {
     id: NodeId,
     start: Mat4,
     subtree: Vec<NodeData>,
     above: Vec<(Vec<Track>, bool, bool)>,
+    links: Vec<(Mat4, NodeData)>,
 }
 
 impl Sim {
@@ -147,6 +149,7 @@ impl Key {
                     start: scene.world_matrix_at(id, f64::from(start)),
                     subtree: subtree(scene, id),
                     above: above(scene, id),
+                    links: links(scene, &node.data, start),
                 });
             }
             true
@@ -178,6 +181,22 @@ fn subtree(scene: &Scene, id: NodeId) -> Vec<NodeData> {
         stack.extend(node.children().iter().rev());
     }
     found
+}
+
+/// A Cloner's effectors and Object mode object: where each is at `start` and
+/// its data; nothing for other objects.
+fn links(scene: &Scene, data: &NodeData, start: i32) -> Vec<(Mat4, NodeData)> {
+    let grid4d_scene::ObjectKind::Cloner { object, effectors, .. } = &data.kind else {
+        return Vec::new();
+    };
+    effectors
+        .iter()
+        .chain(object)
+        .filter_map(|&id| {
+            let node = scene.get(id)?;
+            Some((scene.world_matrix_at(id, f64::from(start)), node.data.clone()))
+        })
+        .collect()
 }
 
 /// What above `id` can move or hide it: animation, visibility, enabled.
@@ -296,5 +315,33 @@ mod tests {
         fill(&mut sim, &doc, 40);
         sim.overrides(40, &mut from_sim);
         assert_eq!(from_replay, from_sim, "deterministic");
+    }
+
+    #[test]
+    fn a_tagged_cloners_effectors_are_part_of_the_inputs() {
+        use grid4d_geom::cloner::Cloner;
+        let (mut doc, _, _) = falling_cube();
+        let effector = doc
+            .scene
+            .insert(Node::new("Plain", ObjectKindTag::PlainEffector.default_kind()));
+        let mut cloner = NodeData::new(
+            "Cloner",
+            ObjectKind::Cloner {
+                cloner: Cloner::default(),
+                object: None,
+                effectors: vec![effector],
+            },
+        );
+        cloner.tags.push(Tag::Dynamics(Body::rigid()));
+        let cloner = doc.scene.insert(Node::from_data(cloner));
+        doc.scene
+            .insert_child(cloner, Node::new("Ball", ObjectKindTag::Sphere.default_kind()))
+            .unwrap();
+        let mut sim = Sim::default();
+        fill(&mut sim, &doc, 5);
+        assert!(sim.cached().is_some());
+        doc.scene.get_mut(effector).unwrap().data.transform.position.x = 100.0;
+        sim.sync(&doc);
+        assert_eq!(sim.cached(), None, "moving the effector changes where the clones start");
     }
 }

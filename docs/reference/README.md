@@ -95,4 +95,4 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 10.8 | [`mograph-effectors.md`](mograph-effectors.md) — Plain and Random effectors, their falloff | implemented 2026-10-30 |
 | 11.1–11.2 | [`simulation-rigid-body.md`](simulation-rigid-body.md) — Rigid Body and Collider Body tags: motion, shapes, mass, bounce, friction; project settings | implemented 2026-10-30 |
 | 11.3, 11.5 | [`simulation-cache.md`](simulation-cache.md) — start state, the cache, Bake / Clear, playback and renders, saved caches | 11.3 implemented 2026-10-30 |
-| 11.4 | `simulation-clones.md` — clones as bodies | todo |
+| 11.4 | [`simulation-clones.md`](simulation-clones.md) — clones as bodies | implemented 2026-10-30 |

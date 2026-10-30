@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 11 — Simulation (v0.11) |
-| Last step done | 11.3 — Playback, cache and renders (2026-10-30) |
-| Next step | 11.4 — Clones as bodies |
-| Tests | 677, all passing; clippy and rustfmt clean |
+| Last step done | 11.4 — Clones as bodies (2026-10-30) |
+| Next step | 11.5 — Saved caches and limits |
+| Tests | 680, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1459,6 +1459,7 @@ parameters, are undoable, saved, picked, exported and rendered.
 | 11.1 | Rigid Body / Collider Body (one Dynamics tag: motion, shape, bounce, friction, mass, damping, start velocity) from the Tags menus, edited, saved; Simulation settings in the Project settings, undoable, saved; the `grid4d-sim` crate on `rapier3d` 0.36: a ball falls ½ g t² and rests on a collider, deterministically | 665 |
 | 11.2 | The simulation core: bodies from tagged objects as the viewport shows them at the start frame (Compound groups, box / sphere / convex hull / mesh shapes, mass, bounce, friction, damping, start velocity), stepped in sub-steps with animated colliders following their keys, recorded per frame; not yet shown in the viewport (11.3) | 671 |
 | 11.3 | The simulation in the viewport: simulated as the frame advances (a budget per refresh), cached and shown at once when revisited (a green bar on the timeline), dropped only when the motion's inputs change; Bake Simulation (progress, Esc) and Clear Simulation Cache; renders, Current State to Object and export show it | 677 |
+| 11.4 | Clones as bodies: a Rigid / Collider Body tag on a Cloner makes every clone a body (a cloned group one piece), colliding with each other and with everything; clones start where the layout and effectors put them; shown, rendered, baked and exported where the simulation has them | 680 |
 
 **Planning notes:**
 - **The engine's maths library.** `rapier3d` 0.36 (the latest, 2026-10) uses
@@ -1545,6 +1546,26 @@ parameters, are undoable, saved, picked, exported and rendered.
   Simulation filled the bar to frame 90; scrubbing back to 37 showed the
   cached frame at once. (Ctrl+R cannot be sent by the test driver; the render
   path is covered by the test above.)
+
+**11.4 — Clones as bodies**
+
+*Problems and solutions:*
+- **A clone has no node.** Clones are instances, rebuilt with every
+  evaluation, so they cannot be "placed" like objects. A simulated clone is
+  given its **change since the start** (`world(f) × world(start)⁻¹`), applied
+  to all its parts after the instances are built — a cloned group keeps its
+  arrangement and the layout is not stored twice.
+- **The Cloner's bounds** (selection box, framing) were computed from the
+  layout; they are made again from the moved clones whenever a clone moves.
+- **One body per clone with several parts:** the body is framed by the
+  clone's first part, and every part's shown mesh becomes a collider in that
+  frame, so a group of a cube and a sphere tumbles as one piece.
+- **What else a clone's start depends on:** a tagged Cloner's effectors and
+  Object mode object are not below it, so the inputs key now also holds their
+  start place and data; moving an effector re-simulates.
+- **On-screen testing:** a tagged 5 × 3 × 5 Grid Array of cubes and spheres
+  dropped onto a tilted ramp: baked to frame 120, the clones slid off the ramp
+  and scattered on the floor; scrubbing showed the cached frames.
 
 ---
 

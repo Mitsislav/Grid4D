@@ -2,8 +2,8 @@
 //! stepped frame by frame into a [`SimCache`].
 
 use glam::{Mat4, Quat, Vec3};
-use grid4d_eval::{EvaluatedScene, MeshKey, Overrides};
-use grid4d_scene::{Body, Document, Inherit, Motion, NodeId, Scene, Tag};
+use grid4d_eval::{EvaluatedInstance, EvaluatedScene, MeshKey, Overrides};
+use grid4d_scene::{Body, Document, Inherit, Motion, NodeId, ObjectKind, Scene, Tag};
 
 use crate::{BodyId, World, shape};
 
@@ -12,6 +12,8 @@ use crate::{BodyId, World, shape};
 pub enum BodyKey {
     /// An object with a Dynamics tag (and, Compound, its children).
     Node(NodeId),
+    /// Clone `n` of a Cloner with a Dynamics tag (all its parts).
+    Clone(NodeId, u32),
 }
 
 /// Every body's pose at every simulated frame, from the start frame on.
@@ -64,9 +66,17 @@ impl SimCache {
         out.clear();
         let frame = frame.min(self.last());
         for (index, key) in self.bodies.iter().enumerate() {
-            let BodyKey::Node(id) = *key;
-            if let Some(world) = self.world(frame, index) {
-                out.set(id, world);
+            let Some(world) = self.world(frame, index) else {
+                continue;
+            };
+            match *key {
+                BodyKey::Node(id) => out.set(id, world),
+                // A clone moves by its change since the start, its parts with it.
+                BodyKey::Clone(cloner, n) => {
+                    if let Some(start) = self.world(self.start, index) {
+                        out.set_clone(cloner, n, world * start.inverse());
+                    }
+                }
             }
         }
     }
@@ -233,10 +243,18 @@ fn gather(
             continue;
         }
         compound_depth = None;
-        let Some(body) = scene.get(node.id).and_then(|n| dynamics(&n.data.tags)) else {
+        let Some((body, data)) = scene
+            .get(node.id)
+            .and_then(|n| Some((dynamics(&n.data.tags)?, &n.data)))
+        else {
             continue;
         };
         if !body.enabled {
+            continue;
+        }
+        // A Cloner's tag makes each of its clones a body.
+        if matches!(data.kind, ObjectKind::Cloner { .. }) {
+            clone_bodies(scene, evaluated, node.id, &body, frame, world, bodies, cache);
             continue;
         }
         let (scale, rotation, position) = node.world.to_scale_rotation_translation();
@@ -262,6 +280,58 @@ fn gather(
         bodies.push(SimBody { id, follows });
         cache.bodies.push(BodyKey::Node(node.id));
         cache.scales.push(scale);
+    }
+}
+
+/// Every clone of `cloner` as a body: its parts' shapes in the frame of its
+/// first part.
+#[expect(clippy::too_many_arguments, reason = "the parts of one gathering pass")]
+fn clone_bodies(
+    scene: &Scene,
+    evaluated: &EvaluatedScene,
+    cloner: NodeId,
+    body: &Body,
+    frame: f64,
+    world: &mut World,
+    bodies: &mut Vec<SimBody>,
+    cache: &mut SimCache,
+) {
+    let clones: Vec<&EvaluatedInstance> = evaluated.instances().iter().filter(|c| c.owner == cloner).collect();
+    let mut start = 0;
+    while let Some(first) = clones.get(start) {
+        let index = first.index;
+        let end = start + clones[start..].iter().take_while(|c| c.index == index).count();
+        let parts = &clones[start..end];
+        start = end;
+        let (scale, rotation, position) = first.world.to_scale_rotation_translation();
+        let to_body = Mat4::from_rotation_translation(rotation, position).inverse();
+        let mut colliders = Vec::new();
+        for part in parts {
+            if let Some(mesh) = clone_mesh(scene, evaluated, part, frame) {
+                colliders.extend(shape::colliders(&mesh, to_body * part.world, body));
+            }
+        }
+        if colliders.is_empty() {
+            continue;
+        }
+        let id = world.insert(position, rotation, body, colliders);
+        bodies.push(SimBody { id, follows: None });
+        cache.bodies.push(BodyKey::Clone(cloner, index));
+        cache.scales.push(scale);
+    }
+}
+
+/// The surface a clone's part shows, in its own space.
+fn clone_mesh(
+    scene: &Scene,
+    evaluated: &EvaluatedScene,
+    part: &EvaluatedInstance,
+    frame: f64,
+) -> Option<grid4d_geom::PolyMesh> {
+    let drawable = part.drawable.filter(|d| !d.unlit && !d.marker)?;
+    match drawable.key {
+        MeshKey::Polygon(id) => evaluated.mesh(id).map(|m| m.mesh().clone()),
+        _ => grid4d_eval::editable_mesh(&scene.get(part.source)?.data.kind_at(frame)),
     }
 }
 
@@ -486,5 +556,66 @@ mod tests {
         };
         let off = simulate(&doc, 30);
         assert!(off.cache().bodies().is_empty());
+    }
+
+    #[test]
+    fn a_tagged_cloner_makes_every_clone_a_body() {
+        use grid4d_geom::cloner::{Cloner, GridArray, Layout};
+        let mut doc = Document::new("clones");
+        doc.scene.insert(floor());
+        let cloner = doc.scene.insert(tagged(
+            "Cloner",
+            ObjectKind::cloner(Cloner {
+                layout: Layout::Grid(GridArray {
+                    count: [3, 3, 3],
+                    size: Vec3::splat(70.0),
+                    ..GridArray::default()
+                }),
+                ..Cloner::default()
+            }),
+            Vec3::Y * 300.0,
+            Body::rigid(),
+        ));
+        // A cloned group: two cubes, one above the other.
+        let group = doc
+            .scene
+            .insert_child(cloner, Node::new("Group", ObjectKind::Null))
+            .unwrap();
+        for y in [0.0, 25.0] {
+            doc.scene
+                .insert_child(group, Node::new("Cube", cube(20.0)).with_position(Vec3::Y * y))
+                .unwrap();
+        }
+        let simulation = simulate(&doc, 90);
+        let cache = simulation.cache();
+        assert_eq!(cache.bodies().len(), 1 + 27, "the floor and every clone");
+        assert_eq!(cache.bodies()[1], BodyKey::Clone(cloner, 0));
+        let mut overrides = Overrides::default();
+        cache.overrides(90, &mut overrides);
+        let mut eval = EvaluatedScene::new();
+        eval.set_frame(90.0);
+        eval.set_overrides(&overrides);
+        eval.update(&doc.scene);
+        let clones = eval.instances();
+        assert_eq!(clones.len(), 54);
+        // Every clone has fallen to the floor (the grid was 230 – 370 cm up) …
+        assert!(
+            clones.iter().all(|c| c.world.w_axis.y < 150.0),
+            "{:?}",
+            clones.iter().map(|c| c.world.w_axis.y).collect::<Vec<_>>()
+        );
+        // … and each clone's two cubes moved as one: still 25 cm apart.
+        for pair in clones.chunks(2) {
+            let gap = pair[0]
+                .world
+                .w_axis
+                .truncate()
+                .distance(pair[1].world.w_axis.truncate());
+            assert!((gap - 25.0).abs() < 0.5, "{gap}");
+        }
+        // They spread out: no longer in a 70 cm grid's 140 cm square.
+        let xs = clones.iter().map(|c| c.world.w_axis.x);
+        let spread = xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min);
+        assert!(spread > 140.0, "{spread}");
     }
 }

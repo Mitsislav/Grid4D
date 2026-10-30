@@ -1722,6 +1722,16 @@ back or playing again shows them at once.
 - Editing a body while the time slider is past the start frame changes its
   start: the viewport shows the simulation again from there.
 
+**Clones as bodies:** put the Rigid Body tag on a **Cloner** (not on its
+children) and every clone becomes a body of its own — a grid of cubes
+collapses, a ring of spheres rolls apart. Each clone keeps its shape (a cloned
+group moves as one piece), clones collide with each other and with every other
+body, and they start where the Cloner and its effectors place them at the
+start frame. A Collider Body tag on a Cloner makes every clone an obstacle.
+Changing the Cloner, its children or its effectors starts the simulation over.
+
+![75 clones of a cube and a sphere from a tagged Grid Array Cloner, at frame 82: they fell onto a tilted ramp, slid off and scattered on the floor](images/manual/simulation-clones.png)
+
 ## 18. Materials
 
 A **material** gives objects their surface. Materials live in the **Material
@@ -1972,8 +1982,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Modelling**:
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
   Solid, Proportional and Radial modes; Bridge point by point.
-- **Simulation**: clones of a Cloner as bodies come next, and the simulated
-  frames are not yet saved with the document; soft bodies, cloth, particles,
+- **Simulation**: the simulated frames are not yet saved with the document;
+  a body per part of a cloned group (Individual Elements) is not possible; soft bodies, cloth, particles,
   forces and connectors are not planned for the first simulation release.
 - **Deformers**: splines are not deformed; component modes show the
   undeformed points; no handles for size and angle (only strength has one);
