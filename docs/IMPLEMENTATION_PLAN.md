@@ -993,10 +993,99 @@ saved (tests).
 
 ## Phase 13 — Extensibility (v0.13)
 
-* A statically registered Rust plugin trait for object, tag and tool types
-  (generators and deformers first, since their evaluation seam exists).
-* Scripting (Rhai, or Python via `pyo3`) after the API stabilises: read and edit
-  the document through `SceneEdit`, so scripts are undoable.
+**Goal:** Grid4D grows without changing its core. **Plugins** — Rust crates
+built into the application — add new generators, deformers and commands
+that look and behave like built-in ones (parameters in the Attribute Manager,
+animation, undo, takes, saving); and **scripts** written in the application
+— small programs that read and change the document — automate repetitive
+work, each run one undo step.
+
+**Behaviour specs** (written per step before implementing, from the public
+manual and SDK docs — clean-room): `reference/extend-plugins.md`
+(13.1–13.3), `extend-scripting.md` (13.4–13.5).
+
+### Design
+
+* **Plugins are crates built in, registered explicitly** (decision D16). A
+  new crate **`grid4d-plugin`** (depends on `grid4d-geom` and
+  `grid4d-scene`) holds the API: a **parameter schema** (`ParamSpec`: name,
+  kind — float with unit and range, integer, bool, choice, vector, colour —
+  and default), the traits **`GeneratorPlugin`** (parameters → a
+  `grid4d_geom::PolyMesh`), **`DeformerPlugin`** (parameters, a point, the
+  deformer's space → a moved point) and **`CommandPlugin`** (the document and
+  selection → `SceneEdit`s), and the **`Registry`** of them by a stable,
+  namespaced type id (`"grid4d.gear"`). The binary builds the registry at
+  start from a plain list (`src/plugins.rs`) and installs it once
+  (`grid4d_plugin::install`, a `OnceLock`); tests install their own. Plugin
+  crates live in `plugins/` in the workspace (`grid4d-plugin-gear`,
+  `-wave`, `-scatter`) and depend only on `grid4d-plugin`. No dynamic
+  libraries: `unsafe` stays forbidden and Rust has no stable ABI.
+* **Plugin objects are one more `ObjectKind`:** `ObjectKind::Plugin(PluginObject
+  { type_id, values })`, `values` a list of named `PluginValue`s matching the
+  schema. Everything that works on objects works on them: `SetData` edits,
+  undo, takes (Parameters group), layers, the Attribute Manager (built from
+  the schema), animation (`ObjectParam::Plugin(index)` for float values,
+  KeyRows by parameter name), the file format (`KindDto::Plugin` with the
+  type id and values by name). **A document whose plugin is missing still
+  opens:** the object keeps its values, shows as a group with a "missing
+  plugin" note, and saves back unchanged; values the schema does not know
+  are kept, missing ones take their defaults.
+* **Evaluation:** `grid4d-eval` (which now depends on `grid4d-plugin`) asks
+  the registry for generator plugins' meshes — cached per object and values
+  like the built-in generators, the result validated (finite points, valid
+  indices; otherwise nothing and a warning) — and treats deformer plugins
+  like built-in deformers (in the deformer stack, their box drawn as a
+  curve). The path tracer and export see the results as they see built-in
+  generators'.
+* **Commands** appear in **Plugins ▸** (and the Command palette's search,
+  later): with options (a schema) they open a small dialog built from it;
+  their `SceneEdit`s are one undo step.
+* **Scripting: Rhai** (decision D17) — `rhai` 1.27 (2026-10-21; MIT OR
+  Apache-2.0; pure Rust, MSRV 1.66), not Python through `pyo3`: no Python
+  installation to find or bundle, nothing outside the process, a sandbox
+  that can cap operations and has no file or network access unless given
+  one, the same build on every platform. A new crate **`grid4d-script`**
+  (depends on `grid4d-scene` and `grid4d-plugin`) wraps an engine with a
+  document API: objects (find by name, children, selection), their name,
+  position / rotation (degrees) / scale, visibility, colour, parameters by
+  name (built-in and plugin), create / delete / reparent, materials and
+  layers (assign), the current frame, `print`, and the plugin commands.
+* **Scripts change the document only through `SceneEdit`s** (decision D18):
+  a run works on a copy of the document, records the edits it makes and,
+  if it finishes, applies them as **one undo step** (an error or a stop
+  applies nothing). A script is stopped after a set number of operations
+  (an infinite loop cannot hang the application); errors report the line
+  and column.
+* **The Script Manager** (a window: Script ▸ Script Manager…, as the
+  reference's) edits a script in a monospace editor with line numbers, runs
+  it (Ctrl+Enter), shows its output and errors in a console, and keeps
+  scripts as `.rhai` files in the user's script folder (in the user data
+  folder, beside the recovery copies); **Script ▸** lists them to run with a
+  click. Example scripts ship with Grid4D.
+* **Not in Phase 13:** plugins loaded from libraries at run time, Python,
+  scripts that run every frame (expression tags, node-based expressions),
+  scripts with file or network access, plugin panels or tools that take
+  pointer input in the viewport, a plugin marketplace.
+
+### Steps
+
+| Step | Size | Work |
+|------|------|------|
+| 13.1 | L | **Plugin API and generator plugins:** spec `extend-plugins.md`; the `grid4d-plugin` crate (`ParamSpec`, `PluginValue`, `GeneratorPlugin`, `Registry`, `install`); `scene::PluginObject` and `ObjectKind::Plugin`; evaluation of generator plugins (cached, validated); `.g4d` v3 additive `KindDto::Plugin` (unknown types and values preserved); the Attribute Manager built from a schema; **Create ▸ Plugins**; the binary's registration list; the example **Gear** generator (`plugins/gear`); tests: schema defaults and checks, a registered generator drawn and rendered, a document with a missing plugin opening, showing and saving back unchanged, idle frames |
+| 13.2 | M | **Deformer plugins and animated plugin parameters:** `DeformerPlugin` in the deformer stack (box, strength handle where the plugin gives one); the example **Wave** deformer (`plugins/wave`); `ObjectParam::Plugin(index)`, key buttons by parameter name, the F-Curve editor's curves for them; takes override plugin parameters; tests: a wave bends a cube and follows its keys, undo, a take |
+| 13.3 | M | **Command plugins:** `CommandPlugin` with an options schema; **Plugins ▸** entries, an options dialog from the schema, one undo step; the example **Scatter** command (`plugins/scatter`: copies of the selection placed at random over a surface, seeded); tests: deterministic result, undo, nothing selected |
+| 13.4 | L | **Scripting core:** spec `extend-scripting.md`; the `grid4d-script` crate (`rhai` 1.27): the document API, runs on a copy recording `SceneEdit`s, one undo step, an operations limit, errors with line and column, `print` captured; tests: a script that builds and colours a grid of cubes undoes in one step, a failing script changes nothing, an endless loop is stopped, a script calls a plugin command |
+| 13.5 | M | **The Script Manager:** the window (editor with line numbers, Run with Ctrl+Enter, console, New / Open / Save in the user's script folder), **Script ▸** with the library's scripts, example scripts installed on first start; tests: running from the window, the library listing, output and errors shown |
+| 13.6 | M | **SDK documentation and finish:** `docs/plugins.md` (writing a plugin crate: the traits, the schema, registering it, testing it) and `docs/scripting.md` (the script API, with examples); the Greek for every new text; the manual's Plugins and Scripting chapters; the phase's acceptance |
+
+**Acceptance:** the Gear generator is created from Create ▸ Plugins, its
+parameters edit, animate, undo, override in a take and save; the same file
+opened in a Grid4D without the plugin shows the object as missing, and saved
+there it still opens with the gear in a Grid4D that has it; the Wave
+deformer bends a cube and is animated; Scatter places copies in one undo
+step; a script that builds a coloured grid of cubes runs as one undo step,
+an error points at its line, an endless loop is stopped; everything new
+reads in Greek.
 
 ---
 
@@ -1063,6 +1152,9 @@ per steady-state frame" for the hot path, complementing `extract_reuses_capacity
 | D13 | Docking library | `egui_tiles` 0.18 (egui 0.37, from egui's authors, serialisable tree) instead of `egui_dock`, whose newest release (0.21.1) is still on egui 0.36; no own splitter tree needed | Phase 12 |
 | D14 | How takes reach panels and renders | The document always holds the active take's state; switching is one undoable swap of the overridden groups (Main's values kept beside the takes), edits in a take are recorded as its overrides (Auto Take), and renders apply a take to their own copy — so panels, evaluation and the renderer need no take awareness | Phase 12 |
 | D15 | Translation keys | The English text is the key (`tr("Object Manager")`): readable code, English as the fallback, a test that finds every `tr` literal missing from the Greek table | Phase 12 |
+| D16 | How plugins are added | Rust crates built into the binary and registered explicitly from a list in the composition root (`src/plugins.rs`), behind a `grid4d-plugin` API crate; plugin objects are one more `ObjectKind` holding a type id and schema-typed values, so undo, takes, layers, animation and files need no plugin awareness; documents with missing plugins open and save back unchanged. No dynamic libraries (`unsafe` is forbidden; Rust has no stable ABI) | Phase 13 |
+| D17 | Scripting language | Rhai (`rhai` 1.27, pure Rust, sandboxed, no external runtime) rather than Python via `pyo3` (needs a Python installation, complicates builds and distribution) | Phase 13 |
+| D18 | How scripts change the document | Only through `SceneEdit`s recorded while running on a copy, applied as one undo step when the script finishes (nothing on an error or stop); an operations limit stops endless loops | Phase 13 |
 | R3 | Scope creep | Ship the release train in order; each phase must leave the app usable and tests green | ongoing |
 
 ---

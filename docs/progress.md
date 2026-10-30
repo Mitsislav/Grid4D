@@ -12,9 +12,9 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 12 — Workspace (v0.12) |
-| Last step done | 12.6 — Greek (2026-10-30); Phase 12 complete |
-| Next step | Phase 13 — Extensibility: plan it in detail |
+| Current phase | 13 — Extensibility (v0.13) |
+| Last step done | Phase 13 planned (2026-10-30) |
+| Next step | 13.1 — Plugin API and generator plugins |
 | Tests | 716, all passing; clippy and rustfmt clean |
 
 ---
@@ -1824,6 +1824,28 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
 
 Phase 12 is complete: docking layouts, Preferences, themes, layers, takes and
 the interface in Greek.
+
+---
+
+## Phase 13 — Extensibility (2026-10-30 – )
+
+| Step | What was built | Tests |
+|------|----------------|-------|
+| — | Phase 13 planned in detail: plugins as Rust crates built in and registered from a list (`grid4d-plugin`: parameter schema, generator, deformer and command traits; `ObjectKind::Plugin`; missing plugins kept), scripting in Rhai through `SceneEdit`s (one undo step per run, an operations limit), the Script Manager, SDK documentation (`IMPLEMENTATION_PLAN.md`) | 716 |
+
+**Planning notes:**
+- **Why plugins are built in.** Loading plugin libraries at run time would
+  need `unsafe` (forbidden in the workspace) and a stable ABI Rust does not
+  have; plugins are crates the binary lists, and the plugin API is a crate of
+  its own, so a plugin depends on nothing else of Grid4D (decision D16).
+- **Why Rhai, not Python.** Rhai 1.27 (released 2026-10-21) is pure Rust,
+  sandboxed and needs nothing installed; Python through `pyo3` 0.30 would
+  need a Python runtime found or bundled on every platform and a more complex
+  build (decision D17).
+- **Plugins without plugin awareness.** Plugin objects are one more
+  `ObjectKind` with a type id and values, so undo, takes, layers, animation,
+  files and the path tracer handle them like any object; only evaluation and
+  the Attribute Manager ask the registry.
 
 ---
 
