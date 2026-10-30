@@ -2196,6 +2196,15 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
                     .range(SimulationSettings::MIN_TIME_SCALE..=SimulationSettings::MAX_TIME_SCALE),
             );
             ui.end_row();
+            attr_label(ui, "Cache Memory", LABEL_WIDTH);
+            ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut simulation.memory_limit_mb)
+                    .speed(1.0)
+                    .range(1..=SimulationSettings::MAX_MEMORY_MB)
+                    .suffix(" MB"),
+            );
+            ui.end_row();
         });
     ui.add_space(8.0);
     ui.label(RichText::new("Select an object to edit its attributes.").color(p::TEXT_DIM));

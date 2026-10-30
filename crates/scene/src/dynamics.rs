@@ -2,7 +2,9 @@
 //! what a Dynamics tag makes of its object, and the document's simulation
 //! settings. The simulation itself lives in `grid4d-sim`.
 
-use glam::Vec3;
+use glam::{Quat, Vec3};
+
+use crate::NodeId;
 
 /// How a body moves.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -205,6 +207,8 @@ pub struct SimulationSettings {
     pub solver_iterations: u32,
     /// Below 1: slow motion.
     pub time_scale: f32,
+    /// Most memory the simulated frames may take (MB).
+    pub memory_limit_mb: u32,
 }
 
 impl Default for SimulationSettings {
@@ -215,6 +219,7 @@ impl Default for SimulationSettings {
             steps_per_frame: 5,
             solver_iterations: 4,
             time_scale: 1.0,
+            memory_limit_mb: 256,
         }
     }
 }
@@ -224,6 +229,7 @@ impl SimulationSettings {
     pub const MAX_ITERATIONS: u32 = 100;
     pub const MIN_TIME_SCALE: f32 = 0.01;
     pub const MAX_TIME_SCALE: f32 = 100.0;
+    pub const MAX_MEMORY_MB: u32 = 65_536;
 
     /// The settings with every value in its range (non-finite numbers become
     /// the defaults).
@@ -244,7 +250,37 @@ impl SimulationSettings {
             } else {
                 defaults.time_scale
             },
+            memory_limit_mb: self.memory_limit_mb.clamp(1, Self::MAX_MEMORY_MB),
         }
+    }
+}
+
+/// A simulation's frames as saved with a document (see
+/// `docs/reference/simulation-cache.md`): every body's pose per frame from the
+/// start frame on.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SimulationCache {
+    pub start: i32,
+    pub bodies: Vec<CachedBody>,
+    /// Frames × bodies: position (cm) and rotation.
+    pub poses: Vec<(Vec3, Quat)>,
+}
+
+/// A body of a [`SimulationCache`]: an object, or a clone of a Cloner, and its
+/// scale (which the simulation keeps).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CachedBody {
+    pub node: NodeId,
+    /// The clone's number, for a Cloner's clone.
+    pub clone: Option<u32>,
+    pub scale: Vec3,
+}
+
+impl SimulationCache {
+    /// Frames held.
+    #[must_use]
+    pub fn frames(&self) -> usize {
+        self.poses.len().checked_div(self.bodies.len()).unwrap_or(0)
     }
 }
 
@@ -260,6 +296,7 @@ mod tests {
             steps_per_frame: 0,
             solver_iterations: 1000,
             time_scale: 0.0,
+            memory_limit_mb: 0,
         }
         .validated();
         assert_eq!(wild.gravity, SimulationSettings::default().gravity);

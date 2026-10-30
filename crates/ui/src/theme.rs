@@ -69,6 +69,8 @@ pub mod palette {
     pub const ICON_DEFORMER: Color32 = Color32::from_rgb(0xb7, 0x8c, 0xf0);
     /// Effectors.
     pub const ICON_EFFECTOR: Color32 = Color32::from_rgb(0xf0, 0x9a, 0x5c);
+    /// A warning in the status bar.
+    pub const WARNING: Color32 = Color32::from_rgb(0xf0, 0xb4, 0x4c);
     /// The simulated frames on the timeline.
     pub const SIM_CACHE: Color32 = Color32::from_rgb(0x5f, 0xb3, 0x7a);
     /// Tag icons in the Object Manager.

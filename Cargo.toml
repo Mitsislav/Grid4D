@@ -74,6 +74,8 @@ rayon = "1.10"
 # run is deterministic. It brings glam 0.33 (through glamx) beside our 0.34;
 # grid4d-sim converts through plain arrays (IMPLEMENTATION_PLAN.md, D10).
 rapier3d = "0.36"
+# Benchmarks (dev only): plain measurements, no plots or thread pool.
+criterion = { version = "0.8", default-features = false }
 # Rendered pictures (grid4d-io): PNG; OpenEXR written by hand with zlib (the
 # backend zip already uses) and half floats. `exr` (dev only) reads them back in tests.
 png = "0.18"

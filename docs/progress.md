@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 11 — Simulation (v0.11) |
-| Last step done | 11.4 — Clones as bodies (2026-10-30) |
-| Next step | 11.5 — Saved caches and limits |
-| Tests | 680, all passing; clippy and rustfmt clean |
+| Last step done | 11.5 — Saved caches and limits (2026-10-30); Phase 11 complete |
+| Next step | Phase 12 — Workspace: plan it in detail |
+| Tests | 683, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1460,6 +1460,7 @@ parameters, are undoable, saved, picked, exported and rendered.
 | 11.2 | The simulation core: bodies from tagged objects as the viewport shows them at the start frame (Compound groups, box / sphere / convex hull / mesh shapes, mass, bounce, friction, damping, start velocity), stepped in sub-steps with animated colliders following their keys, recorded per frame; not yet shown in the viewport (11.3) | 671 |
 | 11.3 | The simulation in the viewport: simulated as the frame advances (a budget per refresh), cached and shown at once when revisited (a green bar on the timeline), dropped only when the motion's inputs change; Bake Simulation (progress, Esc) and Clear Simulation Cache; renders, Current State to Object and export show it | 677 |
 | 11.4 | Clones as bodies: a Rigid / Collider Body tag on a Cloner makes every clone a body (a cloned group one piece), colliding with each other and with everything; clones start where the layout and effectors put them; shown, rendered, baked and exported where the simulation has them | 680 |
+| 11.5 | Simulated frames saved with the document and shown at once when reopened (kept only if the bodies still start the same); Cache Memory limit with a status-bar warning; a benchmark of 1 000 falling cubes; the manual's Simulation chapter | 683 |
 
 **Planning notes:**
 - **The engine's maths library.** `rapier3d` 0.36 (the latest, 2026-10) uses
@@ -1566,6 +1567,35 @@ parameters, are undoable, saved, picked, exported and rendered.
 - **On-screen testing:** a tagged 5 × 3 × 5 Grid Array of cubes and spheres
   dropped onto a tilted ramp: baked to frame 120, the clones slid off the ramp
   and scattered on the floor; scrubbing showed the cached frames.
+
+**11.5 — Saved caches and limits**
+
+*Problems and solutions:*
+- **Where a saved cache lives.** It is not part of the document's undoable
+  data, so it travels beside it: `grid4d_io::save_with_cache` /
+  `load_with_cache` take and give a `SimulationCache` (plain scene data, so
+  `grid4d-io` needs no physics), while `save` / `load` stay as they were.
+- **Never trusting a file.** The poses' entry is read against the size the
+  description claims (frames × bodies × 28 bytes), capped at 2 GiB; a file
+  claiming one frame more than it holds is refused (a test edits the claim).
+- **Is a saved cache still right?** The engine's state cannot be saved, and a
+  file edited elsewhere could hold frames of another scene. On opening, a
+  fresh simulation of the document is built (frame 0 only) and the saved
+  frames are kept only if they agree with it: same bodies, scales and start
+  poses. Past the saved frames the fresh simulation runs on — the same motion,
+  being deterministic (a test compares frame 50 both ways).
+- **The memory limit** is a setting that changes no motion, so it is left out
+  of the inputs key: raising it keeps what is cached.
+- **The benchmark** uses `criterion` without its default features (no plots,
+  no thread pool): building 1 000 bodies takes ≈ 2.3 ms, a frame of 1 000
+  cubes falling into a box ≈ 4.6 ms with 5 sub-steps.
+- **Clippy** asked for `is_multiple_of`.
+- **On-screen testing:** five cubes and a ball baked and saved with File ▸
+  Save: the file held `simulation.bin` (17 836 bytes: 91 frames × 7 bodies);
+  reopened, the cache bar was full at once.
+
+Phase 11 is complete: rigid and collider bodies on objects and clones,
+simulated with rapier3d, cached, baked, saved, rendered and exported.
 
 ---
 

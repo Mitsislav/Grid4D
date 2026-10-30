@@ -316,14 +316,18 @@ pub(crate) fn open_path(path: PathBuf, doc: &mut Document, editor: &mut EditorSt
         let name = path
             .file_stem()
             .map_or_else(|| "Untitled".into(), |s| s.to_string_lossy());
-        grid4d_io::import(&path).map(|imported| (imported.into_document(&name), None))
+        grid4d_io::import(&path).map(|imported| (imported.into_document(&name), None, None))
     } else {
-        grid4d_io::load(&path).map(|doc| (doc, Some(path.clone())))
+        grid4d_io::load_with_cache(&path).map(|(doc, cache)| (doc, Some(path.clone()), cache))
     };
     match loaded {
-        Ok((loaded, saved_path)) => {
+        Ok((loaded, saved_path, cache)) => {
             editor.file.recent.touch(&path);
             replace(doc, editor, viewport, loaded, saved_path);
+            // Frames simulated before saving: ready at once, if they still fit.
+            if let Some(cache) = cache {
+                editor.simulation.adopt(doc, cache);
+            }
             viewport.frame_scene(&doc.scene);
         }
         Err(err) => {
@@ -726,7 +730,8 @@ pub(crate) fn save(doc: &Document, editor: &mut EditorState, ask_path: bool) -> 
             path
         }
     };
-    match grid4d_io::save(doc, &path) {
+    let cache = editor.simulation.to_save(doc);
+    match grid4d_io::save_with_cache(doc, cache.as_ref(), &path) {
         Ok(()) => {
             editor.file.recent.touch(&path);
             editor.file.path = Some(path);

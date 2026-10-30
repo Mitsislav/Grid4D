@@ -31,10 +31,10 @@ use grid4d_geom::{
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
 use grid4d_scene::{
-    Axis, Body, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming, FrameRange,
-    ImageFormat, Inherit, Interpolation, Key, LightDetails, LightShadow, LightType, MassMode, Material, MaterialId,
-    MeshHandle, MeshId, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, RenderSettings, SimulationSettings,
-    SplineHandle, Tag, Tangents, TimeSettings, Track, Transform,
+    Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
+    FrameRange, ImageFormat, Inherit, Interpolation, Key, LightDetails, LightShadow, LightType, MassMode, Material,
+    MaterialId, MeshHandle, MeshId, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, RenderSettings,
+    SimulationCache, SimulationSettings, SplineHandle, Tag, Tangents, TimeSettings, Track, Transform,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -78,6 +78,9 @@ struct DocumentDto {
     /// defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     simulation: Option<SimulationDto>,
+    /// Added in step 11.5: the simulated frames, when saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    simulation_cache: Option<SimCacheDto>,
 }
 
 /// A material; colours are linear RGB.
@@ -759,6 +762,124 @@ struct SimulationDto {
     steps_per_frame: u32,
     solver_iterations: u32,
     time_scale: f32,
+    /// Added in step 11.5.
+    #[serde(default = "default_memory")]
+    memory_limit_mb: u32,
+}
+
+const fn default_memory() -> u32 {
+    256
+}
+
+/// A saved simulation cache (step 11.5): its bodies here, the poses in
+/// [`SIMULATION_ENTRY`] (frames × bodies × position and rotation, seven
+/// little-endian `f32`s each).
+#[derive(Debug, Serialize, Deserialize)]
+struct SimCacheDto {
+    start: i32,
+    frames: u32,
+    bodies: Vec<CachedBodyDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CachedBodyDto {
+    /// Index in `objects`.
+    object: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    clone: Option<u32>,
+    scale: [f32; 3],
+}
+
+/// The archive entry holding a saved cache's poses.
+const SIMULATION_ENTRY: &str = "simulation.bin";
+/// The largest saved cache read (bytes): what a file claims is never trusted.
+const MAX_CACHE_BYTES: u64 = 1 << 31;
+
+impl SimCacheDto {
+    /// The cache's description and its poses' bytes; `None` when a body's
+    /// object is not in the file (the cache is then left out).
+    fn new(cache: &SimulationCache, refs: &Refs) -> Option<(Self, Vec<u8>)> {
+        let bodies = cache
+            .bodies
+            .iter()
+            .map(|b| {
+                Some(CachedBodyDto {
+                    object: *refs.objects.get(&b.node)?,
+                    clone: b.clone,
+                    scale: b.scale.to_array(),
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let mut bytes = Vec::with_capacity(cache.poses.len() * 28);
+        for (position, rotation) in &cache.poses {
+            for value in position.to_array().into_iter().chain(rotation.to_array()) {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        let frames = u32::try_from(cache.frames()).ok()?;
+        Some((
+            Self {
+                start: cache.start,
+                frames,
+                bodies,
+            },
+            bytes,
+        ))
+    }
+
+    fn into_cache(self, archive: &mut Archive<'_>, ids: &[NodeId]) -> Result<SimulationCache, IoError> {
+        let invalid = |what: &str| IoError::Invalid(format!("the saved simulation {what}"));
+        let expected = u64::from(self.frames)
+            .checked_mul(u64::try_from(self.bodies.len()).unwrap_or(u64::MAX))
+            .and_then(|n| n.checked_mul(28))
+            .filter(|&n| n <= MAX_CACHE_BYTES)
+            .ok_or_else(|| invalid("is too large"))?;
+        let bytes = archive.read(SIMULATION_ENTRY, expected)?;
+        if u64::try_from(bytes.len()).ok() != Some(expected) {
+            return Err(invalid("has the wrong size"));
+        }
+        let bodies = self
+            .bodies
+            .iter()
+            .map(|b| {
+                let scale = Vec3::from_array(b.scale);
+                (scale.is_finite())
+                    .then_some(())
+                    .and_then(|()| ids.get(b.object))
+                    .map(|&node| CachedBody {
+                        node,
+                        clone: b.clone,
+                        scale,
+                    })
+                    .ok_or_else(|| invalid("names an object that is not in the file"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let values: Vec<f32> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
+            .collect();
+        if !values.iter().all(|v| v.is_finite()) {
+            return Err(invalid("holds a number that is not finite"));
+        }
+        let poses = values
+            .as_chunks::<7>()
+            .0
+            .iter()
+            .map(|v| {
+                (
+                    Vec3::new(v[0], v[1], v[2]),
+                    glam::Quat::from_xyzw(v[3], v[4], v[5], v[6]).normalize(),
+                )
+            })
+            .collect();
+        Ok(SimulationCache {
+            start: self.start,
+            bodies,
+            poses,
+        })
+    }
 }
 
 impl SimulationDto {
@@ -770,6 +891,7 @@ impl SimulationDto {
             steps_per_frame: settings.steps_per_frame,
             solver_iterations: settings.solver_iterations,
             time_scale: settings.time_scale,
+            memory_limit_mb: settings.memory_limit_mb,
         })
     }
 
@@ -785,6 +907,7 @@ impl SimulationDto {
             steps_per_frame: self.steps_per_frame,
             solver_iterations: self.solver_iterations,
             time_scale: self.time_scale,
+            memory_limit_mb: self.memory_limit_mb,
         }
         .validated())
     }
@@ -2334,7 +2457,7 @@ impl MeshTable {
 }
 
 /// Writes `doc` as a version 3 archive.
-pub(crate) fn write(doc: &Document) -> Result<Vec<u8>, IoError> {
+pub(crate) fn write(doc: &Document, cache: Option<&SimulationCache>) -> Result<Vec<u8>, IoError> {
     // Pre-order: a parent is always written (and indexed) before its children.
     // Indexed first, so tags can refer to objects written after them.
     let mut order: Vec<NodeId> = Vec::with_capacity(doc.scene.len());
@@ -2369,7 +2492,9 @@ pub(crate) fn write(doc: &Document) -> Result<Vec<u8>, IoError> {
     for (mesh, object) in &table.meshes {
         check_mesh_finite(mesh.mesh(), object)?;
     }
+    let saved_cache = cache.and_then(|c| SimCacheDto::new(c, &refs));
     let settings = doc.time.settings();
+    let (simulation_cache, cache_bytes) = saved_cache.map_or((None, None), |(dto, bytes)| (Some(dto), Some(bytes)));
     let file = File {
         format: FORMAT_TAG.to_owned(),
         version: VERSION,
@@ -2385,6 +2510,7 @@ pub(crate) fn write(doc: &Document) -> Result<Vec<u8>, IoError> {
             materials: doc.scene.materials().iter().map(|(_, m)| MaterialDto::new(m)).collect(),
             render: RenderDto::new(&doc.render),
             simulation: SimulationDto::new(&doc.simulation),
+            simulation_cache,
         },
         meshes: table.meshes.iter().map(|(mesh, _)| MeshDto::of(mesh.mesh())).collect(),
     };
@@ -2404,6 +2530,11 @@ pub(crate) fn write(doc: &Document) -> Result<Vec<u8>, IoError> {
         zip.start_file(mesh_entry(index), options.large_file(large))?;
         zip.write_all(&bytes)?;
     }
+    if let Some(bytes) = cache_bytes {
+        let large = u64::try_from(bytes.len()).unwrap_or(u64::MAX) >= u64::from(u32::MAX);
+        zip.start_file(SIMULATION_ENTRY, options.large_file(large))?;
+        zip.write_all(&bytes)?;
+    }
     Ok(zip.finish()?.into_inner())
 }
 
@@ -2412,8 +2543,12 @@ impl File {
         Ok(serde_json::from_str(text)?)
     }
 
-    /// Builds the document, reading the meshes from `archive`.
-    pub(crate) fn into_document(self, archive: &mut Archive<'_>) -> Result<Document, IoError> {
+    /// Builds the document, reading the meshes (and a saved simulation cache)
+    /// from `archive`.
+    pub(crate) fn into_document(
+        self,
+        archive: &mut Archive<'_>,
+    ) -> Result<(Document, Option<SimulationCache>), IoError> {
         let meshes = self
             .meshes
             .iter()
@@ -2442,6 +2577,7 @@ impl File {
             materials,
             render,
             simulation,
+            simulation_cache,
         } = self.document;
         let materials = materials
             .into_iter()
@@ -2502,7 +2638,8 @@ impl File {
                     .collect();
             }
         }
-        Ok(doc)
+        let cache = simulation_cache.map(|dto| dto.into_cache(archive, &ids)).transpose()?;
+        Ok((doc, cache))
     }
 }
 
@@ -4120,6 +4257,53 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_simulation_cache_round_trips_and_bad_sizes_are_refused() {
+        let mut doc = Document::new("cache");
+        let ball = doc
+            .scene
+            .insert(Node::new("Ball", ObjectKindTag::Sphere.default_kind()));
+        let cloner = doc
+            .scene
+            .insert(Node::new("Cloner", ObjectKindTag::Cloner.default_kind()));
+        let body = |node, clone| CachedBody {
+            node,
+            clone,
+            scale: Vec3::new(1.0, 2.0, 1.0),
+        };
+        let cache = SimulationCache {
+            start: 5,
+            bodies: vec![body(ball, None), body(cloner, Some(3))],
+            poses: (0..6)
+                .map(|i| {
+                    let i = f32::from(u8::try_from(i).unwrap());
+                    (Vec3::new(i, -i, 2.0 * i), glam::Quat::from_rotation_y(i * 0.1))
+                })
+                .collect(),
+        };
+        let bytes = crate::to_bytes_with_cache(&doc, Some(&cache)).unwrap();
+        let (loaded, back) = crate::from_bytes_with_cache(&bytes).unwrap();
+        let back = back.unwrap();
+        let roots = loaded.scene.roots();
+        assert_eq!(back.bodies, vec![body(roots[0], None), body(roots[1], Some(3))]);
+        assert_eq!((back.start, back.frames()), (5, 3));
+        for (a, b) in back.poses.iter().zip(&cache.poses) {
+            assert!(a.0.abs_diff_eq(b.0, 1e-6) && a.1.abs_diff_eq(b.1, 1e-6));
+        }
+        assert!(
+            crate::from_bytes_with_cache(&to_bytes(&doc).unwrap())
+                .unwrap()
+                .1
+                .is_none()
+        );
+
+        // A file claiming more frames than it holds is refused.
+        let mut archive = Archive::new(&bytes).unwrap();
+        let json = String::from_utf8(archive.read(DOCUMENT_ENTRY, 1 << 20).unwrap()).unwrap();
+        let lying = File::parse(&json.replace("\"frames\": 3", "\"frames\": 4")).unwrap();
+        assert!(lying.into_document(&mut archive).is_err());
+    }
+
+    #[test]
     fn dynamics_tags_and_simulation_settings_round_trip() {
         let mut doc = Document::new("bodies");
         let rigid = Tag::Dynamics(Body::rigid());
@@ -4149,6 +4333,7 @@ mod tests {
             steps_per_frame: 10,
             solver_iterations: 8,
             time_scale: 0.5,
+            memory_limit_mb: 1024,
         };
         let loaded = round_trip(&doc);
         let roots = loaded.scene.roots();
@@ -4179,6 +4364,7 @@ mod tests {
             steps_per_frame: 5,
             solver_iterations: 4,
             time_scale: 1.0,
+            memory_limit_mb: 256,
         };
         assert!(bad.into_settings().is_err());
     }

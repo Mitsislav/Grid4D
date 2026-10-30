@@ -25,12 +25,13 @@ screenshots come from the application itself.
 13. [Splines](#13-splines)
 14. [Deformers](#14-deformers)
 15. [The Cloner](#15-the-cloner)
-16. [Snapping](#16-snapping)
-17. [Tags](#17-tags)
-18. [Materials](#18-materials)
-19. [Rendering](#19-rendering)
-20. [Keyboard shortcuts](#20-keyboard-shortcuts)
-21. [Limitations and what is planned](#21-limitations-and-what-is-planned)
+16. [Simulation](#16-simulation)
+17. [Snapping](#17-snapping)
+18. [Tags](#18-tags)
+19. [Materials](#19-materials)
+20. [Rendering](#20-rendering)
+21. [Keyboard shortcuts](#21-keyboard-shortcuts)
+22. [Limitations and what is planned](#22-limitations-and-what-is-planned)
 
 ---
 
@@ -61,7 +62,7 @@ sessions.
 |---|------|----------------|
 | 1 | **Menu bar** | Every command: File, Edit, Create, Modes, Select, Tools, Mesh, Animate, Window, Help. |
 | 2 | **Command palette** | Undo/redo, the selection tools, Move/Scale/Rotate, axis locks, World/Object coordinates, render buttons (*planned*) and buttons that create objects. |
-| 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§16](#16-snapping)). |
+| 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§17](#17-snapping)). |
 | 4 | **Viewport** | The 3D view of the scene, or up to four views ([§3.2](#32-several-views-top-front-and-side)). Each view's header has the View, Cameras, Display, Options, Filter and Panel menus and three navigation icons. |
 | 5 | **Object Manager** | The scene's objects as a hierarchy. |
 | 6 | **Attribute Manager** | The parameters of the selected object, or the options of the current tool. |
@@ -337,7 +338,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
 
 - Spot and Infinite lights shine along their **−Z axis**, like cameras look. Turn
   them with the Rotate tool or the Coordinates, or give them a **Target tag** to
-  point them at an object ([§17.3](#173-target)). *Cameras ▸ Selected Object as
+  point them at an object ([§18.3](#183-target)). *Cameras ▸ Selected Object as
   Camera* shows what a light points at.
 - In the viewport a **Spot** shows its cone and an **Infinite** light an arrow
   along its direction (orange when selected).
@@ -345,7 +346,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
   light the viewport.
 - Sides that no light reaches keep a little soft light, so shapes stay readable.
 
-**Materials** show in the lit viewport too ([§18](#18-materials)): roughness sets
+**Materials** show in the lit viewport too ([§19](#19-materials)): roughness sets
 how sharp the highlights are, metals reflect in their own colour, and luminance
 makes a surface glow whatever the light.
 
@@ -377,7 +378,7 @@ then drag a handle of the gizmo.
 - **Alt + drag** always navigates, even over the gizmo.
 - For exact values, type them in the Attribute Manager ([§7](#7-the-attribute-manager)).
 - To place objects exactly on other objects or on the grid, turn on snapping
-  (**Shift+S**, [§16](#16-snapping)).
+  (**Shift+S**, [§17](#17-snapping)).
 
 Every drag is one undo step.
 
@@ -395,7 +396,7 @@ Every drag is one undo step.
 - **Re-parent**: drag a row onto another row. The object keeps its position in the
   world. Right-click ▸ *Move to Top Level* takes it out of its group.
 - **Search**: type in the search field to show only matching objects.
-- **Tags** appear as icons after the name; click one to edit it ([§17](#17-tags)).
+- **Tags** appear as icons after the name; click one to edit it ([§18](#18-tags)).
 - Right-click a row for Rename, Frame Object, Move to Top Level, Add Tag and Delete.
 
 ## 7. The Attribute Manager
@@ -1016,7 +1017,7 @@ Select the generator and open **Attribute Manager ▸ Object**:
 |-----------|---------|
 | Type | **Catmull-Clark (N-Gons)**: every polygon with *n* corners becomes *n* quads, then the surface is smoothed. It is the only type for now. |
 | Subdivision Viewport | How many times the viewport subdivides (0 shows the cage itself, 6 at most). Each level multiplies the polygons by about four, so keep it low (2) while modelling. |
-| Subdivision Renderer | The level for final renders ([§19](#19-rendering)). |
+| Subdivision Renderer | The level for final renders ([§20](#20-rendering)). |
 | Linear Pre-Subdivision | Splits the cage this many times *without* smoothing before the smoothing levels, which keeps the result closer to the cage. |
 | Boundary Interpolation | How open borders (the edge of a plane) are smoothed. **Edge and Corner** keeps a border's corners in place; **Edge** rounds them off as well. |
 
@@ -1562,7 +1563,86 @@ order. The viewport shows each effector as a small cross with its falloff's
 outline; **Filter ▸ Effector** hides them. Switch an effector off (its check
 mark) to stop it.
 
-## 16. Snapping
+## 16. Simulation
+
+Objects can fall, collide, bounce and come to rest. Give an object a **Rigid
+Body** tag and it moves under gravity; give one a **Collider Body** tag and
+rigid bodies hit it. Nothing else is needed: play the animation.
+
+### 16.1 Rigid Body and Collider Body
+
+A **Rigid Body** falls under
+gravity, collides, bounces and comes to rest; a **Collider Body** is something
+rigid bodies hit — a floor, a bowl, a moving paddle — and is never pushed
+itself. Both are the same tag (*Dynamics*; one per object): choose **Rigid
+Body Tag** or **Collider Body Tag** in the Tags menu, or switch **Dynamic**
+between *Dynamic* and *Collider* later.
+
+![A sphere with a Rigid Body tag above a floor with a Collider Body tag; the Rigid Body tag's settings](images/manual/tags_dynamics.png)
+
+- **Enabled**: off, the object takes no part.
+- **Inherit Tag**: *Compound* makes the object and its visible children one
+  body.
+- **Shape**: what collides — *Automatic* (a convex hull for a rigid body, the
+  exact mesh for a collider), *Box*, *Sphere*, *Convex Hull* or *Static Mesh*
+  (colliders only). Shapes come from the object as it is shown, deformers and
+  generators included.
+- **Bounce** and **Friction**: how much speed survives a hit, and how much
+  sliding is resisted.
+- **Mass** (rigid bodies): *Global Density* (a 100 cm cube weighs 1 kg),
+  *Custom Density* or *Custom Mass*; **Rotational Mass** makes it harder or
+  easier to set spinning; **Linear / Angular Damping** slow it down as air
+  would.
+- **Velocity** and **Spin**: how it is moving at the start frame.
+
+### 16.2 Simulation settings
+
+The document's **Simulation** settings are in the Project settings (click an
+empty spot in the Object Manager): **Enabled**, **Gravity** (cm/s², 981 down
+by default), **Steps per Frame** (more for fast or small objects), **Solver
+Iterations** (steadier stacks), **Time Scale** (below 1: slow motion) and
+**Cache Memory** (how much memory the simulated frames may take, 256 MB by
+default; when it is reached the status bar says so and no more frames are
+simulated — raise it to go on).
+
+### 16.3 Playing, baking and saving
+
+Set the scene up at the start frame (Minimum Time) — that is where every body
+starts. Then play, or drag the time slider
+forward: the bodies fall, collide and settle, simulated as you go. Simulated
+frames are kept (a green bar under the timeline's ruler shows them), so going
+back or playing again shows them at once.
+
+![Five cubes and a ball dropped onto a floor, at frame 61: they have fallen, bounced and settled; the green bar under the ruler shows the simulated frames](images/manual/simulation-playback.png)
+
+- Changing anything that affects the motion — a body's place, size, shape,
+  tag or animation, or the Simulation settings — starts the simulation over.
+  Selecting, renaming, or editing objects that are not bodies keeps it.
+- **Simulate ▸ Bake Simulation** simulates the whole range now; the status bar
+  shows how far it is, **Esc** stops it. **Simulate ▸ Clear Simulation Cache**
+  forgets the simulated frames.
+- The **Render View**, **Render to Picture Viewer** (every frame of an
+  animation), **Current State to Object** and **File ▸ Export** all show the
+  bodies where the simulation has them at their frame.
+- Editing a body while the time slider is past the start frame changes its
+  start: the viewport shows the simulation again from there.
+- **Saving:** the simulated frames are saved with the document (**File ▸
+  Save**), so a baked simulation plays at once when the file is opened again.
+  If the file was changed elsewhere so that the bodies no longer start where
+  they did, the saved frames are left out and the simulation runs again.
+
+### 16.4 Clones as bodies
+
+Put the Rigid Body tag on a **Cloner** (not on its children), and every clone becomes a body of its own — a grid of cubes
+collapses, a ring of spheres rolls apart. Each clone keeps its shape (a cloned
+group moves as one piece), clones collide with each other and with every other
+body, and they start where the Cloner and its effectors place them at the
+start frame. A Collider Body tag on a Cloner makes every clone an obstacle.
+Changing the Cloner, its children or its effectors starts the simulation over.
+
+![75 clones of a cube and a sphere from a tagged Grid Array Cloner, at frame 82: they fell onto a tilted ramp, slid off and scattered on the floor](images/manual/simulation-clones.png)
+
+## 17. Snapping
 
 With snapping on, a moved object or selection jumps onto nearby geometry or onto
 the floor grid, so you can place things exactly: an object's axis level with a
@@ -1609,7 +1689,7 @@ Move tool and look at the **Snap** group in the Attribute Manager's Tool mode
 Within the radius, points win over edges and grid lines, which win over surfaces,
 so a corner can be caught right next to its edges.
 
-## 17. Tags
+## 18. Tags
 
 Tags add a property or a behaviour to an object without changing what kind of
 object it is. They show as small icons to the right of the object's name in the
@@ -1630,7 +1710,7 @@ change can be undone and is saved with the document.
 **Removing:** click the tag icon, then press **Delete** (or right-click the icon ▸
 *Delete Tag*). With a tag selected, Delete removes only the tag, not its object.
 
-### 17.1 Phong
+### 18.1 Phong
 
 Controls how smooth the object looks.
 
@@ -1643,7 +1723,7 @@ Controls how smooth the object looks.
 
 ![A sphere with a Phong tag at 0°: flat shading](images/manual/tags_flat.png)
 
-### 17.2 Protection
+### 18.2 Protection
 
 Guards an object against accidental changes. Tick **Position**, **Scale** and/or
 **Rotation**. A protected channel cannot be changed with the gizmo (the Move, Scale
@@ -1651,7 +1731,7 @@ or Rotate gizmo does not appear for the object) or in the Coordinates fields of 
 Attribute Manager, which turn grey. The object's points, edges and polygons can still
 be edited in the component modes.
 
-### 17.3 Target
+### 18.3 Target
 
 Turns the object to face another object.
 
@@ -1667,72 +1747,15 @@ Turns the object to face another object.
 
 ![The Target tag's settings](images/manual/tags_target.png)
 
-### 17.4 Material
+### 18.4 Material
 
-Links a material to the object; see [§18](#18-materials).
+Links a material to the object; see [§19](#19-materials).
 
-### 17.5 Rigid Body and Collider Body
+### 18.5 Rigid Body and Collider Body
 
-Make an object part of the rigid body simulation: a **Rigid Body** falls under
-gravity, collides, bounces and comes to rest; a **Collider Body** is something
-rigid bodies hit — a floor, a bowl, a moving paddle — and is never pushed
-itself. Both are the same tag (*Dynamics*; one per object): choose **Rigid
-Body Tag** or **Collider Body Tag** in the Tags menu, or switch **Dynamic**
-between *Dynamic* and *Collider* later.
+Make an object part of the simulation; see [§16](#16-simulation).
 
-![A sphere with a Rigid Body tag above a floor with a Collider Body tag; the Rigid Body tag's settings](images/manual/tags_dynamics.png)
-
-- **Enabled**: off, the object takes no part.
-- **Inherit Tag**: *Compound* makes the object and its visible children one
-  body.
-- **Shape**: what collides — *Automatic* (a convex hull for a rigid body, the
-  exact mesh for a collider), *Box*, *Sphere*, *Convex Hull* or *Static Mesh*
-  (colliders only). Shapes come from the object as it is shown, deformers and
-  generators included.
-- **Bounce** and **Friction**: how much speed survives a hit, and how much
-  sliding is resisted.
-- **Mass** (rigid bodies): *Global Density* (a 100 cm cube weighs 1 kg),
-  *Custom Density* or *Custom Mass*; **Rotational Mass** makes it harder or
-  easier to set spinning; **Linear / Angular Damping** slow it down as air
-  would.
-- **Velocity** and **Spin**: how it is moving at the start frame.
-
-The document's **Simulation** settings are in the Project settings (click an
-empty spot in the Object Manager): **Enabled**, **Gravity** (cm/s², 981 down
-by default), **Steps per Frame** (more for fast or small objects), **Solver
-Iterations** (steadier stacks) and **Time Scale** (below 1: slow motion).
-
-**Playing the simulation:** set the scene up at the start frame (Minimum
-Time) — that is where every body starts. Then play, or drag the time slider
-forward: the bodies fall, collide and settle, simulated as you go. Simulated
-frames are kept (a green bar under the timeline's ruler shows them), so going
-back or playing again shows them at once.
-
-![Five cubes and a ball dropped onto a floor, at frame 61: they have fallen, bounced and settled; the green bar under the ruler shows the simulated frames](images/manual/simulation-playback.png)
-
-- Changing anything that affects the motion — a body's place, size, shape,
-  tag or animation, or the Simulation settings — starts the simulation over.
-  Selecting, renaming, or editing objects that are not bodies keeps it.
-- **Simulate ▸ Bake Simulation** simulates the whole range now; the status bar
-  shows how far it is, **Esc** stops it. **Simulate ▸ Clear Simulation Cache**
-  forgets the simulated frames.
-- The **Render View**, **Render to Picture Viewer** (every frame of an
-  animation), **Current State to Object** and **File ▸ Export** all show the
-  bodies where the simulation has them at their frame.
-- Editing a body while the time slider is past the start frame changes its
-  start: the viewport shows the simulation again from there.
-
-**Clones as bodies:** put the Rigid Body tag on a **Cloner** (not on its
-children) and every clone becomes a body of its own — a grid of cubes
-collapses, a ring of spheres rolls apart. Each clone keeps its shape (a cloned
-group moves as one piece), clones collide with each other and with every other
-body, and they start where the Cloner and its effectors place them at the
-start frame. A Collider Body tag on a Cloner makes every clone an obstacle.
-Changing the Cloner, its children or its effectors starts the simulation over.
-
-![75 clones of a cube and a sphere from a tagged Grid Array Cloner, at frame 82: they fell onto a tilted ramp, slid off and scattered on the floor](images/manual/simulation-clones.png)
-
-## 18. Materials
+## 19. Materials
 
 A **material** gives objects their surface. Materials live in the **Material
 Manager**, the **Materials** tab at the bottom (beside Timeline and F-Curve;
@@ -1786,7 +1809,7 @@ their objects show their display colour again; undo brings everything back.
 Every change is one undo step. Materials are saved with the document, travel with
 glTF and OBJ files ([§9](#9-files)), and come along when you merge a document.
 
-## 19. Rendering
+## 20. Rendering
 
 A **render** is the finished picture of the scene: materials and lights as
 they look for real — soft shadows, light bouncing between surfaces, reflections —
@@ -1794,7 +1817,7 @@ where the viewport only approximates them. **Render Settings** say how the
 document is rendered; the **Picture Viewer** renders it and shows the result;
 the **Render View** renders the view you work in, in place.
 
-### 19.1 Render Settings
+### 20.1 Render Settings
 
 **Render ▸ Edit Render Settings…**, **Ctrl+B** or the gear button in the
 toolbar opens the **Render Settings** window. It stays open while you work;
@@ -1816,7 +1839,7 @@ left: **Output**, **Save**, **Sampling** or **Options**.
 | Frames | how many pictures the range gives |
 
 **Render to Picture Viewer** renders every frame of the range at the Frame
-Step and saves each as its own numbered file ([§19.2](#192-the-picture-viewer));
+Step and saves each as its own numbered file ([§20.2](#202-the-picture-viewer));
 the Render View always shows the current frame.
 
 ![The Save page: renders go to renders/shot.png next to the document, with transparency](images/manual/render-settings-save.png)
@@ -1851,7 +1874,7 @@ how many frames and the first file's name.
 
 Every change is one undo step, and the settings are saved with the document.
 
-### 19.2 The Picture Viewer
+### 20.2 The Picture Viewer
 
 **Render ▸ Render to Picture Viewer**, **Shift+R** or the toolbar button next to
 the gear renders the scene and opens the **Picture Viewer**. It renders:
@@ -1899,7 +1922,7 @@ pixel per screen pixel, **−** and **+** halve and double. The **mouse wheel**
 zooms about the pointer and **dragging** moves the picture. A picture with
 transparency shows over a grey checkerboard.
 
-### 19.3 The Render View
+### 20.3 The Render View
 
 **Render ▸ Render View**, **Ctrl+R** or the leftmost render button in the
 toolbar renders the **active view** right where it is: at the view's own size,
@@ -1918,7 +1941,7 @@ overlays stay on top, so you can carry on working. **Ctrl+R** again renders
 afresh. The Render View is never saved and does not appear in the Picture
 Viewer's history; use **Shift+R** for a picture to keep.
 
-## 20. Keyboard shortcuts
+## 21. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -1973,7 +1996,7 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 21. Limitations and what is planned
+## 22. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 
@@ -1982,8 +2005,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Modelling**:
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
   Solid, Proportional and Radial modes; Bridge point by point.
-- **Simulation**: the simulated frames are not yet saved with the document;
-  a body per part of a cloned group (Individual Elements) is not possible; soft bodies, cloth, particles,
+- **Simulation**: a body per part of a cloned group (Individual Elements),
+  Ghost bodies, triggers (On Collision), Follow Position springs and joints; soft bodies, cloth, particles,
   forces and connectors are not planned for the first simulation release.
 - **Deformers**: splines are not deformed; component modes show the
   undeformed points; no handles for size and angle (only strength has one);

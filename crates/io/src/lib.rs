@@ -57,7 +57,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use grid4d_scene::Document;
+use grid4d_scene::{Document, SimulationCache};
 use serde::Deserialize;
 
 use crate::common::Archive;
@@ -161,12 +161,23 @@ impl From<serde_json::Error> for IoError {
 
 /// Serialises `doc` in the current format.
 pub fn to_bytes(doc: &Document) -> Result<Vec<u8>, IoError> {
-    v3::write(doc)
+    v3::write(doc, None)
+}
+
+/// [`to_bytes`], with a simulation's frames saved beside the document.
+pub fn to_bytes_with_cache(doc: &Document, cache: Option<&SimulationCache>) -> Result<Vec<u8>, IoError> {
+    v3::write(doc, cache)
 }
 
 /// Reads a document written by this or an older format version: an archive
 /// (version 3 and later) or a JSON text file (versions 1 and 2).
 pub fn from_bytes(bytes: &[u8]) -> Result<Document, IoError> {
+    from_bytes_with_cache(bytes).map(|(doc, _)| doc)
+}
+
+/// [`from_bytes`], with the simulation's frames saved beside the document, if
+/// any.
+pub fn from_bytes_with_cache(bytes: &[u8]) -> Result<(Document, Option<SimulationCache>), IoError> {
     if bytes.starts_with(ZIP_MAGIC) {
         let mut archive = Archive::new(bytes)?;
         let json = archive.read(v3::DOCUMENT_ENTRY, MAX_DOCUMENT_BYTES)?;
@@ -181,7 +192,7 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Document, IoError> {
         };
     }
     let text = std::str::from_utf8(bytes).map_err(|_| IoError::NotADocument)?;
-    from_json(text)
+    from_json(text).map(|doc| (doc, None))
 }
 
 /// Reads a JSON document of format version 1 or 2.
@@ -228,6 +239,11 @@ pub fn save(doc: &Document, path: &Path) -> Result<(), IoError> {
     write_atomic(path, &to_bytes(doc)?)
 }
 
+/// [`save`], with a simulation's frames saved beside the document.
+pub fn save_with_cache(doc: &Document, cache: Option<&SimulationCache>, path: &Path) -> Result<(), IoError> {
+    write_atomic(path, &to_bytes_with_cache(doc, cache)?)
+}
+
 /// Writes `bytes` to a temporary file next to `path` and renames it over `path`.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), IoError> {
     let temp = temp_path(path);
@@ -242,6 +258,11 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), IoError> {
 /// Loads the document at `path`.
 pub fn load(path: &Path) -> Result<Document, IoError> {
     from_bytes(&fs::read(path)?)
+}
+
+/// [`load`], with the simulation's frames saved beside the document, if any.
+pub fn load_with_cache(path: &Path) -> Result<(Document, Option<SimulationCache>), IoError> {
+    from_bytes_with_cache(&fs::read(path)?)
 }
 
 /// `scene.g4d` → `scene.g4d.tmp`, in the same directory (so the rename is atomic).

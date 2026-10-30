@@ -42,6 +42,17 @@ every time, without waiting for it more than once.
 - **Editing a body** while the time slider is past the start frame edits its
   start state (as in the reference: set scenes up at the start frame).
 
+## Saved frames and memory (11.5)
+
+- **Saving** a document saves its simulated frames with it; opening the file
+  shows them at once. They are kept only if the bodies still start the way the
+  saved frames do (the same bodies, scales and start poses as a fresh
+  simulation of the opened document) — a file edited elsewhere simulates again.
+- **Cache Memory** (Project settings ▸ Simulation, 1 – 65 536 MB, 256 by
+  default) caps the simulated frames' memory: at the cap no more frames are
+  simulated and the status bar says so. Changing it changes no motion, so it
+  keeps the cache.
+
 ## Grid4D mapping
 
 | Piece | Where |
@@ -51,6 +62,8 @@ every time, without waiting for it more than once.
 | `ui::simulation::Sim` in `EditorState` — the inputs key, invalidation, budgeted filling, baking, the cached range | `grid4d-ui` |
 | Viewport overrides, the timeline bar, Simulate menu, status bar progress, Esc | `grid4d-ui` panels |
 | Renders with a `Replay`; Current State to Object and export with the editor's overrides | `grid4d-ui::rendering`, `current_state`, `file` |
+| `SimulationCache` / `CachedBody` (scene data); `SimCache::{to_saved, from_saved, agrees}`; `.g4d` v3 `simulation_cache` (bodies by object index, frame count) and `simulation.bin` (frames × bodies × 7 little-endian `f32`, size checked against the claim and capped at 2 GiB); `grid4d_io::{save_with_cache, load_with_cache}`; `Sim::{to_save, adopt, is_full}`; `SimulationSettings::memory_limit_mb` | `grid4d-scene`, `grid4d-sim`, `grid4d-io`, `grid4d-ui` |
+| A `criterion` benchmark: building 1 000 bodies, a frame of 1 000 falling cubes | `crates/sim/benches/falling_cubes.rs` |
 
 ## Decisions (2026-10-30)
 
@@ -69,3 +82,10 @@ every time, without waiting for it more than once.
 - [x] Bake fills the range with progress and Esc; Clear empties it.
 - [x] The Render View, final renders, Current State to Object and export show
       the simulated poses.
+
+11.5:
+
+- [x] A baked simulation saved with the document plays at once when reopened;
+      a file whose bodies changed elsewhere simulates again.
+- [x] Cache Memory stops the cache with a warning and keeps it when changed.
+- [x] A benchmark of 1 000 falling cubes.

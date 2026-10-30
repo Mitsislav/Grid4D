@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use glam::Mat4;
 use grid4d_eval::Overrides;
-use grid4d_scene::{Document, NodeData, NodeId, Scene, SimulationSettings, Tag, Track};
-use grid4d_sim::{Replay, Simulation};
+use grid4d_scene::{Document, NodeData, NodeId, Scene, SimulationCache, SimulationSettings, Tag, Track};
+use grid4d_sim::{Replay, SimCache, Simulation};
 
 /// Time spent simulating per refresh.
 const BUDGET: Duration = Duration::from_millis(8);
@@ -25,6 +25,10 @@ pub struct Sim {
     checked: Option<u64>,
     /// Bake: simulate up to this frame now.
     baking: Option<i32>,
+    /// Frames saved with the document (shown until the simulation passes them).
+    saved: Option<SimCache>,
+    /// The cache reached the memory limit: no more frames are simulated.
+    full: bool,
 }
 
 /// Everything a simulation depends on.
@@ -60,6 +64,8 @@ impl Sim {
         let key = Key::of(doc);
         if self.key.as_ref() != Some(&key) {
             self.simulation = None;
+            self.saved = None;
+            self.full = false;
             self.key = Some(key);
         }
     }
@@ -74,23 +80,74 @@ impl Sim {
             return false;
         }
         let target = self.baking.map_or(frame, |end| end.max(frame));
+        // Saved frames cover it: nothing to simulate.
+        if self.saved.as_ref().is_some_and(|s| s.last() >= target) {
+            self.baking = None;
+            return false;
+        }
+        let limit = usize::try_from(doc.simulation.memory_limit_mb)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(1 << 20);
         let budget = if self.baking.is_some() { BAKE_BUDGET } else { BUDGET };
         let began = Instant::now();
         while simulation.cache().last() < target && began.elapsed() < budget {
+            if simulation.cache().memory() >= limit {
+                self.full = true;
+                break;
+            }
             simulation.step();
         }
-        let more = simulation.cache().last() < target;
+        let more = simulation.cache().last() < target && !self.full;
         if !more {
             self.baking = None;
         }
         more
     }
 
+    /// The cache reached the Project settings' memory limit.
+    #[must_use]
+    pub const fn is_full(&self) -> bool {
+        self.full
+    }
+
+    /// The fuller of the simulation's and the saved cache.
+    fn best(&self) -> Option<&SimCache> {
+        let running = self.simulation.as_ref().map(Simulation::cache);
+        match (running, self.saved.as_ref()) {
+            (Some(a), Some(b)) => Some(if b.last() > a.last() { b } else { a }),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// The frames to save with the document; `None` when nothing is simulated.
+    #[must_use]
+    pub fn to_save(&mut self, doc: &Document) -> Option<SimulationCache> {
+        self.sync(doc);
+        self.best()
+            .filter(|cache| !cache.bodies().is_empty())
+            .map(SimCache::to_saved)
+    }
+
+    /// Takes frames saved with a just-opened `doc`, if they still agree with
+    /// it (the same bodies starting the same way); returns whether they did.
+    pub fn adopt(&mut self, doc: &Document, saved: SimulationCache) -> bool {
+        self.sync(doc);
+        let fresh = Simulation::of(doc);
+        match SimCache::from_saved(saved).filter(|cache| cache.agrees(fresh.cache())) {
+            Some(cache) => {
+                self.saved = Some(cache);
+                self.simulation = Some(fresh);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The simulated objects' places at `frame` (the latest simulated frame
     /// until `frame` is), into `out`; nothing without a simulation.
     pub fn overrides(&self, frame: i32, out: &mut Overrides) {
-        match &self.simulation {
-            Some(simulation) => simulation.cache().overrides(frame, out),
+        match self.best() {
+            Some(cache) => cache.overrides(frame, out),
             None => out.clear(),
         }
     }
@@ -98,7 +155,7 @@ impl Sim {
     /// The cached frames (first, last), if anything is simulated.
     #[must_use]
     pub fn cached(&self) -> Option<(i32, i32)> {
-        let cache = self.simulation.as_ref()?.cache();
+        let cache = self.best()?;
         (!cache.bodies().is_empty()).then(|| (cache.start(), cache.last()))
     }
 
@@ -123,7 +180,9 @@ impl Sim {
     /// frames are visited.
     pub fn clear(&mut self) {
         self.simulation = None;
+        self.saved = None;
         self.baking = None;
+        self.full = false;
     }
 
     /// A copy of the cache for a render, which simulates what it lacks; `None`
@@ -131,8 +190,8 @@ impl Sim {
     #[must_use]
     pub fn replay(&mut self, doc: &Document) -> Option<Replay> {
         self.sync(doc);
-        let simulation = self.simulation.get_or_insert_with(|| Simulation::of(doc));
-        let cache = simulation.cache();
+        self.simulation.get_or_insert_with(|| Simulation::of(doc));
+        let cache = self.best()?;
         (!cache.bodies().is_empty()).then(|| Replay::new(doc.clone(), cache.clone()))
     }
 }
@@ -155,7 +214,7 @@ impl Key {
             true
         });
         Self {
-            settings: doc.simulation,
+            settings: motion_settings(&doc.simulation),
             fps: doc.time.fps(),
             start,
             bodies,
@@ -164,7 +223,17 @@ impl Key {
 
     /// The settings and time the simulation was made with still hold.
     fn matches_document(&self, doc: &Document) -> bool {
-        self.settings == doc.simulation && self.fps == doc.time.fps() && self.start == doc.time.start()
+        self.settings == motion_settings(&doc.simulation)
+            && self.fps == doc.time.fps()
+            && self.start == doc.time.start()
+    }
+}
+
+/// The settings that change the motion (the memory limit does not).
+fn motion_settings(settings: &SimulationSettings) -> SimulationSettings {
+    SimulationSettings {
+        memory_limit_mb: 0,
+        ..*settings
     }
 }
 
@@ -343,5 +412,57 @@ mod tests {
         doc.scene.get_mut(effector).unwrap().data.transform.position.x = 100.0;
         sim.sync(&doc);
         assert_eq!(sim.cached(), None, "moving the effector changes where the clones start");
+    }
+
+    #[test]
+    fn saved_frames_reopen_ready_unless_the_document_disagrees() {
+        let (mut doc, cube, _) = falling_cube();
+        doc.time.set_range(0, 40);
+        let mut sim = Sim::default();
+        sim.bake(&doc);
+        fill(&mut sim, &doc, 0);
+        let saved = sim.to_save(&doc).unwrap();
+        let bytes = grid4d_io::to_bytes_with_cache(&doc, Some(&saved)).unwrap();
+        let (opened, cache) = grid4d_io::from_bytes_with_cache(&bytes).unwrap();
+        let mut reopened = Sim::default();
+        assert!(reopened.adopt(&opened, cache.clone().unwrap()));
+        assert_eq!(reopened.cached(), Some((0, 40)), "all frames at once");
+        assert!(!reopened.advance(&opened, 40), "nothing to simulate");
+        let (mut a, mut b) = (Overrides::default(), Overrides::default());
+        sim.overrides(33, &mut a);
+        let opened_cube = opened.scene.roots()[1];
+        reopened.overrides(33, &mut b);
+        assert_eq!(a.get(cube), b.get(opened_cube));
+        // Past the saved frames the simulation goes on as it would have.
+        doc.time.set_range(0, 60);
+        let mut longer = opened.clone();
+        longer.time.set_range(0, 60);
+        fill(&mut reopened, &longer, 50);
+        fill(&mut sim, &doc, 50);
+        sim.overrides(50, &mut a);
+        reopened.overrides(50, &mut b);
+        assert_eq!(a.get(cube), b.get(opened_cube));
+
+        // A body moved behind the file's back: the saved frames are dropped.
+        let mut moved = opened.clone();
+        moved.scene.get_mut(opened_cube).unwrap().data.transform.position.y = 900.0;
+        assert!(!Sim::default().adopt(&moved, cache.unwrap()));
+    }
+
+    #[test]
+    fn the_memory_limit_stops_the_cache() {
+        let (mut doc, _, _) = falling_cube();
+        doc.time.set_range(0, 100_000);
+        doc.simulation.memory_limit_mb = 1;
+        let mut sim = Sim::default();
+        sim.bake(&doc);
+        fill(&mut sim, &doc, 0);
+        assert!(sim.is_full());
+        let (_, last) = sim.cached().unwrap();
+        assert!(last > 1000 && last < 100_000, "stopped at about 1 MB: {last}");
+        // Raising the limit keeps what is done (it changes no motion).
+        doc.simulation.memory_limit_mb = 2;
+        sim.sync(&doc);
+        assert_eq!(sim.cached().unwrap().1, last);
     }
 }

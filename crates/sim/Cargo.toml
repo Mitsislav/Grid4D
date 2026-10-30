@@ -14,5 +14,13 @@ grid4d-eval.workspace = true
 glam.workspace = true
 rapier3d.workspace = true
 
+[dev-dependencies]
+criterion.workspace = true
+grid4d-geom.workspace = true
+
+[[bench]]
+name = "falling_cubes"
+harness = false
+
 [lints]
 workspace = true

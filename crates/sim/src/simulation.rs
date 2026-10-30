@@ -3,7 +3,7 @@
 
 use glam::{Mat4, Quat, Vec3};
 use grid4d_eval::{EvaluatedInstance, EvaluatedScene, MeshKey, Overrides};
-use grid4d_scene::{Body, Document, Inherit, Motion, NodeId, ObjectKind, Scene, Tag};
+use grid4d_scene::{Body, CachedBody, Document, Inherit, Motion, NodeId, ObjectKind, Scene, SimulationCache, Tag};
 
 use crate::{BodyId, World, shape};
 
@@ -79,6 +79,77 @@ impl SimCache {
                 }
             }
         }
+    }
+
+    /// The cache as saved with a document.
+    #[must_use]
+    pub fn to_saved(&self) -> SimulationCache {
+        SimulationCache {
+            start: self.start,
+            bodies: self
+                .bodies
+                .iter()
+                .zip(&self.scales)
+                .map(|(key, &scale)| match *key {
+                    BodyKey::Node(node) => CachedBody {
+                        node,
+                        clone: None,
+                        scale,
+                    },
+                    BodyKey::Clone(node, n) => CachedBody {
+                        node,
+                        clone: Some(n),
+                        scale,
+                    },
+                })
+                .collect(),
+            poses: self.poses.clone(),
+        }
+    }
+
+    /// A cache saved with a document; `None` if its poses do not fill whole
+    /// frames.
+    #[must_use]
+    pub fn from_saved(saved: SimulationCache) -> Option<Self> {
+        let count = saved.bodies.len();
+        if count == 0 || !saved.poses.len().is_multiple_of(count) || saved.poses.is_empty() {
+            return None;
+        }
+        let (bodies, scales) = saved
+            .bodies
+            .iter()
+            .map(|b| {
+                let key = b.clone.map_or(BodyKey::Node(b.node), |n| BodyKey::Clone(b.node, n));
+                (key, b.scale)
+            })
+            .unzip();
+        Some(Self {
+            start: saved.start,
+            bodies,
+            scales,
+            poses: saved.poses,
+        })
+    }
+
+    /// `true` if `other` starts the same way: the same bodies (scales too) in
+    /// the same order, at the same start frame and start poses. A saved cache
+    /// that agrees with a fresh simulation of its document is still valid.
+    #[must_use]
+    pub fn agrees(&self, other: &Self) -> bool {
+        let count = self.bodies.len();
+        self.start == other.start
+            && self.bodies == other.bodies
+            && self
+                .scales
+                .iter()
+                .zip(&other.scales)
+                .all(|(a, b)| a.abs_diff_eq(*b, 1e-3))
+            && self.poses.len() >= count
+            && other.poses.len() >= count
+            && self.poses[..count]
+                .iter()
+                .zip(&other.poses[..count])
+                .all(|((p, q), (p2, q2))| p.abs_diff_eq(*p2, 1e-2) && q.abs_diff_eq(*q2, 1e-4))
     }
 
     /// Bytes the poses take.

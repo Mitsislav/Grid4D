@@ -18,6 +18,14 @@ pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
                     .color(p::TEXT_STRONG)
                     .size(11.5),
             ),
+            None if editor.simulation.is_full() => ui.label(
+                RichText::new(format!(
+                    "The simulation cache is full ({} MB): raise Cache Memory in the Project settings",
+                    doc.simulation.memory_limit_mb
+                ))
+                .color(p::WARNING)
+                .size(11.5),
+            ),
             None => ui.label(RichText::new(hint).color(p::TEXT_DIM).size(11.5)),
         };
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
