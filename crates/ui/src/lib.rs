@@ -28,6 +28,7 @@ pub mod panels;
 pub mod recent;
 pub mod rendering;
 pub mod shortcuts;
+pub mod simulation;
 pub mod theme;
 mod widgets;
 pub mod window;

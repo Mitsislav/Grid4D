@@ -203,6 +203,8 @@ pub struct ViewportPanel {
     camera_moved: bool,
     /// What the document looks like this frame; re-evaluated only when it changed.
     evaluated: EvaluatedScene,
+    /// The simulated objects' places at the current frame.
+    simulated: grid4d_eval::Overrides,
     /// Render snapshot, refilled every frame (no per-frame allocation).
     frame: FrameData,
     /// Renderer and offscreen target; `None` without a wgpu render state.
@@ -289,6 +291,7 @@ impl ViewportPanel {
             solo: None,
             camera_moved: false,
             evaluated: EvaluatedScene::new(),
+            simulated: grid4d_eval::Overrides::default(),
             frame: FrameData::new(),
             gpu: render_state.map(GpuView::new),
             walk_stack: Vec::with_capacity(64),
@@ -520,6 +523,13 @@ impl ViewportPanel {
         if area.width() < 2.0 || area.height() < 2.0 {
             return;
         }
+        // The simulation at this frame: a little more of it each refresh.
+        let frame = doc.time.frame();
+        if editor.simulation.advance(doc, frame) {
+            ui.ctx().request_repaint();
+        }
+        editor.simulation.overrides(frame, &mut self.simulated);
+        self.evaluated.set_overrides(&self.simulated);
         let mut cells = self.cells(area);
         // The active view must be on show.
         if !cells.iter().flatten().any(|&(i, _)| i == self.active)

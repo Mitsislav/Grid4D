@@ -1,7 +1,8 @@
 //! Current State to Object: copies of objects as the viewport shows them at
 //! the current frame — deformed, generated, animated — as plain objects.
 
-use grid4d_eval::{EvaluatedNode, EvaluatedScene, MeshKey};
+use glam::Mat4;
+use grid4d_eval::{EvaluatedNode, EvaluatedScene, MeshKey, Overrides};
 use grid4d_scene::{
     Components, Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, Scene, SplineHandle, Tag, TagKind, Tags,
     Transform,
@@ -20,10 +21,12 @@ pub(crate) struct Baked {
 /// pre-order (parents before children): what the viewport shows at the current
 /// frame, frozen. Deformers and the objects enabled generators consume are
 /// left out.
-pub(crate) fn bake(doc: &Document, selection: &[NodeId]) -> Vec<Baked> {
+/// `simulated`: the simulation's poses at the current frame.
+pub(crate) fn bake(doc: &Document, selection: &[NodeId], simulated: &Overrides) -> Vec<Baked> {
     let frame = f64::from(doc.time.frame());
     let mut eval = EvaluatedScene::new();
     eval.set_frame(frame);
+    eval.set_overrides(simulated);
     eval.update(&doc.scene);
     let nodes = eval.nodes();
     let mut baked = Vec::new();
@@ -63,7 +66,7 @@ pub(crate) fn bake(doc: &Document, selection: &[NodeId]) -> Vec<Baked> {
             baked.push(Baked {
                 parent,
                 original: node.id,
-                data: copy(&eval, &doc.scene, node, original, frame),
+                data: copy(&eval, &doc.scene, node, original, frame, simulated),
             });
             // A Cloner's copy (a Null) holds its clones as objects.
             if original.data.enabled && matches!(original.data.kind, ObjectKind::Cloner { .. }) {
@@ -139,9 +142,24 @@ fn consumed(scene: &Scene, id: NodeId) -> bool {
 }
 
 /// `original` as the viewport shows it at `frame`, with no animation.
-fn copy(eval: &EvaluatedScene, scene: &Scene, node: &EvaluatedNode, original: &Node, frame: f64) -> NodeData {
+fn copy(
+    eval: &EvaluatedScene,
+    scene: &Scene,
+    node: &EvaluatedNode,
+    original: &Node,
+    frame: f64,
+    simulated: &Overrides,
+) -> NodeData {
     let mut data = original.data.clone();
     data.transform = original.data.transform_at(frame);
+    // A simulated object where the simulation put it, under the same parent.
+    if let Some(world) = simulated.get(node.id) {
+        let parent = original
+            .parent()
+            .and_then(|p| eval.nodes().iter().find(|n| n.id == p))
+            .map_or(Mat4::IDENTITY, |n| n.world);
+        data.transform = Transform::from_matrix(&(parent.inverse() * world));
+    }
     data.tracks.clear();
     data.unkeyed = None;
     let kind = original.data.kind_at(frame);

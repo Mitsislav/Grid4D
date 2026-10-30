@@ -15,6 +15,7 @@ grid4d-text.workspace = true
 grid4d-render.workspace = true
 grid4d-io.workspace = true
 grid4d-raytrace.workspace = true
+grid4d-sim.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
 glam.workspace = true

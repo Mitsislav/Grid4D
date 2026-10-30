@@ -155,6 +155,10 @@ pub enum EditorCommand {
     /// (C4D's "Make Editable", `C`), and the selected generators into polygon
     /// objects holding their result (their cage goes); others are left alone.
     MakeEditable,
+    /// Simulate ▸ Bake Simulation: the whole range now (Esc stops).
+    BakeSimulation,
+    /// Simulate ▸ Clear Simulation Cache.
+    ClearSimulation,
     /// Adds copies of the selected objects as the viewport shows them at the
     /// current frame (deformed, generated, animated) as plain objects, each
     /// after its original, and selects them (C4D's "Current State to Object").
@@ -394,15 +398,23 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::MergeFile(path) => file::merge(&path, doc, editor, viewport),
         EditorCommand::Export => file::export(doc, editor),
         EditorCommand::RenderToPictureViewer => {
-            editor
-                .renders
-                .start(doc, viewport.camera(), viewport.view_object(), editor.file.path());
+            let replay = editor.simulation.replay(doc);
+            editor.renders.start(
+                doc,
+                viewport.camera(),
+                viewport.view_object(),
+                editor.file.path(),
+                replay,
+            );
             editor.renders.viewer_open = true;
         }
         EditorCommand::RenderView => {
             let key = viewport.view_key(doc);
-            editor.renders.start_view(doc, viewport.camera(), key);
+            let replay = editor.simulation.replay(doc);
+            editor.renders.start_view(doc, viewport.camera(), key, replay);
         }
+        EditorCommand::BakeSimulation => editor.simulation.bake(doc),
+        EditorCommand::ClearSimulation => editor.simulation.clear(),
         EditorCommand::StopRender => editor.renders.stop(),
         EditorCommand::SaveRenderAs => file::save_render_as(doc, editor),
         EditorCommand::SplineCommand(op) => spline_command(doc, editor, op),
@@ -1698,7 +1710,10 @@ pub fn can_bake_current_state(doc: &Document, selection: &Selection) -> bool {
 /// Inserts the copies [`crate::current_state::bake`] makes as one undo step and
 /// selects the top ones.
 fn current_state_to_object(doc: &mut Document, editor: &mut EditorState) {
-    let baked = crate::current_state::bake(doc, editor.selection.as_slice());
+    // Simulated objects as they are at this frame.
+    let mut simulated = grid4d_eval::Overrides::default();
+    editor.simulation.overrides(doc.time.frame(), &mut simulated);
+    let baked = crate::current_state::bake(doc, editor.selection.as_slice(), &simulated);
     if baked.is_empty() {
         return;
     }
@@ -4455,5 +4470,32 @@ mod tests {
         assert_eq!(doc.simulation, before);
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
         assert_eq!(doc.simulation.steps_per_frame, 20);
+    }
+
+    #[test]
+    fn current_state_and_export_take_the_simulated_pose() {
+        use grid4d_scene::{Body, NodeData, Tag};
+        let (mut doc, mut editor, mut vp) = (Document::new("t"), EditorState::default(), viewport());
+        let mut floor = NodeData::new("Floor", ObjectKindTag::Plane.default_kind());
+        floor.tags.push(Tag::Dynamics(Body::collider()));
+        doc.scene.insert(Node::from_data(floor));
+        let mut cube = NodeData::new("Cube", ObjectKindTag::Cube.default_kind());
+        cube.transform.position.y = 600.0;
+        cube.tags.push(Tag::Dynamics(Body::rigid()));
+        let cube = doc.scene.insert(Node::from_data(cube));
+        doc.time.set_frame(20);
+        while editor.simulation.advance(&doc, 20) {}
+        editor.selection.set_single(cube);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::CurrentStateToObject]);
+        let copy = doc.scene.roots()[2];
+        let y = doc.scene.get(copy).unwrap().data.transform.position.y;
+        assert!(y < 500.0, "where it has fallen to at frame 20: {y}");
+        assert_eq!(doc.scene.get(cube).unwrap().data.transform.position.y, 600.0);
+
+        let mut simulated = grid4d_eval::Overrides::default();
+        editor.simulation.overrides(20, &mut simulated);
+        let objects = file::exportable_at(&doc, &simulated);
+        let exported = objects.nodes.iter().find(|e| e.data.name == "Cube").unwrap();
+        assert!((exported.data.transform.position.y - y).abs() < 1e-3);
     }
 }

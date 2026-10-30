@@ -166,6 +166,18 @@ impl TimelinePanel {
             f += tick_step;
         }
 
+        // The simulated (cached) frames.
+        if let Some((first, last)) = editor.simulation.cached() {
+            let (from, to) = (first.max(start), last.min(end));
+            if from <= to {
+                let bar = Rect::from_x_y_ranges(
+                    scale.x(f64::from(from))..=scale.x(f64::from(to)).max(scale.x(f64::from(from)) + 2.0),
+                    rect.bottom() - 3.0..=rect.bottom(),
+                );
+                painter.rect_filled(bar, CornerRadius::ZERO, p::SIM_CACHE);
+            }
+        }
+
         // Playhead.
         let x = scale.x(time.frame_f64().clamp(f64::from(start), f64::from(end)));
         painter.line_segment(

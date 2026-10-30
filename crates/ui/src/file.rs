@@ -458,7 +458,9 @@ pub(crate) fn export(doc: &Document, editor: &mut EditorState) {
     let Some(path) = editor.file.dialogs.pick_export(directory.as_deref(), &suggested) else {
         return;
     };
-    if let Err(err) = grid4d_io::export(&exportable(doc), &path) {
+    let mut simulated = grid4d_eval::Overrides::default();
+    editor.simulation.overrides(doc.time.frame(), &mut simulated);
+    if let Err(err) = grid4d_io::export(&exportable_at(doc, &simulated), &path) {
         editor.file.alert = Some(Alert {
             title: "Could Not Export",
             message: format!("{}\n\n{err}", path.display()),
@@ -619,12 +621,19 @@ pub(crate) fn pick_render_output(doc: &Document, editor: &mut EditorState) -> Op
 /// path, sections), a switched-off generator as a Null over its children.
 #[must_use]
 pub fn exportable(doc: &Document) -> Objects {
+    exportable_at(doc, &grid4d_eval::Overrides::default())
+}
+
+/// [`exportable`], with simulated objects where `simulated` (the simulation at
+/// the current frame) puts them.
+pub fn exportable_at(doc: &Document, simulated: &grid4d_eval::Overrides) -> Objects {
     let mut nodes = Vec::new();
     let mut index_of: HashMap<NodeId, usize> = HashMap::new();
     let mut stack: Vec<NodeId> = doc.scene.roots().iter().rev().copied().collect();
     // Deformed shapes as the viewport shows them at the current frame.
     let mut evaluated = grid4d_eval::EvaluatedScene::new();
     evaluated.set_frame(f64::from(doc.time.frame()));
+    evaluated.set_overrides(simulated);
     evaluated.update(&doc.scene);
     while let Some(id) = stack.pop() {
         let Some(node) = doc.scene.get(id) else { continue };
@@ -655,6 +664,14 @@ pub fn exportable(doc: &Document) -> Objects {
         }
         if let Some(mesh) = evaluated.deformed(id) {
             data.kind = ObjectKind::polygon(mesh.clone());
+        }
+        // A simulated object where the simulation put it.
+        if let Some(world) = simulated.get(id) {
+            let parent = node
+                .parent()
+                .and_then(|p| evaluated.nodes().iter().find(|n| n.id == p))
+                .map_or(glam::Mat4::IDENTITY, |n| n.world);
+            data.transform = grid4d_scene::Transform::from_matrix(&(parent.inverse() * world));
         }
         // A generator without a material shows its cage's.
         if let Some(cage) = cage.and_then(|c| doc.scene.get(c))

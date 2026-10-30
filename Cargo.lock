@@ -1786,6 +1786,7 @@ dependencies = [
  "grid4d-raytrace",
  "grid4d-render",
  "grid4d-scene",
+ "grid4d-sim",
  "grid4d-text",
  "log",
  "png",

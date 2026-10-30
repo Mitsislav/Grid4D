@@ -13,5 +13,5 @@ mod shape;
 mod simulation;
 mod world;
 
-pub use simulation::{BodyKey, SimCache, Simulation};
+pub use simulation::{BodyKey, Replay, SimCache, Simulation};
 pub use world::{BodyId, World};

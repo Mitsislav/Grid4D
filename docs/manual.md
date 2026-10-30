@@ -1702,9 +1702,25 @@ empty spot in the Object Manager): **Enabled**, **Gravity** (cm/s², 981 down
 by default), **Steps per Frame** (more for fast or small objects), **Solver
 Iterations** (steadier stacks) and **Time Scale** (below 1: slow motion).
 
-The simulation itself — objects actually falling as the frame advances — is
-being built: for now the tags and settings are kept and saved with the
-document.
+**Playing the simulation:** set the scene up at the start frame (Minimum
+Time) — that is where every body starts. Then play, or drag the time slider
+forward: the bodies fall, collide and settle, simulated as you go. Simulated
+frames are kept (a green bar under the timeline's ruler shows them), so going
+back or playing again shows them at once.
+
+![Five cubes and a ball dropped onto a floor, at frame 61: they have fallen, bounced and settled; the green bar under the ruler shows the simulated frames](images/manual/simulation-playback.png)
+
+- Changing anything that affects the motion — a body's place, size, shape,
+  tag or animation, or the Simulation settings — starts the simulation over.
+  Selecting, renaming, or editing objects that are not bodies keeps it.
+- **Simulate ▸ Bake Simulation** simulates the whole range now; the status bar
+  shows how far it is, **Esc** stops it. **Simulate ▸ Clear Simulation Cache**
+  forgets the simulated frames.
+- The **Render View**, **Render to Picture Viewer** (every frame of an
+  animation), **Current State to Object** and **File ▸ Export** all show the
+  bodies where the simulation has them at their frame.
+- Editing a body while the time slider is past the start frame changes its
+  start: the viewport shows the simulation again from there.
 
 ## 18. Materials
 
@@ -1956,9 +1972,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Modelling**:
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
   Solid, Proportional and Radial modes; Bridge point by point.
-- **Simulation**: rigid bodies do not move yet (the tags and settings are
-  stored); soft bodies, cloth, particles, forces and connectors are not
-  planned for the first simulation release.
+- **Simulation**: clones of a Cloner as bodies come next, and the simulated
+  frames are not yet saved with the document; soft bodies, cloth, particles,
+  forces and connectors are not planned for the first simulation release.
 - **Deformers**: splines are not deformed; component modes show the
   undeformed points; no handles for size and angle (only strength has one);
   an FFD's lattice cannot be animated.

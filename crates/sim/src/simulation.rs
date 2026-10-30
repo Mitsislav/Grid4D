@@ -2,7 +2,7 @@
 //! stepped frame by frame into a [`SimCache`].
 
 use glam::{Mat4, Quat, Vec3};
-use grid4d_eval::{EvaluatedScene, MeshKey};
+use grid4d_eval::{EvaluatedScene, MeshKey, Overrides};
 use grid4d_scene::{Body, Document, Inherit, Motion, NodeId, Scene, Tag};
 
 use crate::{BodyId, World, shape};
@@ -56,6 +56,19 @@ impl SimCache {
             rotation,
             position,
         ))
+    }
+
+    /// Every body's place at `frame` (the last simulated one if `frame` is not
+    /// yet), into `out`.
+    pub fn overrides(&self, frame: i32, out: &mut Overrides) {
+        out.clear();
+        let frame = frame.min(self.last());
+        for (index, key) in self.bodies.iter().enumerate() {
+            let BodyKey::Node(id) = *key;
+            if let Some(world) = self.world(frame, index) {
+                out.set(id, world);
+            }
+        }
     }
 
     /// Bytes the poses take.
@@ -112,6 +125,16 @@ impl Simulation {
         }
     }
 
+    /// The simulation of `doc` from its start frame, evaluated as the viewport
+    /// shows it.
+    #[must_use]
+    pub fn of(doc: &Document) -> Self {
+        let mut evaluated = EvaluatedScene::new();
+        evaluated.set_frame(f64::from(doc.time.start()));
+        evaluated.update(&doc.scene);
+        Self::new(doc, &evaluated)
+    }
+
     /// Simulates up to `frame` (nothing if it is already cached).
     pub fn step_to(&mut self, frame: i32) {
         while self.cache.last() < frame && !self.bodies.is_empty() {
@@ -148,6 +171,38 @@ impl Simulation {
     #[must_use]
     pub const fn fps(&self) -> u32 {
         self.fps
+    }
+}
+
+/// A copy of a cache that simulates the frames it lacks itself (renders take
+/// one: the motion is the same, a run being deterministic).
+#[derive(Debug)]
+pub struct Replay {
+    doc: Document,
+    cache: SimCache,
+    simulation: Option<Simulation>,
+}
+
+impl Replay {
+    #[must_use]
+    pub const fn new(doc: Document, cache: SimCache) -> Self {
+        Self {
+            doc,
+            cache,
+            simulation: None,
+        }
+    }
+
+    /// Every body's place at `frame`, simulating up to it if needed.
+    pub fn overrides(&mut self, frame: i32, out: &mut Overrides) {
+        if frame > self.cache.last() {
+            let simulation = self.simulation.get_or_insert_with(|| Simulation::of(&self.doc));
+            simulation.step_to(frame);
+        }
+        self.simulation
+            .as_ref()
+            .map_or(&self.cache, Simulation::cache)
+            .overrides(frame, out);
     }
 }
 

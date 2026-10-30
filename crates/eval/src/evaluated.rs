@@ -187,6 +187,9 @@ pub struct EvaluatedScene {
     /// turned objects whose subtree is being visited.
     aim_index: HashMap<NodeId, usize>,
     aim_stack: Vec<(u32, Mat4)>,
+    /// Objects placed by a simulation, and scratch space for applying them.
+    overrides: crate::Overrides,
+    override_stack: Vec<(u32, Mat4)>,
     /// The frame animation is evaluated at.
     frame: f64,
     /// Whether the last update found animated objects (only then does a new frame
@@ -222,6 +225,16 @@ impl EvaluatedScene {
     #[must_use]
     pub const fn purpose(&self) -> Purpose {
         self.purpose
+    }
+
+    /// Places some objects by `overrides` (a simulation's poses) instead of
+    /// their animation; their children follow. The next
+    /// [`update`](Self::update) re-evaluates if they changed.
+    pub fn set_overrides(&mut self, overrides: &crate::Overrides) {
+        if self.overrides != *overrides {
+            self.overrides.clone_from(overrides);
+            self.revision = None;
+        }
     }
 
     /// Sets the frame animation is evaluated at; the next [`update`](Self::update)
@@ -510,7 +523,10 @@ impl EvaluatedScene {
         {
             apply_aims(scene, &mut self.nodes, &mut self.aim_index, &mut self.aim_stack);
         }
-        // Clones follow their Cloner where animation and Target tags put it.
+        // Simulated objects where the simulation put them.
+        crate::overrides::apply(&self.overrides, &mut self.nodes, &mut self.override_stack);
+        // Clones follow their Cloner where animation, Target tags and the
+        // simulation put it.
         self.instances.clear();
         build_instances(
             scene,
@@ -1383,6 +1399,9 @@ mod tests {
             .insert_child(cloner, Node::new("Clone", ObjectKindTag::Sphere.default_kind()))
             .unwrap();
         let mut eval = EvaluatedScene::new();
+        let mut simulated = crate::Overrides::default();
+        simulated.set(cloner, Mat4::from_translation(Vec3::Y * 10.0));
+        eval.set_overrides(&simulated);
         eval.update(&doc.scene);
         let capacity = |e: &EvaluatedScene| {
             (
@@ -1395,6 +1414,7 @@ mod tests {
                 e.sources.capacity(),
                 e.cloning.effects.capacity(),
                 e.cloning.placements.capacity(),
+                e.override_stack.capacity(),
             )
         };
         let before = capacity(&eval);
@@ -2587,5 +2607,45 @@ mod tests {
         eval.update(&doc.scene);
         let again: Vec<Vec3> = eval.instances().iter().map(|c| c.world.w_axis.truncate()).collect();
         assert_eq!(again, moved, "repeatable");
+    }
+
+    #[test]
+    fn overrides_place_objects_and_their_children_follow() {
+        let mut doc = Document::new("overrides");
+        let parent = doc
+            .scene
+            .insert(Node::new("Parent", ObjectKindTag::Cube.default_kind()).with_position(Vec3::Y * 100.0));
+        let child = doc
+            .scene
+            .insert_child(
+                parent,
+                Node::new("Child", ObjectKindTag::Sphere.default_kind()).with_position(Vec3::X * 50.0),
+            )
+            .unwrap();
+        let other = doc.scene.insert(Node::new("Other", ObjectKindTag::Cube.default_kind()));
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let mut overrides = crate::Overrides::default();
+        let turned = Mat4::from_rotation_translation(
+            glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            Vec3::new(0.0, 20.0, 0.0),
+        );
+        overrides.set(parent, turned);
+        eval.set_overrides(&overrides);
+        assert!(eval.update(&doc.scene), "new overrides re-evaluate");
+        assert_eq!(node(&eval, parent).world, turned);
+        // The child keeps its place relative to its parent: turned a quarter about Y.
+        let at = node(&eval, child).world.w_axis.truncate();
+        assert!(at.abs_diff_eq(Vec3::new(0.0, 20.0, -50.0), 1e-4), "{at}");
+        assert_eq!(node(&eval, other).world, Mat4::IDENTITY, "others untouched");
+        eval.set_overrides(&overrides);
+        assert!(!eval.update(&doc.scene), "the same overrides change nothing");
+        eval.set_overrides(&crate::Overrides::default());
+        eval.update(&doc.scene);
+        assert_eq!(
+            node(&eval, parent).world.w_axis.y,
+            100.0,
+            "back to the animation's place"
+        );
     }
 }

@@ -122,7 +122,7 @@ mod tests {
         let mut editor = EditorState::default();
         editor
             .renders
-            .start(&doc, &grid4d_render::OrbitCamera::default(), None, None);
+            .start(&doc, &grid4d_render::OrbitCamera::default(), None, None, None);
         crate::rendering::tests::wait(&mut editor.renders);
         editor.renders.viewer_open = true;
         assert_idle_frames_leave_the_document_alone(doc, editor);

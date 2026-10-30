@@ -27,9 +27,11 @@ mod drawable;
 mod evaluated;
 mod generator;
 mod key;
+mod overrides;
 
 pub use curve::{CurveHandle, CurveId};
 pub use drawable::{Drawable, Shading, Surface, drawable, editable_mesh};
 pub use evaluated::{EvaluatedInstance, EvaluatedLight, EvaluatedNode, EvaluatedScene, PickShape, Purpose};
 pub use generator::{generator_color, generator_mesh};
 pub use key::{MeshKey, Ratio};
+pub use overrides::Overrides;

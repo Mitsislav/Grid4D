@@ -392,7 +392,24 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
         });
 
         ui.menu_button("Simulate", |ui| {
-            for name in ["Rigid Body", "Soft Body", "Cloth", "Particles"] {
+            if ui
+                .button("Bake Simulation")
+                .on_hover_text("Simulate the whole range now (Esc stops)")
+                .clicked()
+            {
+                editor.commands.push(EditorCommand::BakeSimulation);
+                ui.close();
+            }
+            if ui
+                .button("Clear Simulation Cache")
+                .on_hover_text("Forget the simulated frames; they are simulated again as you visit them")
+                .clicked()
+            {
+                editor.commands.push(EditorCommand::ClearSimulation);
+                ui.close();
+            }
+            ui.separator();
+            for name in ["Soft Body", "Cloth", "Particles"] {
                 planned(ui, name, "");
             }
         });

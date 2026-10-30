@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 11 — Simulation (v0.11) |
-| Last step done | 11.2 — Simulation core (2026-10-30) |
-| Next step | 11.3 — Playback, cache and renders |
-| Tests | 671, all passing; clippy and rustfmt clean |
+| Last step done | 11.3 — Playback, cache and renders (2026-10-30) |
+| Next step | 11.4 — Clones as bodies |
+| Tests | 677, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1458,6 +1458,7 @@ parameters, are undoable, saved, picked, exported and rendered.
 | — | Phase 11 planned in detail: rigid and collider bodies as a Dynamics tag, `rapier3d` 0.36 in a new `grid4d-sim` crate (metres inside, arrays at its edge), a per-frame cache in editor state keyed by the simulation's inputs, evaluation overrides, clones as bodies, saved caches (`IMPLEMENTATION_PLAN.md`) | 658 |
 | 11.1 | Rigid Body / Collider Body (one Dynamics tag: motion, shape, bounce, friction, mass, damping, start velocity) from the Tags menus, edited, saved; Simulation settings in the Project settings, undoable, saved; the `grid4d-sim` crate on `rapier3d` 0.36: a ball falls ½ g t² and rests on a collider, deterministically | 665 |
 | 11.2 | The simulation core: bodies from tagged objects as the viewport shows them at the start frame (Compound groups, box / sphere / convex hull / mesh shapes, mass, bounce, friction, damping, start velocity), stepped in sub-steps with animated colliders following their keys, recorded per frame; not yet shown in the viewport (11.3) | 671 |
+| 11.3 | The simulation in the viewport: simulated as the frame advances (a budget per refresh), cached and shown at once when revisited (a green bar on the timeline), dropped only when the motion's inputs change; Bake Simulation (progress, Esc) and Clear Simulation Cache; renders, Current State to Object and export show it | 677 |
 
 **Planning notes:**
 - **The engine's maths library.** `rapier3d` 0.36 (the latest, 2026-10) uses
@@ -1514,6 +1515,36 @@ parameters, are undoable, saved, picked, exported and rendered.
   in milliseconds.
 - **On-screen testing:** nothing to see yet — the cache reaches the viewport
   in 11.3; the step is covered by its physics tests.
+
+**11.3 — Playback, cache and renders**
+
+*Problems and solutions:*
+- **Showing poses without evaluation knowing about physics.** `grid4d-eval`
+  got a general `Overrides` (world matrices by node) applied after animation
+  and Target tags; an overridden node's change is carried to its subtree as a
+  delta matrix, so a simulated object's children follow it. Setting the same
+  overrides again costs nothing (no re-evaluation), so idle frames stay free.
+- **When is the cache stale?** Comparing whole documents would drop it on
+  every selection. The key holds only what can change the motion: the
+  settings, the frame rate and start, and for each body its start world
+  matrix, its subtree's data (names left out) and what above it animates or
+  hides it. It is rebuilt only when the scene revision changes.
+- **Simulating without freezing the UI.** No worker thread: the engine is
+  fast, so the viewport advances the simulation within 8 ms per refresh
+  (40 ms while baking) and asks for another refresh while frames are missing.
+- **Renders on their own thread** cannot borrow the editor's simulation. They
+  take a `Replay`: a copy of the cache plus the document, which simulates any
+  missing frame itself — the same motion, since a run is deterministic. A test
+  renders frame 40 from a cache holding only the start and finds the cube
+  fallen out of view.
+- **Baking simulated poses.** Current State to Object and export now take the
+  overrides too, turning a simulated world matrix back into a transform under
+  the object's (evaluated) parent.
+- **On-screen testing:** five cubes and a ball dropped on a floor: scrubbing to
+  frame 61 showed them settled with the cache bar to 61; Simulate ▸ Bake
+  Simulation filled the bar to frame 90; scrubbing back to 37 showed the
+  cached frame at once. (Ctrl+R cannot be sent by the test driver; the render
+  path is covered by the test above.)
 
 ---
 

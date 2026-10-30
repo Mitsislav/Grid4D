@@ -319,8 +319,9 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
         if ctrl_only && i.key_pressed(Key::R) {
             editor.commands.push(EditorCommand::RenderView);
         }
-        // Esc clears the Render View; a drag in progress takes it for itself.
-        if plain && i.key_pressed(Key::Escape) && !i.pointer.any_down() {
+        // Esc stops baking, else clears the Render View; a drag in progress
+        // takes it for itself.
+        if plain && i.key_pressed(Key::Escape) && !i.pointer.any_down() && !editor.simulation.stop_baking() {
             editor.renders.clear_view();
         }
         for (key, forward) in [(Key::F, false), (Key::G, true)] {
@@ -633,7 +634,7 @@ mod tests {
         let key = crate::ViewportPanel::new(None).view_key(&doc);
         editor
             .renders
-            .start_view(&doc, &grid4d_render::OrbitCamera::default(), key);
+            .start_view(&doc, &grid4d_render::OrbitCamera::default(), key, None);
         assert!(editor.renders.view_render().is_some());
         press_on(&mut doc, &mut editor, Key::Escape, Modifiers::NONE);
         assert!(editor.renders.view_render().is_none(), "Esc clears it");

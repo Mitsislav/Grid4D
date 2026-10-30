@@ -774,6 +774,8 @@ pub struct EditorState {
     pub show_render_settings: bool,
     /// The session's renders and the Picture Viewer (Shift+R).
     pub renders: crate::rendering::Renders,
+    /// The rigid body simulation and its cache.
+    pub simulation: crate::simulation::Sim,
 }
 
 impl EditorState {
@@ -825,6 +827,7 @@ impl Default for EditorState {
             show_optimize: false,
             show_render_settings: false,
             renders: crate::rendering::Renders::default(),
+            simulation: crate::simulation::Sim::default(),
         }
     }
 }

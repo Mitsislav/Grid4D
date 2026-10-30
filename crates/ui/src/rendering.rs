@@ -19,6 +19,7 @@ use grid4d_eval::EvaluatedScene;
 use grid4d_raytrace::{CameraProjection, Image, Progressive, RenderCamera, RenderControl, RenderOptions, RenderScene};
 use grid4d_render::OrbitCamera;
 use grid4d_scene::{Document, ImageFormat, NodeId, ObjectKind, RenderSettings, Scene};
+use grid4d_sim::Replay;
 
 /// The history's pictures may take this much memory together; older ones go first.
 pub const HISTORY_BYTES: usize = 512 << 20;
@@ -201,14 +202,21 @@ impl Drop for Job {
 impl Job {
     /// Starts a worker rendering `scene` at each of `frames`; `None` if no
     /// thread could start.
-    fn spawn(number: u32, scene: Scene, frames: Vec<i32>, eye: Eye, options: RenderOptions) -> Option<Self> {
+    fn spawn(
+        number: u32,
+        scene: Scene,
+        frames: Vec<i32>,
+        eye: Eye,
+        options: RenderOptions,
+        replay: Option<Replay>,
+    ) -> Option<Self> {
         let control = Arc::new(RenderControl::default());
         let (sender, updates) = mpsc::channel();
         let worker_control = Arc::clone(&control);
         let count = u64::try_from(frames.len()).unwrap_or(1).max(1);
         let spawned = thread::Builder::new()
             .name(format!("grid4d render {number}"))
-            .spawn(move || work(&scene, &frames, eye, &options, &worker_control, &sender));
+            .spawn(move || work(&scene, &frames, eye, &options, replay, &worker_control, &sender));
         if let Err(err) = spawned {
             log::error!("could not start the render thread: {err}");
             return None;
@@ -386,7 +394,8 @@ impl Renders {
     /// Renders the view `key` describes (through `view`, at its size, with
     /// the Render Settings' quality) for the Render View, replacing one that
     /// shows. Nothing is saved or kept in the history.
-    pub fn start_view(&mut self, doc: &Document, view: &OrbitCamera, key: ViewKey) {
+    /// `replay`: the simulation (a copy of its cache), if there is one.
+    pub fn start_view(&mut self, doc: &Document, view: &OrbitCamera, key: ViewKey, replay: Option<Replay>) {
         self.view = None;
         let settings = doc.render.clone().validated();
         let options = RenderOptions {
@@ -400,6 +409,7 @@ impl Renders {
             vec![doc.time.frame()],
             Eye::Fixed(render_camera(view)),
             options,
+            replay,
         );
         let picture = Picture {
             number: 0,
@@ -443,6 +453,7 @@ impl Renders {
         view: &OrbitCamera,
         object: Option<NodeId>,
         document: Option<&std::path::Path>,
+        replay: Option<Replay>,
     ) -> u32 {
         self.stop();
         let settings = doc.render.clone().validated();
@@ -475,7 +486,7 @@ impl Renders {
 
         let camera = render_camera(view);
         let eye = object.map_or(Eye::Fixed(camera), |id| Eye::Object(id, camera));
-        let job = Job::spawn(number, doc.scene.clone(), frames, eye, options);
+        let job = Job::spawn(number, doc.scene.clone(), frames, eye, options, replay);
         if job.is_none() {
             self.end(number, true);
             return number;
@@ -640,11 +651,18 @@ fn work(
     frames: &[i32],
     eye: Eye,
     options: &RenderOptions,
+    mut replay: Option<Replay>,
     control: &RenderControl,
     sender: &Sender<Update>,
 ) {
     let mut evaluated = EvaluatedScene::for_render();
+    let mut simulated = grid4d_eval::Overrides::default();
     for &frame in frames {
+        // The simulation at this frame (simulated here if the cache lacks it).
+        if let Some(replay) = replay.as_mut() {
+            replay.overrides(frame, &mut simulated);
+            evaluated.set_overrides(&simulated);
+        }
         evaluated.set_frame(f64::from(frame));
         evaluated.update(scene);
         let camera = eye.at(scene, &evaluated, f64::from(frame));
@@ -714,7 +732,7 @@ pub(crate) mod tests {
         let mut doc = Document::with_demo_scene();
         small(&mut doc, 5);
         let mut renders = Renders::default();
-        let number = renders.start(&doc, &OrbitCamera::default(), None, None);
+        let number = renders.start(&doc, &OrbitCamera::default(), None, None, None);
         assert_eq!(number, 1);
         assert!(renders.is_rendering());
         assert_eq!(renders.shown_picture().map(|p| p.state), Some(RenderState::Rendering));
@@ -750,13 +768,13 @@ pub(crate) mod tests {
         let mut doc = Document::with_demo_scene();
         doc.render.samples = 4096;
         let mut renders = Renders::default();
-        renders.start(&doc, &OrbitCamera::default(), None, None);
+        renders.start(&doc, &OrbitCamera::default(), None, None, None);
         renders.stop();
         assert!(!renders.is_rendering());
         assert_eq!(renders.picture(1).map(|p| p.state), Some(RenderState::Stopped));
 
-        renders.start(&doc, &OrbitCamera::default(), None, None);
-        renders.start(&doc, &OrbitCamera::default(), None, None);
+        renders.start(&doc, &OrbitCamera::default(), None, None, None);
+        renders.start(&doc, &OrbitCamera::default(), None, None, None);
         assert_eq!(
             renders.picture(2).map(|p| p.state),
             Some(RenderState::Stopped),
@@ -782,7 +800,7 @@ pub(crate) mod tests {
             frame: 0,
         };
         let mut renders = Renders::default();
-        renders.start_view(&doc, &camera, key.clone());
+        renders.start_view(&doc, &camera, key.clone(), None);
         assert!(
             renders.is_busy() && !renders.is_rendering(),
             "not a Picture Viewer render"
@@ -808,7 +826,7 @@ pub(crate) mod tests {
         let whole = grid4d_raytrace::render(&RenderScene::new(&evaluated), &render_camera(&camera), &options);
         assert_eq!(view.picture.rgb, whole.to_rgb8());
 
-        renders.start_view(&doc, &camera, key);
+        renders.start_view(&doc, &camera, key, None);
         renders.clear_view();
         assert!(renders.view_render().is_none() && !renders.is_busy());
     }
@@ -828,7 +846,7 @@ pub(crate) mod tests {
         data.set_transform_at(&moved, 20.0, true);
 
         let mut renders = Renders::default();
-        renders.start(&doc, &OrbitCamera::default(), Some(camera), None);
+        renders.start(&doc, &OrbitCamera::default(), Some(camera), None, None);
         let finished = wait(&mut renders);
         let frames: Vec<i32> = finished.iter().map(|f| f.frame).collect();
         assert_eq!(frames, [0, 10, 20], "every 10th frame, in order");
@@ -894,5 +912,32 @@ pub(crate) mod tests {
         let numbers: Vec<u32> = renders.history().iter().map(|p| p.number).collect();
         assert_eq!(numbers, [2, 3, 4], "the oldest went");
         assert_eq!(renders.shown, None, "it showed the dropped one");
+    }
+
+    #[test]
+    fn renders_show_the_simulation_at_their_frame() {
+        use grid4d_scene::{Body, Node, NodeData, ObjectKindTag, Tag};
+        // A big cube that falls out of the default camera's view in a second.
+        let mut doc = Document::new("fall");
+        small(&mut doc, 1);
+        let mut cube = NodeData::new("Cube", ObjectKindTag::Cube.default_kind());
+        cube.tags.push(Tag::Dynamics(Body::rigid()));
+        doc.scene.insert(Node::from_data(cube));
+        doc.render.frames = grid4d_scene::FrameRange::Current;
+        let picture = |doc: &Document, replay: Option<Replay>| {
+            let mut renders = Renders::default();
+            renders.start(doc, &OrbitCamera::default(), None, None, replay);
+            wait(&mut renders);
+            renders.shown_picture().unwrap().rgba.clone()
+        };
+        let still = picture(&doc, None);
+        doc.time.set_frame(40);
+        let mut sim = crate::simulation::Sim::default();
+        // The cache holds only the start; the render simulates the rest itself.
+        let replay = sim.replay(&doc);
+        assert!(replay.is_some());
+        let fallen = picture(&doc, replay);
+        assert_ne!(still, fallen, "the cube has fallen out of view");
+        assert!(fallen.chunks(4).all(|p| p[3] == 0), "nothing left in view");
     }
 }

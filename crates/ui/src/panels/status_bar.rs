@@ -12,7 +12,14 @@ pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
             .map(crate::shortcuts::Chord::hint)
             .or(editor.status_hint)
             .unwrap_or_else(|| editor.tool.hint());
-        ui.label(RichText::new(hint).color(p::TEXT_DIM).size(11.5));
+        match editor.simulation.baking() {
+            Some((done, target)) => ui.label(
+                RichText::new(format!("Simulating: frame {done} of {target} — Esc stops"))
+                    .color(p::TEXT_STRONG)
+                    .size(11.5),
+            ),
+            None => ui.label(RichText::new(hint).color(p::TEXT_DIM).size(11.5)),
+        };
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.label(
                 RichText::new(editor.renderer_info.as_str())
