@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 11 — Simulation (v0.11) |
-| Last step done | 11.1 — Scene data and the physics crate (2026-10-30) |
-| Next step | 11.2 — Simulation core |
-| Tests | 665, all passing; clippy and rustfmt clean |
+| Last step done | 11.2 — Simulation core (2026-10-30) |
+| Next step | 11.3 — Playback, cache and renders |
+| Tests | 671, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1457,6 +1457,7 @@ parameters, are undoable, saved, picked, exported and rendered.
 |------|----------------|-------|
 | — | Phase 11 planned in detail: rigid and collider bodies as a Dynamics tag, `rapier3d` 0.36 in a new `grid4d-sim` crate (metres inside, arrays at its edge), a per-frame cache in editor state keyed by the simulation's inputs, evaluation overrides, clones as bodies, saved caches (`IMPLEMENTATION_PLAN.md`) | 658 |
 | 11.1 | Rigid Body / Collider Body (one Dynamics tag: motion, shape, bounce, friction, mass, damping, start velocity) from the Tags menus, edited, saved; Simulation settings in the Project settings, undoable, saved; the `grid4d-sim` crate on `rapier3d` 0.36: a ball falls ½ g t² and rests on a collider, deterministically | 665 |
+| 11.2 | The simulation core: bodies from tagged objects as the viewport shows them at the start frame (Compound groups, box / sphere / convex hull / mesh shapes, mass, bounce, friction, damping, start velocity), stepped in sub-steps with animated colliders following their keys, recorded per frame; not yet shown in the viewport (11.3) | 671 |
 
 **Planning notes:**
 - **The engine's maths library.** `rapier3d` 0.36 (the latest, 2026-10) uses
@@ -1489,6 +1490,30 @@ parameters, are undoable, saved, picked, exported and rendered.
   in the Attribute Manager, the Project settings. (Scrolling to the Simulation
   section does not reach the app through posted messages; it is covered by
   the undo test.)
+
+**11.2 — Simulation core**
+
+*Problems and solutions:*
+- **Scale.** Engine bodies have a position and a rotation only, so each
+  object's world matrix is split: the scale goes into the collider points
+  (every part mapped into the body's unscaled space), and the cache keeps the
+  start scale to rebuild full matrices.
+- **Custom Mass and Rotational Mass.** The engine takes a density or a mass
+  per collider, but a body can have several parts and Rotational Mass has no
+  setting. Each collider's mass properties are computed here instead: a
+  Custom Mass is spread over the parts by their volume, and Rotational Mass
+  divides the inverse inertia. A test checks a 100 cm cube at density 1
+  weighs 1 kg and a custom 7 kg holds whatever the size.
+- **Combining surfaces.** Bounce takes the higher of two bodies' values and
+  friction their product (as the spec says), set as the engine's combine
+  rules on every collider.
+- **Animated colliders** are kinematic: before every sub-step they are moved
+  to where their keys put them at that sub-step's end, so a paddle sweeping
+  through a box pushes it along.
+- **Speed:** the dev profile optimises dependencies, so the physics tests run
+  in milliseconds.
+- **On-screen testing:** nothing to see yet — the cache reaches the viewport
+  in 11.3; the step is covered by its physics tests.
 
 ---
 

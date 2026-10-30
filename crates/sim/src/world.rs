@@ -1,11 +1,13 @@
-//! A physics world: bodies with simple shapes, stepped frame by frame. The
-//! simulation of a document (11.2) builds one from the evaluated scene.
+//! A physics world: bodies made of colliders, stepped frame by frame. The
+//! simulation of a document ([`crate::Simulation`]) builds one from the
+//! evaluated scene.
 
 use glam::{Quat, Vec3};
-use grid4d_scene::{Body, MassMode, Motion, SimulationSettings};
-use rapier3d::prelude::{ColliderBuilder, PhysicsWorld, RigidBodyBuilder, RigidBodyHandle};
+use grid4d_scene::{Body, Motion, SimulationSettings};
+use rapier3d::prelude::{ColliderBuilder, PhysicsWorld, Pose, RigidBodyBuilder, RigidBodyHandle};
 
 use crate::convert::{from_engine, length_to_engine, rotation_from_engine, rotation_to_engine, to_engine};
+use crate::shape;
 
 /// A body in a [`World`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -43,50 +45,69 @@ impl World {
         }
     }
 
+    /// Sub-steps in a frame.
+    #[must_use]
+    pub const fn steps_per_frame(&self) -> u32 {
+        self.steps_per_frame
+    }
+
     /// Adds a body shaped like a ball of `radius` (cm), centred at `position`.
     pub fn add_ball(&mut self, position: Vec3, rotation: Quat, radius: f32, body: &Body) -> BodyId {
-        self.add(
-            position,
-            rotation,
-            ColliderBuilder::ball(length_to_engine(radius)),
-            body,
-        )
+        let ball = ColliderBuilder::ball(length_to_engine(radius));
+        self.insert(position, rotation, body, vec![ball])
     }
 
     /// Adds a body shaped like a box of half-sizes `half` (cm), centred at `position`.
     pub fn add_box(&mut self, position: Vec3, rotation: Quat, half: Vec3, body: &Body) -> BodyId {
         let [x, y, z] = half.abs().to_array().map(length_to_engine);
-        self.add(position, rotation, ColliderBuilder::cuboid(x, y, z), body)
+        self.insert(position, rotation, body, vec![ColliderBuilder::cuboid(x, y, z)])
     }
 
-    fn add(&mut self, position: Vec3, rotation: Quat, shape: ColliderBuilder, body: &Body) -> BodyId {
+    /// Adds a body at `position` (cm) made of `colliders` (in its own space,
+    /// metres), with `body`'s surface and mass.
+    pub(crate) fn insert(
+        &mut self,
+        position: Vec3,
+        rotation: Quat,
+        body: &Body,
+        colliders: Vec<ColliderBuilder>,
+    ) -> BodyId {
         let body = body.validated();
         let builder = match body.motion {
             Motion::Dynamic => RigidBodyBuilder::dynamic()
                 .linvel(to_engine(body.initial_velocity))
                 .angvel(rapier3d::prelude::Vector::from_array(body.initial_spin.to_array()))
-                .linear_damping(body.linear_damping)
-                .angular_damping(body.angular_damping),
-            // Moved only by its animation (11.2): kinematic.
+                .linear_damping(damping_rate(body.linear_damping))
+                .angular_damping(damping_rate(body.angular_damping)),
+            // Moved only by its animation: kinematic.
             Motion::Collider => RigidBodyBuilder::kinematic_position_based(),
         }
-        .translation(to_engine(position))
-        .rotation(rotation_to_engine(rotation).to_scaled_axis());
-        let mut collider = shape.restitution(body.bounce).friction(body.friction);
-        collider = match body.mass_mode {
-            // Density 1: a 100 cm cube (1 m³) weighs 1 kg.
-            MassMode::GlobalDensity => collider.density(1.0),
-            MassMode::CustomDensity => collider.density(body.density),
-            MassMode::CustomMass => collider.mass(body.mass),
-        };
-        let (handle, _) = self.inner.insert(builder, collider);
+        .pose(Pose::from_parts(to_engine(position), rotation_to_engine(rotation)));
+        let handle = self.inner.insert_body(builder);
+        let total = shape::volume_mass(&colliders);
+        for collider in colliders {
+            let collider = shape::surface(collider, &body, total);
+            self.inner.insert_collider(collider, Some(handle));
+        }
         BodyId(handle)
+    }
+
+    /// Where a collider body should be at the end of the next sub-step.
+    pub fn move_kinematic(&mut self, body: BodyId, position: Vec3, rotation: Quat) {
+        if let Some(b) = self.inner.bodies.get_mut(body.0) {
+            b.set_next_kinematic_position(Pose::from_parts(to_engine(position), rotation_to_engine(rotation)));
+        }
+    }
+
+    /// Advances one sub-step.
+    pub fn substep(&mut self) {
+        self.inner.step();
     }
 
     /// Advances one frame (its sub-steps).
     pub fn step_frame(&mut self) {
         for _ in 0..self.steps_per_frame {
-            self.inner.step();
+            self.substep();
         }
     }
 
@@ -102,6 +123,19 @@ impl World {
     pub fn velocity(&self, body: BodyId) -> Option<Vec3> {
         self.inner.bodies.get(body.0).map(|b| from_engine(b.linvel()))
     }
+
+    /// The mass of `body` (kg).
+    #[must_use]
+    pub fn mass(&self, body: BodyId) -> Option<f32> {
+        self.inner.bodies.get(body.0).map(rapier3d::prelude::RigidBody::mass)
+    }
+}
+
+/// The engine's damping rate for a fraction of speed lost per second
+/// (1.0 = all of it: a very high rate).
+fn damping_rate(fraction: f32) -> f32 {
+    let kept = (1.0 - fraction.clamp(0.0, 1.0)).max(1e-3);
+    -kept.ln()
 }
 
 #[cfg(test)]
@@ -151,5 +185,20 @@ mod tests {
         );
         assert!(path.iter().all(|p| p.y > 30.0), "never through the floor");
         assert_eq!(path, run(), "deterministic");
+    }
+
+    #[test]
+    fn mass_follows_density_or_the_custom_mass() {
+        let mut world = World::new(&SimulationSettings::default(), 30);
+        // A 100 cm cube at density 1 weighs 1 kg.
+        let cube = world.add_box(Vec3::ZERO, Quat::IDENTITY, Vec3::splat(50.0), &Body::rigid());
+        assert!((world.mass(cube).unwrap() - 1.0).abs() < 1e-4);
+        let heavy = Body {
+            mass_mode: grid4d_scene::MassMode::CustomMass,
+            mass: 7.0,
+            ..Body::rigid()
+        };
+        let custom = world.add_box(Vec3::X * 500.0, Quat::IDENTITY, Vec3::splat(200.0), &heavy);
+        assert!((world.mass(custom).unwrap() - 7.0).abs() < 1e-3, "whatever the size");
     }
 }

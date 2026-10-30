@@ -9,6 +9,9 @@
 //! The engine runs on one thread, so a run is deterministic.
 
 mod convert;
+mod shape;
+mod simulation;
 mod world;
 
+pub use simulation::{BodyKey, SimCache, Simulation};
 pub use world::{BodyId, World};

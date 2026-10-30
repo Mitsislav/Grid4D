@@ -74,7 +74,8 @@ Collider bodies ignore mass, damping and velocities.
 | `Body` (enabled, `Motion`, `Inherit`, `CollisionShape`, bounce, friction, `MassMode`, density, mass, rotational mass, damping, initial velocity and spin), `Body::rigid` / `Body::collider`; `Tag::Dynamics(Body)`, `TagKind::Dynamics` | `scene/src/dynamics.rs`, `scene/src/tag.rs` |
 | `SimulationSettings` (`validated`), `Document::simulation`, `SceneEdit::SetSimulation` | `scene/src/dynamics.rs`, `document.rs`, `edit.rs` |
 | `.g4d` v3 `dynamics` tag (defaults omitted), `simulation` block (omitted while default) | `grid4d-io::v3` |
-| New crate `grid4d-sim`: `rapier3d` 0.36 single-threaded, conversions at its edge (`convert.rs`), metres inside; `World` (gravity, bodies, step) as the base 11.2 builds on | `crates/sim` |
+| New crate `grid4d-sim`: `rapier3d` 0.36 single-threaded, conversions at its edge (`convert.rs`), metres inside; `World` (gravity, bodies, sub-steps, kinematic moves) | `crates/sim` |
+| `Simulation::new(doc, evaluated start frame)`: bodies from tagged visible objects (Compound: their visible children too), shapes from the shown meshes (`shape.rs`: box, sphere, convex hull, trimesh; the world scale baked in), mass properties computed per collider (Custom Mass spread by volume, Rotational Mass dividing the inverse inertia), bounce combined by maximum and friction by product; `step_to(frame)`: sub-steps, animated colliders moved to their keys each sub-step; `SimCache` (frames × bodies of position and rotation, the start scale kept, `world(frame, body)`) | `crates/sim` |
 | Tags menus (Rigid Body, Collider Body), Attribute Manager tag rows, Project settings' Simulation section, tag icon | `grid4d-ui` |
 
 ## Decisions (2026-10-30)
@@ -103,6 +104,6 @@ Collider bodies ignore mass, damping and velocities.
 
 11.2:
 
-- [ ] A cube falls onto a collider plane and rests on it; a ball bounces lower
+- [x] A cube falls onto a collider plane and rests on it; a ball bounces lower
       each time; a box slides further on less friction; an animated collider
       pushes a dynamic body; identical runs give identical results.

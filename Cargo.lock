@@ -1757,6 +1757,8 @@ name = "grid4d-sim"
 version = "0.1.0"
 dependencies = [
  "glam 0.34.1",
+ "grid4d-eval",
+ "grid4d-geom",
  "grid4d-scene",
  "rapier3d",
 ]
