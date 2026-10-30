@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 12 — Workspace (v0.12) |
-| Last step done | 12.5 — Takes (2026-10-30) |
-| Next step | 12.6 — Greek |
-| Tests | 713, all passing; clippy and rustfmt clean |
+| Last step done | 12.6 — Greek (2026-10-30); Phase 12 complete |
+| Next step | Phase 13 — Extensibility: plan it in detail |
+| Tests | 716, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1609,6 +1609,7 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
 | 12.3 | Dark, Darker and Light themes (Preferences ▸ Interface ▸ Theme) for every panel, menu, window and icon; the 3D view keeps its own colours; a contrast test for every theme | 699 |
 | 12.4 | Layers: a coloured, named table in the document with Solo, View, Render, Manager, Locked, Animation, Generators and Deformers switches; objects on a layer (children inherit it); the Layer Manager, layer chips in the Object Manager, a Layer field; saved and merged | 708 |
 | 12.5 | Takes: variations of the document (transform, visibility, parameters, tags, display colour, a camera, render settings) recorded automatically in the active take, switched as undo steps, rendered by choice; the Take Manager; saved | 713 |
+| 12.6 | The interface in Greek (Preferences ▸ Interface ▸ Language; English by default): 1 012 texts through `tr`, switched at once; a test that no shown text lacks Greek | 716 |
 
 **Planning notes:**
 - **The docking library.** The plan named `egui_dock`, to be checked against
@@ -1788,6 +1789,41 @@ simulated with rapier3d, cached, baked, saved, rendered and exported.
   Editor in the Basic tab hid the cube and the Take Manager listed
   "Cube · Visibility"; clicking Main showed the cube, clicking the take hid it
   again.
+
+**12.6 — Greek**
+
+*Problems and solutions:*
+- **Finding every text.** About a thousand texts lived in 40 files. Scripts
+  wrapped the literals passed straight to egui widgets in `tr(…)`, enum labels
+  where they are shown, and the `format!` texts became `trf` with numbered
+  placeholders (Greek word order differs: "{0} Object" became
+  "Αντικείμενο {0}"). The label-drawing helpers translate their argument
+  themselves, which keeps the Attribute Manager's key buttons on their
+  English row names. Texts in constants and `match` arms are marked with
+  `key(…)` (a `const fn`) and translated where they are shown.
+- **A test instead of a list.** A scanner reads the sources and gathers what
+  the interface shows: `tr`/`trf`/`key` literals, the first literal of the
+  label helpers, undo step and alert names, and every literal in the bodies
+  of `fn label`, `fn hint`, `fn title` (in this crate and the crates whose
+  labels it shows). It fails on any text without Greek and on any Greek no
+  code uses. Two traps it met: files with an early `#[cfg(test)]` item (cut
+  at the test module instead) and Rust's `\` line continuation inside a
+  string (the key is the joined text).
+- **A check that compared English text.** Saving a failed render looked for
+  a note starting with "Not saved"; with Greek notes it never would. It now
+  compares with the translated prefix.
+- **Longer labels.** Greek labels are often longer than the 128-point label
+  column; labels are now clipped to their column and show in full on hover,
+  and the Preferences window is wider.
+- **Tests never switch the language.** The language is one atomic for the
+  whole process, so a test switching it could change another test's texts
+  running at the same time; the tests check the table directly instead.
+- **On-screen testing:** Preferences ▸ Language ▸ Ελληνικά switched the menus,
+  managers, tabs, tooltips and status bar at once; Greek came back after a
+  restart; the Basic tab's long labels were clipped neatly.
+
+Phase 12 is complete: docking layouts, Preferences, themes, layers, takes and
+the interface in Greek.
 
 ---
 

@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use egui::{Id, Modal, RichText};
 
+use crate::i18n::{tr, trf};
 use crate::{EditorCommand, EditorState, autosave::RecoveryChoice, theme::palette as p};
 
 pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
@@ -14,18 +15,18 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
         .as_deref()
         .and_then(std::path::Path::file_name)
         .map_or_else(
-            || "an unsaved document".to_owned(),
+            || tr("an unsaved document").to_owned(),
             |n| format!("“{}”", n.to_string_lossy()),
         );
-    let message = format!(
-        "Grid4D did not close normally. A copy of {name} was saved automatically {}.",
-        ago(offer.written)
+    let message = trf(
+        "Grid4D did not close normally. A copy of {0} was saved automatically {1}.",
+        &[&name, &ago(offer.written)],
     );
     let mut choice = None;
     let response = Modal::new(Id::unique("grid4d.recovery")).show(ctx, |ui| {
         ui.set_width(420.0);
         ui.label(
-            RichText::new("Recover Unsaved Work?")
+            RichText::new(tr("Recover Unsaved Work?"))
                 .size(15.0)
                 .strong()
                 .color(p().text_strong),
@@ -34,10 +35,10 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
         ui.label(RichText::new(message).color(p().text_dim));
         ui.add_space(14.0);
         ui.horizontal(|ui| {
-            if ui.button("Recover").clicked() {
+            if ui.button(tr("Recover")).clicked() {
                 choice = Some(RecoveryChoice::Recover);
             }
-            if ui.button("Discard").clicked() {
+            if ui.button(tr("Discard")).clicked() {
                 choice = Some(RecoveryChoice::Discard);
             }
         });
@@ -55,11 +56,11 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
 fn ago(written: SystemTime) -> String {
     let seconds = SystemTime::now().duration_since(written).map_or(0, |d| d.as_secs());
     match seconds {
-        0..60 => "less than a minute ago".to_owned(),
-        60..120 => "a minute ago".to_owned(),
-        120..3600 => format!("{} minutes ago", seconds / 60),
-        3600..7200 => "an hour ago".to_owned(),
-        7200..172_800 => format!("{} hours ago", seconds / 3600),
-        _ => format!("{} days ago", seconds / 86_400),
+        0..60 => tr("less than a minute ago").to_owned(),
+        60..120 => tr("a minute ago").to_owned(),
+        120..3600 => trf("{0} minutes ago", &[&(seconds / 60)]),
+        3600..7200 => tr("an hour ago").to_owned(),
+        7200..172_800 => trf("{0} hours ago", &[&(seconds / 3600)]),
+        _ => trf("{0} days ago", &[&(seconds / 86_400)]),
     }
 }

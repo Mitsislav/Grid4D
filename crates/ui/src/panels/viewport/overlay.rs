@@ -7,6 +7,7 @@ use grid4d_render::{OrbitCamera, ViewFilter};
 use grid4d_scene::LightType;
 
 use super::project;
+use crate::i18n::{tr, trf};
 use crate::{Selection, theme::view_palette as p};
 
 /// Cinema 4D-style corner brackets on the bounding box of each selected object
@@ -242,9 +243,9 @@ pub(super) fn hud(painter: &Painter, rect: Rect, camera: &OrbitCamera) {
     painter.text(
         pos2(rect.right() - 12.0, rect.bottom() - 10.0),
         Align2::RIGHT_BOTTOM,
-        format!(
-            "Grid Spacing : {}",
-            crate::preferences::units(painter.ctx()).format(f64::from(camera.grid_spacing()), 2, "")
+        trf(
+            "Grid Spacing : {0}",
+            &[&crate::preferences::units(painter.ctx()).format(f64::from(camera.grid_spacing()), 2, "")],
         ),
         FontId::proportional(11.5),
         p().text_dim,
@@ -303,7 +304,7 @@ pub(super) fn snap_target(painter: &Painter, rect: Rect, view_proj: &Mat4, hit: 
         StrokeKind::Middle,
     );
     painter.circle_filled(at, 2.0, p().snap);
-    let galley = painter.layout_no_wrap(hit.kind.label().to_owned(), FontId::proportional(11.5), p().snap);
+    let galley = painter.layout_no_wrap(tr(hit.kind.label()).to_owned(), FontId::proportional(11.5), p().snap);
     let corner = at + vec2(11.0, -11.0 - galley.size().y);
     painter.rect_filled(
         Rect::from_min_size(corner, galley.size()).expand(3.0),

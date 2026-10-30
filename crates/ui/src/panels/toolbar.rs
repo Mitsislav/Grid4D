@@ -4,6 +4,7 @@
 use egui::{Align2, CornerRadius, FontId, Sense, Ui, Vec2, vec2};
 use grid4d_scene::ObjectKindTag;
 
+use crate::i18n::{key, tr, trf};
 use crate::{
     EditorCommand, EditorState, Tool,
     commands::tag_color,
@@ -39,9 +40,9 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
             axis_toggle(ui, &mut editor.axes[axis], label, p().axis[axis]);
         }
         let (icon, tip) = if editor.world_coordinates {
-            (Icon::CoordWorld, "Coordinate System: World (click for Object)")
+            (Icon::CoordWorld, key("Coordinate System: World (click for Object)"))
         } else {
-            (Icon::CoordObject, "Coordinate System: Object (click for World)")
+            (Icon::CoordObject, key("Coordinate System: Object (click for World)"))
         };
         if icon_button(ui, icon, IconStyle::default(), tip).clicked() {
             editor.world_coordinates = !editor.world_coordinates;
@@ -97,7 +98,7 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
         );
         egui::Popup::menu(&splines).show(|ui| {
             for tag in ObjectKindTag::SPLINES {
-                let label = format!("Add {}", tag.label());
+                let label = trf("Add {0}", &[&tr(tag.label())]);
                 if ui.button(label).clicked() {
                     editor.commands.push(EditorCommand::CreateObject(tag));
                     ui.close();
@@ -160,17 +161,17 @@ fn history_button(ui: &mut Ui, editor: &mut EditorState, step: HistoryStep) {
     let (icon, verb, shortcut, empty, label, command) = match step {
         HistoryStep::Undo => (
             Icon::Undo,
-            "Undo",
+            key("Undo"),
             "Ctrl+Z",
-            "Undo (Ctrl+Z) — nothing to undo",
+            key("Undo (Ctrl+Z) — nothing to undo"),
             editor.history.undo_label(),
             EditorCommand::Undo,
         ),
         HistoryStep::Redo => (
             Icon::Redo,
-            "Redo",
+            key("Redo"),
             "Ctrl+Y",
-            "Redo (Ctrl+Y) — nothing to redo",
+            key("Redo (Ctrl+Y) — nothing to redo"),
             editor.history.redo_label(),
             EditorCommand::Redo,
         ),
@@ -182,10 +183,10 @@ fn history_button(ui: &mut Ui, editor: &mut EditorState, step: HistoryStep) {
     // The tooltip text is only built while hovered.
     let response = icon_button_bare(ui, icon, style).on_hover_ui(|ui| match label {
         Some(label) => {
-            ui.label(format!("{verb} {label} ({shortcut})"));
+            ui.label(format!("{} {} ({shortcut})", tr(verb), tr(label)));
         }
         None => {
-            ui.label(empty);
+            ui.label(tr(empty));
         }
     });
     if response.clicked() {
@@ -219,7 +220,7 @@ fn axis_toggle(ui: &mut Ui, enabled: &mut bool, label: &'static str, color: egui
         painter.rect_filled(underline, CornerRadius::same(1), color.gamma_multiply(0.7));
     }
     if response
-        .on_hover_text("Axis lock: enable/disable this axis for the active tool")
+        .on_hover_text(tr("Axis lock: enable/disable this axis for the active tool"))
         .clicked()
     {
         *enabled = !*enabled;
@@ -249,19 +250,19 @@ const fn tool_icon(tool: Tool) -> Icon {
 
 const fn tool_tooltip(tool: Tool) -> &'static str {
     match tool {
-        Tool::LiveSelection => "Live Selection (9)",
-        Tool::RectangleSelection => "Rectangle Selection (0)",
-        Tool::LoopSelection => "Loop Selection (U~L)",
-        Tool::RingSelection => "Ring Selection (U~B)",
-        Tool::Move => "Move (E)",
-        Tool::Scale => "Scale (T)",
-        Tool::Rotate => "Rotate (R)",
-        Tool::Extrude => "Extrude (D)",
-        Tool::Inset => "Inset (I)",
-        Tool::LoopCut => "Loop/Path Cut (K~L)",
-        Tool::LineCut => "Line Cut (K~K)",
-        Tool::Bevel => "Bevel (M~S)",
-        Tool::Bridge => "Bridge (B)",
+        Tool::LiveSelection => key("Live Selection (9)"),
+        Tool::RectangleSelection => key("Rectangle Selection (0)"),
+        Tool::LoopSelection => key("Loop Selection (U~L)"),
+        Tool::RingSelection => key("Ring Selection (U~B)"),
+        Tool::Move => key("Move (E)"),
+        Tool::Scale => key("Scale (T)"),
+        Tool::Rotate => key("Rotate (R)"),
+        Tool::Extrude => key("Extrude (D)"),
+        Tool::Inset => key("Inset (I)"),
+        Tool::LoopCut => key("Loop/Path Cut (K~L)"),
+        Tool::LineCut => key("Line Cut (K~K)"),
+        Tool::Bevel => key("Bevel (M~S)"),
+        Tool::Bridge => key("Bridge (B)"),
         Tool::Weld => "Weld",
         Tool::Pen => "Pen",
     }
@@ -269,39 +270,39 @@ const fn tool_tooltip(tool: Tool) -> &'static str {
 
 const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
     match tag {
-        ObjectKindTag::Null => "Add Null",
-        ObjectKindTag::Cube => "Add Cube",
-        ObjectKindTag::Sphere => "Add Sphere",
-        ObjectKindTag::Cylinder => "Add Cylinder",
-        ObjectKindTag::Plane => "Add Plane",
-        ObjectKindTag::Cone => "Add Cone",
-        ObjectKindTag::Torus => "Add Torus",
-        ObjectKindTag::Disc => "Add Disc",
-        ObjectKindTag::Capsule => "Add Capsule",
-        ObjectKindTag::Camera => "Add Camera (at the current view)",
-        ObjectKindTag::Light => "Add Light",
-        ObjectKindTag::Polygon => "Add Polygon Object",
-        ObjectKindTag::SubdivisionSurface => "Add Subdivision Surface (Alt: around the selected object)",
-        ObjectKindTag::Extrude => "Add Extrude (Alt: around the selected spline)",
-        ObjectKindTag::Lathe => "Add Lathe (Alt: around the selected spline)",
-        ObjectKindTag::Sweep => "Add Sweep: profile first, path second (Alt: around the selected spline)",
-        ObjectKindTag::Loft => "Add Loft: a skin over its child splines (Alt: around the selected splines)",
-        ObjectKindTag::Cloner => "Add Cloner: repeats its children (Alt: around the selected object)",
-        ObjectKindTag::PlainEffector => "Add Plain effector: moves, turns, scales the selected Cloner's clones",
-        ObjectKindTag::RandomEffector => "Add Random effector: varies the selected Cloner's clones at random",
-        ObjectKindTag::Bend => "Add Bend (Shift: under the selected object, fitted to it)",
-        ObjectKindTag::Twist => "Add Twist (Shift: under the selected object, fitted to it)",
-        ObjectKindTag::Taper => "Add Taper (Shift: under the selected object, fitted to it)",
-        ObjectKindTag::Bulge => "Add Bulge (Shift: under the selected object, fitted to it)",
-        ObjectKindTag::Ffd => "Add FFD (Shift: under the selected object, fitted to it)",
-        ObjectKindTag::Circle => "Add Circle",
-        ObjectKindTag::Rectangle => "Add Rectangle",
-        ObjectKindTag::Arc => "Add Arc",
-        ObjectKindTag::NSide => "Add n-Side",
-        ObjectKindTag::Star => "Add Star",
-        ObjectKindTag::Helix => "Add Helix",
-        ObjectKindTag::Flower => "Add Flower",
-        ObjectKindTag::Text => "Add Text",
-        ObjectKindTag::Spline => "Add Spline",
+        ObjectKindTag::Null => key("Add Null"),
+        ObjectKindTag::Cube => key("Add Cube"),
+        ObjectKindTag::Sphere => key("Add Sphere"),
+        ObjectKindTag::Cylinder => key("Add Cylinder"),
+        ObjectKindTag::Plane => key("Add Plane"),
+        ObjectKindTag::Cone => key("Add Cone"),
+        ObjectKindTag::Torus => key("Add Torus"),
+        ObjectKindTag::Disc => key("Add Disc"),
+        ObjectKindTag::Capsule => key("Add Capsule"),
+        ObjectKindTag::Camera => key("Add Camera (at the current view)"),
+        ObjectKindTag::Light => key("Add Light"),
+        ObjectKindTag::Polygon => key("Add Polygon Object"),
+        ObjectKindTag::SubdivisionSurface => key("Add Subdivision Surface (Alt: around the selected object)"),
+        ObjectKindTag::Extrude => key("Add Extrude (Alt: around the selected spline)"),
+        ObjectKindTag::Lathe => key("Add Lathe (Alt: around the selected spline)"),
+        ObjectKindTag::Sweep => key("Add Sweep: profile first, path second (Alt: around the selected spline)"),
+        ObjectKindTag::Loft => key("Add Loft: a skin over its child splines (Alt: around the selected splines)"),
+        ObjectKindTag::Cloner => key("Add Cloner: repeats its children (Alt: around the selected object)"),
+        ObjectKindTag::PlainEffector => key("Add Plain effector: moves, turns, scales the selected Cloner's clones"),
+        ObjectKindTag::RandomEffector => key("Add Random effector: varies the selected Cloner's clones at random"),
+        ObjectKindTag::Bend => key("Add Bend (Shift: under the selected object, fitted to it)"),
+        ObjectKindTag::Twist => key("Add Twist (Shift: under the selected object, fitted to it)"),
+        ObjectKindTag::Taper => key("Add Taper (Shift: under the selected object, fitted to it)"),
+        ObjectKindTag::Bulge => key("Add Bulge (Shift: under the selected object, fitted to it)"),
+        ObjectKindTag::Ffd => key("Add FFD (Shift: under the selected object, fitted to it)"),
+        ObjectKindTag::Circle => key("Add Circle"),
+        ObjectKindTag::Rectangle => key("Add Rectangle"),
+        ObjectKindTag::Arc => key("Add Arc"),
+        ObjectKindTag::NSide => key("Add n-Side"),
+        ObjectKindTag::Star => key("Add Star"),
+        ObjectKindTag::Helix => key("Add Helix"),
+        ObjectKindTag::Flower => key("Add Flower"),
+        ObjectKindTag::Text => key("Add Text"),
+        ObjectKindTag::Spline => key("Add Spline"),
     }
 }

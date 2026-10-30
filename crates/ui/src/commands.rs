@@ -16,6 +16,7 @@ use grid4d_scene::{
     SceneEdit, SplineHandle, Transform,
 };
 
+use crate::i18n::key;
 use crate::{
     EditMode, EditorState, Selection, ViewportPanel,
     file::{self, FileAction, UnsavedChoice},
@@ -601,14 +602,14 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::DeleteSelected if editor.mode != EditMode::Model => {
             let label = match editor.mode {
                 EditMode::Points => "Delete Points",
-                EditMode::Edges => "Delete Edges",
-                EditMode::Polygons | EditMode::Model => "Delete Polygons",
+                EditMode::Edges => key("Delete Edges"),
+                EditMode::Polygons | EditMode::Model => key("Delete Polygons"),
             };
             rebuild_selection(doc, editor, label, ops::delete, false);
         }
         EditorCommand::MeltSelected => rebuild_selection(doc, editor, "Melt", ops::melt, false),
         EditorCommand::DissolveSelected => rebuild_selection(doc, editor, "Dissolve", ops::dissolve, false),
-        EditorCommand::ConnectSelected => rebuild_selection(doc, editor, "Connect", ops::connect, true),
+        EditorCommand::ConnectSelected => rebuild_selection(doc, editor, key("Connect"), ops::connect, true),
         EditorCommand::LoopCut { node, edge, fractions } => {
             let select_cuts = editor.modeling_settings.loop_cut.select_cuts;
             let data = doc.scene.get(node).and_then(|n| {
@@ -851,7 +852,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             }
         }
         EditorCommand::SelectComponents { node, hits, mode, .. } if is_spline(doc, node) => {
-            edit_spline_points(doc, editor, node, "Select Points", |state, _| {
+            edit_spline_points(doc, editor, node, key("Select Points"), |state, _| {
                 let picked: Vec<usize> = hits
                     .iter()
                     .map(|&i| idx(i))
@@ -919,7 +920,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         }),
         EditorCommand::GrowSelection => {
             let edges_only = editor.selection_settings.grow_edges_only;
-            in_component_mode(doc, editor, "Grow Selection", |state, mesh, component| {
+            in_component_mode(doc, editor, key("Grow Selection"), |state, mesh, component| {
                 let grown = selection::grow(
                     mesh.mesh(),
                     mesh.topology(),
@@ -932,7 +933,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         }
         EditorCommand::ShrinkSelection => {
             let edges_only = editor.selection_settings.grow_edges_only;
-            in_component_mode(doc, editor, "Shrink Selection", |state, mesh, component| {
+            in_component_mode(doc, editor, key("Shrink Selection"), |state, mesh, component| {
                 let shrunk = selection::shrink(
                     mesh.mesh(),
                     mesh.topology(),
@@ -944,7 +945,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             });
         }
         EditorCommand::InvertSelection if spline_target(doc, editor).is_some() => {
-            on_spline_target(doc, editor, "Invert Selection", |state, count| {
+            on_spline_target(doc, editor, key("Invert Selection"), |state, count| {
                 let mut inverted = BitSet::new();
                 inverted.extend((0..count).filter(|&i| !state.selected.points.contains(i)));
                 inverted.remove_all(&state.hidden.points);
@@ -952,7 +953,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             });
         }
         EditorCommand::InvertSelection => {
-            in_component_mode(doc, editor, "Invert Selection", |state, mesh, component| {
+            in_component_mode(doc, editor, key("Invert Selection"), |state, mesh, component| {
                 let hidden = hidden_mask(state, mesh, component);
                 let inverted = selection::invert(
                     mesh.mesh(),
@@ -965,33 +966,37 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             })
         }
         EditorCommand::SelectConnected => {
-            in_component_mode(doc, editor, "Select Connected", |state, mesh, component| {
+            in_component_mode(doc, editor, key("Select Connected"), |state, mesh, component| {
                 let reached =
                     selection::connected(mesh.mesh(), mesh.topology(), state.selected.get(component), component);
                 set_selected(state, mesh, component, reached);
             })
         }
-        EditorCommand::HideSelected => in_component_mode(doc, editor, "Hide Selected", |state, mesh, component| {
-            let selected = stored(
-                elements(state.selected.get(component), component, mesh),
-                component,
-                mesh,
-            );
-            state.hidden.get_mut(component).extend(selected.iter());
-            state.selected.get_mut(component).clear();
-        }),
-        EditorCommand::HideUnselected => in_component_mode(doc, editor, "Hide Unselected", |state, mesh, component| {
-            let hidden = hidden_mask(state, mesh, component);
-            let others = selection::invert(
-                mesh.mesh(),
-                mesh.topology(),
-                state.selected.get(component),
-                component,
-                &hidden,
-            );
-            state.hidden.get_mut(component).extend(others.iter());
-        }),
-        EditorCommand::UnhideAll => in_component_mode(doc, editor, "Unhide All", |state, _, _| {
+        EditorCommand::HideSelected => {
+            in_component_mode(doc, editor, key("Hide Selected"), |state, mesh, component| {
+                let selected = stored(
+                    elements(state.selected.get(component), component, mesh),
+                    component,
+                    mesh,
+                );
+                state.hidden.get_mut(component).extend(selected.iter());
+                state.selected.get_mut(component).clear();
+            })
+        }
+        EditorCommand::HideUnselected => {
+            in_component_mode(doc, editor, key("Hide Unselected"), |state, mesh, component| {
+                let hidden = hidden_mask(state, mesh, component);
+                let others = selection::invert(
+                    mesh.mesh(),
+                    mesh.topology(),
+                    state.selected.get(component),
+                    component,
+                    &hidden,
+                );
+                state.hidden.get_mut(component).extend(others.iter());
+            })
+        }
+        EditorCommand::UnhideAll => in_component_mode(doc, editor, key("Unhide All"), |state, _, _| {
             state.hidden = grid4d_geom::ComponentSet::default();
         }),
         EditorCommand::ConvertSelection { to, tolerant } => {
@@ -999,7 +1004,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 (editor.mode.component(), to.component(), editor.selection.active())
                 && from != target
             {
-                edit_components(doc, editor, id, "Convert Selection", |state, mesh| {
+                edit_components(doc, editor, id, key("Convert Selection"), |state, mesh| {
                     let mut converted =
                         selection::convert(mesh.mesh(), mesh.topology(), &state.selected, from, target, tolerant);
                     converted.remove_all(state.hidden.get(target)); // hidden components stay unselected
@@ -1061,9 +1066,9 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 .collect();
             if !edits.is_empty() {
                 let label = if layer.is_some() {
-                    "Add to Layer"
+                    key("Add to Layer")
                 } else {
-                    "Remove from Layer"
+                    key("Remove from Layer")
                 };
                 commit(doc, editor, label, edits, |_, _| {});
             }
@@ -1817,9 +1822,9 @@ fn edit_components(
 
 const fn select_label(component: Component) -> &'static str {
     match component {
-        Component::Point => "Select Points",
-        Component::Edge => "Select Edges",
-        Component::Polygon => "Select Polygons",
+        Component::Point => key("Select Points"),
+        Component::Edge => key("Select Edges"),
+        Component::Polygon => key("Select Polygons"),
     }
 }
 

@@ -11,6 +11,7 @@ use egui::{
 };
 use grid4d_scene::{Document, MaterialId};
 
+use crate::i18n::{tr, trf};
 use crate::{EditorCommand, EditorState, MaterialDrag, icons, theme::palette as p};
 
 /// Default height of the panel.
@@ -62,7 +63,7 @@ impl MaterialsPanel {
             ui.painter().text(
                 area.center(),
                 egui::Align2::CENTER_CENTER,
-                "No materials: double-click here or press Ctrl+N to make one",
+                tr("No materials: double-click here or press Ctrl+N to make one"),
                 FontId::proportional(12.5),
                 p().text_dim,
             );
@@ -77,7 +78,10 @@ impl MaterialsPanel {
             }
         }
         background.context_menu(|ui| {
-            if ui.add(Button::new("New Material").shortcut_text("Ctrl+N")).clicked() {
+            if ui
+                .add(Button::new(tr("New Material")).shortcut_text("Ctrl+N"))
+                .clicked()
+            {
                 editor.commands.push(EditorCommand::NewMaterial);
                 ui.close();
             }
@@ -97,16 +101,19 @@ fn menu(ui: &mut Ui, editor: &mut EditorState) {
         .inner_margin(egui::Margin::symmetric(4, 1))
         .show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("Create", |ui| {
-                    if ui.add(Button::new("New Material").shortcut_text("Ctrl+N")).clicked() {
+                ui.menu_button(tr("Create"), |ui| {
+                    if ui
+                        .add(Button::new(tr("New Material")).shortcut_text("Ctrl+N"))
+                        .clicked()
+                    {
                         editor.commands.push(EditorCommand::NewMaterial);
                         ui.close();
                     }
                 });
                 let selected = editor.materials.selected;
-                ui.menu_button("Edit", |ui| {
+                ui.menu_button(tr("Edit"), |ui| {
                     if ui
-                        .add_enabled(selected.is_some(), Button::new("Delete").shortcut_text("Delete"))
+                        .add_enabled(selected.is_some(), Button::new(tr("Delete")).shortcut_text("Delete"))
                         .clicked()
                         && let Some(material) = selected
                     {
@@ -114,11 +121,11 @@ fn menu(ui: &mut Ui, editor: &mut EditorState) {
                         ui.close();
                     }
                 });
-                ui.menu_button("Material", |ui| {
+                ui.menu_button(tr("Material"), |ui| {
                     let can = selected.is_some() && !editor.selection.is_empty();
                     if ui
-                        .add_enabled(can, Button::new("Apply"))
-                        .on_disabled_hover_text("Select a material and objects first")
+                        .add_enabled(can, Button::new(tr("Apply")))
+                        .on_disabled_hover_text(tr("Select a material and objects first"))
                         .clicked()
                         && let Some(material) = selected
                     {
@@ -172,17 +179,20 @@ fn cell(ui: &mut Ui, doc: &Document, editor: &mut EditorState, id: MaterialId) -
         editor.materials.shown = true;
         editor.panes.show = Some(crate::workspace::Pane::Attributes);
     }
-    let response = response.on_hover_text(format!("{} · drag onto an object to assign it", material.name));
+    let response = response.on_hover_text(trf("{0} · drag onto an object to assign it", &[&material.name]));
     response.context_menu(|ui| {
         let can = !editor.selection.is_empty();
-        if ui.add_enabled(can, Button::new("Apply to Selected Objects")).clicked() {
+        if ui
+            .add_enabled(can, Button::new(tr("Apply to Selected Objects")))
+            .clicked()
+        {
             editor.commands.push(EditorCommand::AssignMaterial {
                 material: id,
                 nodes: editor.selection.as_slice().to_vec(),
             });
             ui.close();
         }
-        if ui.add(Button::new("Delete").shortcut_text("Delete")).clicked() {
+        if ui.add(Button::new(tr("Delete")).shortcut_text("Delete")).clicked() {
             editor.commands.push(EditorCommand::DeleteMaterial(id));
             ui.close();
         }

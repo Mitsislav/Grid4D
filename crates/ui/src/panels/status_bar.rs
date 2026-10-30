@@ -3,6 +3,7 @@
 use egui::{Align, Layout, RichText, Ui};
 use grid4d_scene::Document;
 
+use crate::i18n::{tr, trf};
 use crate::{EditorState, theme::palette as p};
 
 pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
@@ -12,16 +13,17 @@ pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
             .map(crate::shortcuts::Chord::hint)
             .or(editor.status_hint)
             .unwrap_or_else(|| editor.tool.hint());
+        let hint = tr(hint);
         match editor.simulation.baking() {
             Some((done, target)) => ui.label(
-                RichText::new(format!("Simulating: frame {done} of {target} — Esc stops"))
+                RichText::new(trf("Simulating: frame {0} of {1} — Esc stops", &[&done, &target]))
                     .color(p().text_strong)
                     .size(11.5),
             ),
             None if editor.simulation.is_full() => ui.label(
-                RichText::new(format!(
-                    "The simulation cache is full ({} MB): raise Cache Memory in the Project settings",
-                    doc.simulation.memory_limit_mb
+                RichText::new(trf(
+                    "The simulation cache is full ({0} MB): raise Cache Memory in the Project settings",
+                    &[&doc.simulation.memory_limit_mb],
                 ))
                 .color(p().warning)
                 .size(11.5),
@@ -38,7 +40,7 @@ pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
             let objects = doc.scene.len();
             let selected = editor.selection.len();
             ui.label(
-                RichText::new(format!("{objects} objects · {selected} selected"))
+                RichText::new(trf("{0} objects · {1} selected", &[&objects, &selected]))
                     .color(p().text_dim)
                     .size(11.0),
             );

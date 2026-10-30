@@ -15,6 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::i18n::{key, trf};
 use grid4d_eval::EvaluatedScene;
 use grid4d_raytrace::{CameraProjection, Image, Progressive, RenderCamera, RenderControl, RenderOptions, RenderScene};
 use grid4d_render::OrbitCamera;
@@ -430,7 +431,7 @@ impl Renders {
             frames: 1,
             frames_done: 0,
             saved: 0,
-            target: SaveTarget::Nowhere("The Render View is not saved."),
+            target: SaveTarget::Nowhere(crate::i18n::key("The Render View is not saved.")),
             note: String::new(),
             version: 0,
         };
@@ -551,14 +552,12 @@ impl Renders {
         if let Some(picture) = self.history.iter_mut().find(|p| p.number == number) {
             picture.saved += 1;
             picture.note = if picture.frames > 1 {
-                format!(
-                    "Saved {} of {} frames, the last to {}",
-                    picture.saved,
-                    picture.frames,
-                    path.display()
+                trf(
+                    "Saved {0} of {1} frames, the last to {2}",
+                    &[&picture.saved, &picture.frames, &path.display()],
                 )
             } else {
-                format!("Saved to {}", path.display())
+                trf("Saved to {0}", &[&path.display()])
             };
         }
     }
@@ -578,7 +577,7 @@ impl Renders {
                 RenderState::Finished
             };
             if stopped && picture.saved == 0 {
-                picture.note = "Stopped: not saved.".to_owned();
+                picture.note = crate::i18n::tr("Stopped: not saved.").to_owned();
             } else if stopped {
                 picture.note.push_str(" · stopped");
             }
@@ -626,15 +625,15 @@ pub fn render_camera(view: &OrbitCamera) -> RenderCamera {
 #[must_use]
 pub fn save_target(settings: &RenderSettings, document: Option<&std::path::Path>, numbered: bool) -> SaveTarget {
     if !settings.save {
-        return SaveTarget::Nowhere("Not saved: Save is off in the Render Settings.");
+        return SaveTarget::Nowhere(key("Not saved: Save is off in the Render Settings."));
     }
     if settings.output.trim().is_empty() {
-        return SaveTarget::Nowhere("Not saved: the Render Settings have no file.");
+        return SaveTarget::Nowhere(key("Not saved: the Render Settings have no file."));
     }
     if settings.output_path(document).is_none() {
-        return SaveTarget::Nowhere(
+        return SaveTarget::Nowhere(key(
             "Not saved: the file is relative to the document's folder; save the document first.",
-        );
+        ));
     }
     SaveTarget::File(Output {
         settings: settings.clone(),

@@ -152,6 +152,8 @@ pub struct Preferences {
     pub views: ViewDefaults,
     /// The interface's colours.
     pub theme: crate::theme::ColorTheme,
+    /// The interface's language (English by default).
+    pub language: crate::i18n::Language,
 }
 
 impl Default for Preferences {
@@ -163,6 +165,7 @@ impl Default for Preferences {
             autosave_minutes: 5,
             views: ViewDefaults::default(),
             theme: crate::theme::ColorTheme::default(),
+            language: crate::i18n::Language::default(),
         }
     }
 }
@@ -286,6 +289,7 @@ mod tests {
                 hud: false,
             },
             theme: crate::theme::ColorTheme::Light,
+            language: crate::i18n::Language::Greek,
         };
         let text = serde_json::to_string(&preferences).unwrap();
         assert_eq!(serde_json::from_str::<Preferences>(&text).unwrap(), preferences);
@@ -299,6 +303,7 @@ mod tests {
         assert_eq!((other.undo_depth, other.autosave_minutes), (1, 120));
         assert_eq!(other.views, ViewDefaults::default());
         assert_eq!(other.theme, crate::theme::ColorTheme::Dark);
+        assert_eq!(other.language, crate::i18n::Language::English, "English by default");
         assert_eq!(Preferences::default().autosave_interval(), Some(300.0));
     }
 }

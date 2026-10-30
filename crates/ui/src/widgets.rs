@@ -2,6 +2,7 @@
 
 use egui::{Color32, CornerRadius, FontId, Rect, Response, Sense, Stroke, StrokeKind, TextStyle, Ui, Vec2, pos2, vec2};
 
+use crate::i18n::tr;
 use crate::{
     icons::{self, Icon},
     theme::{metrics, palette as p},
@@ -24,18 +25,18 @@ pub(crate) fn length_per<'a>(ui: &Ui, value: &'a mut f32, per: &'static str) -> 
 
 /// The snapping settings as menu entries (the snap button's menu, Tools ▸ Snap).
 pub(crate) fn snap_menu(ui: &mut Ui, snap: &mut crate::SnapSettings) {
-    ui.checkbox(&mut snap.enabled, "Enable Snapping  (Shift+S)");
+    ui.checkbox(&mut snap.enabled, tr("Enable Snapping  (Shift+S)"));
     ui.separator();
     for kind in crate::SnapType::ALL {
-        ui.radio_value(&mut snap.kind, kind, kind.label());
+        ui.radio_value(&mut snap.kind, kind, tr(kind.label()));
     }
     ui.separator();
     for kind in grid4d_render::SnapKind::ALL {
-        ui.checkbox(snap.targets.flag_mut(kind), kind.label());
+        ui.checkbox(snap.targets.flag_mut(kind), tr(kind.label()));
     }
     ui.separator();
     ui.horizontal(|ui| {
-        ui.label("Snap Radius");
+        ui.label(tr("Snap Radius"));
         ui.add(
             egui::DragValue::new(&mut snap.radius)
                 .speed(0.2)
@@ -67,7 +68,7 @@ impl Default for IconStyle {
 
 /// A square, frameless toolbar button showing a painted icon.
 pub(crate) fn icon_button(ui: &mut Ui, icon: Icon, style: IconStyle, tooltip: &'static str) -> Response {
-    icon_button_bare(ui, icon, style).on_hover_text(tooltip)
+    icon_button_bare(ui, icon, style).on_hover_text(tr(tooltip))
 }
 
 /// [`icon_button`] without a tooltip, for callers whose tooltip is built on
@@ -124,15 +125,21 @@ pub(crate) fn header_row(ui: &mut Ui) -> Rect {
 
 /// Attribute label with Cinema 4D's dotted leader: `Name . . . . . .`
 pub(crate) fn attr_label(ui: &mut Ui, text: &str, width: f32) {
-    let (rect, _) = ui.allocate_exact_size(vec2(width, metrics::ROW_HEIGHT - 2.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, metrics::ROW_HEIGHT - 2.0), Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
     }
-    let painter = ui.painter();
+    // Clipped to its column (a long translation must not run into the field);
+    // the whole text shows on hover then.
+    let painter = ui.painter_at(rect.shrink2(vec2(0.0, -2.0)));
     let font = TextStyle::Body.resolve(ui.style());
+    let text = tr(text);
     let galley = painter.layout_no_wrap(text.to_owned(), font, p().text);
     let text_pos = pos2(rect.left() + 2.0, rect.center().y - galley.size().y * 0.5);
     let mut x = text_pos.x + galley.size().x + 5.0;
+    if text_pos.x + galley.size().x > rect.right() - 4.0 {
+        response.on_hover_text(text);
+    }
     painter.galley(text_pos, galley, p().text);
     let y = rect.center().y + 4.0;
     while x < rect.right() - 6.0 {
@@ -150,7 +157,7 @@ pub(crate) fn section_heading(ui: &mut Ui, text: &str) {
     painter.text(
         rect.left_center() + vec2(8.0, 0.0),
         egui::Align2::LEFT_CENTER,
-        text,
+        tr(text),
         FontId::proportional(12.0),
         p().text_strong,
     );

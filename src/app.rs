@@ -131,6 +131,7 @@ impl eframe::App for Grid4DApp {
         self.window_fit.check(&ctx);
         preferences::set_units(&ctx, self.editor.preferences.units);
         theme::follow(&ctx, self.editor.preferences.theme);
+        grid4d_ui::i18n::set_language(self.editor.preferences.language);
         shortcuts::handle(&ctx, &mut self.doc, &mut self.editor);
         file::accept_dropped_files(&ctx, &mut self.editor);
 

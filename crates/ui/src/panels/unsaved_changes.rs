@@ -4,6 +4,7 @@
 use egui::{Id, Modal, RichText};
 use grid4d_scene::Document;
 
+use crate::i18n::{key, tr, trf};
 use crate::{
     EditorCommand, EditorState,
     file::{FileAction, UnsavedChoice},
@@ -16,22 +17,22 @@ pub fn show(ctx: &egui::Context, doc: &Document, editor: &mut EditorState) {
     let response = Modal::new(Id::unique("grid4d.unsaved_changes")).show(ctx, |ui| {
         ui.set_width(400.0);
         ui.label(
-            RichText::new(format!("Save changes to “{}”?", editor.file.display_name(doc)))
+            RichText::new(trf("Save changes to “{0}”?", &[&editor.file.display_name(doc)]))
                 .size(15.0)
                 .strong()
                 .color(p().text_strong),
         );
         ui.add_space(6.0);
-        ui.label(RichText::new(consequence(action)).color(p().text_dim));
+        ui.label(RichText::new(tr(consequence(action))).color(p().text_dim));
         ui.add_space(14.0);
         ui.horizontal(|ui| {
-            if ui.button("Save").clicked() {
+            if ui.button(tr("Save")).clicked() {
                 choice = Some(UnsavedChoice::Save);
             }
-            if ui.button("Don't Save").clicked() {
+            if ui.button(tr("Don't Save")).clicked() {
                 choice = Some(UnsavedChoice::Discard);
             }
-            if ui.button("Cancel").clicked() {
+            if ui.button(tr("Cancel")).clicked() {
                 choice = Some(UnsavedChoice::Cancel);
             }
         });
@@ -47,10 +48,10 @@ pub fn show(ctx: &egui::Context, doc: &Document, editor: &mut EditorState) {
 
 const fn consequence(action: &FileAction) -> &'static str {
     match action {
-        FileAction::New => "Your changes will be lost if you start a new document without saving.",
+        FileAction::New => key("Your changes will be lost if you start a new document without saving."),
         FileAction::Open | FileAction::OpenPath(_) => {
-            "Your changes will be lost if you open another document without saving."
+            key("Your changes will be lost if you open another document without saving.")
         }
-        FileAction::Quit => "Your changes will be lost if you quit without saving.",
+        FileAction::Quit => key("Your changes will be lost if you quit without saving."),
     }
 }

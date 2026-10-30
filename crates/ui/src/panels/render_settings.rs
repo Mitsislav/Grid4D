@@ -8,6 +8,7 @@
 use egui::{Button, ComboBox, DragValue, Frame, Grid, Id, RichText, TextEdit, Ui, Window};
 use grid4d_scene::{Document, FrameNaming, FrameRange, ImageFormat, RenderSettings, SceneEdit, TimeState};
 
+use crate::i18n::{key, tr, trf};
 use crate::{
     EditorCommand, EditorState,
     live_edit::{LiveEdit, interaction_ongoing},
@@ -25,14 +26,14 @@ const PAGE_HEIGHT: f32 = 310.0;
 
 /// Common picture sizes (the Preset list).
 const PRESETS: [(&str, u32, u32); 8] = [
-    ("Preview 640 × 360", 640, 360),
-    ("VGA 640 × 480", 640, 480),
-    ("HD 720 (1280 × 720)", 1280, 720),
-    ("HD 1080 (1920 × 1080)", 1920, 1080),
+    (key("Preview 640 × 360"), 640, 360),
+    (key("VGA 640 × 480"), 640, 480),
+    (key("HD 720 (1280 × 720)"), 1280, 720),
+    (key("HD 1080 (1920 × 1080)"), 1920, 1080),
     ("2K (2560 × 1440)", 2560, 1440),
-    ("4K UHD (3840 × 2160)", 3840, 2160),
-    ("Square 1080 × 1080", 1080, 1080),
-    ("Portrait 1080 × 1920", 1080, 1920),
+    (key("4K UHD (3840 × 2160)"), 3840, 2160),
+    (key("Square 1080 × 1080"), 1080, 1080),
+    (key("Portrait 1080 × 1920"), 1080, 1920),
 ];
 
 /// The window's pages.
@@ -95,7 +96,7 @@ impl RenderSettingsPanel {
         self.was_open = true;
         self.edit.begin((), &doc.render);
         let mut ongoing = false;
-        Window::new("Render Settings")
+        Window::new(tr("Render Settings"))
             .id(Id::unique("grid4d.render_settings"))
             .open(&mut open)
             .collapsible(false)
@@ -152,11 +153,11 @@ impl RenderSettingsPanel {
             .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.set_width(PAGE_LIST_WIDTH);
-                    ui.label(RichText::new("Path Tracer").size(11.0).color(p().text_dim));
+                    ui.label(RichText::new(tr("Path Tracer")).size(11.0).color(p().text_dim));
                     ui.add_space(2.0);
                     for page in Page::ALL {
-                        let button =
-                            Button::selectable(self.page == page, page.label()).min_size([PAGE_LIST_WIDTH, 0.0].into());
+                        let button = Button::selectable(self.page == page, tr(page.label()))
+                            .min_size([PAGE_LIST_WIDTH, 0.0].into());
                         if ui.add(button).clicked() {
                             self.page = page;
                         }
@@ -185,13 +186,13 @@ fn take_field(ui: &mut Ui, takes: &grid4d_scene::Takes, commands: &mut crate::Co
             ComboBox::from_id_salt("grid4d.render.take")
                 .selected_text(name(chosen))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut chosen, None, "Current");
+                    ui.selectable_value(&mut chosen, None, tr("Current"));
                     for (id, take) in takes.iter() {
                         ui.selectable_value(&mut chosen, Some(id), &take.name);
                     }
                 })
                 .response
-                .on_hover_text("The take renders show; Current: the active one");
+                .on_hover_text(tr("The take renders show; Current: the active one"));
             if chosen != takes.render_take {
                 let mut changed = takes.clone();
                 changed.render_take = chosen;
@@ -214,13 +215,13 @@ fn output_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, ratio: (u3
             let current = PRESETS
                 .iter()
                 .find(|&&(_, w, h)| (w, h) == (s.width, s.height))
-                .map_or("Custom", |&(name, _, _)| name);
+                .map_or(key("Custom"), |&(name, _, _)| name);
             ComboBox::from_id_salt("grid4d.render.preset")
-                .selected_text(current)
+                .selected_text(tr(current))
                 .width(190.0)
                 .show_ui(ui, |ui| {
                     for (name, w, h) in PRESETS {
-                        if ui.selectable_label(current == name, name).clicked() {
+                        if ui.selectable_label(current == name, tr(name)).clicked() {
                             (s.width, s.height) = (w, h);
                         }
                     }
@@ -264,7 +265,7 @@ fn output_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, ratio: (u3
             attr_label(ui, "Frame Range", LABEL_WIDTH);
             let span = s.frame_span(time);
             ComboBox::from_id_salt("grid4d.render.range")
-                .selected_text(s.frames.label())
+                .selected_text(tr(s.frames.label()))
                 .width(FIELD_WIDTH + 30.0)
                 .show_ui(ui, |ui| {
                     let manual = FrameRange::Manual {
@@ -273,7 +274,7 @@ fn output_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, ratio: (u3
                     };
                     for choice in [FrameRange::Current, FrameRange::All, manual] {
                         let selected = std::mem::discriminant(&s.frames) == std::mem::discriminant(&choice);
-                        if ui.selectable_label(selected, choice.label()).clicked() && !selected {
+                        if ui.selectable_label(selected, tr(choice.label())).clicked() && !selected {
                             s.frames = choice;
                         }
                     }
@@ -311,13 +312,17 @@ fn output_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, ratio: (u3
             attr_label(ui, "Frames", LABEL_WIDTH);
             let count = s.frame_count(time);
             let span = s.frame_span(time);
-            ui.label(RichText::new(format!("{count} (from {} to {})", span.start(), span.end())).color(p().text_dim));
+            ui.label(
+                RichText::new(trf("{0} (from {1} to {2})", &[&count, &span.start(), &span.end()])).color(p().text_dim),
+            );
             ui.end_row();
         });
     ui.label(
-        RichText::new("Render to Picture Viewer renders every frame of the range; the Render View the current one.")
-            .size(11.0)
-            .color(p().text_faint),
+        RichText::new(tr(
+            "Render to Picture Viewer renders every frame of the range; the Render View the current one.",
+        ))
+        .size(11.0)
+        .color(p().text_faint),
     );
 }
 
@@ -335,7 +340,7 @@ fn save_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, editor: &mut
             ui.add_enabled_ui(s.save, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(TextEdit::singleline(&mut s.output).desired_width(190.0));
-                    if ui.button("…").on_hover_text("Choose where to save").clicked() {
+                    if ui.button(tr("…")).on_hover_text(tr("Choose where to save")).clicked() {
                         editor.commands.push(EditorCommand::BrowseRenderOutput);
                     }
                 });
@@ -344,44 +349,46 @@ fn save_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, editor: &mut
 
             attr_label(ui, "Format", LABEL_WIDTH);
             ComboBox::from_id_salt("grid4d.render.format")
-                .selected_text(s.format.label())
+                .selected_text(tr(s.format.label()))
                 .width(190.0)
                 .show_ui(ui, |ui| {
                     for format in ImageFormat::ALL {
-                        ui.selectable_value(&mut s.format, format, format.label());
+                        ui.selectable_value(&mut s.format, format, tr(format.label()));
                     }
                 })
                 .response
-                .on_hover_text("OpenEXR keeps the light's full range, in linear colour, for compositing");
+                .on_hover_text(tr(
+                    "OpenEXR keeps the light's full range, in linear colour, for compositing",
+                ));
             ui.end_row();
             attr_label(ui, "Name", LABEL_WIDTH);
             ComboBox::from_id_salt("grid4d.render.naming")
-                .selected_text(s.naming.label())
+                .selected_text(tr(s.naming.label()))
                 .width(FIELD_WIDTH + 30.0)
                 .show_ui(ui, |ui| {
                     for naming in FrameNaming::ALL {
-                        ui.selectable_value(&mut s.naming, naming, naming.label());
+                        ui.selectable_value(&mut s.naming, naming, tr(naming.label()));
                     }
                 })
                 .response
-                .on_hover_text("How frame numbers join the file names of an animation");
+                .on_hover_text(tr("How frame numbers join the file names of an animation"));
             ui.end_row();
             attr_label(ui, "Alpha Channel", LABEL_WIDTH);
             ui.checkbox(&mut s.alpha, "")
-                .on_hover_text("Keep the background transparent; off: black");
+                .on_hover_text(tr("Keep the background transparent; off: black"));
             ui.end_row();
         });
     let hint = match (s.save, s.output.trim().is_empty()) {
-        (false, _) => "Renders are not saved.".to_owned(),
-        (true, true) => "No file: renders are not saved.".to_owned(),
+        (false, _) => tr("Renders are not saved.").to_owned(),
+        (true, true) => tr("No file: renders are not saved.").to_owned(),
         (true, false) => match s.output_path(editor.file.path()) {
             Some(_) if s.is_animation(time) => {
                 let first = s.frames(time).next().unwrap_or(0);
                 let file = s.output_file(editor.file.path(), Some(first)).unwrap_or_default();
-                format!("Saves {} frames as {} …", s.frame_count(time), file.display())
+                trf("Saves {0} frames as {1} …", &[&s.frame_count(time), &file.display()])
             }
-            Some(path) => format!("Saves to {}", path.display()),
-            None => "Relative to the document's folder: renders are saved once the document is saved.".to_owned(),
+            Some(path) => trf("Saves to {0}", &[&path.display()]),
+            None => tr("Relative to the document's folder: renders are saved once the document is saved.").to_owned(),
         },
     };
     ui.add(egui::Label::new(RichText::new(hint).size(11.0).color(p().text_dim)).wrap());
@@ -398,14 +405,14 @@ fn sampling_page(ui: &mut Ui, s: &mut RenderSettings) {
                 [FIELD_WIDTH, 19.0],
                 DragValue::new(&mut s.samples).range(1..=RenderSettings::MAX_SAMPLES),
             )
-            .on_hover_text("Per pixel: smoother edges and less noise, but slower");
+            .on_hover_text(tr("Per pixel: smoother edges and less noise, but slower"));
             ui.end_row();
             attr_label(ui, "Bounces", LABEL_WIDTH);
             ui.add_sized(
                 [FIELD_WIDTH, 19.0],
                 DragValue::new(&mut s.bounces).range(0..=RenderSettings::MAX_BOUNCES),
             )
-            .on_hover_text("How often light bounces between surfaces (0: direct light only)");
+            .on_hover_text(tr("How often light bounces between surfaces (0: direct light only)"));
             ui.end_row();
         });
 }
@@ -418,7 +425,7 @@ fn options_page(ui: &mut Ui, s: &mut RenderSettings) {
         .show(ui, |ui| {
             attr_label(ui, "Auto Light", LABEL_WIDTH);
             ui.checkbox(&mut s.auto_light, "")
-                .on_hover_text("Light a scene that has no lights");
+                .on_hover_text(tr("Light a scene that has no lights"));
             ui.end_row();
         });
 }

@@ -21,6 +21,7 @@ mod current_state;
 pub mod editor;
 pub mod file;
 pub mod history;
+pub mod i18n;
 pub mod icons;
 pub mod keys;
 mod live_edit;

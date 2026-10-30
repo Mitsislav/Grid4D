@@ -13,6 +13,7 @@ use egui::{
 };
 use grid4d_scene::{Document, NodeId, Playback, SceneEdit, TimeSettings, TimeState};
 
+use crate::i18n::{key, tr};
 use crate::{
     EditorCommand, EditorState,
     icons::Icon,
@@ -238,7 +239,7 @@ impl TimelinePanel {
         response.context_menu(|ui| {
             let any = !editor.keys.frames.is_empty();
             if ui
-                .add_enabled(any, egui::Button::new("Delete Keys").shortcut_text("Delete"))
+                .add_enabled(any, egui::Button::new(tr("Delete Keys")).shortcut_text("Delete"))
                 .clicked()
             {
                 editor.commands.push(EditorCommand::DeleteKeys);
@@ -247,7 +248,7 @@ impl TimelinePanel {
             if ui
                 .add_enabled(
                     !editor.selection.is_empty(),
-                    egui::Button::new("Record Active Objects").shortcut_text("F9"),
+                    egui::Button::new(tr("Record Active Objects")).shortcut_text("F9"),
                 )
                 .clicked()
             {
@@ -432,7 +433,7 @@ fn transport(ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {
             .suffix(" F");
         if ui
             .add_sized([72.0, 20.0], field)
-            .on_hover_text("Current frame")
+            .on_hover_text(tr("Current frame"))
             .changed()
         {
             time.stop();
@@ -476,9 +477,9 @@ fn transport(ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {
         }
         let forward = time.playback() == Playback::Forward;
         let (icon, tip) = if forward {
-            (Icon::Pause, "Stop (F7)")
+            (Icon::Pause, key("Stop (F7)"))
         } else {
-            (Icon::PlayForward, "Play Forwards (F8)")
+            (Icon::PlayForward, key("Play Forwards (F8)"))
         };
         let play_style = IconStyle {
             selected: forward,
@@ -559,12 +560,12 @@ fn transport(ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {
             let (mut start, mut end) = (time.start(), time.end());
             let end_changed = ui
                 .add_sized([58.0, 20.0], DragValue::new(&mut end).speed(0.25).suffix(" F"))
-                .on_hover_text("Preview max")
+                .on_hover_text(tr("Preview max"))
                 .changed();
-            ui.label(RichText::new("to").color(p().text_dim));
+            ui.label(RichText::new(tr("to")).color(p().text_dim));
             let start_changed = ui
                 .add_sized([58.0, 20.0], DragValue::new(&mut start).speed(0.25).suffix(" F"))
-                .on_hover_text("Preview min")
+                .on_hover_text(tr("Preview min"))
                 .changed();
             if start_changed || end_changed {
                 time.set_range(start, end);

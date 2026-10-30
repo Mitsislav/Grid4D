@@ -4,6 +4,7 @@
 use egui::Ui;
 use grid4d_scene::Document;
 
+use crate::i18n::key;
 use crate::{
     EditMode, EditorCommand, EditorState, commands,
     icons::Icon,
@@ -78,15 +79,15 @@ const fn mode_icon(mode: EditMode) -> Icon {
 
 const fn mode_tooltip(mode: EditMode) -> &'static str {
     match mode {
-        EditMode::Model => "Model mode",
+        EditMode::Model => key("Model mode"),
         EditMode::Points => {
-            "Points mode · Shift+click converts the selection (touching), Ctrl+click strictly (fully covered)"
+            key("Points mode · Shift+click converts the selection (touching), Ctrl+click strictly (fully covered)")
         }
         EditMode::Edges => {
-            "Edges mode · Shift+click converts the selection (touching), Ctrl+click strictly (fully covered)"
+            key("Edges mode · Shift+click converts the selection (touching), Ctrl+click strictly (fully covered)")
         }
         EditMode::Polygons => {
-            "Polygons mode · Shift+click converts the selection (touching), Ctrl+click strictly (fully covered)"
+            key("Polygons mode · Shift+click converts the selection (touching), Ctrl+click strictly (fully covered)")
         }
     }
 }

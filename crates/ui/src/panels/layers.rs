@@ -8,6 +8,7 @@ use egui::{
 };
 use grid4d_scene::{Document, LayerId, LayerSwitches, Layers, NodeId, SceneEdit};
 
+use crate::i18n::{key, tr};
 use crate::{
     EditorCommand, EditorState,
     live_edit::{LiveEdit, interaction_ongoing},
@@ -19,18 +20,22 @@ type Switch = fn(&mut LayerSwitches) -> &mut bool;
 
 /// The switch columns: letter, name, and the switch.
 const SWITCHES: [(&str, &str, Switch); 8] = [
-    ("S", "Solo: only soloed layers' objects show", |s| &mut s.solo),
-    ("V", "View: shown in the views", |s| &mut s.view),
-    ("R", "Render: shown in renders", |s| &mut s.render),
-    ("M", "Manager: listed in the Object Manager", |s| &mut s.manager),
-    ("L", "Locked: not pickable or movable in the views", |s| &mut s.locked),
-    ("A", "Animation: animated (off: shown unanimated)", |s| &mut s.animation),
+    ("S", key("Solo: only soloed layers' objects show"), |s| &mut s.solo),
+    ("V", key("View: shown in the views"), |s| &mut s.view),
+    ("R", key("Render: shown in renders"), |s| &mut s.render),
+    ("M", key("Manager: listed in the Object Manager"), |s| &mut s.manager),
+    ("L", key("Locked: not pickable or movable in the views"), |s| {
+        &mut s.locked
+    }),
+    ("A", key("Animation: animated (off: shown unanimated)"), |s| {
+        &mut s.animation
+    }),
     (
         "G",
-        "Generators: generators build (off: they act as switched off)",
+        key("Generators: generators build (off: they act as switched off)"),
         |s| &mut s.generators,
     ),
-    ("D", "Deformers: deformers deform", |s| &mut s.deformers),
+    ("D", key("Deformers: deformers deform"), |s| &mut s.deformers),
 ];
 const SWITCH_WIDTH: f32 = 18.0;
 /// Where a row's name starts (after the colour chip).
@@ -70,7 +75,7 @@ impl LayersPanel {
         let mut actions = Vec::new();
         egui::Frame::new().inner_margin(Margin::symmetric(4, 2)).show(ui, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("New Layer").on_hover_text("Add a layer").clicked() {
+                if ui.button(tr("New Layer")).on_hover_text(tr("Add a layer")).clicked() {
                     let mut layers = doc.scene.layers().clone();
                     let layer = layers.next_layer("Layer");
                     layers.insert(layer);
@@ -89,9 +94,9 @@ impl LayersPanel {
                 if doc.scene.layers().is_empty() {
                     ui.add_space(6.0);
                     ui.label(
-                        RichText::new(
+                        RichText::new(tr(
                             "No layers yet. New Layer adds one; then drag objects from the Object Manager onto it.",
-                        )
+                        ))
                         .color(p().text_dim),
                     );
                     return;
@@ -132,7 +137,7 @@ impl LayersPanel {
                 p().text_dim,
             );
             ui.interact(column, ui.scope_id().with(("layers.header", index)), Sense::hover())
-                .on_hover_text(*tip);
+                .on_hover_text(tr(tip));
         }
     }
 
@@ -183,7 +188,7 @@ impl LayersPanel {
             _ => {
                 let name = ui
                     .interact(name_rect, ui.scope_id().with(("layers.name", id)), Sense::click())
-                    .on_hover_text("Double-click to rename; right-click for more");
+                    .on_hover_text(tr("Double-click to rename; right-click for more"));
                 ui.painter_at(name_rect).text(
                     pos2(name_rect.left(), name_rect.center().y),
                     Align2::LEFT_CENTER,
@@ -201,7 +206,11 @@ impl LayersPanel {
             let mut switches = layer.switches;
             let on = *switch(&mut switches);
             let button = Button::selectable(on, RichText::new(*letter).size(11.0));
-            if ui.put(switch_rect(rect, index), button).on_hover_text(*tip).clicked() {
+            if ui
+                .put(switch_rect(rect, index), button)
+                .on_hover_text(tr(tip))
+                .clicked()
+            {
                 actions.push(RowAction::Toggle(id, index));
             }
         }
@@ -294,27 +303,30 @@ fn layer_menu(response: &egui::Response, id: LayerId, editor: &EditorState, acti
     response.context_menu(|ui| {
         let any = !selected.is_empty();
         if ui
-            .add_enabled(any, Button::new("Add Selected Objects"))
-            .on_disabled_hover_text("Select objects first")
+            .add_enabled(any, Button::new(tr("Add Selected Objects")))
+            .on_disabled_hover_text(tr("Select objects first"))
             .clicked()
         {
             actions.push(RowAction::Assign(Some(id), selected.clone()));
             ui.close();
         }
-        if ui.add_enabled(any, Button::new("Remove Selected Objects")).clicked() {
+        if ui
+            .add_enabled(any, Button::new(tr("Remove Selected Objects")))
+            .clicked()
+        {
             actions.push(RowAction::RemoveFrom(id, selected.clone()));
             ui.close();
         }
-        if ui.button("Select Objects").clicked() {
+        if ui.button(tr("Select Objects")).clicked() {
             actions.push(RowAction::Select(id));
             ui.close();
         }
         ui.separator();
-        if ui.button("Rename").clicked() {
+        if ui.button(tr("Rename")).clicked() {
             actions.push(RowAction::StartRename(id));
             ui.close();
         }
-        if ui.button("Delete Layer").clicked() {
+        if ui.button(tr("Delete Layer")).clicked() {
             actions.push(RowAction::Delete(id));
             ui.close();
         }

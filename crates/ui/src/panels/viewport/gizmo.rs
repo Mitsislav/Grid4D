@@ -16,6 +16,7 @@ use super::{
     project,
     snapping::{Snapper, generators_above},
 };
+use crate::i18n::key;
 use crate::{CommandQueue, EditorCommand, EditorState, Tool, keys::Keying, theme::view_palette as p};
 
 /// On-screen length of the axis handles, in points.
@@ -422,12 +423,12 @@ const fn drag_label(tool: Tool, target: Target) -> &'static str {
         return tool.label();
     };
     match (tool, component) {
-        (Tool::Scale, Component::Point) => "Scale Points",
-        (Tool::Scale, Component::Edge) => "Scale Edges",
-        (Tool::Scale, Component::Polygon) => "Scale Polygons",
-        (Tool::Rotate, Component::Point) => "Rotate Points",
-        (Tool::Rotate, Component::Edge) => "Rotate Edges",
-        (Tool::Rotate, Component::Polygon) => "Rotate Polygons",
+        (Tool::Scale, Component::Point) => key("Scale Points"),
+        (Tool::Scale, Component::Edge) => key("Scale Edges"),
+        (Tool::Scale, Component::Polygon) => key("Scale Polygons"),
+        (Tool::Rotate, Component::Point) => key("Rotate Points"),
+        (Tool::Rotate, Component::Edge) => key("Rotate Edges"),
+        (Tool::Rotate, Component::Polygon) => key("Rotate Polygons"),
         (_, component) => move_label(component),
     }
 }
@@ -435,9 +436,9 @@ const fn drag_label(tool: Tool, target: Target) -> &'static str {
 /// Undo label of moving components (the gizmo, or Tweak).
 pub(super) const fn move_label(component: Component) -> &'static str {
     match component {
-        Component::Point => "Move Points",
-        Component::Edge => "Move Edges",
-        Component::Polygon => "Move Polygons",
+        Component::Point => key("Move Points"),
+        Component::Edge => key("Move Edges"),
+        Component::Polygon => key("Move Polygons"),
     }
 }
 

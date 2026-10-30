@@ -4,6 +4,7 @@
 
 use egui::{Align2, CornerRadius, FontId, Id, LayerId, Order, Stroke, StrokeKind};
 
+use crate::i18n::{tr, trf};
 use crate::{file, theme::palette as p};
 
 pub fn show(ctx: &egui::Context) {
@@ -41,19 +42,19 @@ fn hover_label<'a>(paths: impl Iterator<Item = Option<&'a std::path::Path>>) -> 
         any_path = true;
         let name = || path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
         if file::is_document(path) {
-            return Some(format!("Drop to open {}", name()));
+            return Some(trf("Drop to open {0}", &[&name()]));
         }
         if merge.is_none() && grid4d_io::is_importable(path) {
-            merge = Some(format!("Drop to merge {}", name()));
+            merge = Some(trf("Drop to merge {0}", &[&name()]));
         }
     }
     match (any, any_path, merge) {
         (false, _, _) => None,
         (true, true, Some(merge)) => Some(merge),
         (true, true, None) => {
-            Some("Only Grid4D documents (.g4d) and models (.gltf, .glb, .obj) can be dropped".to_owned())
+            Some(tr("Only Grid4D documents (.g4d) and models (.gltf, .glb, .obj) can be dropped").to_owned())
         }
-        (true, false, _) => Some("Drop a .g4d document to open it, or a model to merge it".to_owned()),
+        (true, false, _) => Some(tr("Drop a .g4d document to open it, or a model to merge it").to_owned()),
     }
 }
 

@@ -118,6 +118,14 @@ Changes take effect at once; close the window with its **×**.
 
 ![Preferences with lengths in metres: the Cube's position reads 1 m and the view's grid spacing 1 m; the grid is off for the views](images/manual/preferences.png)
 
+- **Interface ▸ Language** — **English** (the default) or **Ελληνικά**
+  (Greek). The menus, managers, tooltips, dialogs and the status bar switch
+  at once, no restart needed. Your documents do not change: object, material,
+  layer and take names stay as you typed them, and a new cube is still
+  called "Cube", so files read the same in either language. This manual is
+  in English.
+
+  ![The interface in Greek](images/manual/language.png)
 - **Interface ▸ Theme** — **Dark** (the usual look), **Darker** (deeper
   greys, for dim rooms) or **Light** (light panels and dark text). The 3D view
   keeps its grey in every theme, so objects, the grid and the handles look the
@@ -2205,6 +2213,8 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
 - **Takes**: takes inside takes, override groups shared by several objects,
   rendering several takes at once; a Cloner's object links are not part of a
   take's saved parameters.
+- **Language**: other languages than English and Greek; egui's own small
+  texts (inside the colour picker) stay in English; a Greek manual.
 - The Filter panel is a placeholder.
 
 See [`progress.md`](progress.md) for what changed in each step.

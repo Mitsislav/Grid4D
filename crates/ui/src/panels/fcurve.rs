@@ -13,6 +13,7 @@ use egui::{
 };
 use grid4d_scene::{Curve, Document, Interpolation, NodeData, NodeId, Param, SceneEdit, TangentPreset, Tangents};
 
+use crate::i18n::{key, tr, trf};
 use crate::{
     CurveKey, EditorCommand, EditorState, FrameCurves,
     keys::CurveOp,
@@ -240,9 +241,9 @@ impl FCurvePanel {
                 let Some(key) = single else {
                     let n = editor.curves.keys.len();
                     let text = if n == 0 {
-                        "No key selected".to_owned()
+                        tr("No key selected").to_owned()
                     } else {
-                        format!("{n} keys selected")
+                        trf("{0} keys selected", &[&n])
                     };
                     ui.label(RichText::new(text).color(p().text_dim).size(11.5));
                     return;
@@ -260,17 +261,17 @@ impl FCurvePanel {
                 else {
                     return;
                 };
-                ui.label(RichText::new(key.param.label()).color(p().text_dim).size(11.5));
+                ui.label(RichText::new(tr(key.param.label())).color(p().text_dim).size(11.5));
                 #[expect(clippy::cast_possible_truncation, reason = "key frames are within the i32 range")]
                 let mut frame = found.frame.round() as i32;
                 let mut value = f64::from(found.value) * k;
                 let frame_changed = ui
                     .add_sized([64.0, 18.0], DragValue::new(&mut frame).speed(0.2).suffix(" F"))
-                    .on_hover_text("The key's frame")
+                    .on_hover_text(tr("The key's frame"))
                     .changed();
                 let value_changed = ui
                     .add_sized([80.0, 18.0], DragValue::new(&mut value).speed(0.5).max_decimals(3))
-                    .on_hover_text("The key's value")
+                    .on_hover_text(tr("The key's value"))
                     .changed();
                 if (frame_changed || value_changed)
                     && let Some(track) = data.tracks.iter_mut().find(|t| t.param == key.param)
@@ -652,9 +653,9 @@ impl FCurvePanel {
         response.context_menu(|ui| {
             let any = !editor.curves.keys.is_empty();
             ui.add_enabled_ui(any, |ui| {
-                ui.menu_button("Interpolation", |ui| {
+                ui.menu_button(tr("Interpolation"), |ui| {
                     for interpolation in Interpolation::ALL {
-                        if ui.button(interpolation.label()).clicked() {
+                        if ui.button(tr(interpolation.label())).clicked() {
                             editor.commands.push(EditorCommand::EditCurveKeys {
                                 op: CurveOp::Interpolation(interpolation),
                             });
@@ -662,9 +663,9 @@ impl FCurvePanel {
                         }
                     }
                 });
-                ui.menu_button("Tangents", |ui| {
+                ui.menu_button(tr("Tangents"), |ui| {
                     for preset in TangentPreset::ALL {
-                        if ui.button(preset.label()).clicked() {
+                        if ui.button(tr(preset.label())).clicked() {
                             editor.commands.push(EditorCommand::EditCurveKeys {
                                 op: CurveOp::Tangents(preset),
                             });
@@ -673,7 +674,7 @@ impl FCurvePanel {
                     }
                 });
                 if ui
-                    .add(egui::Button::new("Delete Keys").shortcut_text("Delete"))
+                    .add(egui::Button::new(tr("Delete Keys")).shortcut_text("Delete"))
                     .clicked()
                 {
                     editor
@@ -683,12 +684,12 @@ impl FCurvePanel {
                 }
             });
             ui.separator();
-            if ui.add(egui::Button::new("Frame All").shortcut_text("H")).clicked() {
+            if ui.add(egui::Button::new(tr("Frame All")).shortcut_text("H")).clicked() {
                 self.frame_keys(plot, doc, shown, false, editor);
                 ui.close();
             }
             if ui
-                .add_enabled(any, egui::Button::new("Frame Selected").shortcut_text("S"))
+                .add_enabled(any, egui::Button::new(tr("Frame Selected")).shortcut_text("S"))
                 .clicked()
             {
                 self.frame_keys(plot, doc, shown, true, editor);
@@ -818,14 +819,14 @@ impl FCurvePanel {
         }
         if shown.is_empty() {
             let text = if editor.selection.is_empty() {
-                "Select animated objects to see their curves"
+                key("Select animated objects to see their curves")
             } else {
-                "The selected objects are not animated: record keys with F9"
+                key("The selected objects are not animated: record keys with F9")
             };
             painter.text(
                 plot.center(),
                 Align2::CENTER_CENTER,
-                text,
+                tr(text),
                 FontId::proportional(13.0),
                 p().text_dim,
             );
@@ -992,7 +993,7 @@ fn track_list(ui: &mut Ui, rect: Rect, doc: &Document, editor: &mut EditorState)
                         ui.painter().text(
                             pos2(row.left() + 26.0, row.center().y),
                             Align2::LEFT_CENTER,
-                            param.label(),
+                            tr(param.label()),
                             FontId::proportional(12.0),
                             p().text,
                         );

@@ -26,6 +26,7 @@ use grid4d_render::{
 use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, Tags, Transform, WalkItem};
 
 use self::{gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView, select_tools::Gesture};
+use crate::i18n::{key, tr, trf};
 use crate::{
     EditorCommand, EditorState, SelectMode, Selection, Tool,
     icons::Icon,
@@ -36,7 +37,7 @@ use crate::{
 const ORBIT_SPEED: f32 = 0.0085;
 const DOLLY_DRAG_SPEED: f32 = 0.005;
 const DOLLY_WHEEL_SPEED: f32 = 0.0015;
-const NAV_HINT: &str = "Alt+Left: orbit · Alt+Middle / Middle: pan · Alt+Right / Wheel: zoom · H: frame scene";
+const NAV_HINT: &str = key("Alt+Left: orbit · Alt+Middle / Middle: pan · Alt+Right / Wheel: zoom · H: frame scene");
 
 /// What a view looks at: in perspective, or straight along a world axis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,14 +135,14 @@ impl Arrangement {
 
 /// The Display menu's shading modes, with their shortcuts from Maxon's list.
 const SHADING_MENU: [(ShadingMode, &str, &str); 8] = [
-    (ShadingMode::Gouraud, "Gouraud Shading", "N~A"),
-    (ShadingMode::GouraudLines, "Gouraud Shading (Lines)", "N~B"),
-    (ShadingMode::Quick, "Quick Shading", "N~C"),
-    (ShadingMode::QuickLines, "Quick Shading (Lines)", "N~D"),
-    (ShadingMode::Constant, "Constant Shading", "N~E"),
-    (ShadingMode::ConstantLines, "Constant Shading (Lines)", ""),
-    (ShadingMode::HiddenLine, "Hidden Line", "N~F"),
-    (ShadingMode::Lines, "Lines", "N~G"),
+    (ShadingMode::Gouraud, key("Gouraud Shading"), "N~A"),
+    (ShadingMode::GouraudLines, key("Gouraud Shading (Lines)"), "N~B"),
+    (ShadingMode::Quick, key("Quick Shading"), "N~C"),
+    (ShadingMode::QuickLines, key("Quick Shading (Lines)"), "N~D"),
+    (ShadingMode::Constant, key("Constant Shading"), "N~E"),
+    (ShadingMode::ConstantLines, key("Constant Shading (Lines)"), ""),
+    (ShadingMode::HiddenLine, key("Hidden Line"), "N~F"),
+    (ShadingMode::Lines, key("Lines"), "N~G"),
 ];
 
 /// A shading mode's name in the Display menu.
@@ -154,25 +155,25 @@ pub(crate) fn shading_label(mode: ShadingMode) -> &'static str {
 
 /// The Display menu's styles: what is drawn of each object.
 const STYLE_MENU: [(DisplayStyle, &str, &str); 2] = [
-    (DisplayStyle::Wireframe, "Wireframe", "N~H"),
+    (DisplayStyle::Wireframe, key("Wireframe"), "N~H"),
     (DisplayStyle::Box, "Box", "N~K"),
 ];
 
 /// The Filter menu: object types, then elements of the view.
 const FILTER_OBJECTS: [(FilterItem, &str); 8] = [
-    (FilterItem::Polygon, "Polygon"),
-    (FilterItem::Generator, "Generator"),
-    (FilterItem::SubdivisionSurface, "Subdivision Surface"),
-    (FilterItem::Spline, "Spline"),
-    (FilterItem::Deformer, "Deformer"),
-    (FilterItem::Effector, "Effector"),
-    (FilterItem::Camera, "Camera"),
-    (FilterItem::Light, "Light"),
+    (FilterItem::Polygon, key("Polygon")),
+    (FilterItem::Generator, key("Generator")),
+    (FilterItem::SubdivisionSurface, key("Subdivision Surface")),
+    (FilterItem::Spline, key("Spline")),
+    (FilterItem::Deformer, key("Deformer")),
+    (FilterItem::Effector, key("Effector")),
+    (FilterItem::Camera, key("Camera")),
+    (FilterItem::Light, key("Light")),
 ];
 const FILTER_ELEMENTS: [(FilterItem, &str); 3] = [
-    (FilterItem::Grid, "World Grid"),
-    (FilterItem::WorldAxis, "World Axis"),
-    (FilterItem::Hud, "HUD"),
+    (FilterItem::Grid, key("World Grid")),
+    (FilterItem::WorldAxis, key("World Axis")),
+    (FilterItem::Hud, key("HUD")),
 ];
 
 /// One view's own settings (the active view's live in the panel's fields).
@@ -797,7 +798,7 @@ impl ViewportPanel {
             painter.text(
                 rect.center(),
                 Align2::CENTER_CENTER,
-                "3D viewport unavailable: wgpu renderer not initialised",
+                tr("3D viewport unavailable: wgpu renderer not initialised"),
                 egui::FontId::proportional(14.0),
                 crate::theme::view_palette().text_dim,
             );
@@ -806,7 +807,7 @@ impl ViewportPanel {
         let linked = self.linked.filter(|_| index == 0);
         let label = linked
             .and_then(|id| doc.scene.get(id))
-            .map_or_else(|| self.kind.label().to_owned(), |n| n.data.name.clone());
+            .map_or_else(|| tr(self.kind.label()).to_owned(), |n| n.data.name.clone());
         if interactive && let Some(node) = self.spline_target(editor) {
             self.paint_spline_points(ui, painter, rect, node);
         }
@@ -970,15 +971,18 @@ impl ViewportPanel {
         }
         let seconds = picture.elapsed.as_secs_f32();
         let status = match progress {
-            Some(fraction) => format!(
-                "Render View · rendering {:.0} % · {} of {} samples · {seconds:.1} s",
-                fraction * 100.0,
-                picture.samples,
-                picture.total_samples
+            Some(fraction) => trf(
+                "Render View · rendering {0} % · {1} of {2} samples · {3} s",
+                &[
+                    &format!("{:.0}", fraction * 100.0),
+                    &picture.samples,
+                    &picture.total_samples,
+                    &format!("{seconds:.1}"),
+                ],
             ),
-            None => format!(
-                "Render View · {} samples · {seconds:.1} s · Esc clears",
-                picture.samples
+            None => trf(
+                "Render View · {0} samples · {1} s · Esc clears",
+                &[&picture.samples, &format!("{seconds:.1}")],
             ),
         };
         overlay::render_view_status(painter, rect, &status);
@@ -1076,19 +1080,19 @@ impl ViewportPanel {
                 ui.set_height(metrics::HEADER_HEIGHT);
                 ui.horizontal_centered(|ui| {
                     egui::MenuBar::new().ui(ui, |ui| {
-                        ui.menu_button("View", |ui| {
+                        ui.menu_button(tr("View"), |ui| {
                             for (label, cmd) in [
-                                ("Frame Scene (H)", EditorCommand::FrameScene),
-                                ("Frame Selected Objects (O)", EditorCommand::FrameSelected),
-                                ("Reset View", EditorCommand::ResetView),
+                                (key("Frame Scene (H)"), EditorCommand::FrameScene),
+                                (key("Frame Selected Objects (O)"), EditorCommand::FrameSelected),
+                                (key("Reset View"), EditorCommand::ResetView),
                             ] {
-                                if ui.button(label).clicked() {
+                                if ui.button(tr(label)).clicked() {
                                     editor.commands.push(cmd);
                                     ui.close();
                                 }
                             }
                         });
-                        ui.menu_button("Cameras", |ui| {
+                        ui.menu_button(tr("Cameras"), |ui| {
                             // View 1 may look through a camera; every view picks its projection.
                             if index == 0 {
                                 cameras_menu(ui, doc, editor);
@@ -1096,7 +1100,7 @@ impl ViewportPanel {
                             }
                             for kind in ViewKind::ALL {
                                 let current = self.kind == kind && (index != 0 || editor.view_camera.is_none());
-                                if ui.add(egui::Button::new(kind.label()).selected(current)).clicked() {
+                                if ui.add(egui::Button::new(tr(kind.label())).selected(current)).clicked() {
                                     if index == 0 {
                                         editor.view_camera = None;
                                     }
@@ -1106,12 +1110,12 @@ impl ViewportPanel {
                                 }
                             }
                         });
-                        ui.menu_button("Display", |ui| {
+                        ui.menu_button(tr("Display"), |ui| {
                             // This view's own mode (the shortcuts act on the active view).
                             for (shading, label, keys) in SHADING_MENU {
                                 let current = self.display.shading == shading;
                                 if ui
-                                    .add(egui::Button::new(label).shortcut_text(keys).selected(current))
+                                    .add(egui::Button::new(tr(label)).shortcut_text(keys).selected(current))
                                     .clicked()
                                 {
                                     self.display.shading = shading;
@@ -1122,40 +1126,40 @@ impl ViewportPanel {
                             for (style, label, keys) in STYLE_MENU {
                                 let current = self.display.style == style;
                                 if ui
-                                    .add(egui::Button::new(label).shortcut_text(keys).selected(current))
+                                    .add(egui::Button::new(tr(label)).shortcut_text(keys).selected(current))
                                     .clicked()
                                 {
                                     self.display.style = style;
                                     ui.close();
                                 }
                             }
-                            for planned in ["Isoparms — planned", "Skeleton — planned"] {
-                                ui.add_enabled(false, egui::Button::new(planned));
+                            for planned in [key("Isoparms — planned"), key("Skeleton — planned")] {
+                                ui.add_enabled(false, egui::Button::new(tr(planned)));
                             }
                         });
-                        ui.menu_button("Options", |ui| {
-                            ui.checkbox(&mut self.effects.shadows, "Shadows").on_hover_text(
+                        ui.menu_button(tr("Options"), |ui| {
+                            ui.checkbox(&mut self.effects.shadows, tr("Shadows")).on_hover_text(tr(
                                 "The key light's shadow (Gouraud Shading): the first light whose Shadow is not None",
-                            );
-                            ui.checkbox(&mut self.effects.ssao, "SSAO")
-                                .on_hover_text("Ambient occlusion: darkens corners, creases and contact areas");
+                            ));
+                            ui.checkbox(&mut self.effects.ssao, tr("SSAO"))
+                                .on_hover_text(tr("Ambient occlusion: darkens corners, creases and contact areas"));
                             ui.separator();
-                            for planned in ["Backface Culling", "X-Ray"] {
-                                ui.add_enabled(false, egui::Button::new(planned))
-                                    .on_disabled_hover_text("Planned");
+                            for planned in [key("Backface Culling"), key("X-Ray")] {
+                                ui.add_enabled(false, egui::Button::new(tr(planned)))
+                                    .on_disabled_hover_text(tr("Planned"));
                             }
                             ui.label(
-                                egui::RichText::new("Grid, World Axis and HUD: Filter menu")
+                                egui::RichText::new(tr("Grid, World Axis and HUD: Filter menu"))
                                     .color(p().text_dim)
                                     .size(11.0),
                             );
                         });
-                        ui.menu_button("Filter", |ui| self.filter_menu(ui));
-                        ui.menu_button("Panel", |ui| {
+                        ui.menu_button(tr("Filter"), |ui| self.filter_menu(ui));
+                        ui.menu_button(tr("Panel"), |ui| {
                             for arrangement in Arrangement::ALL {
                                 let current = self.arrangement == arrangement && self.solo.is_none();
                                 if ui
-                                    .add(egui::Button::new(arrangement.label()).selected(current))
+                                    .add(egui::Button::new(tr(arrangement.label())).selected(current))
                                     .clicked()
                                 {
                                     self.arrangement = arrangement;
@@ -1165,26 +1169,26 @@ impl ViewportPanel {
                             }
                             ui.separator();
                             for (i, label, key) in [
-                                (0, "View 1", "F1"),
-                                (1, "View 2", "F2"),
-                                (2, "View 3", "F3"),
-                                (3, "View 4", "F4"),
+                                (0, key("View 1"), "F1"),
+                                (1, key("View 2"), "F2"),
+                                (2, key("View 3"), "F3"),
+                                (3, key("View 4"), "F4"),
                             ] {
                                 let alone = self.solo == Some(i);
                                 if ui
-                                    .add(egui::Button::new(label).shortcut_text(key).selected(alone))
+                                    .add(egui::Button::new(tr(label)).shortcut_text(key).selected(alone))
                                     .clicked()
                                 {
                                     editor.commands.push(EditorCommand::ShowView(Some(i)));
                                     ui.close();
                                 }
                             }
-                            if ui.add(egui::Button::new("All Views").shortcut_text("F5")).clicked() {
+                            if ui.add(egui::Button::new(tr("All Views")).shortcut_text("F5")).clicked() {
                                 editor.commands.push(EditorCommand::ShowView(None));
                                 ui.close();
                             }
                             ui.label(
-                                egui::RichText::new("Middle-click a view to show it alone or in place")
+                                egui::RichText::new(tr("Middle-click a view to show it alone or in place"))
                                     .color(p().text_dim)
                                     .size(11.0),
                             );
@@ -1229,10 +1233,10 @@ impl ViewportPanel {
     /// keeps only that one.
     fn filter_menu(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            if ui.button("All").clicked() {
+            if ui.button(tr("All")).clicked() {
                 self.filter = ViewFilter::ALL;
             }
-            if ui.button("None").clicked() {
+            if ui.button(tr("None")).clicked() {
                 self.filter = ViewFilter::NONE;
             }
         });
@@ -1243,7 +1247,7 @@ impl ViewportPanel {
                 ui.separator();
             }
             let mut shown = self.filter.shows(item);
-            if ui.checkbox(&mut shown, label).clicked() {
+            if ui.checkbox(&mut shown, tr(label)).clicked() {
                 if only {
                     self.filter = ViewFilter::only(item);
                 } else {
@@ -1252,7 +1256,7 @@ impl ViewportPanel {
             }
         }
         ui.label(
-            egui::RichText::new("Ctrl+click: show only this")
+            egui::RichText::new(tr("Ctrl+click: show only this"))
                 .color(p().text_dim)
                 .size(11.0),
         );
@@ -1371,18 +1375,18 @@ impl ViewportPanel {
     fn context_menu(&self, response: &Response, editor: &mut EditorState) {
         response.context_menu(|ui| {
             for (label, cmd) in [
-                ("Frame Scene", EditorCommand::FrameScene),
-                ("Frame Selected Objects", EditorCommand::FrameSelected),
+                (key("Frame Scene"), EditorCommand::FrameScene),
+                (key("Frame Selected Objects"), EditorCommand::FrameSelected),
             ] {
-                if ui.button(label).clicked() {
+                if ui.button(tr(label)).clicked() {
                     editor.commands.push(cmd);
                     ui.close();
                 }
             }
             ui.separator();
-            ui.menu_button("Create", |ui| {
+            ui.menu_button(tr("Create"), |ui| {
                 for tag in ObjectKindTag::ALL {
-                    if ui.button(tag.label()).clicked() {
+                    if ui.button(tr(tag.label())).clicked() {
                         editor.commands.push(EditorCommand::CreateObject(tag));
                         ui.close();
                     }
@@ -1390,7 +1394,7 @@ impl ViewportPanel {
             });
             if !editor.selection.is_empty() {
                 ui.separator();
-                if ui.button("Delete").clicked() {
+                if ui.button(tr("Delete")).clicked() {
                     editor.commands.push(EditorCommand::DeleteSelected);
                     ui.close();
                 }
@@ -1404,14 +1408,14 @@ impl ViewportPanel {
 fn cameras_menu(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
     let linked = editor.view_camera;
     if ui
-        .add(egui::Button::new("Default Camera").selected(linked.is_none()))
-        .on_hover_text("The view's own camera")
+        .add(egui::Button::new(tr("Default Camera")).selected(linked.is_none()))
+        .on_hover_text(tr("The view's own camera"))
         .clicked()
     {
         editor.view_camera = None;
         ui.close();
     }
-    ui.menu_button("Use Camera", |ui| {
+    ui.menu_button(tr("Use Camera"), |ui| {
         let mut any = false;
         doc.scene.walk(&mut Vec::new(), |id, node, _, _| {
             if matches!(node.data.kind, ObjectKind::Camera { .. }) {
@@ -1427,13 +1431,13 @@ fn cameras_menu(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
             true
         });
         if !any {
-            ui.add_enabled(false, egui::Button::new("No cameras in the scene"));
+            ui.add_enabled(false, egui::Button::new(tr("No cameras in the scene")));
         }
     });
     let active = editor.selection.active();
     if ui
-        .add_enabled(active.is_some(), egui::Button::new("Selected Object as Camera"))
-        .on_hover_text("Look along the active object's −Z axis (e.g. to aim a light)")
+        .add_enabled(active.is_some(), egui::Button::new(tr("Selected Object as Camera")))
+        .on_hover_text(tr("Look along the active object's −Z axis (e.g. to aim a light)"))
         .clicked()
     {
         editor.view_camera = active;
@@ -1477,70 +1481,76 @@ fn component_style(pixels_per_point: f32) -> ComponentStyle {
 /// Status-bar help in a component mode (`active`: a polygon object to work on).
 const fn component_hint(component: Component, tool: Tool, active: bool) -> &'static str {
     if !active {
-        return "Component modes work on a polygon object: select one, or press C to make a primitive editable";
+        return key("Component modes work on a polygon object: select one, or press C to make a primitive editable");
     }
     match tool {
         Tool::LiveSelection => {
-            return "Live Selection: paint to select · Shift adds · Ctrl removes · middle-drag sizes the brush · Esc cancels";
+            return key(
+                "Live Selection: paint to select · Shift adds · Ctrl removes · middle-drag sizes the brush · Esc cancels",
+            );
         }
         Tool::RectangleSelection => {
-            return "Rectangle Selection: drag a frame · Shift adds · Ctrl removes · Esc cancels";
+            return key("Rectangle Selection: drag a frame · Shift adds · Ctrl removes · Esc cancels");
         }
         Tool::LoopSelection => {
-            return "Loop Selection: click to select the highlighted loop · Shift adds · Ctrl removes";
+            return key("Loop Selection: click to select the highlighted loop · Shift adds · Ctrl removes");
         }
         Tool::RingSelection => {
-            return "Ring Selection: click to select the highlighted ring · Shift adds · Ctrl removes";
+            return key("Ring Selection: click to select the highlighted ring · Shift adds · Ctrl removes");
         }
         Tool::Extrude => {
             return match component {
-                Component::Polygon => {
-                    "Extrude: drag left/right to extrude the selected polygons (all when none is) · click selects · Esc cancels"
-                }
-                Component::Edge => {
-                    "Extrude: drag left/right to extrude the selected border edges (all when none is) · click selects · Esc cancels"
-                }
-                Component::Point => "Extrude does not work on points yet: use Edges or Polygons mode",
+                Component::Polygon => key(
+                    "Extrude: drag left/right to extrude the selected polygons (all when none is) · click selects · Esc cancels",
+                ),
+                Component::Edge => key(
+                    "Extrude: drag left/right to extrude the selected border edges (all when none is) · click selects · Esc cancels",
+                ),
+                Component::Point => key("Extrude does not work on points yet: use Edges or Polygons mode"),
             };
         }
         Tool::Inset => {
             return match component {
-                Component::Polygon => {
-                    "Inset: drag left/right to inset the selected polygons (all when none is) · click selects · Esc cancels"
-                }
-                Component::Point | Component::Edge => "Inset works in Polygons mode",
+                Component::Polygon => key(
+                    "Inset: drag left/right to inset the selected polygons (all when none is) · click selects · Esc cancels",
+                ),
+                Component::Point | Component::Edge => key("Inset works in Polygons mode"),
             };
         }
         Tool::LoopCut => {
-            return "Loop/Path Cut: hover an edge to see the loop · click cuts it there · Number of Cuts spaces them evenly";
+            return key(
+                "Loop/Path Cut: hover an edge to see the loop · click cuts it there · Number of Cuts spaces them evenly",
+            );
         }
-        Tool::LineCut => return "Line Cut: drag a line across the object · release cuts · Esc cancels",
+        Tool::LineCut => return key("Line Cut: drag a line across the object · release cuts · Esc cancels"),
         Tool::Bevel => {
             return match component {
                 Component::Edge | Component::Point => {
-                    "Bevel: drag left/right to bevel the selection · Apply in the Attribute Manager · Esc cancels"
+                    key("Bevel: drag left/right to bevel the selection · Apply in the Attribute Manager · Esc cancels")
                 }
-                Component::Polygon => "Bevel works on edges or points: switch to Edges or Points mode",
+                Component::Polygon => key("Bevel works on edges or points: switch to Edges or Points mode"),
             };
         }
         Tool::Bridge => {
             return match component {
-                Component::Polygon => "Bridge: drag from one polygon to another · Apply bridges the two selected",
-                Component::Edge => "Bridge: drag from one border edge to another · Apply bridges the two selected",
-                Component::Point => "Bridge works in Polygons or Edges mode",
+                Component::Polygon => key("Bridge: drag from one polygon to another · Apply bridges the two selected"),
+                Component::Edge => key("Bridge: drag from one border edge to another · Apply bridges the two selected"),
+                Component::Point => key("Bridge works in Polygons or Edges mode"),
             };
         }
-        Tool::Weld => return "Weld: click a selected point to weld onto it, or anywhere else to weld at the centre",
+        Tool::Weld => {
+            return key("Weld: click a selected point to weld onto it, or anywhere else to weld at the centre");
+        }
         Tool::Pen => return Tool::Pen.hint(),
         Tool::Move | Tool::Scale | Tool::Rotate => {}
     }
     match component {
         Component::Point => {
-            "Points: drag the gizmo to transform the selection · click selects · Shift adds · Ctrl removes"
+            key("Points: drag the gizmo to transform the selection · click selects · Shift adds · Ctrl removes")
         }
-        Component::Edge => "Edges: drag the gizmo to transform the selection · click selects · double-click: loop",
+        Component::Edge => key("Edges: drag the gizmo to transform the selection · click selects · double-click: loop"),
         Component::Polygon => {
-            "Polygons: drag the gizmo to transform the selection · click selects · double-click: connected part"
+            key("Polygons: drag the gizmo to transform the selection · click selects · double-click: connected part")
         }
     }
 }

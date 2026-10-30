@@ -23,6 +23,7 @@ use grid4d_scene::{
     SimulationSettings, SplineHandle, Tag, TagKind, TimeSettings,
 };
 
+use crate::i18n::{key, tr, trf};
 use crate::{
     CommandQueue, EditorCommand, EditorState, Tool,
     commands::tag_color,
@@ -48,9 +49,9 @@ impl Tab {
     /// Undo label for edits made on this tab.
     const fn edit_label(self) -> &'static str {
         match self {
-            Self::Basic => "Edit Basic Properties",
-            Self::Coord => "Edit Coordinates",
-            Self::Object => "Edit Object Properties",
+            Self::Basic => key("Edit Basic Properties"),
+            Self::Coord => key("Edit Coordinates"),
+            Self::Object => key("Edit Object Properties"),
         }
     }
 }
@@ -99,22 +100,22 @@ impl AttributesPanel {
 
         egui::Frame::new().inner_margin(Margin::symmetric(4, 1)).show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("Mode", |ui| {
-                    for (view, label) in [(View::Objects, "Objects"), (View::Tool, "Tool")] {
-                        if ui.add(Button::new(label).selected(self.view == view)).clicked() {
+                ui.menu_button(tr("Mode"), |ui| {
+                    for (view, label) in [(View::Objects, key("Objects")), (View::Tool, key("Tool"))] {
+                        if ui.add(Button::new(tr(label)).selected(self.view == view)).clicked() {
                             self.view = view;
                             ui.close();
                         }
                     }
-                    ui.add_enabled(false, Button::new("Tags"));
-                    ui.add_enabled(false, Button::new("Materials"));
+                    ui.add_enabled(false, Button::new(tr("Tags")));
+                    ui.add_enabled(false, Button::new(tr("Materials")));
                 });
-                ui.menu_button("Edit", |ui| {
-                    ui.add_enabled(false, Button::new("Copy"));
-                    ui.add_enabled(false, Button::new("Paste"));
+                ui.menu_button(tr("Edit"), |ui| {
+                    ui.add_enabled(false, Button::new(tr("Copy")));
+                    ui.add_enabled(false, Button::new(tr("Paste")));
                 });
-                ui.menu_button("User Data", |ui| {
-                    ui.add_enabled(false, Button::new("Add User Data…"));
+                ui.menu_button(tr("User Data"), |ui| {
+                    ui.add_enabled(false, Button::new(tr("Add User Data…")));
                 });
             });
         });
@@ -157,7 +158,7 @@ impl AttributesPanel {
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());
             icons::paint_material_ball(ui.painter(), rect, material.color);
             ui.label(
-                RichText::new(format!("Material [{}]", material.name))
+                RichText::new(trf("Material [{0}]", &[&material.name]))
                     .strong()
                     .color(p().text_strong),
             );
@@ -174,8 +175,8 @@ impl AttributesPanel {
                 colour_button(ui, &mut material.color);
                 ui.end_row();
                 for (label, value) in [
-                    ("Roughness", &mut material.roughness),
-                    ("Metallic", &mut material.metallic),
+                    (key("Roughness"), &mut material.roughness),
+                    (key("Metallic"), &mut material.metallic),
                 ] {
                     attr_label(ui, label, LABEL_WIDTH);
                     let mut percent = *value * 100.0;
@@ -196,8 +197,10 @@ impl AttributesPanel {
             });
         ui.add_space(4.0);
         ui.label(
-            RichText::new("The viewport shows the colour; roughness, metallic and luminance shade it from Phase 7")
-                .color(p().text_dim),
+            RichText::new(tr(
+                "The viewport shows the colour; roughness, metallic and luminance shade it from Phase 7",
+            ))
+            .color(p().text_dim),
         );
         if doc.scene.materials().get(id).is_some_and(|m| *m != material)
             && let Some(m) = doc.scene.materials_mut().get_mut(id)
@@ -236,7 +239,7 @@ impl AttributesPanel {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
                 icons::paint(ui.painter(), rect, Icon::Tag(kind), p().tag);
                 ui.label(
-                    RichText::new(format!("{} Tag [{}]", kind.label(), data.name))
+                    RichText::new(trf("{0} Tag [{1}]", &[&tr(kind.label()), &data.name]))
                         .strong()
                         .color(p().text_strong),
                 );
@@ -245,7 +248,7 @@ impl AttributesPanel {
             if let Some(tag) = data.tags.get_mut(index) {
                 tag_ui(ui, tag, &doc.scene, id);
             }
-            self.finish_node_edit(ui, doc, id, &data, "Edit Tag", commands);
+            self.finish_node_edit(ui, doc, id, &data, key("Edit Tag"), commands);
             return;
         }
 
@@ -255,12 +258,12 @@ impl AttributesPanel {
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
             icons::paint(ui.painter(), rect, Icon::Object(tag), tag_color(tag));
             ui.label(
-                RichText::new(format!("{} Object [{}]", data.kind.label(), data.name))
+                RichText::new(trf("{0} Object [{1}]", &[&tr(data.kind.label()), &data.name]))
                     .strong()
                     .color(p().text_strong),
             );
             if selection_len > 1 {
-                ui.label(RichText::new(format!("+{} more", selection_len - 1)).color(p().text_dim));
+                ui.label(RichText::new(trf("+{0} more", &[&(selection_len - 1)])).color(p().text_dim));
             }
         });
         ui.add_space(4.0);
@@ -268,8 +271,12 @@ impl AttributesPanel {
         // Tab buttons.
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            for (tab, label) in [(Tab::Basic, "Basic"), (Tab::Coord, "Coord."), (Tab::Object, "Object")] {
-                let button = Button::new(label)
+            for (tab, label) in [
+                (Tab::Basic, key("Basic")),
+                (Tab::Coord, key("Coord.")),
+                (Tab::Object, key("Object")),
+            ] {
+                let button = Button::new(tr(label))
                     .selected(self.tab == tab)
                     .min_size(Vec2::new(64.0, 20.0));
                 if ui.add(button).clicked() {
@@ -376,11 +383,11 @@ fn basic_tab(ui: &mut Ui, data: &mut NodeData, layers: &grid4d_scene::Layers) {
             let current = data
                 .layer
                 .and_then(|l| layers.get(l))
-                .map_or("None", |l| l.name.as_str());
+                .map_or(key("None"), |l| l.name.as_str());
             egui::ComboBox::from_id_salt("grid4d.attr.layer")
                 .selected_text(current)
                 .show_ui(ui, |ui| {
-                    if ui.selectable_label(data.layer.is_none(), "None").clicked() {
+                    if ui.selectable_label(data.layer.is_none(), tr("None")).clicked() {
                         data.layer = None;
                     }
                     for (id, layer) in layers.iter() {
@@ -390,7 +397,7 @@ fn basic_tab(ui: &mut Ui, data: &mut NodeData, layers: &grid4d_scene::Layers) {
                     }
                 })
                 .response
-                .on_hover_text("The layer this object is on; None: its parent's");
+                .on_hover_text(tr("The layer this object is on; None: its parent's"));
             ui.end_row();
         });
 }
@@ -464,8 +471,8 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData, keying: Keying) -> Option<&'stati
     ui.add_space(6.0);
     let unprotected = !(protection.position || protection.scale || protection.rotation);
     if ui
-        .add_enabled(unprotected, Button::new("Reset Transform"))
-        .on_disabled_hover_text("A Protection tag guards this object's transform")
+        .add_enabled(unprotected, Button::new(tr("Reset Transform")))
+        .on_disabled_hover_text(tr("A Protection tag guards this object's transform"))
         .clicked()
     {
         *t = grid4d_scene::Transform::IDENTITY;
@@ -477,11 +484,11 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData, keying: Keying) -> Option<&'stati
     Some(match click {
         KeyClick::Toggle => {
             data.toggle_key(param, frame);
-            "Set Key"
+            key("Set Key")
         }
         KeyClick::DeleteTrack => {
             data.delete_track(param, frame);
-            "Delete Track"
+            key("Delete Track")
         }
     })
 }
@@ -518,14 +525,14 @@ fn key_button(ui: &mut Ui, state: KeyState) -> Option<KeyClick> {
             .circle_stroke(center, radius - 0.6, egui::Stroke::new(1.3, color));
     }
     let tip = match state {
-        KeyState::Unanimated => "Click: set a key at the current frame",
-        KeyState::Track => "Animated · click: set a key here · Shift+Ctrl+click: delete the track",
-        KeyState::Key => "Key at this frame · click: remove it · Shift+Ctrl+click: delete the track",
-        KeyState::Changed { .. } => {
-            "Changed but not recorded: dropped when the frame changes · click: set a key · Shift+Ctrl+click: delete the track"
-        }
+        KeyState::Unanimated => key("Click: set a key at the current frame"),
+        KeyState::Track => key("Animated · click: set a key here · Shift+Ctrl+click: delete the track"),
+        KeyState::Key => key("Key at this frame · click: remove it · Shift+Ctrl+click: delete the track"),
+        KeyState::Changed { .. } => key(
+            "Changed but not recorded: dropped when the frame changes · click: set a key · Shift+Ctrl+click: delete the track",
+        ),
     };
-    if !response.on_hover_text(tip).clicked() {
+    if !response.on_hover_text(tr(tip)).clicked() {
         return None;
     }
     let m = ui.input(|i| i.modifiers);
@@ -570,11 +577,11 @@ fn object_tab_at(
     Some(match click {
         KeyClick::Toggle => {
             data.toggle_key(param, frame);
-            "Set Key"
+            key("Set Key")
         }
         KeyClick::DeleteTrack => {
             data.delete_track(param, frame);
-            "Delete Track"
+            key("Delete Track")
         }
     })
 }
@@ -626,7 +633,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
         .show(ui, |ui| match kind {
             ObjectKind::Null => {
                 ui.label(
-                    RichText::new("A Null groups objects. Drag objects onto it in the Object Manager.")
+                    RichText::new(tr("A Null groups objects. Drag objects onto it in the Object Manager."))
                         .color(p().text_dim),
                 );
                 ui.end_row();
@@ -635,7 +642,10 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
                 for (axis, label) in ["Size . X", "Size . Y", "Size . Z"].into_iter().enumerate() {
                     length_row(ui, k, label, &mut size[axis]);
                 }
-                for (axis, label) in ["Segments X", "Segments Y", "Segments Z"].into_iter().enumerate() {
+                for (axis, label) in [key("Segments X"), key("Segments Y"), key("Segments Z")]
+                    .into_iter()
+                    .enumerate()
+                {
                     segments_row(ui, label, &mut segments[axis], 1);
                 }
             }
@@ -750,19 +760,19 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
                 ui.end_row();
                 attr_label(ui, "Type", LABEL_WIDTH);
                 egui::ComboBox::from_id_salt("grid4d.attr.light.type")
-                    .selected_text(light_type.label())
+                    .selected_text(tr(light_type.label()))
                     .show_ui(ui, |ui| {
                         for option in LightType::ALL {
-                            ui.selectable_value(light_type, option, option.label());
+                            ui.selectable_value(light_type, option, tr(option.label()));
                         }
                     });
                 ui.end_row();
                 attr_label(ui, "Shadow", LABEL_WIDTH);
                 egui::ComboBox::from_id_salt("grid4d.attr.light.shadow")
-                    .selected_text(shadow.label())
+                    .selected_text(tr(shadow.label()))
                     .show_ui(ui, |ui| {
                         for option in LightShadow::ALL {
-                            ui.selectable_value(shadow, option, option.label());
+                            ui.selectable_value(shadow, option, tr(option.label()));
                         }
                     });
                 ui.end_row();
@@ -775,12 +785,12 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
                 boundary,
             } => {
                 attr_label(ui, "Type", LABEL_WIDTH);
-                ui.label("Catmull-Clark (N-Gons)");
+                ui.label(tr("Catmull-Clark (N-Gons)"));
                 ui.end_row();
                 for (label, value) in [
-                    ("Subdivision Viewport", viewport_levels),
-                    ("Subdivision Renderer", render_levels),
-                    ("Linear Pre-Subdivision", linear_pre),
+                    (key("Subdivision Viewport"), viewport_levels),
+                    (key("Subdivision Renderer"), render_levels),
+                    (key("Linear Pre-Subdivision"), linear_pre),
                 ] {
                     attr_label(ui, label, LABEL_WIDTH);
                     ui.add_sized(
@@ -798,16 +808,16 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
                         grid4d_geom::subdivision::Boundary::EdgeAndCorner => "Edge and Corner",
                     })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(boundary, grid4d_geom::subdivision::Boundary::Edge, "Edge");
+                        ui.selectable_value(boundary, grid4d_geom::subdivision::Boundary::Edge, tr("Edge"));
                         ui.selectable_value(
                             boundary,
                             grid4d_geom::subdivision::Boundary::EdgeAndCorner,
-                            "Edge and Corner",
+                            tr("Edge and Corner"),
                         );
                     });
                 ui.end_row();
                 ui.label("");
-                ui.label(RichText::new("Smooths its first child (the cage)").color(p().text_dim));
+                ui.label(RichText::new(tr("Smooths its first child (the cage)")).color(p().text_dim));
                 ui.end_row();
             }
             ObjectKind::Extrude {
@@ -874,7 +884,7 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
     let k = &mut KeyRows::default();
     let tool = editor.tool;
     ui.label(
-        RichText::new(format!("{} [Tool]", tool.label()))
+        RichText::new(trf("{0} [Tool]", &[&tr(tool.label())]))
             .strong()
             .color(p().text_strong),
     );
@@ -893,7 +903,7 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                         .range(1.0..=1000.0)
                         .suffix(" px"),
                 )
-                .on_hover_text("Middle-drag in the viewport changes it too");
+                .on_hover_text(tr("Middle-drag in the viewport changes it too"));
                 ui.end_row();
                 check_row(ui, "Only Select Visible Elements", &mut s.live_visible_only);
                 check_row(ui, "Tolerant Selection", &mut s.live_tolerant);
@@ -910,15 +920,17 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 // Wrapped: a long label in a grid would widen the whole panel.
                 ui.add(
                     egui::Label::new(
-                        RichText::new("With nothing selected, drag a point, edge or polygon to move just it")
-                            .color(p().text_dim),
+                        RichText::new(tr(
+                            "With nothing selected, drag a point, edge or polygon to move just it",
+                        ))
+                        .color(p().text_dim),
                     )
                     .wrap(),
                 );
                 ui.end_row();
             }
             Tool::Scale | Tool::Rotate => {
-                ui.label(RichText::new("This tool has no options yet.").color(p().text_dim));
+                ui.label(RichText::new(tr("This tool has no options yet.")).color(p().text_dim));
                 ui.end_row();
             }
             Tool::Extrude => {
@@ -948,7 +960,7 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                         [FIELD_WIDTH, 19.0],
                         DragValue::new(&mut percent).speed(0.5).range(1.0..=99.0).suffix(" %"),
                     )
-                    .on_hover_text("A click sets it from where the cursor is on the edge")
+                    .on_hover_text(tr("A click sets it from where the cursor is on the edge"))
                     .changed()
                 {
                     m.offset = percent / 100.0;
@@ -990,21 +1002,21 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 check_row(ui, "Delete Original Polygons", &mut m.delete_originals);
             }
             Tool::Weld => {
-                ui.label(RichText::new("No options").color(p().text_dim));
+                ui.label(RichText::new(tr("No options")).color(p().text_dim));
                 ui.end_row();
             }
             Tool::Pen => {
                 attr_label(ui, "Type", LABEL_WIDTH);
                 let kind = &mut editor.pen.kind;
                 egui::ComboBox::from_id_salt("grid4d.attr.pen.type")
-                    .selected_text(kind.label())
+                    .selected_text(tr(kind.label()))
                     .show_ui(ui, |ui| {
                         for option in SplineType::ALL {
-                            ui.selectable_value(kind, option, option.label());
+                            ui.selectable_value(kind, option, tr(option.label()));
                         }
                     })
                     .response
-                    .on_hover_text("The type of a new spline; points added to a spline keep its type");
+                    .on_hover_text(tr("The type of a new spline; points added to a spline keep its type"));
                 ui.end_row();
             }
             Tool::LineCut => {
@@ -1023,27 +1035,29 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
         let target = crate::commands::component_target(doc, editor)
             .is_some_and(|(_, c)| matches!(c, grid4d_geom::Component::Polygon | grid4d_geom::Component::Edge));
         if ui
-            .add_enabled(target, Button::new("Apply"))
-            .on_hover_text("Bridge the two selected polygons or border edges")
-            .on_disabled_hover_text(tool.hint())
+            .add_enabled(target, Button::new(tr("Apply")))
+            .on_hover_text(tr("Bridge the two selected polygons or border edges"))
+            .on_disabled_hover_text(tr(tool.hint()))
             .clicked()
         {
             editor.commands.push(EditorCommand::BridgeSelected);
         }
-        ui.label(RichText::new("Or drag from one polygon or border edge to another").color(p().text_dim));
+        ui.label(RichText::new(tr("Or drag from one polygon or border edge to another")).color(p().text_dim));
     }
     if tool == Tool::Weld {
         ui.add_space(6.0);
         ui.label(
-            RichText::new("Click one of the selected points to weld onto it, anywhere else for their centre")
-                .color(p().text_dim),
+            RichText::new(tr(
+                "Click one of the selected points to weld onto it, anywhere else for their centre",
+            ))
+            .color(p().text_dim),
         );
     }
     if tool.is_cut_tool() {
         ui.add_space(6.0);
         let how = match tool {
-            Tool::LoopCut => "Hover an edge to see the loop, click to cut it",
-            _ => "Drag a line across the object; release cuts, Esc cancels",
+            Tool::LoopCut => key("Hover an edge to see the loop, click to cut it"),
+            _ => key("Drag a line across the object; release cuts, Esc cancels"),
         };
         ui.label(RichText::new(how).color(p().text_dim));
     }
@@ -1052,15 +1066,17 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
         let target = crate::commands::component_target(doc, editor)
             .is_some_and(|(_, component)| crate::modeling::works_in(tool, component));
         if ui
-            .add_enabled(target, Button::new("Apply"))
-            .on_hover_text("Run the tool once with these options on the selection (or on everything)")
-            .on_disabled_hover_text(tool.hint())
+            .add_enabled(target, Button::new(tr("Apply")))
+            .on_hover_text(tr(
+                "Run the tool once with these options on the selection (or on everything)",
+            ))
+            .on_disabled_hover_text(tr(tool.hint()))
             .clicked()
         {
             editor.commands.push(EditorCommand::ApplyMeshTool);
         }
         ui.label(
-            RichText::new("Or drag left/right in the viewport: every drag is a new operation").color(p().text_dim),
+            RichText::new(tr("Or drag left/right in the viewport: every drag is a new operation")).color(p().text_dim),
         );
     }
 }
@@ -1079,7 +1095,7 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
                     angle_row(ui, k, "Phong Angle", angle, 0.0..=180.0);
                 } else {
                     attr_label(ui, "Phong Angle", LABEL_WIDTH);
-                    ui.label(RichText::new("no limit (180°)").color(p().text_dim));
+                    ui.label(RichText::new(tr("no limit (180°)")).color(p().text_dim));
                     ui.end_row();
                 }
             }
@@ -1101,19 +1117,21 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
             Tag::Dynamics(body) => body_rows(ui, body),
         });
     let hint = match tag {
-        Tag::Phong { .. } => "Edges sharper than the angle stay hard; with Angle Limit off everything is smooth",
-        Tag::Protection { .. } => "Protected channels cannot be changed with the gizmo or the Coordinates fields",
-        Tag::Target { .. } => "The object turns its forward axis (−Z) towards the target; Pitch off keeps it level",
-        Tag::Material { .. } => {
-            "The object and its children without a Material tag of their own show this material; drag a material onto an object to assign it"
+        Tag::Phong { .. } => key("Edges sharper than the angle stay hard; with Angle Limit off everything is smooth"),
+        Tag::Protection { .. } => key("Protected channels cannot be changed with the gizmo or the Coordinates fields"),
+        Tag::Target { .. } => {
+            key("The object turns its forward axis (−Z) towards the target; Pitch off keeps it level")
         }
+        Tag::Material { .. } => key(
+            "The object and its children without a Material tag of their own show this material; drag a material onto an object to assign it",
+        ),
         Tag::Dynamics(body) => match body.motion {
-            Motion::Dynamic => "A rigid body: it falls, collides and bounces from the start frame on",
-            Motion::Collider => "A collider: rigid bodies hit it; it moves only by its own animation",
+            Motion::Dynamic => key("A rigid body: it falls, collides and bounces from the start frame on"),
+            Motion::Collider => key("A collider: rigid bodies hit it; it moves only by its own animation"),
         },
     };
     ui.add_space(4.0);
-    ui.label(RichText::new(hint).color(p().text_dim));
+    ui.label(RichText::new(tr(hint)).color(p().text_dim));
 }
 
 /// A Dynamics tag: how the body moves, its shape, its surface and mass, its
@@ -1148,7 +1166,10 @@ fn body_rows(ui: &mut Ui, body: &mut Body) {
     );
     unbounded_percent_row(ui, "Linear Damping", &mut body.linear_damping, 0.0);
     unbounded_percent_row(ui, "Angular Damping", &mut body.angular_damping, 0.0);
-    for (axis, label) in ["Velocity . X", "Velocity . Y", "Velocity . Z"].into_iter().enumerate() {
+    for (axis, label) in [key("Velocity . X"), key("Velocity . Y"), key("Velocity . Z")]
+        .into_iter()
+        .enumerate()
+    {
         attr_label(ui, label, LABEL_WIDTH);
         ui.add_sized(
             [FIELD_WIDTH, 19.0],
@@ -1156,7 +1177,10 @@ fn body_rows(ui: &mut Ui, body: &mut Body) {
         );
         ui.end_row();
     }
-    for (axis, label) in ["Spin . X", "Spin . Y", "Spin . Z"].into_iter().enumerate() {
+    for (axis, label) in [key("Spin . X"), key("Spin . Y"), key("Spin . Z")]
+        .into_iter()
+        .enumerate()
+    {
         attr_label(ui, label, LABEL_WIDTH);
         let mut degrees = body.initial_spin[axis].to_degrees();
         if ui
@@ -1227,12 +1251,12 @@ fn material_row(ui: &mut Ui, value: &mut Option<MaterialId>, scene: &Scene) {
     let materials = scene.materials();
     let name = value
         .and_then(|id| materials.get(id))
-        .map_or("None", |m| m.name.as_str());
+        .map_or(key("None"), |m| m.name.as_str());
     egui::ComboBox::from_id_salt("grid4d.attr.tag.material")
         .selected_text(name)
         .width(FIELD_WIDTH + 40.0)
         .show_ui(ui, |ui| {
-            ui.selectable_value(value, None, "None");
+            ui.selectable_value(value, None, tr("None"));
             for (id, material) in materials.iter() {
                 ui.selectable_value(value, Some(id), &material.name);
             }
@@ -1245,12 +1269,12 @@ fn object_row(ui: &mut Ui, label: &str, value: &mut Option<NodeId>, scene: &Scen
     attr_label(ui, label, LABEL_WIDTH);
     let name = value
         .and_then(|id| scene.get(id))
-        .map_or("None", |n| n.data.name.as_str());
+        .map_or(key("None"), |n| n.data.name.as_str());
     egui::ComboBox::from_id_salt(("grid4d.attr.tag.link", label))
         .selected_text(name)
         .width(FIELD_WIDTH + 40.0)
         .show_ui(ui, |ui| {
-            ui.selectable_value(value, None, "None");
+            ui.selectable_value(value, None, tr("None"));
             // Built only while the list is open.
             scene.walk(&mut Vec::new(), |id, node, _, depth| {
                 if id != owner {
@@ -1273,10 +1297,10 @@ fn snap_section(ui: &mut Ui, snap: &mut crate::SnapSettings) {
             check_row(ui, "Enable Snapping", &mut snap.enabled);
             attr_label(ui, "Type", LABEL_WIDTH);
             egui::ComboBox::from_id_salt("grid4d.attr.snap.type")
-                .selected_text(snap.kind.label())
+                .selected_text(tr(snap.kind.label()))
                 .show_ui(ui, |ui| {
                     for kind in crate::SnapType::ALL {
-                        ui.selectable_value(&mut snap.kind, kind, kind.label());
+                        ui.selectable_value(&mut snap.kind, kind, tr(kind.label()));
                     }
                 });
             ui.end_row();
@@ -1293,7 +1317,12 @@ fn snap_section(ui: &mut Ui, snap: &mut crate::SnapSettings) {
                 check_row(ui, kind.label(), snap.targets.flag_mut(kind));
             }
         });
-    ui.label(RichText::new("The gizmo's centre (or the tweaked element) snaps while you move it").color(p().text_dim));
+    ui.label(
+        RichText::new(tr(
+            "The gizmo's centre (or the tweaked element) snaps while you move it",
+        ))
+        .color(p().text_dim),
+    );
 }
 
 /// A length that may be negative (a tool's offset).
@@ -1357,10 +1386,10 @@ fn spline_rows(ui: &mut Ui, k: &mut KeyRows, primitive: &mut SplinePrimitive) {
         } => {
             attr_label(ui, "Type", LABEL_WIDTH);
             egui::ComboBox::from_id_salt("grid4d.attr.arc.type")
-                .selected_text(kind.label())
+                .selected_text(tr(kind.label()))
                 .show_ui(ui, |ui| {
                     for option in ArcType::ALL {
-                        ui.selectable_value(kind, option, option.label());
+                        ui.selectable_value(kind, option, tr(option.label()));
                     }
                 });
             ui.end_row();
@@ -1450,10 +1479,10 @@ fn text_rows(ui: &mut Ui, k: &mut KeyRows, text: &mut Text) {
     ui.end_row();
     attr_label(ui, "Align", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.text.align")
-        .selected_text(text.align.label())
+        .selected_text(tr(text.align.label()))
         .show_ui(ui, |ui| {
             for align in TextAlign::ALL {
-                ui.selectable_value(&mut text.align, align, align.label());
+                ui.selectable_value(&mut text.align, align, tr(align.label()));
             }
         });
     ui.end_row();
@@ -1467,10 +1496,10 @@ fn text_rows(ui: &mut Ui, k: &mut KeyRows, text: &mut Text) {
 fn placement_rows(ui: &mut Ui, plane: &mut SplinePlane, reverse: &mut bool, interpolation: &mut Interpolation) {
     attr_label(ui, "Plane", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.spline.plane")
-        .selected_text(plane.label())
+        .selected_text(tr(plane.label()))
         .show_ui(ui, |ui| {
             for option in SplinePlane::ALL {
-                ui.selectable_value(plane, option, option.label());
+                ui.selectable_value(plane, option, tr(option.label()));
             }
         });
     ui.end_row();
@@ -1485,10 +1514,10 @@ fn editable_spline_rows(ui: &mut Ui, spline: &mut SplineHandle, interpolation: &
     attr_label(ui, "Type", LABEL_WIDTH);
     let mut kind = current;
     egui::ComboBox::from_id_salt("grid4d.attr.spline.type")
-        .selected_text(kind.label())
+        .selected_text(tr(kind.label()))
         .show_ui(ui, |ui| {
             for option in SplineType::ALL {
-                ui.selectable_value(&mut kind, option, option.label());
+                ui.selectable_value(&mut kind, option, tr(option.label()));
             }
         });
     ui.end_row();
@@ -1526,7 +1555,13 @@ fn editable_spline_rows(ui: &mut Ui, spline: &mut SplineHandle, interpolation: &
 fn interpolation_rows(ui: &mut Ui, interpolation: &mut Interpolation) {
     // Sampling settings are not animatable: no key buttons.
     let k = &mut KeyRows::default();
-    const MODES: [&str; 5] = ["None", "Natural", "Uniform", "Adaptive", "Subdivided"];
+    const MODES: [&str; 5] = [
+        key("None"),
+        key("Natural"),
+        key("Uniform"),
+        key("Adaptive"),
+        key("Subdivided"),
+    ];
     let current = match interpolation {
         Interpolation::None => 0,
         Interpolation::Natural { .. } => 1,
@@ -1631,10 +1666,10 @@ fn percent_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
 fn extrude_rows(ui: &mut Ui, k: &mut KeyRows, extrusion: &mut Extrusion, hierarchical: &mut bool) {
     attr_label(ui, "Direction", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.extrude.direction")
-        .selected_text(extrusion.direction.label())
+        .selected_text(tr(extrusion.direction.label()))
         .show_ui(ui, |ui| {
             for option in ExtrudeDirection::ALL {
-                ui.selectable_value(&mut extrusion.direction, option, option.label());
+                ui.selectable_value(&mut extrusion.direction, option, tr(option.label()));
             }
         });
     ui.end_row();
@@ -1660,7 +1695,7 @@ fn extrude_rows(ui: &mut Ui, k: &mut KeyRows, extrusion: &mut Extrusion, hierarc
     check_row(ui, "Reverse Normals", &mut extrusion.reverse_normals);
     check_row(ui, "Hierarchical", hierarchical);
     ui.label("");
-    ui.label(RichText::new("Caps").strong());
+    ui.label(RichText::new(tr("Caps")).strong());
     ui.end_row();
     cap_rows(
         ui,
@@ -1669,7 +1704,7 @@ fn extrude_rows(ui: &mut Ui, k: &mut KeyRows, extrusion: &mut Extrusion, hierarc
         &mut extrusion.cap_type,
     );
     ui.label("");
-    ui.label(RichText::new("Extrudes its first child spline").color(p().text_dim));
+    ui.label(RichText::new(tr("Extrudes its first child spline")).color(p().text_dim));
     ui.end_row();
 }
 
@@ -1688,11 +1723,11 @@ fn lathe_rows(ui: &mut Ui, k: &mut KeyRows, lathe: &mut Lathe) {
     scale_row(ui, k, "Scaling", &mut lathe.scaling);
     check_row(ui, "Reverse Normals", &mut lathe.reverse_normals);
     ui.label("");
-    ui.label(RichText::new("Caps").strong());
+    ui.label(RichText::new(tr("Caps")).strong());
     ui.end_row();
     cap_rows(ui, &mut lathe.start_cap, &mut lathe.end_cap, &mut lathe.cap_type);
     ui.label("");
-    ui.label(RichText::new("Turns its first child spline around Y").color(p().text_dim));
+    ui.label(RichText::new(tr("Turns its first child spline around Y")).color(p().text_dim));
     ui.end_row();
 }
 
@@ -1707,11 +1742,11 @@ fn sweep_rows(ui: &mut Ui, k: &mut KeyRows, sweep: &mut Sweep) {
     check_row(ui, "Banking", &mut sweep.banking);
     check_row(ui, "Reverse Normals", &mut sweep.reverse_normals);
     ui.label("");
-    ui.label(RichText::new("Caps").strong());
+    ui.label(RichText::new(tr("Caps")).strong());
     ui.end_row();
     cap_rows(ui, &mut sweep.start_cap, &mut sweep.end_cap, &mut sweep.cap_type);
     ui.label("");
-    ui.label(RichText::new("Child 1: profile; child 2: path").color(p().text_dim));
+    ui.label(RichText::new(tr("Child 1: profile; child 2: path")).color(p().text_dim));
     ui.end_row();
 }
 
@@ -1727,7 +1762,7 @@ fn cloner_rows(
     attr_label(ui, "Mode", LABEL_WIDTH);
     let mut index = cloner.layout.index();
     egui::ComboBox::from_id_salt("grid4d.attr.cloner.mode")
-        .selected_text(cloner.layout.label())
+        .selected_text(tr(cloner.layout.label()))
         .show_ui(ui, |ui| {
             for (i, label) in Layout::LABELS.into_iter().enumerate() {
                 ui.selectable_value(&mut index, i, label);
@@ -1739,10 +1774,10 @@ fn cloner_rows(
     }
     attr_label(ui, "Clones", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.cloner.clones")
-        .selected_text(cloner.clones.label())
+        .selected_text(tr(cloner.clones.label()))
         .show_ui(ui, |ui| {
             for option in CloneOrder::ALL {
-                ui.selectable_value(&mut cloner.clones, option, option.label());
+                ui.selectable_value(&mut cloner.clones, option, tr(option.label()));
             }
         });
     ui.end_row();
@@ -1771,10 +1806,10 @@ fn cloner_rows(
             length_row(ui, k, "Radius", &mut radial.radius);
             attr_label(ui, "Plane", LABEL_WIDTH);
             egui::ComboBox::from_id_salt("grid4d.attr.cloner.plane")
-                .selected_text(radial.plane.label())
+                .selected_text(tr(radial.plane.label()))
                 .show_ui(ui, |ui| {
                     for option in SplinePlane::ALL {
-                        ui.selectable_value(&mut radial.plane, option, option.label());
+                        ui.selectable_value(&mut radial.plane, option, tr(option.label()));
                     }
                 });
             ui.end_row();
@@ -1784,7 +1819,10 @@ fn cloner_rows(
             angle_row(ui, k, "Offset", &mut radial.offset, -36_000.0..=36_000.0);
         }
         Layout::Grid(grid) => {
-            for (axis, label) in ["Count . X", "Count . Y", "Count . Z"].into_iter().enumerate() {
+            for (axis, label) in [key("Count . X"), key("Count . Y"), key("Count . Z")]
+                .into_iter()
+                .enumerate()
+            {
                 bounded_count_row(ui, label, &mut grid.count[axis], 1, max);
             }
             step_mode_row(ui, &mut grid.mode);
@@ -1794,14 +1832,14 @@ fn cloner_rows(
         }
         Layout::Object(surface) => {
             if let Some((scene, owner)) = links {
-                object_row(ui, "Object", object, scene, owner);
+                object_row(ui, key("Object"), object, scene, owner);
             }
             attr_label(ui, "Distribution", LABEL_WIDTH);
             egui::ComboBox::from_id_salt("grid4d.attr.cloner.distribution")
-                .selected_text(surface.distribution.label())
+                .selected_text(tr(surface.distribution.label()))
                 .show_ui(ui, |ui| {
                     for option in Distribution::ALL {
-                        ui.selectable_value(&mut surface.distribution, option, option.label());
+                        ui.selectable_value(&mut surface.distribution, option, tr(option.label()));
                     }
                 });
             ui.end_row();
@@ -1809,7 +1847,7 @@ fn cloner_rows(
         }
     }
     ui.label("");
-    ui.label(RichText::new("Clones repeat its children").color(p().text_dim));
+    ui.label(RichText::new(tr("Clones repeat its children")).color(p().text_dim));
     ui.end_row();
 }
 
@@ -1822,7 +1860,11 @@ fn effector_list_rows(ui: &mut Ui, effectors: &mut Vec<NodeId>, scene: &Scene) {
         let name = scene.get(id).map_or("(deleted)", |n| n.data.name.as_str());
         ui.horizontal(|ui| {
             ui.label(name);
-            if ui.small_button("✕").on_hover_text("Remove from the list").clicked() {
+            if ui
+                .small_button(tr("✕"))
+                .on_hover_text(tr("Remove from the list"))
+                .clicked()
+            {
                 remove = Some(index);
             }
         });
@@ -1834,7 +1876,7 @@ fn effector_list_rows(ui: &mut Ui, effectors: &mut Vec<NodeId>, scene: &Scene) {
     attr_label(ui, if effectors.is_empty() { "Effectors" } else { "" }, LABEL_WIDTH);
     let mut added = None;
     egui::ComboBox::from_id_salt("grid4d.attr.cloner.add_effector")
-        .selected_text("Add…")
+        .selected_text(tr("Add…"))
         .width(FIELD_WIDTH + 40.0)
         .show_ui(ui, |ui| {
             // Built only while the list is open.
@@ -1891,10 +1933,10 @@ fn effector_rows(ui: &mut Ui, k: &mut KeyRows, effector: &mut Effector, random: 
     let falloff = &mut effector.falloff;
     attr_label(ui, "Falloff", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.effector.falloff")
-        .selected_text(falloff.shape.label())
+        .selected_text(tr(falloff.shape.label()))
         .show_ui(ui, |ui| {
             for option in FalloffShape::ALL {
-                ui.selectable_value(&mut falloff.shape, option, option.label());
+                ui.selectable_value(&mut falloff.shape, option, tr(option.label()));
             }
         });
     ui.end_row();
@@ -1907,7 +1949,7 @@ fn effector_rows(ui: &mut Ui, k: &mut KeyRows, effector: &mut Effector, random: 
         }
     }
     ui.label("");
-    ui.label(RichText::new("Add it to a Cloner's Effectors").color(p().text_dim));
+    ui.label(RichText::new(tr("Add it to a Cloner's Effectors")).color(p().text_dim));
     ui.end_row();
 }
 
@@ -1934,10 +1976,10 @@ fn signed_percent_row(ui: &mut Ui, label: &str, value: &mut f32) {
 fn step_mode_row(ui: &mut Ui, mode: &mut StepMode) {
     attr_label(ui, "Spacing", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.cloner.step")
-        .selected_text(mode.label())
+        .selected_text(tr(mode.label()))
         .show_ui(ui, |ui| {
             for option in StepMode::ALL {
-                ui.selectable_value(mode, option, option.label());
+                ui.selectable_value(mode, option, tr(option.label()));
             }
         });
     ui.end_row();
@@ -1950,10 +1992,10 @@ fn box_rows(ui: &mut Ui, k: &mut KeyRows, size: &mut glam::Vec3, mode: &mut Defo
     }
     attr_label(ui, "Mode", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.deformer.mode")
-        .selected_text(mode.label())
+        .selected_text(tr(mode.label()))
         .show_ui(ui, |ui| {
             for option in DeformerMode::ALL {
-                ui.selectable_value(mode, option, option.label());
+                ui.selectable_value(mode, option, tr(option.label()));
             }
         });
     ui.end_row();
@@ -1989,15 +2031,15 @@ fn shape_rows(ui: &mut Ui, k: &mut KeyRows, shape: &mut Shape) {
 fn fit_row(ui: &mut Ui, k: &mut KeyRows, hint: &str) {
     ui.label("");
     if ui
-        .button("Fit to Parent")
-        .on_hover_text("Size the box to the parent and centre it there")
+        .button(tr("Fit to Parent"))
+        .on_hover_text(tr("Size the box to the parent and centre it there"))
         .clicked()
     {
         k.fit_to_parent = true;
     }
     ui.end_row();
     ui.label("");
-    ui.label(RichText::new(hint).color(p().text_dim));
+    ui.label(RichText::new(tr(hint)).color(p().text_dim));
     ui.end_row();
 }
 
@@ -2012,7 +2054,7 @@ fn ffd_rows(
 ) {
     let (size, grid) = (ffd.size, ffd.grid);
     box_rows(ui, k, &mut ffd.size, &mut ffd.mode);
-    for (axis, label) in ["Grid Points X", "Grid Points Y", "Grid Points Z"]
+    for (axis, label) in [key("Grid Points X"), key("Grid Points Y"), key("Grid Points Z")]
         .into_iter()
         .enumerate()
     {
@@ -2020,8 +2062,8 @@ fn ffd_rows(
     }
     ui.label("");
     let reset = ui
-        .button("Reset Lattice")
-        .on_hover_text("Put every lattice point back on its grid")
+        .button(tr("Reset Lattice"))
+        .on_hover_text(tr("Put every lattice point back on its grid"))
         .clicked();
     ui.end_row();
     if reset || ffd.grid != grid {
@@ -2046,10 +2088,10 @@ fn bend_rows(ui: &mut Ui, k: &mut KeyRows, bend: &mut Bend) {
     check_row(ui, "Keep Y-Axis Length", &mut bend.keep_length);
     attr_label(ui, "Origin", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.bend.origin")
-        .selected_text(bend.origin.label())
+        .selected_text(tr(bend.origin.label()))
         .show_ui(ui, |ui| {
             for origin in BendOrigin::ALL {
-                ui.selectable_value(&mut bend.origin, origin, origin.label());
+                ui.selectable_value(&mut bend.origin, origin, tr(origin.label()));
             }
         });
     ui.end_row();
@@ -2059,8 +2101,8 @@ fn bend_rows(ui: &mut Ui, k: &mut KeyRows, bend: &mut Bend) {
 /// The Loft generator's Object and Caps parameters.
 fn loft_rows(ui: &mut Ui, loft: &mut Loft) {
     for (label, value) in [
-        ("Subdivision U", &mut loft.subdivision_u),
-        ("Subdivision V", &mut loft.subdivision_v),
+        (key("Subdivision U"), &mut loft.subdivision_u),
+        (key("Subdivision V"), &mut loft.subdivision_v),
     ] {
         bounded_count_row(ui, label, value, Loft::MIN_SUBDIVISION, Loft::MAX_SUBDIVISION);
     }
@@ -2070,11 +2112,11 @@ fn loft_rows(ui: &mut Ui, loft: &mut Loft) {
     check_row(ui, "Linear Interpolation", &mut loft.linear);
     check_row(ui, "Reverse Normals", &mut loft.reverse_normals);
     ui.label("");
-    ui.label(RichText::new("Caps").strong());
+    ui.label(RichText::new(tr("Caps")).strong());
     ui.end_row();
     cap_rows(ui, &mut loft.start_cap, &mut loft.end_cap, &mut loft.cap_type);
     ui.label("");
-    ui.label(RichText::new("A skin over its child splines").color(p().text_dim));
+    ui.label(RichText::new(tr("A skin over its child splines")).color(p().text_dim));
     ui.end_row();
 }
 
@@ -2104,10 +2146,10 @@ fn cap_rows(ui: &mut Ui, start: &mut bool, end: &mut bool, cap_type: &mut CapTyp
     check_row(ui, "End Cap", end);
     attr_label(ui, "Caps Type", LABEL_WIDTH);
     egui::ComboBox::from_id_salt("grid4d.attr.caps.type")
-        .selected_text(cap_type.label())
+        .selected_text(tr(cap_type.label()))
         .show_ui(ui, |ui| {
             for option in CapType::ALL {
-                ui.selectable_value(cap_type, option, option.label());
+                ui.selectable_value(cap_type, option, tr(option.label()));
             }
         });
     ui.end_row();
@@ -2127,7 +2169,7 @@ fn walk_rows(ui: &mut Ui, options: &mut WalkOptions) {
 
 fn project_settings(ui: &mut Ui, doc: &mut Document) {
     ui.label(
-        RichText::new(format!("Project [{}]", doc.name))
+        RichText::new(trf("Project [{0}]", &[&doc.name]))
             .strong()
             .color(p().text_strong),
     );
@@ -2170,7 +2212,7 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
             ui.checkbox(&mut time.looping, "");
             ui.end_row();
 
-            attr_label(ui, "Objects", LABEL_WIDTH);
+            attr_label(ui, key("Objects"), LABEL_WIDTH);
             ui.label(doc.scene.len().to_string());
             ui.end_row();
         });
@@ -2181,7 +2223,10 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
         .spacing([6.0, 4.0])
         .show(ui, |ui| {
             check_row(ui, "Enabled", &mut simulation.enabled);
-            for (axis, label) in ["Gravity . X", "Gravity . Y", "Gravity . Z"].into_iter().enumerate() {
+            for (axis, label) in [key("Gravity . X"), key("Gravity . Y"), key("Gravity . Z")]
+                .into_iter()
+                .enumerate()
+            {
                 attr_label(ui, label, LABEL_WIDTH);
                 ui.add_sized(
                     [FIELD_WIDTH, 19.0],
@@ -2222,7 +2267,7 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
             ui.end_row();
         });
     ui.add_space(8.0);
-    ui.label(RichText::new("Select an object to edit its attributes.").color(p().text_dim));
+    ui.label(RichText::new(tr("Select an object to edit its attributes.")).color(p().text_dim));
 }
 
 /// A segment count, from `min` up to what the geometry generators accept.
@@ -2264,10 +2309,10 @@ fn light_details(ui: &mut Ui, k: &mut KeyRows, light_type: LightType, details: &
     if light_type.has_position() {
         attr_label(ui, "Falloff", LABEL_WIDTH);
         egui::ComboBox::from_id_salt("grid4d.attr.light.falloff")
-            .selected_text(details.falloff.label())
+            .selected_text(tr(details.falloff.label()))
             .show_ui(ui, |ui| {
                 for option in Falloff::ALL {
-                    ui.selectable_value(&mut details.falloff, option, option.label());
+                    ui.selectable_value(&mut details.falloff, option, tr(option.label()));
                 }
             });
         ui.end_row();
@@ -2308,7 +2353,7 @@ fn length_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
 }
 
 fn small_label(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).color(p().text_dim).size(11.5));
+    ui.label(RichText::new(tr(text)).color(p().text_dim).size(11.5));
 }
 
 #[cfg(test)]

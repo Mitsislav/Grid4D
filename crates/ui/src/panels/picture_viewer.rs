@@ -10,6 +10,7 @@ use egui::{
     TextureOptions, Ui, Vec2, Window, pos2, vec2,
 };
 
+use crate::i18n::{tr, trf};
 use crate::{
     EditorCommand, EditorState,
     rendering::{Picture, RenderState, Renders},
@@ -62,7 +63,7 @@ impl PictureViewerPanel {
         }
         let mut open = true;
         let screen = ctx.content_rect();
-        Window::new("Picture Viewer")
+        Window::new(tr("Picture Viewer"))
             .id(Id::unique("grid4d.picture_viewer"))
             .open(&mut open)
             .collapsible(false)
@@ -91,13 +92,13 @@ impl PictureViewerPanel {
         ui.horizontal(|ui| {
             let rendering = editor.renders.is_rendering();
             if ui
-                .button("Render")
-                .on_hover_text("Render the active view (Shift+R)")
+                .button(tr("Render"))
+                .on_hover_text(tr("Render the active view (Shift+R)"))
                 .clicked()
             {
                 editor.commands.push(EditorCommand::RenderToPictureViewer);
             }
-            if ui.add_enabled(rendering, Button::new("Stop")).clicked() {
+            if ui.add_enabled(rendering, Button::new(tr("Stop"))).clicked() {
                 editor.commands.push(EditorCommand::StopRender);
             }
             ui.separator();
@@ -106,24 +107,24 @@ impl PictureViewerPanel {
                 .shown_picture()
                 .is_some_and(|picture| picture.has_pixels() && picture.state != RenderState::Rendering);
             if ui
-                .add_enabled(savable, Button::new("Save As…"))
-                .on_hover_text("Save the shown picture as PNG")
+                .add_enabled(savable, Button::new(tr("Save As…")))
+                .on_hover_text(tr("Save the shown picture as PNG"))
                 .clicked()
             {
                 editor.commands.push(EditorCommand::SaveRenderAs);
             }
             ui.separator();
-            if ui.add(Button::selectable(self.zoom.is_none(), "Fit")).clicked() {
+            if ui.add(Button::selectable(self.zoom.is_none(), tr("Fit"))).clicked() {
                 (self.zoom, self.pan) = (None, Vec2::ZERO);
             }
             if ui.add(Button::selectable(self.zoom == Some(1.0), "100 %")).clicked() {
                 (self.zoom, self.pan) = (Some(1.0), Vec2::ZERO);
             }
             let current = self.zoom.unwrap_or(self.fitted(&editor.renders, pixels_per_point));
-            if ui.button("−").on_hover_text("Zoom out").clicked() {
+            if ui.button(tr("−")).on_hover_text(tr("Zoom out")).clicked() {
                 self.zoom_by(current, 0.5);
             }
-            if ui.button("+").on_hover_text("Zoom in").clicked() {
+            if ui.button(tr("+")).on_hover_text(tr("Zoom in")).clicked() {
                 self.zoom_by(current, 2.0);
             }
             ui.label(RichText::new(format!("{:.0} %", current * 100.0)).color(p().text_dim));
@@ -152,7 +153,7 @@ impl PictureViewerPanel {
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Render ▸ Render to Picture Viewer (Shift+R)",
+                tr("Render ▸ Render to Picture Viewer (Shift+R)"),
                 egui::FontId::proportional(13.0),
                 p().text_dim,
             );
@@ -162,7 +163,7 @@ impl PictureViewerPanel {
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Preparing the scene…",
+                tr("Preparing the scene…"),
                 egui::FontId::proportional(13.0),
                 p().text_dim,
             );
@@ -251,7 +252,7 @@ impl PictureViewerPanel {
 fn history(ui: &mut Ui, renders: &mut Renders, height: f32) {
     ui.vertical(|ui| {
         ui.set_width(HISTORY_WIDTH);
-        ui.label(RichText::new("History").size(11.0).color(p().text_dim));
+        ui.label(RichText::new(tr("History")).size(11.0).color(p().text_dim));
         let shown = renders.shown_picture().map(|picture| picture.number);
         let mut chosen = None;
         ScrollArea::vertical()
@@ -261,22 +262,26 @@ fn history(ui: &mut Ui, renders: &mut Renders, height: f32) {
             .show(ui, |ui| {
                 for picture in renders.history().iter().rev() {
                     let state = match picture.state {
-                        RenderState::Rendering => " · rendering",
+                        RenderState::Rendering => tr(" · rendering"),
                         RenderState::Finished => "",
-                        RenderState::Stopped => " · stopped",
+                        RenderState::Stopped => tr(" · stopped"),
                     };
                     let frames = if picture.frames > 1 {
-                        format!(" · {} frames", picture.frames)
+                        trf(" · {0} frames", &[&picture.frames])
                     } else {
                         String::new()
                     };
-                    let text = format!(
-                        "Render {}{state}\n{} × {} · {} spp{frames} · {}",
-                        picture.number,
-                        picture.width,
-                        picture.height,
-                        picture.total_samples,
-                        seconds(picture.elapsed)
+                    let text = trf(
+                        "Render {0}{1}\n{2} × {3} · {4} spp{5} · {6}",
+                        &[
+                            &picture.number,
+                            &state,
+                            &picture.width,
+                            &picture.height,
+                            &picture.total_samples,
+                            &frames,
+                            &seconds(picture.elapsed),
+                        ],
                     );
                     let button = Button::selectable(shown == Some(picture.number), text)
                         .min_size(vec2(HISTORY_WIDTH - 12.0, 0.0));
@@ -297,28 +302,31 @@ fn status_line(ui: &mut Ui, renders: &Renders) {
         return;
     };
     let frames = if picture.frames > 1 {
-        format!(
-            " · frame {} ({} of {} done)",
-            picture.frame, picture.frames_done, picture.frames
+        trf(
+            " · frame {0} ({1} of {2} done)",
+            &[&picture.frame, &picture.frames_done, &picture.frames],
         )
     } else {
         String::new()
     };
-    let summary = format!(
-        "Render {} · {} × {}{frames} · {} of {} samples · {}",
-        picture.number,
-        picture.width,
-        picture.height,
-        picture.samples,
-        picture.total_samples,
-        seconds(picture.elapsed)
+    let summary = trf(
+        "Render {0} · {1} × {2}{3} · {4} of {5} samples · {6}",
+        &[
+            &picture.number,
+            &picture.width,
+            &picture.height,
+            &frames,
+            &picture.samples,
+            &picture.total_samples,
+            &seconds(picture.elapsed),
+        ],
     );
     match renders.progress().filter(|&(number, _)| number == picture.number) {
         Some((_, fraction)) => {
             ui.add(
                 ProgressBar::new(fraction)
                     .desired_height(16.0)
-                    .text(format!("Rendering · {summary}")),
+                    .text(trf("Rendering · {0}", &[&summary])),
             );
         }
         None => {

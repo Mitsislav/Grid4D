@@ -15,6 +15,7 @@ use grid4d_io::{ObjectEntry, Objects};
 use grid4d_raytrace::Image;
 use grid4d_scene::{Document, ImageFormat, MeshHandle, NodeData, NodeId, ObjectKind, SceneEdit, Tags};
 
+use crate::i18n::{tr, trf};
 use crate::{
     EditorCommand, EditorState, History, ViewportPanel,
     recent::RecentFiles,
@@ -54,7 +55,7 @@ pub struct NativeDialogs;
 impl FileDialogs for NativeDialogs {
     fn pick_open(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
         with_filters(with_directory(rfd::FileDialog::new(), directory))
-            .set_title("Open")
+            .set_title(tr("Open"))
             .pick_file()
     }
 
@@ -66,8 +67,8 @@ impl FileDialogs for NativeDialogs {
 
     fn pick_save(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
         with_directory(rfd::FileDialog::new(), directory)
-            .set_title("Save As")
-            .add_filter("Grid4D Document", &[grid4d_io::EXTENSION])
+            .set_title(tr("Save As"))
+            .add_filter(tr("Grid4D Document"), &[grid4d_io::EXTENSION])
             .set_file_name(suggested)
             .save_file()
             .map(with_extension)
@@ -75,10 +76,10 @@ impl FileDialogs for NativeDialogs {
 
     fn pick_export(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
         with_directory(rfd::FileDialog::new(), directory)
-            .set_title("Export")
-            .add_filter("glTF Binary (.glb)", &["glb"])
+            .set_title(tr("Export"))
+            .add_filter(tr("glTF Binary (.glb)"), &["glb"])
             .add_filter("glTF (.gltf + .bin)", &["gltf"])
-            .add_filter("Wavefront OBJ (.obj + .mtl)", &["obj"])
+            .add_filter(tr("Wavefront OBJ (.obj + .mtl)"), &["obj"])
             .set_file_name(suggested)
             .save_file()
             .map(with_export_extension)
@@ -86,8 +87,8 @@ impl FileDialogs for NativeDialogs {
 
     fn pick_render_output(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
         with_directory(rfd::FileDialog::new(), directory)
-            .set_title("Save Render As")
-            .add_filter("Pictures (PNG, OpenEXR)", &["png", "exr"])
+            .set_title(tr("Save Render As"))
+            .add_filter(tr("Pictures (PNG, OpenEXR)"), &["png", "exr"])
             .set_file_name(suggested)
             .save_file()
     }
@@ -111,8 +112,8 @@ fn with_export_extension(path: PathBuf) -> PathBuf {
 /// Grid4D documents and models (glTF, OBJ), together and each on its own.
 fn with_filters(dialog: rfd::FileDialog) -> rfd::FileDialog {
     dialog
-        .add_filter("Grid4D Document or Model", &ANY_EXTENSIONS)
-        .add_filter("Grid4D Document", &grid4d_io::OPEN_EXTENSIONS)
+        .add_filter(tr("Grid4D Document or Model"), &ANY_EXTENSIONS)
+        .add_filter(tr("Grid4D Document"), &grid4d_io::OPEN_EXTENSIONS)
         .add_filter("glTF 2.0", &["gltf", "glb"])
         .add_filter("Wavefront OBJ", &["obj"])
 }
@@ -506,7 +507,7 @@ pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, v
         for inverse in inverses.into_iter().rev() {
             let _ = doc.apply(inverse);
         }
-        return failed(editor, "The file contains no objects.".to_owned());
+        return failed(editor, tr("The file contains no objects.").to_owned());
     }
     let node_of: HashMap<NodeId, NodeId> = imported.sources.iter().copied().zip(ids.iter().copied()).collect();
     for (index, mut data) in later {
@@ -555,7 +556,7 @@ pub(crate) fn save_rendered_frame(editor: &mut EditorState, done: &FinishedFrame
     let output = match &picture.target {
         SaveTarget::File(output) => output,
         SaveTarget::Nowhere(why) => {
-            let why = (*why).to_owned();
+            let why = tr(why).to_owned();
             editor.renders.set_note(done.number, why);
             return;
         }
@@ -566,14 +567,17 @@ pub(crate) fn save_rendered_frame(editor: &mut EditorState, done: &FinishedFrame
     match write_frame(&done.image, output, &path) {
         Ok(()) => editor.renders.record_saved(done.number, &path),
         Err(err) => {
-            let first_failure = !picture.note.starts_with("Not saved");
+            // The note of an earlier failure starts like this one's (in the
+            // language in use).
+            let failed = tr("Not saved: {0}").split("{0}").next().unwrap_or_default();
+            let first_failure = !picture.note.starts_with(failed);
             if first_failure {
                 editor.file.alert = Some(Alert {
                     title: "Could Not Save the Render",
                     message: format!("{}\n\n{err}", path.display()),
                 });
             }
-            editor.renders.set_note(done.number, format!("Not saved: {err}"));
+            editor.renders.set_note(done.number, trf("Not saved: {0}", &[&err]));
         }
     }
 }
@@ -635,7 +639,7 @@ pub(crate) fn save_render_as(doc: &Document, editor: &mut EditorState) {
     let written =
         make_folder(&path).and_then(|()| grid4d_io::save_png(&path, picture.width, picture.height, channels, pixels));
     match written {
-        Ok(()) => renders.set_note(number, format!("Saved to {}", path.display())),
+        Ok(()) => renders.set_note(number, trf("Saved to {0}", &[&path.display()])),
         Err(err) => {
             file.alert = Some(Alert {
                 title: "Could Not Save the Render",
@@ -893,10 +897,11 @@ fn choose_dropped(paths: &[&Path]) -> Option<Result<DropAction, Alert>> {
     Some(match paths.iter().find(|path| grid4d_io::is_importable(path)) {
         Some(path) => Ok(DropAction::Merge(path.to_path_buf())),
         None => {
-            let mut message = format!(
-                "None of the dropped files is a Grid4D document (.{}) or a model (.gltf, .glb, .obj):\n",
-                grid4d_io::EXTENSION
+            let mut message = trf(
+                "None of the dropped files is a Grid4D document (.{0}) or a model (.gltf, .glb, .obj):",
+                &[&grid4d_io::EXTENSION],
             );
+            message.push('\n');
             for path in paths {
                 message.push('\n');
                 message.push_str(&path.file_name().unwrap_or(path.as_os_str()).to_string_lossy());

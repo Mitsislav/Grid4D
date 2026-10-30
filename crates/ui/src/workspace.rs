@@ -8,6 +8,7 @@ use egui_tiles::{Behavior, Container, SimplificationOptions, TabState, Tile, Til
 use grid4d_scene::Document;
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::tr;
 use crate::{
     EditorState,
     panels::{
@@ -366,7 +367,7 @@ impl Behavior<Pane> for Dispatch<'_> {
     }
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> WidgetText {
-        pane.title().into()
+        tr(pane.title()).into()
     }
 
     fn is_tab_closable(&self, tiles: &Tiles<Pane>, tile_id: TileId) -> bool {

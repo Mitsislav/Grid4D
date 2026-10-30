@@ -12,6 +12,7 @@ use glam::{Mat4, Quat, Vec3};
 use grid4d_geom::{Component, selection};
 use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, Scene, SceneEdit, Transform};
 
+use crate::i18n::{key, tr, trf};
 use crate::{EditorCommand, EditorState, keys::Keying, live_edit::interaction_ongoing, theme::palette as p, widgets};
 
 /// How positions and rotations are read.
@@ -124,24 +125,24 @@ impl CoordinatesPanel {
         scroll.show(ui, |ui| {
             egui::Frame::new().inner_margin(Margin::symmetric(8, 6)).show(ui, |ui| {
                 let Some(target) = target else {
-                    ui.label(RichText::new("Select an object to edit its coordinates.").color(p().text_dim));
+                    ui.label(RichText::new(tr("Select an object to edit its coordinates.")).color(p().text_dim));
                     return;
                 };
                 let title = match target {
                     Target::Object(id) => doc.scene.get(id).map(|n| n.data.name.clone()),
                     Target::Components(id, component) => doc.scene.get(id).map(|n| {
                         let what = match component {
-                            Component::Point => "Points",
-                            Component::Edge => "Edges",
-                            Component::Polygon => "Polygons",
+                            Component::Point => key("Points"),
+                            Component::Edge => key("Edges"),
+                            Component::Polygon => key("Polygons"),
                         };
-                        format!("{what} of {}", n.data.name)
+                        trf("{0} of {1}", &[&tr(what), &n.data.name])
                     }),
                 };
                 ui.label(RichText::new(title.unwrap_or_default()).strong().color(p().text_strong));
                 ui.add_space(4.0);
                 let Some(mut fields) = self.fields else {
-                    ui.label(RichText::new("Nothing selected").color(p().text_dim));
+                    ui.label(RichText::new(tr("Nothing selected")).color(p().text_dim));
                     return;
                 };
                 let locks = match target {
@@ -157,23 +158,25 @@ impl CoordinatesPanel {
                 ui.horizontal(|ui| {
                     ComboBox::from_id_salt("grid4d.coordinates.space")
                         .width(76.0)
-                        .selected_text(self.mode.space.label())
+                        .selected_text(tr(self.mode.space.label()))
                         .show_ui(ui, |ui| {
                             for space in Space::ALL {
-                                ui.selectable_value(&mut self.mode.space, space, space.label());
+                                ui.selectable_value(&mut self.mode.space, space, tr(space.label()));
                             }
                         });
                     ui.add_enabled_ui(matches!(target, Target::Object(_)), |ui| {
                         ComboBox::from_id_salt("grid4d.coordinates.middle")
                             .width(64.0)
-                            .selected_text(middle.label())
+                            .selected_text(tr(middle.label()))
                             .show_ui(ui, |ui| {
                                 for m in Middle::ALL {
-                                    ui.selectable_value(&mut self.mode.middle, m, m.label());
+                                    ui.selectable_value(&mut self.mode.middle, m, tr(m.label()));
                                 }
                             });
                     });
-                    let apply = ui.add(Button::new("Apply")).on_hover_text("Writes the fields as shown");
+                    let apply = ui
+                        .add(Button::new(tr("Apply")))
+                        .on_hover_text(tr("Writes the fields as shown"));
                     if apply.clicked()
                         && let (Some(current), Some(node)) = (current, doc.scene.get(target.node()))
                         && let Some(data) = write(&doc.scene, target, &node.data, current, fields, keying, self.mode)
@@ -191,8 +194,10 @@ impl CoordinatesPanel {
                 if let Target::Components(..) = target {
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("Rotation is relative: it turns the selection by that much around its centre")
-                            .color(p().text_dim),
+                        RichText::new(tr(
+                            "Rotation is relative: it turns the selection by that much around its centre",
+                        ))
+                        .color(p().text_dim),
                     );
                 }
 
@@ -227,8 +232,8 @@ impl CoordinatesPanel {
     fn finish(&mut self, editor: &mut EditorState) {
         if let Some(edit) = self.edit.take() {
             let label = match edit.target {
-                Target::Object(_) => "Edit Coordinates",
-                Target::Components(..) => "Transform Components",
+                Target::Object(_) => key("Edit Coordinates"),
+                Target::Components(..) => key("Transform Components"),
             };
             editor.commands.push(EditorCommand::CommitLive {
                 inverse: SceneEdit::SetData {
@@ -302,7 +307,7 @@ fn fields_grid(ui: &mut Ui, fields: &mut Fields, middle: Middle, locks: grid4d_s
                             .changed();
                     }
                     None => {
-                        ui.label(RichText::new("—").color(p().text_faint));
+                        ui.label(RichText::new(tr("—")).color(p().text_faint));
                     }
                 }
                 small(ui, rl);
@@ -325,7 +330,7 @@ fn fields_grid(ui: &mut Ui, fields: &mut Fields, middle: Middle, locks: grid4d_s
 }
 
 fn small(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).color(p().text_dim).size(11.5));
+    ui.label(RichText::new(tr(text)).color(p().text_dim).size(11.5));
 }
 
 /// The fields for `target` at `frame`.

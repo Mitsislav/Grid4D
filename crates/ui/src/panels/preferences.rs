@@ -4,16 +4,18 @@
 use egui::{ComboBox, DragValue, Grid, Id, Ui, Window};
 use grid4d_render::ShadingMode;
 
+use crate::i18n::{key, tr};
 use crate::{
     EditorCommand, EditorState,
+    i18n::Language,
     panels::viewport::shading_label,
     preferences::{Preferences, Units},
     theme::ColorTheme,
     widgets::{attr_label, section_heading},
 };
 
-const LABEL_WIDTH: f32 = 120.0;
-const WINDOW_WIDTH: f32 = 340.0;
+const LABEL_WIDTH: f32 = 150.0;
+const WINDOW_WIDTH: f32 = 370.0;
 
 pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
     if !editor.show_preferences {
@@ -21,7 +23,7 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
     }
     let mut open = true;
     let mut apply_views = false;
-    Window::new("Preferences")
+    Window::new(tr("Preferences"))
         .id(Id::unique("grid4d.preferences"))
         .open(&mut open)
         .collapsible(false)
@@ -44,10 +46,20 @@ fn contents(ui: &mut Ui, prefs: &mut Preferences) -> bool {
     Grid::new("grid4d.preferences.interface").num_columns(2).show(ui, |ui| {
         attr_label(ui, "Theme", LABEL_WIDTH);
         ComboBox::from_id_salt("grid4d.preferences.theme")
-            .selected_text(prefs.theme.label())
+            .selected_text(tr(prefs.theme.label()))
             .show_ui(ui, |ui| {
                 for theme in ColorTheme::ALL {
-                    ui.selectable_value(&mut prefs.theme, theme, theme.label());
+                    ui.selectable_value(&mut prefs.theme, theme, tr(theme.label()));
+                }
+            });
+        ui.end_row();
+        attr_label(ui, "Language", LABEL_WIDTH);
+        ComboBox::from_id_salt("grid4d.preferences.language")
+            .selected_text(prefs.language.label())
+            .show_ui(ui, |ui| {
+                // Each language in itself.
+                for language in Language::ALL {
+                    ui.selectable_value(&mut prefs.language, language, language.label());
                 }
             });
         ui.end_row();
@@ -57,13 +69,13 @@ fn contents(ui: &mut Ui, prefs: &mut Preferences) -> bool {
     Grid::new("grid4d.preferences.units").num_columns(2).show(ui, |ui| {
         attr_label(ui, "Length Unit", LABEL_WIDTH);
         ComboBox::from_id_salt("grid4d.preferences.length_unit")
-            .selected_text(format!("{} ({})", prefs.units.label(), prefs.units.symbol()))
+            .selected_text(format!("{} ({})", tr(prefs.units.label()), prefs.units.symbol()))
             .show_ui(ui, |ui| {
                 for units in Units::ALL {
                     ui.selectable_value(
                         &mut prefs.units,
                         units,
-                        format!("{} ({})", units.label(), units.symbol()),
+                        format!("{} ({})", tr(units.label()), units.symbol()),
                     );
                 }
             });
@@ -77,9 +89,11 @@ fn contents(ui: &mut Ui, prefs: &mut Preferences) -> bool {
             DragValue::new(&mut prefs.undo_depth)
                 .speed(1.0)
                 .range(Preferences::UNDO_DEPTH)
-                .suffix(" steps"),
+                .suffix(format!(" {}", tr("steps"))),
         )
-        .on_hover_text("How many steps Undo can go back; lowering it drops the oldest at once");
+        .on_hover_text(tr(
+            "How many steps Undo can go back; lowering it drops the oldest at once",
+        ));
         ui.end_row();
     });
 
@@ -87,7 +101,7 @@ fn contents(ui: &mut Ui, prefs: &mut Preferences) -> bool {
     Grid::new("grid4d.preferences.autosave").num_columns(2).show(ui, |ui| {
         attr_label(ui, "Autosave", LABEL_WIDTH);
         ui.checkbox(&mut prefs.autosave, "")
-            .on_hover_text("Keep a recovery copy of unsaved work, offered after a crash");
+            .on_hover_text(tr("Keep a recovery copy of unsaved work, offered after a crash"));
         ui.end_row();
         attr_label(ui, "Every", LABEL_WIDTH);
         ui.add_enabled(
@@ -95,7 +109,7 @@ fn contents(ui: &mut Ui, prefs: &mut Preferences) -> bool {
             DragValue::new(&mut prefs.autosave_minutes)
                 .speed(0.2)
                 .range(Preferences::AUTOSAVE_MINUTES)
-                .suffix(" min"),
+                .suffix(format!(" {}", tr("min"))),
         );
         ui.end_row();
     });
@@ -105,18 +119,18 @@ fn contents(ui: &mut Ui, prefs: &mut Preferences) -> bool {
     Grid::new("grid4d.preferences.views").num_columns(2).show(ui, |ui| {
         attr_label(ui, "Shading", LABEL_WIDTH);
         ComboBox::from_id_salt("grid4d.preferences.shading")
-            .selected_text(shading_label(views.shading))
+            .selected_text(tr(shading_label(views.shading)))
             .width(180.0)
             .show_ui(ui, |ui| {
                 for mode in ShadingMode::ALL {
-                    ui.selectable_value(&mut views.shading, mode, shading_label(mode));
+                    ui.selectable_value(&mut views.shading, mode, tr(shading_label(mode)));
                 }
             });
         ui.end_row();
         for (label, value) in [
-            ("Grid", &mut views.grid),
-            ("World Axis", &mut views.world_axis),
-            ("HUD", &mut views.hud),
+            (key("Grid"), &mut views.grid),
+            (key("World Axis"), &mut views.world_axis),
+            (key("HUD"), &mut views.hud),
         ] {
             attr_label(ui, label, LABEL_WIDTH);
             ui.checkbox(value, "");
@@ -126,8 +140,8 @@ fn contents(ui: &mut Ui, prefs: &mut Preferences) -> bool {
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.add_space(LABEL_WIDTH + 8.0);
-        ui.button("Apply to Views")
-            .on_hover_text("Views get these settings when Grid4D starts; this applies them now")
+        ui.button(tr("Apply to Views"))
+            .on_hover_text(tr("Views get these settings when Grid4D starts; this applies them now"))
             .clicked()
     })
     .inner

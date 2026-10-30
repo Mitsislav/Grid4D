@@ -4,6 +4,7 @@
 use egui::{Button, Layout, RichText, Ui};
 use grid4d_scene::{Document, ObjectKindTag, SceneEdit};
 
+use crate::i18n::{key, tr, trf};
 use crate::{
     EditMode, EditorCommand, EditorState, Tool,
     theme::palette as p,
@@ -12,10 +13,10 @@ use crate::{
 
 pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
     egui::MenuBar::new().ui(ui, |ui| {
-        ui.menu_button("File", |ui| {
+        ui.menu_button(tr("File"), |ui| {
             command(ui, editor, "New", "Ctrl+N", EditorCommand::NewDocument);
             command(ui, editor, "Open…", "Ctrl+O", EditorCommand::Open);
-            ui.menu_button("Open Recent", |ui| recent_menu(ui, editor));
+            ui.menu_button(tr("Open Recent"), |ui| recent_menu(ui, editor));
             command(ui, editor, "Merge…", "Ctrl+Shift+O", EditorCommand::Merge);
             ui.separator();
             command(ui, editor, "Save", "Ctrl+S", EditorCommand::Save);
@@ -27,14 +28,14 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             command(ui, editor, "Quit", "", EditorCommand::Quit);
         });
 
-        ui.menu_button("Edit", |ui| {
+        ui.menu_button(tr("Edit"), |ui| {
             // The menu is only built while open, so formatting the labels is cheap.
             let undo = editor.history.undo_label();
             let redo = editor.history.redo_label();
             history_item(
                 ui,
                 editor,
-                undo.map_or_else(|| "Undo".to_owned(), |l| format!("Undo {l}")),
+                undo.map_or_else(|| tr("Undo").to_owned(), |l| trf("Undo {0}", &[&tr(l)])),
                 "Ctrl+Z",
                 undo.is_some(),
                 EditorCommand::Undo,
@@ -42,7 +43,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             history_item(
                 ui,
                 editor,
-                redo.map_or_else(|| "Redo".to_owned(), |l| format!("Redo {l}")),
+                redo.map_or_else(|| tr("Redo").to_owned(), |l| trf("Redo {0}", &[&tr(l)])),
                 "Ctrl+Y",
                 redo.is_some(),
                 EditorCommand::Redo,
@@ -54,28 +55,28 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             ui.separator();
             // With nothing selected the Attribute Manager shows the project settings.
             command(ui, editor, "Project Settings…", "", EditorCommand::DeselectAll);
-            if ui.button("Preferences…").clicked() {
+            if ui.button(tr("Preferences…")).clicked() {
                 editor.show_preferences = true;
                 ui.close();
             }
         });
 
-        ui.menu_button("Create", |ui| {
-            ui.menu_button("Object", |ui| {
+        ui.menu_button(tr("Create"), |ui| {
+            ui.menu_button(tr("Object"), |ui| {
                 create(ui, editor, ObjectKindTag::Null);
                 ui.separator();
                 for tag in ObjectKindTag::PRIMITIVES {
                     create(ui, editor, tag);
                 }
                 ui.separator();
-                for name in ["Platonic", "Landscape"] {
+                for name in [key("Platonic"), key("Landscape")] {
                     planned(ui, name, "");
                 }
             });
-            ui.menu_button("Spline", |ui| {
+            ui.menu_button(tr("Spline"), |ui| {
                 if ui
-                    .add(Button::new(Tool::Pen.label()).selected(editor.tool == Tool::Pen))
-                    .on_hover_text("Click in the viewport to add points, drag to pull tangents")
+                    .add(Button::new(tr(Tool::Pen.label())).selected(editor.tool == Tool::Pen))
+                    .on_hover_text(tr("Click in the viewport to add points, drag to pull tangents"))
                     .clicked()
                 {
                     editor.tool = Tool::Pen;
@@ -86,11 +87,11 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     create(ui, editor, tag);
                 }
             });
-            ui.menu_button("Generator", |ui| {
+            ui.menu_button(tr("Generator"), |ui| {
                 for tag in ObjectKindTag::GENERATORS {
                     if ui
-                        .button(tag.label())
-                        .on_hover_text("Alt + click: around the selected object")
+                        .button(tr(tag.label()))
+                        .on_hover_text(tr("Alt + click: around the selected object"))
                         .clicked()
                     {
                         let alt = ui.input(|i| i.modifiers.alt);
@@ -103,11 +104,11 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     }
                 }
             });
-            ui.menu_button("Effector", |ui| {
+            ui.menu_button(tr("Effector"), |ui| {
                 for tag in ObjectKindTag::EFFECTORS {
                     if ui
-                        .button(tag.label())
-                        .on_hover_text("With a Cloner selected, it is added to the Cloner's Effectors")
+                        .button(tr(tag.label()))
+                        .on_hover_text(tr("With a Cloner selected, it is added to the Cloner's Effectors"))
                         .clicked()
                     {
                         editor.commands.push(EditorCommand::CreateObject(tag));
@@ -115,11 +116,11 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     }
                 }
             });
-            ui.menu_button("Deformer", |ui| {
+            ui.menu_button(tr("Deformer"), |ui| {
                 for tag in ObjectKindTag::DEFORMERS {
                     if ui
-                        .button(tag.label())
-                        .on_hover_text("Shift + click: under the selected object, fitted to it")
+                        .button(tr(tag.label()))
+                        .on_hover_text(tr("Shift + click: under the selected object, fitted to it"))
                         .clicked()
                     {
                         let shift = ui.input(|i| i.modifiers.shift);
@@ -137,8 +138,8 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             create(ui, editor, ObjectKindTag::Light);
             ui.separator();
             if ui
-                .button("Material")
-                .on_hover_text("A new material in the Material Manager")
+                .button(tr("Material"))
+                .on_hover_text(tr("A new material in the Material Manager"))
                 .clicked()
             {
                 editor.commands.push(EditorCommand::NewMaterial);
@@ -147,10 +148,10 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             }
         });
 
-        ui.menu_button("Modes", |ui| {
+        ui.menu_button(tr("Modes"), |ui| {
             for mode in EditMode::ALL {
                 if ui
-                    .add(Button::new(mode.label()).selected(editor.mode == mode))
+                    .add(Button::new(tr(mode.label())).selected(editor.mode == mode))
                     .clicked()
                 {
                     editor.mode = mode;
@@ -159,7 +160,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             }
         });
 
-        ui.menu_button("Select", |ui| {
+        ui.menu_button(tr("Select"), |ui| {
             for tool in [
                 Tool::LiveSelection,
                 Tool::RectangleSelection,
@@ -175,46 +176,51 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             let components = crate::commands::component_target(doc, editor).is_some();
             let item = |ui: &mut Ui, editor: &mut EditorState, label: &str, cmd: EditorCommand| {
                 if ui
-                    .add_enabled(components, Button::new(label))
-                    .on_disabled_hover_text("Works on the points, edges or polygons of a polygon object")
+                    .add_enabled(components, Button::new(tr(label)))
+                    .on_disabled_hover_text(tr("Works on the points, edges or polygons of a polygon object"))
                     .clicked()
                 {
                     editor.commands.push(cmd);
                     ui.close();
                 }
             };
-            item(ui, editor, "Invert", EditorCommand::InvertSelection);
+            item(ui, editor, key("Invert"), EditorCommand::InvertSelection);
             ui.separator();
-            item(ui, editor, "Select Connected", EditorCommand::SelectConnected);
-            item(ui, editor, "Grow Selection", EditorCommand::GrowSelection);
-            item(ui, editor, "Shrink Selection", EditorCommand::ShrinkSelection);
-            ui.checkbox(&mut editor.selection_settings.grow_edges_only, "Grow Using Edges Only")
-                .on_hover_text("Polygons grow into neighbours sharing an edge; off: sharing a point is enough");
+            item(ui, editor, key("Select Connected"), EditorCommand::SelectConnected);
+            item(ui, editor, key("Grow Selection"), EditorCommand::GrowSelection);
+            item(ui, editor, key("Shrink Selection"), EditorCommand::ShrinkSelection);
+            ui.checkbox(
+                &mut editor.selection_settings.grow_edges_only,
+                tr("Grow Using Edges Only"),
+            )
+            .on_hover_text(tr(
+                "Polygons grow into neighbours sharing an edge; off: sharing a point is enough",
+            ));
             ui.separator();
-            item(ui, editor, "Hide Selected", EditorCommand::HideSelected);
-            item(ui, editor, "Hide Unselected", EditorCommand::HideUnselected);
-            item(ui, editor, "Unhide All", EditorCommand::UnhideAll);
+            item(ui, editor, key("Hide Selected"), EditorCommand::HideSelected);
+            item(ui, editor, key("Hide Unselected"), EditorCommand::HideUnselected);
+            item(ui, editor, key("Unhide All"), EditorCommand::UnhideAll);
         });
 
-        ui.menu_button("Tools", |ui| {
+        ui.menu_button(tr("Tools"), |ui| {
             for tool in [Tool::Move, Tool::Scale, Tool::Rotate] {
                 tool_item(ui, editor, tool);
             }
             ui.separator();
-            ui.checkbox(&mut editor.axes[0], "X-Axis");
-            ui.checkbox(&mut editor.axes[1], "Y-Axis");
-            ui.checkbox(&mut editor.axes[2], "Z-Axis");
+            ui.checkbox(&mut editor.axes[0], tr("X-Axis"));
+            ui.checkbox(&mut editor.axes[1], tr("Y-Axis"));
+            ui.checkbox(&mut editor.axes[2], tr("Z-Axis"));
             ui.separator();
-            ui.checkbox(&mut editor.world_coordinates, "World Coordinates");
-            ui.menu_button("Snap", |ui| crate::widgets::snap_menu(ui, &mut editor.snap));
+            ui.checkbox(&mut editor.world_coordinates, tr("World Coordinates"));
+            ui.menu_button(tr("Snap"), |ui| crate::widgets::snap_menu(ui, &mut editor.snap));
         });
 
-        ui.menu_button("Mesh", |ui| {
-            ui.menu_button("Conversion", |ui| {
+        ui.menu_button(tr("Mesh"), |ui| {
+            ui.menu_button(tr("Conversion"), |ui| {
                 let convertible = crate::commands::can_make_editable(doc, &editor.selection);
                 if ui
-                    .add_enabled(convertible, Button::new("Make Editable").shortcut_text("C"))
-                    .on_disabled_hover_text("Select a primitive to turn it into a polygon object")
+                    .add_enabled(convertible, Button::new(tr("Make Editable")).shortcut_text("C"))
+                    .on_disabled_hover_text(tr("Select a primitive to turn it into a polygon object"))
                     .clicked()
                 {
                     editor.commands.push(EditorCommand::MakeEditable);
@@ -222,23 +228,25 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 }
                 let bakeable = crate::commands::can_bake_current_state(doc, &editor.selection);
                 if ui
-                    .add_enabled(bakeable, Button::new("Current State to Object"))
-                    .on_hover_text("Add a copy of the selection as shown now: deformed, generated, at this frame")
-                    .on_disabled_hover_text("Select the objects to copy as they are shown")
+                    .add_enabled(bakeable, Button::new(tr("Current State to Object")))
+                    .on_hover_text(tr(
+                        "Add a copy of the selection as shown now: deformed, generated, at this frame",
+                    ))
+                    .on_disabled_hover_text(tr("Select the objects to copy as they are shown"))
                     .clicked()
                 {
                     editor.commands.push(EditorCommand::CurrentStateToObject);
                     ui.close();
                 }
             });
-            ui.menu_button("Spline", |ui| {
+            ui.menu_button(tr("Spline"), |ui| {
                 let spline = crate::commands::active_spline(doc, editor).is_some();
                 for op in crate::commands::SplineOp::ALL {
                     if ui
-                        .add_enabled(spline, Button::new(op.label()))
-                        .on_disabled_hover_text(
+                        .add_enabled(spline, Button::new(tr(op.label())))
+                        .on_disabled_hover_text(tr(
                             "Select an editable spline (Make Editable turns a spline primitive into one)",
-                        )
+                        ))
                         .clicked()
                     {
                         editor.commands.push(EditorCommand::SplineCommand(op));
@@ -259,16 +267,19 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             ] {
                 let how = match tool {
                     Tool::LoopCut | Tool::LineCut => {
-                        "Then hover an edge and click (Loop/Path Cut) or drag a line (Line Cut) in the viewport"
+                        key("Then hover an edge and click (Loop/Path Cut) or drag a line (Line Cut) in the viewport")
                     }
-                    Tool::Bridge => "Then drag from one polygon or border edge to another",
-                    Tool::Weld => "Then click a selected point, or anywhere else for the centre",
-                    _ => "Then drag left or right in the viewport, or Apply in the Attribute Manager",
+                    Tool::Bridge => key("Then drag from one polygon or border edge to another"),
+                    Tool::Weld => key("Then click a selected point, or anywhere else for the centre"),
+                    _ => key("Then drag left or right in the viewport, or Apply in the Attribute Manager"),
                 };
                 let item = ui
-                    .add_enabled(polygon_object, Button::new(tool.label()).shortcut_text(tool.shortcut()))
-                    .on_hover_text(how)
-                    .on_disabled_hover_text(tool.hint());
+                    .add_enabled(
+                        polygon_object,
+                        Button::new(tr(tool.label())).shortcut_text(tool.shortcut()),
+                    )
+                    .on_hover_text(tr(how))
+                    .on_disabled_hover_text(tr(tool.hint()));
                 if item.clicked() {
                     editor.tool = tool;
                     ui.close();
@@ -276,13 +287,13 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             }
             ui.separator();
             for (label, shortcut, command) in [
-                ("Connect Points/Edges", "M~M", EditorCommand::ConnectSelected),
-                ("Melt", "U~Z", EditorCommand::MeltSelected),
-                ("Dissolve", "M~N", EditorCommand::DissolveSelected),
+                (key("Connect Points/Edges"), "M~M", EditorCommand::ConnectSelected),
+                (key("Melt"), "U~Z", EditorCommand::MeltSelected),
+                (key("Dissolve"), "M~N", EditorCommand::DissolveSelected),
             ] {
                 if ui
-                    .add_enabled(polygon_object, Button::new(label).shortcut_text(shortcut))
-                    .on_disabled_hover_text("Works on the points, edges or polygons of a polygon object")
+                    .add_enabled(polygon_object, Button::new(tr(label)).shortcut_text(shortcut))
+                    .on_disabled_hover_text(tr("Works on the points, edges or polygons of a polygon object"))
                     .clicked()
                 {
                     editor.commands.push(command);
@@ -295,8 +306,8 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 .and_then(|id| doc.scene.get(id))
                 .is_some_and(|n| matches!(n.data.kind, grid4d_scene::ObjectKind::Polygon { .. }));
             if ui
-                .add_enabled(active_polygon, Button::new("Optimize…").shortcut_text("U~O"))
-                .on_disabled_hover_text("Select a polygon object")
+                .add_enabled(active_polygon, Button::new(tr("Optimize…")).shortcut_text("U~O"))
+                .on_disabled_hover_text(tr("Select a polygon object"))
                 .clicked()
             {
                 editor.show_optimize = true;
@@ -306,36 +317,36 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             planned(ui, "Subdivide", "");
         });
 
-        ui.menu_button("Animate", |ui| {
+        ui.menu_button(tr("Animate"), |ui| {
             let time = &mut doc.time;
-            if ui.add(Button::new("Play Forwards").shortcut_text("F8")).clicked() {
+            if ui.add(Button::new(tr("Play Forwards")).shortcut_text("F8")).clicked() {
                 time.play_forward();
                 ui.close();
             }
-            if ui.add(Button::new("Play Backwards").shortcut_text("F6")).clicked() {
+            if ui.add(Button::new(tr("Play Backwards")).shortcut_text("F6")).clicked() {
                 time.play_backward();
                 ui.close();
             }
-            if ui.add(Button::new("Stop").shortcut_text("F7")).clicked() {
+            if ui.add(Button::new(tr("Stop")).shortcut_text("F7")).clicked() {
                 time.stop();
                 ui.close();
             }
             ui.separator();
-            if ui.button("Go to Start").clicked() {
+            if ui.button(tr("Go to Start")).clicked() {
                 time.go_to_start();
                 ui.close();
             }
-            if ui.button("Go to End").clicked() {
+            if ui.button(tr("Go to End")).clicked() {
                 time.go_to_end();
                 ui.close();
             }
             // Same behaviour as the F / G shortcuts and the transport buttons.
-            if ui.add(Button::new("Previous Frame").shortcut_text("F")).clicked() {
+            if ui.add(Button::new(tr("Previous Frame")).shortcut_text("F")).clicked() {
                 time.stop();
                 time.step(-1);
                 ui.close();
             }
-            if ui.add(Button::new("Next Frame").shortcut_text("G")).clicked() {
+            if ui.add(Button::new(tr("Next Frame")).shortcut_text("G")).clicked() {
                 time.stop();
                 time.step(1);
                 ui.close();
@@ -343,7 +354,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             ui.separator();
             // A document setting: applied as an undo step, after layout.
             let mut settings = time.settings();
-            if ui.checkbox(&mut settings.looping, "Loop Playback").changed() {
+            if ui.checkbox(&mut settings.looping, tr("Loop Playback")).changed() {
                 editor.commands.push(EditorCommand::Edit {
                     edit: SceneEdit::SetTime(settings),
                     label: "Loop Playback",
@@ -354,33 +365,33 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             if ui
                 .add_enabled(
                     !editor.selection.is_empty(),
-                    Button::new("Record Active Objects").shortcut_text("F9"),
+                    Button::new(tr("Record Active Objects")).shortcut_text("F9"),
                 )
                 .clicked()
             {
                 editor.commands.push(EditorCommand::RecordKeys { at: frame });
                 ui.close();
             }
-            let autokey = Button::new("Autokeying")
+            let autokey = Button::new(tr("Autokeying"))
                 .shortcut_text("Ctrl+F9")
                 .selected(editor.animation.autokey);
             if ui.add(autokey).clicked() {
                 editor.animation.autokey = !editor.animation.autokey;
                 ui.close();
             }
-            ui.menu_button("Record", |ui| {
+            ui.menu_button(tr("Record"), |ui| {
                 let a = &mut editor.animation;
-                ui.checkbox(&mut a.position, "Position");
-                ui.checkbox(&mut a.scale, "Scale");
-                ui.checkbox(&mut a.rotation, "Rotation");
+                ui.checkbox(&mut a.position, tr("Position"));
+                ui.checkbox(&mut a.scale, tr("Scale"));
+                ui.checkbox(&mut a.rotation, tr("Rotation"));
             });
             for (label, shortcut, forward) in [
-                ("Go to Previous Key", "Ctrl+F", false),
-                ("Go to Next Key", "Ctrl+G", true),
+                (key("Go to Previous Key"), "Ctrl+F", false),
+                (key("Go to Next Key"), "Ctrl+G", true),
             ] {
                 let target = crate::keys::adjacent_key(&doc.scene, &editor.selection, frame, forward);
                 if ui
-                    .add_enabled(target.is_some(), Button::new(label).shortcut_text(shortcut))
+                    .add_enabled(target.is_some(), Button::new(tr(label)).shortcut_text(shortcut))
                     .clicked()
                     && let Some(target) = target
                 {
@@ -390,8 +401,8 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 }
             }
             if ui
-                .add_enabled(!editor.keys.frames.is_empty(), Button::new("Delete Keys"))
-                .on_disabled_hover_text("Select keys on the timeline first")
+                .add_enabled(!editor.keys.frames.is_empty(), Button::new(tr("Delete Keys")))
+                .on_disabled_hover_text(tr("Select keys on the timeline first"))
                 .clicked()
             {
                 editor.commands.push(EditorCommand::DeleteKeys);
@@ -399,30 +410,32 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             }
         });
 
-        ui.menu_button("Simulate", |ui| {
+        ui.menu_button(tr("Simulate"), |ui| {
             if ui
-                .button("Bake Simulation")
-                .on_hover_text("Simulate the whole range now (Esc stops)")
+                .button(tr("Bake Simulation"))
+                .on_hover_text(tr("Simulate the whole range now (Esc stops)"))
                 .clicked()
             {
                 editor.commands.push(EditorCommand::BakeSimulation);
                 ui.close();
             }
             if ui
-                .button("Clear Simulation Cache")
-                .on_hover_text("Forget the simulated frames; they are simulated again as you visit them")
+                .button(tr("Clear Simulation Cache"))
+                .on_hover_text(tr(
+                    "Forget the simulated frames; they are simulated again as you visit them",
+                ))
                 .clicked()
             {
                 editor.commands.push(EditorCommand::ClearSimulation);
                 ui.close();
             }
             ui.separator();
-            for name in ["Soft Body", "Cloth", "Particles"] {
+            for name in [key("Soft Body"), key("Cloth"), key("Particles")] {
                 planned(ui, name, "");
             }
         });
 
-        ui.menu_button("Render", |ui| {
+        ui.menu_button(tr("Render"), |ui| {
             command(ui, editor, "Render View", "Ctrl+R", EditorCommand::RenderView);
             command(
                 ui,
@@ -432,7 +445,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 EditorCommand::RenderToPictureViewer,
             );
             ui.separator();
-            let settings = Button::new("Edit Render Settings…")
+            let settings = Button::new(tr("Edit Render Settings…"))
                 .shortcut_text("Ctrl+B")
                 .selected(editor.show_render_settings);
             if ui.add(settings).clicked() {
@@ -441,7 +454,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             }
         });
 
-        ui.menu_button("Window", |ui| {
+        ui.menu_button(tr("Window"), |ui| {
             command(ui, editor, "Frame Scene", "H", EditorCommand::FrameScene);
             command(ui, editor, "Frame Selected Objects", "O", EditorCommand::FrameSelected);
             command(ui, editor, "Reset View", "", EditorCommand::ResetView);
@@ -453,7 +466,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     Pane::Coordinates => "Shift+F7",
                     _ => "",
                 };
-                let item = Button::new(pane.window_label())
+                let item = Button::new(tr(pane.window_label()))
                     .shortcut_text(shortcut)
                     .selected(editor.panes.is_shown(pane));
                 if ui.add(item).clicked() {
@@ -461,15 +474,15 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     ui.close();
                 }
             }
-            let viewer = Button::new("Picture Viewer").selected(editor.renders.viewer_open);
+            let viewer = Button::new(tr("Picture Viewer")).selected(editor.renders.viewer_open);
             if ui.add(viewer).clicked() {
                 editor.renders.viewer_open = !editor.renders.viewer_open;
                 ui.close();
             }
             ui.separator();
             if ui
-                .button("Reset Layout")
-                .on_hover_text("Put the current layout back as it was")
+                .button(tr("Reset Layout"))
+                .on_hover_text(tr("Put the current layout back as it was"))
                 .clicked()
             {
                 editor.panes.reset = true;
@@ -477,8 +490,8 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             }
         });
 
-        ui.menu_button("Help", |ui| {
-            if ui.button("Keyboard Shortcuts & About").clicked() {
+        ui.menu_button(tr("Help"), |ui| {
+            if ui.button(tr("Keyboard Shortcuts & About")).clicked() {
                 editor.show_about = true;
                 ui.close();
             }
@@ -486,12 +499,12 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
 
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
             ui.menu_button(
-                RichText::new(format!("Layout: {}", editor.panes.current.label()))
+                RichText::new(trf("Layout: {0}", &[&tr(editor.panes.current.label())]))
                     .color(p().text_dim)
                     .size(11.5),
                 |ui| {
                     for layout in PaneLayout::ALL {
-                        let item = Button::new(layout.label()).selected(editor.panes.current == layout);
+                        let item = Button::new(tr(layout.label())).selected(editor.panes.current == layout);
                         if ui.add(item).clicked() {
                             editor.panes.layout = Some(layout);
                             ui.close();
@@ -504,7 +517,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
 }
 
 fn command(ui: &mut Ui, editor: &mut EditorState, label: &str, shortcut: &str, cmd: EditorCommand) {
-    if ui.add(Button::new(label).shortcut_text(shortcut)).clicked() {
+    if ui.add(Button::new(tr(label)).shortcut_text(shortcut)).clicked() {
         editor.commands.push(cmd);
         ui.close();
     }
@@ -514,7 +527,7 @@ fn command(ui: &mut Ui, editor: &mut EditorState, label: &str, shortcut: &str, c
 fn recent_menu(ui: &mut Ui, editor: &mut EditorState) {
     let mut open = None;
     if editor.file.recent.is_empty() {
-        ui.add_enabled(false, Button::new("No recent documents"));
+        ui.add_enabled(false, Button::new(tr("No recent documents")));
     }
     for path in editor.file.recent.paths() {
         let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
@@ -524,7 +537,7 @@ fn recent_menu(ui: &mut Ui, editor: &mut EditorState) {
     }
     ui.separator();
     if ui
-        .add_enabled(!editor.file.recent.is_empty(), Button::new("Clear Recent"))
+        .add_enabled(!editor.file.recent.is_empty(), Button::new(tr("Clear Recent")))
         .clicked()
     {
         editor.file.recent.clear();
@@ -554,14 +567,14 @@ fn history_item(
 }
 
 fn create(ui: &mut Ui, editor: &mut EditorState, tag: ObjectKindTag) {
-    if ui.button(tag.label()).clicked() {
+    if ui.button(tr(tag.label())).clicked() {
         editor.commands.push(EditorCommand::CreateObject(tag));
         ui.close();
     }
 }
 
 fn tool_item(ui: &mut Ui, editor: &mut EditorState, tool: Tool) {
-    let button = Button::new(tool.label())
+    let button = Button::new(tr(tool.label()))
         .shortcut_text(tool.shortcut())
         .selected(editor.tool == tool);
     if ui.add(button).clicked() {
@@ -572,6 +585,6 @@ fn tool_item(ui: &mut Ui, editor: &mut EditorState, tool: Tool) {
 
 /// A disabled menu entry for a feature on the roadmap.
 fn planned(ui: &mut Ui, label: &str, shortcut: &str) {
-    ui.add_enabled(false, Button::new(label).shortcut_text(shortcut))
-        .on_disabled_hover_text("Planned — not implemented yet");
+    ui.add_enabled(false, Button::new(tr(label)).shortcut_text(shortcut))
+        .on_disabled_hover_text(tr("Planned — not implemented yet"));
 }

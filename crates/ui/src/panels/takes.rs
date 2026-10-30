@@ -6,6 +6,7 @@
 use egui::{Button, ComboBox, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
 use grid4d_scene::{Document, NodeId, ObjectKind, SceneEdit, TakeId};
 
+use crate::i18n::{tr, trf};
 use crate::{
     EditorCommand, EditorState,
     theme::{metrics, palette as p},
@@ -23,8 +24,8 @@ impl TakesPanel {
     pub fn show(&mut self, ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
         egui::Frame::new().inner_margin(Margin::symmetric(4, 2)).show(ui, |ui| {
             if ui
-                .button("New Take")
-                .on_hover_text("Add a take and make it active: changes are then recorded in it")
+                .button(tr("New Take"))
+                .on_hover_text(tr("Add a take and make it active: changes are then recorded in it"))
                 .clicked()
             {
                 editor.commands.push(EditorCommand::NewTake);
@@ -46,8 +47,10 @@ impl TakesPanel {
                     Some((id, take)) => active_take(ui, doc, editor, id, take),
                     None => {
                         ui.label(
-                            RichText::new("Main is the scene as it is. Make a take active to record changes in it.")
-                                .color(p().text_dim),
+                            RichText::new(tr(
+                                "Main is the scene as it is. Make a take active to record changes in it.",
+                            ))
+                            .color(p().text_dim),
                         );
                     }
                 }
@@ -88,12 +91,12 @@ impl TakesPanel {
             editor.commands.push(EditorCommand::SwitchTake(Some(id)));
         }
         response.context_menu(|ui| {
-            if ui.button("Rename").clicked() {
+            if ui.button(tr("Rename")).clicked() {
                 self.renaming = Some((id, name.to_owned()));
                 self.rename_needs_focus = true;
                 ui.close();
             }
-            if ui.button("Delete Take").clicked() {
+            if ui.button(tr("Delete Take")).clicked() {
                 editor.commands.push(EditorCommand::DeleteTake(id));
                 ui.close();
             }
@@ -130,26 +133,26 @@ fn take_row(ui: &mut Ui, name: &str, active: bool, overrides: usize) -> egui::Re
             rect.right_center() - vec2(6.0, 0.0),
             egui::Align2::RIGHT_CENTER,
             if overrides == 1 {
-                "1 override".to_owned()
+                tr("1 override").to_owned()
             } else {
-                format!("{overrides} overrides")
+                trf("{0} overrides", &[&overrides])
             },
             egui::FontId::proportional(11.0),
             p().text_dim,
         );
     }
     response.on_hover_text(if name == "Main" {
-        "The scene as it is"
+        tr("The scene as it is")
     } else {
-        "Click: make it active · double-click: rename · right-click: more"
+        tr("Click: make it active · double-click: rename · right-click: more")
     })
 }
 
 /// The active take's camera and overrides.
 fn active_take(ui: &mut Ui, doc: &Document, editor: &mut EditorState, id: TakeId, take: &grid4d_scene::Take) {
-    section_heading(ui, &format!("Take “{}”", take.name));
+    section_heading(ui, &trf("Take “{0}”", &[&take.name]));
     ui.horizontal(|ui| {
-        ui.label("Camera");
+        ui.label(tr("Camera"));
         let name_of = |camera: Option<NodeId>| {
             camera
                 .and_then(|c| doc.scene.get(c))
@@ -159,7 +162,7 @@ fn active_take(ui: &mut Ui, doc: &Document, editor: &mut EditorState, id: TakeId
         ComboBox::from_id_salt("grid4d.takes.camera")
             .selected_text(name_of(take.camera))
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut chosen, None, "The view's");
+                ui.selectable_value(&mut chosen, None, tr("The view's"));
                 for (camera, node) in doc.scene.iter() {
                     if matches!(node.data.kind, ObjectKind::Camera { .. }) {
                         ui.selectable_value(&mut chosen, Some(camera), &node.data.name);
@@ -167,7 +170,7 @@ fn active_take(ui: &mut Ui, doc: &Document, editor: &mut EditorState, id: TakeId
                 }
             })
             .response
-            .on_hover_text("The camera renders of this take look through");
+            .on_hover_text(tr("The camera renders of this take look through"));
         if chosen != take.camera {
             let mut takes = doc.takes.clone();
             if let Some(t) = takes.get_mut(id) {
@@ -181,15 +184,18 @@ fn active_take(ui: &mut Ui, doc: &Document, editor: &mut EditorState, id: TakeId
     });
     ui.add_space(4.0);
     if take.objects.is_empty() && take.render.is_none() {
-        ui.label(RichText::new("No overrides yet: what you change now is recorded in this take.").color(p().text_dim));
+        ui.label(
+            RichText::new(tr("No overrides yet: what you change now is recorded in this take.")).color(p().text_dim),
+        );
         return;
     }
-    ui.label(RichText::new("Overrides").color(p().text_dim).size(11.5));
+    ui.label(RichText::new(tr("Overrides")).color(p().text_dim).size(11.5));
     for (&node, values) in &take.objects {
         let name = doc.scene.get(node).map_or("(deleted)", |n| n.data.name.as_str());
         for value in values {
             let group = value.group();
-            let clear = override_row(ui, &format!("{name} · {}", group.label()));
+            let label = format!("{name} · {}", tr(group.label()));
+            let clear = override_row(ui, &label);
             if clear {
                 editor.commands.push(EditorCommand::ClearOverride {
                     take: id,
@@ -213,8 +219,8 @@ fn override_row(ui: &mut Ui, label: &str) -> bool {
     ui.horizontal(|ui| {
         ui.label(label);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add(Button::new("Clear").small())
-                .on_hover_text("Drop this override: the object shows Main's value")
+            ui.add(Button::new(tr("Clear")).small())
+                .on_hover_text(tr("Drop this override: the object shows Main's value"))
                 .clicked()
         })
         .inner

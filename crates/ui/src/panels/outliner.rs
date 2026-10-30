@@ -13,6 +13,7 @@ use egui::{
 };
 use grid4d_scene::{Body, Document, Node, NodeData, NodeId, ObjectKindTag, Scene, SceneEdit, Tag, TagKind};
 
+use crate::i18n::{key, tr, trf};
 use crate::{
     EditorCommand, EditorState, SelectMode, TagRef,
     commands::tag_color,
@@ -100,46 +101,46 @@ impl OutlinerPanel {
     fn menu(&mut self, ui: &mut Ui, scene: &Scene, editor: &mut EditorState) {
         egui::Frame::new().inner_margin(Margin::symmetric(4, 1)).show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    ui.add_enabled(false, Button::new("Save Selection as Object…"));
+                ui.menu_button(tr("File"), |ui| {
+                    ui.add_enabled(false, Button::new(tr("Save Selection as Object…")));
                 });
-                ui.menu_button("Edit", |ui| {
+                ui.menu_button(tr("Edit"), |ui| {
                     for (label, cmd) in [
-                        ("Select All", EditorCommand::SelectAll),
-                        ("Deselect All", EditorCommand::DeselectAll),
-                        ("Delete", EditorCommand::DeleteSelected),
+                        (key("Select All"), EditorCommand::SelectAll),
+                        (key("Deselect All"), EditorCommand::DeselectAll),
+                        (key("Delete"), EditorCommand::DeleteSelected),
                     ] {
-                        if ui.button(label).clicked() {
+                        if ui.button(tr(label)).clicked() {
                             editor.commands.push(cmd);
                             ui.close();
                         }
                     }
                 });
-                ui.menu_button("View", |ui| {
-                    if ui.button("Expand All").clicked() {
+                ui.menu_button(tr("View"), |ui| {
+                    if ui.button(tr("Expand All")).clicked() {
                         self.collapsed.clear();
                         ui.close();
                     }
-                    if ui.button("Collapse All").clicked() {
+                    if ui.button(tr("Collapse All")).clicked() {
                         self.collapsed
                             .extend(scene.iter().filter(|(_, n)| !n.children().is_empty()).map(|(id, _)| id));
                         ui.close();
                     }
                 });
-                ui.menu_button("Object", |ui| {
+                ui.menu_button(tr("Object"), |ui| {
                     for tag in ObjectKindTag::ALL {
-                        if ui.button(tag.label()).clicked() {
+                        if ui.button(tr(tag.label())).clicked() {
                             editor.commands.push(EditorCommand::CreateObject(tag));
                             ui.close();
                         }
                     }
                 });
-                ui.menu_button("Tags", |ui| {
+                ui.menu_button(tr("Tags"), |ui| {
                     let any = !editor.selection.is_empty();
                     for (label, tag) in tag_menu() {
                         if ui
                             .add_enabled(any, Button::new(label))
-                            .on_disabled_hover_text("Select the objects to tag first")
+                            .on_disabled_hover_text(tr("Select the objects to tag first"))
                             .clicked()
                         {
                             editor.commands.push(EditorCommand::AddTag(tag));
@@ -147,8 +148,8 @@ impl OutlinerPanel {
                         }
                     }
                 });
-                ui.menu_button("Bookmarks", |ui| {
-                    ui.add_enabled(false, Button::new("Bookmarks — planned"));
+                ui.menu_button(tr("Bookmarks"), |ui| {
+                    ui.add_enabled(false, Button::new(tr("Bookmarks — planned")));
                 });
             });
         });
@@ -161,7 +162,7 @@ impl OutlinerPanel {
                 icons::paint(ui.painter(), rect, Icon::NavZoom, p().text_dim);
                 ui.add(
                     TextEdit::singleline(&mut self.filter)
-                        .hint_text("Search objects")
+                        .hint_text(tr("Search objects"))
                         .desired_width(f32::INFINITY),
                 );
             });
@@ -271,11 +272,11 @@ impl OutlinerPanel {
             }
             let hit = ui
                 .interact(icon_rect, ui.scope_id().with(("camera", id)), Sense::click())
-                .on_hover_text(if linked {
-                    "The view looks through this camera · double-click: back to the default camera"
+                .on_hover_text(tr(if linked {
+                    key("The view looks through this camera · double-click: back to the default camera")
                 } else {
-                    "Double-click: look through this camera"
-                });
+                    key("Double-click: look through this camera")
+                }));
             if hit.double_clicked() {
                 self.actions.push(RowAction::LookThrough(id));
             } else if hit.clicked() {
@@ -313,8 +314,8 @@ impl OutlinerPanel {
                 None => icons::paint(&painter, icon_rect.shrink(1.0), Icon::Tag(kind), color),
             }
             let tip = match material {
-                Some((_, mat)) => format!("Material Tag: {} · double-click shows the material", mat.name),
-                None => format!("{} Tag", kind.label()),
+                Some((_, mat)) => trf("Material Tag: {0} · double-click shows the material", &[&mat.name]),
+                None => trf("{0} Tag", &[&tr(kind.label())]),
             };
             let hit = hit.on_hover_text(tip);
             if hit.double_clicked()
@@ -326,7 +327,7 @@ impl OutlinerPanel {
             }
             let actions = &mut self.actions;
             hit.context_menu(|ui| {
-                if ui.button("Delete Tag").clicked() {
+                if ui.button(tr("Delete Tag")).clicked() {
                     actions.push(RowAction::DeleteTag(id, kind));
                     ui.close();
                 }
@@ -346,7 +347,7 @@ impl OutlinerPanel {
                 StrokeKind::Inside,
             );
             ui.interact(chip, ui.scope_id().with(("layer", id)), Sense::hover())
-                .on_hover_text(format!("Layer: {}", layer.name));
+                .on_hover_text(trf("Layer: {0}", &[&layer.name]));
             name_right = chip.left() - 4.0;
         }
 
@@ -399,7 +400,7 @@ impl OutlinerPanel {
             let color = if visible { p().vis_default } else { p().vis_hidden };
             painter.circle_filled(center, if hit.hovered() { 3.4 } else { 2.8 }, color);
             if hit
-                .on_hover_text("Visibility (upper: editor, lower: renderer)")
+                .on_hover_text(tr("Visibility (upper: editor, lower: renderer)"))
                 .clicked()
             {
                 self.actions.push(action);
@@ -415,7 +416,7 @@ impl OutlinerPanel {
             (Icon::Cross, p().vis_hidden)
         };
         icons::paint(&painter, check_rect, icon, color);
-        if check.on_hover_text("Enable / disable object").clicked() {
+        if check.on_hover_text(tr("Enable / disable object")).clicked() {
             self.actions.push(RowAction::ToggleEnabled(id));
         }
 
@@ -433,19 +434,19 @@ impl OutlinerPanel {
         let actions = &mut self.actions;
         let has_parent = node.parent().is_some();
         response.context_menu(|ui| {
-            if ui.button("Rename").clicked() {
+            if ui.button(tr("Rename")).clicked() {
                 actions.push(RowAction::StartRename(id));
                 ui.close();
             }
-            if ui.button("Frame Object").clicked() {
+            if ui.button(tr("Frame Object")).clicked() {
                 actions.push(RowAction::Frame(id));
                 ui.close();
             }
-            if has_parent && ui.button("Move to Top Level").clicked() {
+            if has_parent && ui.button(tr("Move to Top Level")).clicked() {
                 actions.push(RowAction::MakeRoot(id));
                 ui.close();
             }
-            ui.menu_button("Add Tag", |ui| {
+            ui.menu_button(tr("Add Tag"), |ui| {
                 for (index, (label, _)) in tag_menu().enumerate() {
                     if ui.button(label).clicked() {
                         actions.push(RowAction::Select(id, SelectMode::Replace));
@@ -455,7 +456,7 @@ impl OutlinerPanel {
                 }
             });
             ui.separator();
-            if ui.button("Delete").clicked() {
+            if ui.button(tr("Delete")).clicked() {
                 actions.push(RowAction::Delete(id));
                 ui.close();
             }
@@ -560,7 +561,7 @@ impl OutlinerPanel {
                         d.visible_in_render = !d.visible_in_render;
                     });
                 }
-                RowAction::ToggleEnabled(id) => edit_data(doc, editor, id, "Enable", |d| d.enabled = !d.enabled),
+                RowAction::ToggleEnabled(id) => edit_data(doc, editor, id, key("Enable"), |d| d.enabled = !d.enabled),
                 RowAction::StartRename(id) => {
                     if let Some(n) = doc.scene.get(id) {
                         self.renaming = Some(id);
@@ -635,9 +636,9 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 fn tag_menu() -> impl Iterator<Item = (String, Tag)> {
     TagKind::ALL
         .into_iter()
-        .map(|kind| (format!("{} Tag", kind.label()), kind.default_tag()))
+        .map(|kind| (trf("{0} Tag", &[&tr(kind.label())]), kind.default_tag()))
         .chain(std::iter::once((
-            "Collider Body Tag".to_owned(),
+            tr("Collider Body Tag").to_owned(),
             Tag::Dynamics(Body::collider()),
         )))
 }
