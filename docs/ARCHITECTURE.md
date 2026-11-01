@@ -27,8 +27,8 @@ grid4d-geom ◀── grid4d-scene ◀── grid4d-eval ◀── grid4d-render
 | `grid4d-sim` | Rigid-body simulation, cached per frame; the only crate that sees `rapier3d` | geom, scene, eval |
 | `grid4d-io` | `.g4d` files (a versioned zip: JSON and binary meshes), glTF and OBJ import / export, PNG and OpenEXR | geom, scene |
 | `grid4d-script` | Rhai scripts working on a copy of the document | geom, scene, plugin |
-| `grid4d-ui` | The egui interface: panels, theme, icons, shortcuts, commands, undo history, translations | all of the above |
-| `grid4d` | The binary: the window, start-up, the list of built-in plugins — no logic of its own | ui, scene, plugin, plugins |
+| `grid4d-ui` | The egui interface: panels, theme, icons, shortcuts, commands, undo history, translations, autosave, crash reports | all of the above |
+| `grid4d` | The binary: the window, start-up (the logger and the panic hook first), the list of built-in plugins — no logic of its own | ui, scene, plugin, plugins |
 | `plugins/*` | The example plugins: Gear, Wave, Scatter | plugin, geom, scene |
 
 ## How a frame works
@@ -57,7 +57,11 @@ editor's own state — selection, tool, modes, undo history — lives in
 **Every change undoes.** A document change is a `SceneEdit` (add a variant and
 a case in the random undo / redo test for a new kind of change), recorded
 through `commit` as one step. A panel never changes the document without
-either an `EditorCommand` or a live edit followed by `CommitLive`.
+either an `EditorCommand` or a live edit followed by `CommitLive`. A second
+random test (`crates/ui/src/random_commands.rs`) drives long sequences of
+`EditorCommand`s, undos and redos through `commands::apply_pending` and
+checks that a history state always shows the same document — add a case
+there for a new command.
 
 **Read without touching.** Code that only reads uses `Scene::get`, never
 `get_mut`: every `get_mut` bumps the revision and makes evaluation run again.
@@ -83,7 +87,15 @@ shared with a shader has a size test.
 
 **Files.** A released `.g4d` version never changes: new data means a new
 version and a migration. Loading never trusts sizes a file claims and rejects
-numbers that are not finite.
+numbers that are not finite. Files are read through `grid4d_io::read_file`
+(the memory reserved first, so a file too large is an error, not an abort)
+and written to a temporary file that replaces the old one only when complete.
+
+**Failures are told, locally.** A panic writes a crash report into the data
+folder (`ui/src/crash.rs`; nothing is sent anywhere) and the next start
+points to it; start-up without graphics or without a writable data folder
+says so (`ui/src/startup.rs`). Errors the user can act on are alerts
+(`EditorState::file.alert`), not log lines.
 
 **Every text the interface shows is translated**: `i18n::tr("English text")`,
 with the Greek in `crates/ui/src/i18n/el.rs`; a test lists what is missing.

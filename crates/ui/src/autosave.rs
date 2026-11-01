@@ -52,6 +52,10 @@ pub struct Autosave {
     writer: Option<JoinHandle<Result<(), grid4d_io::IoError>>>,
     /// A crashed session's newest copy, until it is recovered or discarded.
     pub offer: Option<Recovery>,
+    /// Why this session's first copy that could not be written failed, until
+    /// taken; later failures are only logged.
+    failure: Option<String>,
+    failed: bool,
 }
 
 impl Autosave {
@@ -134,7 +138,7 @@ impl Autosave {
             return;
         };
         if let Err(err) = fs::create_dir_all(&dir) {
-            log::warn!("Autosave: no recovery folder {}: {err}", dir.display());
+            self.fail(format!("{}\n{err}", dir.display()));
             return;
         }
         self.hold_lock();
@@ -167,12 +171,29 @@ impl Autosave {
             match writer.join() {
                 Ok(Ok(())) => {}
                 Ok(Err(err)) => {
-                    log::warn!("Autosave failed: {err}");
                     self.written = None;
+                    let copy = self.copy_path().unwrap_or_default();
+                    self.fail(format!("{}\n{err}", copy.display()));
                 }
-                Err(_) => self.written = None,
+                Err(_) => {
+                    self.written = None;
+                    self.fail("the autosave stopped with an internal error".to_owned());
+                }
             }
         }
+    }
+
+    fn fail(&mut self, reason: String) {
+        log::warn!("Autosave failed: {reason}");
+        if !self.failed {
+            self.failed = true;
+            self.failure = Some(reason);
+        }
+    }
+
+    /// Why autosave failed, the first time it did in this session (once).
+    pub fn take_failure(&mut self) -> Option<String> {
+        self.failure.take()
     }
 
     fn remove_copy(&mut self) {
@@ -384,6 +405,42 @@ pub(crate) mod tests {
         assert_eq!(again.offer.as_ref().map(|o| &o.copy), Some(&recovered.copy));
         assert_eq!(again.resolve(RecoveryChoice::Discard), None);
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0, "discarded");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_copy_that_cannot_be_written_is_told_once() {
+        let dir = folder("failing");
+        // A file where the recovery folder should be.
+        let blocked = dir.join("recovery");
+        fs::write(&blocked, "").unwrap();
+        let mut autosave = Autosave::new(blocked.clone());
+        assert_eq!(autosave.offer, None, "an unreadable folder offers nothing");
+        let doc = Document::with_demo_scene();
+        let history = History::default();
+        let mut file = DocumentFile::with_dialogs(Box::new(NativeDialogs));
+        file.mark_unsaved();
+        autosave.tick(&doc, &history, &file, Some(60.0), 0.0);
+        autosave.tick(&doc, &history, &file, Some(60.0), 60.0);
+        autosave.wait();
+        let reason = autosave.take_failure().expect("told");
+        assert!(reason.contains(&blocked.display().to_string()), "{reason}");
+        assert_eq!(autosave.take_failure(), None);
+        autosave.tick(&doc, &history, &file, Some(60.0), 120.0);
+        autosave.wait();
+        assert_eq!(autosave.take_failure(), None, "only the first time");
+        autosave.finish();
+
+        // The folder is there but the copy cannot be written (a folder in its
+        // place): the writer's error is told too.
+        fs::remove_file(&blocked).unwrap();
+        let mut autosave = Autosave::new(blocked);
+        fs::create_dir_all(autosave.copy_path().unwrap().with_extension("part")).unwrap();
+        autosave.tick(&doc, &history, &file, Some(60.0), 0.0);
+        autosave.tick(&doc, &history, &file, Some(60.0), 60.0);
+        autosave.wait();
+        assert!(autosave.take_failure().is_some());
+        autosave.finish();
         let _ = fs::remove_dir_all(dir);
     }
 

@@ -4,7 +4,7 @@
 //! keep all their corners both ways. Texture coordinates start at the bottom left
 //! in OBJ and at the top left in Grid4D, so V is flipped both ways.
 
-use std::{collections::HashMap, fmt::Write as _, fs, path::Path};
+use std::{collections::HashMap, fmt::Write as _, path::Path};
 
 use glam::{Mat3, Mat4, Vec2, Vec3};
 use grid4d_geom::{PolyMesh, Smoothing, TriMesh, Triangulator};
@@ -106,7 +106,7 @@ fn load_mtl(path: &Path, base: Option<&Path>) -> tobj::MTLLoadResult {
     let relative = !path.is_absolute() && !text.contains(':') && !text.starts_with(['/', '\\']);
     let file = base
         .filter(|_| relative)
-        .and_then(|base| fs::read(base.join(path)).ok())
+        .and_then(|base| crate::read_file(&base.join(path)).ok())
         .ok_or(tobj::LoadError::OpenFileFailed)?;
     tobj::load_mtl_buf(&mut file.as_slice())
 }
@@ -396,6 +396,8 @@ fn one_line(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use grid4d_geom::{Topology, primitives};
     use grid4d_scene::Transform;
 

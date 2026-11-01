@@ -32,8 +32,15 @@ pub struct Grid4DApp {
 }
 
 impl Grid4DApp {
-    /// `open`: a document to open instead of the demo scene (from the command line).
-    pub fn new(cc: &eframe::CreationContext<'_>, open: Option<std::path::PathBuf>) -> Self {
+    /// `open`: a document to open instead of the demo scene (from the command
+    /// line). `data`: the data folder, if it can be used; `data_problem`: why
+    /// not, told on the first frame.
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        open: Option<std::path::PathBuf>,
+        data: Option<std::path::PathBuf>,
+        data_problem: Option<grid4d_ui::startup::DataFolderProblem>,
+    ) -> Self {
         let render_state = cc.wgpu_render_state.as_ref();
         let mut viewport = ViewportPanel::new(render_state);
 
@@ -45,16 +52,11 @@ impl Grid4DApp {
                     format!("{} · {:?}", info.name, info.backend)
                 },
             ),
-            // The build's identity (see build.rs) and the licences it contains.
-            build: grid4d_ui::BuildInfo {
-                version: env!("CARGO_PKG_VERSION"),
-                commit: env!("GRID4D_COMMIT"),
-                date: env!("GRID4D_COMMIT_DATE"),
-                licences: include_str!("../assets/THIRD_PARTY_LICENSES.txt"),
-            },
+            build: build_info(),
             ..EditorState::default()
         };
         log::info!("Renderer: {}", editor.renderer_info);
+        grid4d_ui::crash::set_adapter(&editor.renderer_info);
         if let Some(stored) = cc.storage.and_then(|s| s.get_string(recent::STORAGE_KEY)) {
             editor.file.recent = RecentFiles::from_storage(&stored);
         }
@@ -65,13 +67,21 @@ impl Grid4DApp {
             editor.preferences = stored.checked();
         }
         theme::apply(&cc.egui_ctx, editor.preferences.theme);
+        grid4d_ui::i18n::set_language(editor.preferences.language);
         viewport.apply_defaults(&editor.preferences.views);
         // Recovery copies live beside the stored settings; one a crashed run
-        // left is offered on the first frame.
-        if let Some(dir) = eframe::storage_dir("grid4d") {
+        // left is offered on the first frame, with a crash report written
+        // since the last start.
+        if let Some(dir) = data {
             editor.autosave = Autosave::new(dir.join("recovery"));
+            editor.crash = grid4d_ui::crash::CrashReports::new(&dir.join("crashes"));
             // The script library beside them (made with the examples).
             editor.scripts = grid4d_ui::scripts::Scripts::new(dir.join("scripts"));
+        }
+        if let Some(problem) = data_problem {
+            let alert = problem.alert();
+            log::warn!("{}: {}", alert.title, alert.message);
+            editor.file.alert = Some(alert);
         }
 
         let doc = Document::with_demo_scene();
@@ -193,5 +203,15 @@ impl eframe::App for Grid4DApp {
         // Title, close button and confirmed quit follow the document's file state.
         file::sync_window(&ctx, &self.doc, &mut self.editor);
         file::autosave(&ctx, &self.doc, &mut self.editor);
+    }
+}
+
+/// The build's identity (see build.rs) and the licences it contains.
+pub fn build_info() -> grid4d_ui::BuildInfo {
+    grid4d_ui::BuildInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        commit: env!("GRID4D_COMMIT"),
+        date: env!("GRID4D_COMMIT_DATE"),
+        licences: include_str!("../assets/THIRD_PARTY_LICENSES.txt"),
     }
 }

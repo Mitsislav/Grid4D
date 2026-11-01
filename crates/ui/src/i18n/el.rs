@@ -44,9 +44,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "A collider: rigid bodies hit it; it moves only by its own animation",
         "Σώμα σύγκρουσης: τα άκαμπτα σώματα το χτυπούν· κινείται μόνο με τη δική του κίνηση",
     ),
+    ("A crash report was written: {0}", "Γράφτηκε αναφορά κατάρρευσης: {0}"),
     (
         "A new material in the Material Manager",
         "Ένα νέο υλικό στη Διαχείριση Υλικών",
+    ),
+    (
+        "A recovery copy of your unsaved work could not be written. Save your work to keep it safe.",
+        "Δεν ήταν δυνατό να γραφτεί αντίγραφο ανάκτησης της μη αποθηκευμένης δουλειάς σας. Αποθηκεύστε τη δουλειά σας για να είναι ασφαλής.",
     ),
     (
         "A rigid body: it falls, collides and bounces from the start frame on",
@@ -222,6 +227,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Autokeying on / off", "Αυτόματα κλειδιά ναι / όχι"),
     ("Automatic", "Αυτόματη"),
     ("Autosave", "Αυτόματη αποθήκευση"),
+    ("Autosave Failed", "Η αυτόματη αποθήκευση απέτυχε"),
     ("Axis", "Άξονας"),
     (
         "Axis lock: enable/disable this axis for the active tool",
@@ -397,6 +403,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Cylinder", "Κύλινδρος"),
     ("Dark", "Σκούρο"),
     ("Darker", "Σκουρότερο"),
+    ("Data Folder Unavailable", "Ο φάκελος δεδομένων δεν είναι διαθέσιμος"),
     ("Default Camera", "Προεπιλεγμένη κάμερα"),
     ("Deformer", "Παραμορφωτής"),
     (
@@ -621,8 +628,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Πλέγμα, Άξονας κόσμου και HUD: μενού Φίλτρο",
     ),
     ("Grid4D", "Grid4D"),
+    ("Grid4D Cannot Start", "Το Grid4D δεν μπορεί να ξεκινήσει"),
     ("Grid4D Document", "Έγγραφο Grid4D"),
     ("Grid4D Document or Model", "Έγγραφο Grid4D ή μοντέλο"),
+    ("Grid4D Stopped Unexpectedly", "Το Grid4D σταμάτησε απροσδόκητα"),
+    (
+        "Grid4D could not start its graphics:\n\n{0}\n\nGrid4D needs a graphics card with Vulkan, Direct3D 12 or Metal support. Updating the graphics driver often helps.",
+        "Το Grid4D δεν μπόρεσε να ξεκινήσει τα γραφικά του:\n\n{0}\n\nΤο Grid4D χρειάζεται κάρτα γραφικών με υποστήριξη Vulkan, Direct3D 12 ή Metal. Η ενημέρωση του προγράμματος οδήγησης γραφικών συχνά βοηθά.",
+    ),
     (
         "Grid4D did not close normally. A copy of {0} was saved automatically {1}.",
         "Το Grid4D δεν έκλεισε κανονικά. Ένα αντίγραφο του {0} αποθηκεύτηκε αυτόματα {1}.",
@@ -701,6 +714,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Invert", "Αντιστροφή"),
     ("Invert Selection", "Αντιστροφή επιλογής"),
     ("Isoparms — planned", "Ισοπαραμετρικές — προγραμματίζεται"),
+    (
+        "It stays on this computer; attach it to a bug report if you report the problem.",
+        "Μένει σε αυτόν τον υπολογιστή· επισυνάψτε την σε μια αναφορά σφάλματος, αν αναφέρετε το πρόβλημα.",
+    ),
     ("Iterate", "Επανάληψη"),
     ("Keep Y-Axis Length", "Διατήρηση μήκους άξονα Y"),
     (
@@ -1407,6 +1424,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Set Interpolation", "Ορισμός παρεμβολής"),
     ("Set Key", "Ορισμός κλειδιού"),
     ("Set Tangents", "Ορισμός εφαπτομένων"),
+    (
+        "Settings, recovery copies, scripts and crash reports cannot be kept in this session.",
+        "Οι ρυθμίσεις, τα αντίγραφα ανάκτησης, τα scripts και οι αναφορές κατάρρευσης δεν μπορούν να φυλαχτούν σε αυτή τη συνεδρία.",
+    ),
     ("Shading", "Σκίαση"),
     ("Shadow", "Σκιά"),
     ("Shadow Maps (Soft)", "Χάρτες σκιών (μαλακές)"),
@@ -1420,6 +1441,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Shifts the wave along; key it to make the wave travel",
         "Μετατοπίζει το κύμα· βάλτε της κλειδιά για να ταξιδεύει",
     ),
+    ("Show Report", "Εμφάνιση αναφοράς"),
     ("Show it alone / back in the arrangement", "Μόνη της / πίσω στη διάταξη"),
     ("Shrink Selection", "Συρρίκνωση επιλογής"),
     ("Sides", "Πλευρές"),
@@ -1570,6 +1592,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "The simulation cache is full ({0} MB): raise Cache Memory in the Project settings",
         "Η μνήμη προσομοίωσης γέμισε ({0} MB): αυξήστε τη Μνήμη αποθήκευσης στις Ρυθμίσεις έργου",
+    ),
+    (
+        "The system gave Grid4D no folder for its data.",
+        "Το σύστημα δεν έδωσε στο Grid4D φάκελο για τα δεδομένα του.",
     ),
     (
         "The take renders show; Current: the active one",

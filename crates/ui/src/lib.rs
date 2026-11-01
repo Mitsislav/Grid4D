@@ -17,6 +17,7 @@
 
 pub mod autosave;
 pub mod commands;
+pub mod crash;
 mod current_state;
 pub mod editor;
 pub mod file;
@@ -28,11 +29,14 @@ mod live_edit;
 mod modeling;
 pub mod panels;
 pub mod preferences;
+#[cfg(test)]
+mod random_commands;
 pub mod recent;
 pub mod rendering;
 pub mod scripts;
 pub mod shortcuts;
 pub mod simulation;
+pub mod startup;
 pub mod theme;
 mod widgets;
 pub mod window;

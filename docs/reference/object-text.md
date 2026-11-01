@@ -3,7 +3,7 @@
 > Sources (read 2026-10-29): manual —
 > [Text spline Object properties](https://help.maxon.net/c4d/en-us/Content/html/OSPLINETEXT-ID_OBJECTPROPERTIES.html).
 > Glyph outlines: the TrueType / OpenType `glyf` and `CFF` outline formats as
-> read by the `ttf-parser` crate (public specifications). Written in our own
+> read by the `skrifa` crate (public specifications; `ttf-parser` until 14.3). Written in our own
 > words — no copied text or images.
 >
 > Covers implementation-plan step **9.8**. Builds on
@@ -67,7 +67,7 @@ Separate Letters on Make Editable.
 | Piece | Where |
 |-------|-------|
 | `Text` (text as `Arc<str>`, height, align, spacings, plane, reverse, interpolation), `TextAlign` — plain data | `grid4d-geom::spline` |
-| Outlines: `text_spline(&Text) -> Spline` (ttf-parser over the built-in font), `FONT_NAME` | new crate `grid4d-text` (`crates/text`), depends on `grid4d-geom`, `ttf-parser`, `epaint_default_fonts` |
+| Outlines: `text_spline(&Text) -> Spline` (skrifa over the built-in font; ttf-parser until 14.3, same outlines), `FONT_NAME` | new crate `grid4d-text` (`crates/text`), depends on `grid4d-geom`, `skrifa`, `epaint_default_fonts` |
 | `ObjectKind::Text(Text)`, tag `Text` in `SPLINES` | `scene/node.rs` |
 | Curve cache (`CurveSource::Text`), bounds from the cached curve, spline inputs of generators | `grid4d-eval` |
 | Make Editable → editable spline | `ui/src/commands.rs` |

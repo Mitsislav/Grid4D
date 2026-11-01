@@ -10,11 +10,7 @@ all-features = false
 # vulnerabilities do.
 unmaintained = "workspace"
 yanked = "deny"
-ignore = [
-    # ttf-parser (grid4d-text's glyph outlines) is unmaintained; moving to
-    # skrifa is planned (IMPLEMENTATION_PLAN.md, Phase 14). No vulnerability.
-    { id = "RUSTSEC-2026-0192", reason = "unmaintained only; replacement planned" },
-]
+ignore = []
 
 [licenses]
 # Permissive licences only, plus the font and data licences egui and Unicode

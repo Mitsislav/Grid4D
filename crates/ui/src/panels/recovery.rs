@@ -1,5 +1,7 @@
 //! "Recover Unsaved Work?" — shown at startup when a Grid4D that did not close
-//! normally left a recovery copy. The answer is queued as a command.
+//! normally left a recovery copy. The answer is queued as a command. A crash
+//! report written since the last start is pointed to there, or in its own
+//! window, "Grid4D Stopped Unexpectedly", when there is nothing to recover.
 
 use std::time::SystemTime;
 
@@ -9,7 +11,10 @@ use crate::i18n::{tr, trf};
 use crate::{EditorCommand, EditorState, autosave::RecoveryChoice, theme::palette as p};
 
 pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
-    let Some(offer) = &editor.autosave.offer else { return };
+    let Some(offer) = &editor.autosave.offer else {
+        crash_report(ctx, editor);
+        return;
+    };
     let name = offer
         .original
         .as_deref()
@@ -33,6 +38,10 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
         );
         ui.add_space(6.0);
         ui.label(RichText::new(message).color(p().text_dim));
+        if let Some(report) = &editor.crash.new_report {
+            ui.add_space(6.0);
+            report_line(ui, report, &mut editor.commands);
+        }
         ui.add_space(14.0);
         ui.horizontal(|ui| {
             if ui.button(tr("Recover")).clicked() {
@@ -49,6 +58,49 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
     }
     if let Some(choice) = choice {
         editor.commands.push(EditorCommand::Recover(choice));
+    }
+    if editor.autosave.offer.is_none() || choice.is_some() {
+        editor.crash.new_report = None;
+    }
+}
+
+/// "Grid4D Stopped Unexpectedly": a crash report and nothing to recover.
+fn crash_report(ctx: &egui::Context, editor: &mut EditorState) {
+    let Some(report) = &editor.crash.new_report else { return };
+    let mut ok = false;
+    let response = Modal::new(Id::unique("grid4d.crash_report")).show(ctx, |ui| {
+        ui.set_width(420.0);
+        ui.label(
+            RichText::new(tr("Grid4D Stopped Unexpectedly"))
+                .size(15.0)
+                .strong()
+                .color(p().text_strong),
+        );
+        ui.add_space(6.0);
+        report_line(ui, report, &mut editor.commands);
+        ui.add_space(14.0);
+        ui.vertical_centered(|ui| ok = ui.button(tr("OK")).clicked());
+    });
+    if ok || response.should_close() {
+        editor.crash.new_report = None;
+    }
+}
+
+/// Where the report is, that it stayed on this computer, and Show Report.
+fn report_line(ui: &mut egui::Ui, report: &std::path::Path, commands: &mut crate::CommandQueue) {
+    let name = report
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    ui.label(RichText::new(trf("A crash report was written: {0}", &[&name])).color(p().text_dim));
+    ui.label(
+        RichText::new(tr(
+            "It stays on this computer; attach it to a bug report if you report the problem.",
+        ))
+        .color(p().text_dim),
+    );
+    ui.add_space(4.0);
+    if ui.button(tr("Show Report")).clicked() {
+        commands.push(EditorCommand::ShowCrashReport(report.to_path_buf()));
     }
 }
 

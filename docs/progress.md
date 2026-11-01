@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 14 — Stabilisation (v1.0) |
-| Last step done | 14.2 — File format freeze (2026-11-01) |
-| Next step | 14.3 — Robustness |
-| Tests | 756, all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 14.3 — Robustness (2026-11-01) |
+| Next step | 14.4 — Performance budget |
+| Tests | 767, all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2047,6 +2047,7 @@ endless loops, a library with examples and the Script Manager. Guides:
 | — | Phase 14 planned in detail: CI on Node 24 with `cargo deny` and third-party licences; the `.g4d` format reviewed, frozen and specified, property-tested and fuzzed; crash reports and a random-command test; the performance budget benchmarked and measured; `egui_kittest` UI tests and a walkthrough in English and Greek; packages for Windows, macOS and Linux from a tagged release; the 1.0 documentation (`IMPLEMENTATION_PLAN.md`) | 751 |
 | 14.1 | CI on Node 24; `cargo deny` (licences, advisories, duplicates, sources) and the third-party licence list checked in CI; Help ▸ About shows the version, commit and date and a Licences page; version 0.13.0; dependencies updated | 751 |
 | 14.2 | `.g4d` v3 reviewed and frozen, specified in `docs/FILE_FORMAT.md`; a golden fixture with everything v3 holds; property-tested round trips; damaged and hostile files; a fuzz target with a CI job and a weekly run; saved rotations kept exact and never NaN | 756 |
+| 14.3 | Text outlines read with `skrifa` (egui's own font reader) instead of the unmaintained `ttf-parser`, identical to the byte; local crash reports (a panic hook, the log's last lines, pointed to on the next start, Show Report); the random-command test (long `EditorCommand` sequences with undo / redo); start-up without graphics or a data folder told in words; autosave's first failure an alert; failed saves keep the old file; files too large for memory refused | 767 |
 
 **Planning notes:**
 - **What "stable" means here.** No new features: the format frozen and
@@ -2118,6 +2119,53 @@ endless loops, a library with examples and the Script Manager. Guides:
   grown to about 95 GB (57 GB of incremental cache, 36 GB of old test
   binaries). The incremental cache and the half-built release folder were
   deleted (rebuilt as needed); `cargo clean` now and then keeps it in check.
+
+**14.3 — Robustness**
+
+*Problems and solutions:*
+- **Replacing `ttf-parser`.** `skrifa` 0.44 was already in the build (egui
+  reads its fonts with it), so the change adds no crate. Its metrics follow
+  the same rule as before (OS/2 typo metrics when the font asks for them,
+  else `hhea`) and its pen gets the same moves, lines and curves: the
+  outlines of a set of test strings (Latin, Greek, accents, symbols, several
+  lines) were dumped with both libraries and compared — identical byte for
+  byte. `ttf-parser` remains in `Cargo.lock` only through winit's Wayland
+  decorations on Linux, which `cargo deny` does not count as ours, so the
+  advisory needs no exception any more.
+- **A panic hook that must not fail.** It runs while the program is already
+  in trouble: it never waits for a lock (the panicking thread may hold the
+  log's), never panics itself, and writes the report before the default
+  hook prints the message. It is tested in an integration test of its own,
+  since a hook is installed for the whole process.
+- **The log's last lines** need the logger to keep them: `env_logger` is
+  built rather than installed and wrapped by a logger that keeps 200 lines.
+- **A UTC time without a date crate** — the report's name and header use
+  the civil-from-days conversion, checked against known dates (a leap day,
+  2100).
+- **Messages before the language is known.** The data folder is checked
+  before the window opens, when the preferences (and the language) are not
+  loaded yet; the check returns the problem, and the app turns it into a
+  translated alert on its first frame.
+- **No GPU.** eframe's wgpu start-up already falls back to a software
+  adapter when it is the only one (WARP on Windows); with none at all
+  `run_native` returns an error and the window never opens — now a system
+  message box says why. Checked by starting with `WGPU_BACKEND` set to a
+  backend the machine lacks (see below).
+- **Found on screen: the message box closed itself.** Started with
+  `WGPU_BACKEND=metal` (a backend Windows lacks), Grid4D logged the message
+  but no box appeared: the failed event loop leaves a quit message in the
+  main thread's queue, and `MessageBoxW` returns at once when it sees one.
+  The box is now shown from a thread of its own, and stays until OK.
+- **The random-command test** found no bug in 120 000 commands (300 seeds
+  of 400, frame changes and component modes included) — so it was checked
+  against a deliberate one: a command that renamed the document without an
+  undo step was caught within 32 commands. Its first runs found two
+  mistakes of its own: a selected tag may outlive its object by design
+  (undo brings both back; it is only read through `selected_tag`), and a
+  sequence ending in undos has its end further on, after redoing.
+  Coverage was checked by counting the undo labels it produced: almost
+  every command that changes the document, including Extrude, Bevel,
+  Bridge, Weld, Loop and Line Cut.
 
 ---
 

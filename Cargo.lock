@@ -2034,7 +2034,7 @@ dependencies = [
  "epaint_default_fonts",
  "glam 0.34.2",
  "grid4d-geom",
- "ttf-parser",
+ "skrifa",
 ]
 
 [[package]]

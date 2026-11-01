@@ -2,7 +2,7 @@
 //! `docs/reference/interchange-gltf.md`. Lengths are metres in glTF and
 //! centimetres here (× 100); both are right-handed and Y-up.
 
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, path::Path};
 
 use glam::{Quat, Vec2, Vec3};
 use gltf::{buffer::Source, camera::Projection, mesh::Mode};
@@ -169,7 +169,7 @@ fn load_uri(uri: &str, base: Option<&Path>) -> Result<Vec<u8>, IoError> {
         )));
     }
     let base = base.ok_or_else(|| invalid("external buffers need the glTF file's folder"))?;
-    fs::read(base.join(path)).map_err(IoError::Io)
+    crate::read_file(&base.join(path))
 }
 
 /// `%20` and friends → bytes (URIs in glTF are percent-encoded).
@@ -453,7 +453,7 @@ fn triangles(mode: Mode, indices: &[u32]) -> Vec<[u32; 3]> {
 
 #[cfg(test)]
 mod tests {
-    use std::f32::consts::FRAC_PI_2;
+    use std::{f32::consts::FRAC_PI_2, fs};
 
     use grid4d_geom::Topology;
     use grid4d_scene::ObjectKindTag;

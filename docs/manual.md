@@ -40,7 +40,10 @@ screenshots come from the application itself.
 ## 1. Getting started
 
 **Requirements:** a graphics card with Vulkan, Direct3D 12 or Metal support (any GPU
-from the last decade). Grid4D runs on Windows, Linux and macOS.
+from the last decade). Grid4D runs on Windows, Linux and macOS. If it cannot
+start its graphics (no driver, an unsupported card, a remote session without
+graphics), it says so in a message, **Grid4D Cannot Start**, with the reason,
+instead of closing silently; updating the graphics driver often helps.
 
 **Running from source** (needs the Rust toolchain, 1.95 or newer):
 
@@ -144,6 +147,14 @@ Changes take effect at once; close the window with its **×**.
 - **Autosave** — while a document has unsaved changes, Grid4D keeps a recovery
   copy of it, renewed **Every** few minutes (5 at first). It never touches your
   own file, and it is deleted when you save or when Grid4D closes normally.
+  If a copy cannot be written (a full disk, say), **Autosave Failed** tells
+  you once, so you know to save your work yourself.
+
+Settings, recovery copies, scripts and crash reports live in Grid4D's **data
+folder** (on Windows `%APPDATA%\grid4d\data`, on Linux
+`~/.local/share/grid4d`, on macOS `~/Library/Application Support/grid4d`).
+If Grid4D cannot write there, it still starts and says so in **Data Folder
+Unavailable**: in that session, nothing of those is kept.
 - **Views** — the **Shading** and whether the **Grid**, **World Axis** and
   **HUD** show in the views when Grid4D starts. **Apply to Views** gives the
   open views these settings now.
@@ -634,6 +645,23 @@ positions, sizes and rotations.
   Press **Esc** to decide on the next start instead.
 
   ![Recover Unsaved Work? after Grid4D stopped unexpectedly](images/manual/recovery.png)
+- **Crash reports.** When Grid4D runs into an internal error it writes a
+  crash report, a text file in the `crashes` folder of its data folder (see
+  [§2.2](#22-preferences)): the version, the system and graphics card, the
+  error and where it happened, and the last lines Grid4D logged — none of
+  your document. **Nothing is sent anywhere.** On the next start Grid4D
+  points to the report once, in **Recover Unsaved Work?** or in its own
+  window, **Grid4D Stopped Unexpectedly**; **Show Report** opens the folder
+  with the report selected. If you report the problem, attach the report.
+  The newest 20 reports are kept.
+
+  ![Grid4D Stopped Unexpectedly, with the crash report's name and Show Report](images/manual/crash-report.png)
+- **A full disk.** If a save cannot be completed, your file stays as it was
+  before, **Could Not Save Document** gives the reason, and the document
+  keeps its unsaved changes — free some space and save again.
+- **Very large files.** A file that needs more memory than the computer
+  has is refused with "not enough memory to read this file", and Grid4D
+  carries on.
 - `.g4d` files keep everything in the document: objects, hierarchy, parameters, the
   meshes of polygon objects, and their selected and hidden points, edges and
   polygons. Editor state (tool, mode, camera) is not saved.

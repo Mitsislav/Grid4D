@@ -420,6 +420,44 @@ pub fn autosave(ctx: &egui::Context, doc: &Document, editor: &mut EditorState) {
     if let Some(due) = editor.autosave.tick(doc, &editor.history, &editor.file, interval, now) {
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(due));
     }
+    // The first failure of a session is told; later ones are only logged.
+    if let Some(reason) = editor.autosave.take_failure()
+        && editor.file.alert.is_none()
+    {
+        editor.file.alert = Some(Alert {
+            title: "Autosave Failed",
+            message: format!(
+                "{}\n\n{reason}",
+                tr("A recovery copy of your unsaved work could not be written. Save your work to keep it safe.")
+            ),
+        });
+    }
+}
+
+/// Shows `path` in the system's file manager: selected in Explorer or the
+/// Finder, its folder elsewhere. Failures are only logged.
+pub fn reveal(path: &Path) {
+    let mut command;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        command = std::process::Command::new("explorer");
+        // Explorer wants `/select,"path"` as one argument, quoted inside.
+        command.raw_arg(format!("/select,\"{}\"", path.display()));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        command = std::process::Command::new("open");
+        command.arg("-R").arg(path);
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        command = std::process::Command::new("xdg-open");
+        command.arg(path.parent().unwrap_or(path));
+    }
+    if let Err(err) = command.spawn() {
+        log::warn!("Could not show {}: {err}", path.display());
+    }
 }
 
 /// File ▸ Merge: adds the objects of `path` (a glTF file or a Grid4D document)

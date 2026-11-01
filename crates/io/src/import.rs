@@ -3,7 +3,7 @@
 //! from a document to write (File ▸ Export). A flat list in Object Manager
 //! pre-order, each node naming its parent by index.
 
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, path::Path};
 
 use grid4d_scene::{Document, Layers, MaterialId, Materials, Node, NodeData, NodeId, ObjectKind, Tag};
 
@@ -170,7 +170,7 @@ pub fn import(path: &Path) -> Result<Objects, IoError> {
             crate::EXTENSION
         )));
     }
-    let bytes = fs::read(path).map_err(IoError::Io)?;
+    let bytes = crate::read_file(path)?;
     if has_extension(path, &["obj"]) {
         let name = path
             .file_stem()

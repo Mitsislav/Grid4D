@@ -147,6 +147,8 @@ pub enum EditorCommand {
     AnswerUnsaved(UnsavedChoice),
     /// The answer to "Recover Unsaved Work?" after a crash.
     Recover(crate::autosave::RecoveryChoice),
+    /// Shows this crash report in the system's file manager.
+    ShowCrashReport(std::path::PathBuf),
     /// Gives every view the preferred shading, grid, axis and HUD.
     ApplyViewDefaults,
     /// Puts `objects` on `layer` (`None`: on no layer of their own), one undo
@@ -561,6 +563,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::Quit => file::request(FileAction::Quit, doc, editor, viewport),
         EditorCommand::AnswerUnsaved(choice) => file::answer(choice, doc, editor, viewport),
         EditorCommand::Recover(choice) => file::recover(choice, doc, editor, viewport),
+        EditorCommand::ShowCrashReport(path) => file::reveal(&path),
         EditorCommand::ApplyViewDefaults => viewport.apply_defaults(&editor.preferences.views),
         EditorCommand::CreateObject(tag) if ObjectKindTag::EFFECTORS.contains(&tag) => {
             create_effector(doc, editor, viewport, tag);

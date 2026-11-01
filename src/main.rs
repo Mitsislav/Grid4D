@@ -13,11 +13,23 @@ mod plugins;
 use app::Grid4DApp;
 
 fn main() -> eframe::Result {
-    env_logger::Builder::from_env(
+    // The log, whose last lines a crash report keeps.
+    let logger = env_logger::Builder::from_env(
         env_logger::Env::default()
             .default_filter_or("warn,grid4d=info,grid4d_scene=info,grid4d_render=info,grid4d_ui=info"),
     )
-    .init();
+    .build();
+    let level = logger.filter();
+    grid4d_ui::crash::install_log(Box::new(logger), level);
+
+    // Settings, recovery copies, scripts and crash reports live here; a
+    // panic from now on leaves a report (nothing is sent anywhere).
+    let data = eframe::storage_dir("grid4d");
+    let data_problem = grid4d_ui::startup::check_data_folder(data.as_deref()).err();
+    let data = data.filter(|_| data_problem.is_none());
+    if let Some(dir) = &data {
+        grid4d_ui::crash::install(dir.join("crashes"), app::build_info());
+    }
 
     // `grid4d scene.g4d` opens that document (how "Open with" and file
     // associations launch the app).
@@ -46,11 +58,17 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
 
-    eframe::run_native(
+    let started = eframe::run_native(
         "Grid4D",
         native_options,
-        Box::new(|cc| Ok(Box::new(Grid4DApp::new(cc, open)))),
-    )
+        Box::new(|cc| Ok(Box::new(Grid4DApp::new(cc, open, data, data_problem)))),
+    );
+    // Without usable graphics the window never opens: say why rather than
+    // vanish.
+    if let Err(err) = &started {
+        grid4d_ui::startup::cannot_start(&err.to_string());
+    }
+    started
 }
 
 /// The window, taskbar and dock icon. (On Windows `build.rs` also embeds

@@ -53,7 +53,8 @@ mod v2;
 mod v3;
 
 use std::{
-    fmt, fs, io,
+    fmt, fs,
+    io::{self, Read as _},
     path::{Path, PathBuf},
 };
 
@@ -257,12 +258,35 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), IoError> {
 
 /// Loads the document at `path`.
 pub fn load(path: &Path) -> Result<Document, IoError> {
-    from_bytes(&fs::read(path)?)
+    from_bytes(&read_file(path)?)
 }
 
 /// [`load`], with the simulation's frames saved beside the document, if any.
 pub fn load_with_cache(path: &Path) -> Result<(Document, Option<SimulationCache>), IoError> {
-    from_bytes_with_cache(&fs::read(path)?)
+    from_bytes_with_cache(&read_file(path)?)
+}
+
+/// Reads the whole file at `path`, reserving the memory it needs first: a
+/// file larger than the memory available is refused with an error
+/// (`ErrorKind::OutOfMemory`) instead of stopping the program.
+pub fn read_file(path: &Path) -> Result<Vec<u8>, IoError> {
+    let mut file = fs::File::open(path)?;
+    let mut bytes = reserve(file.metadata()?.len())?;
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// An empty buffer with room for `size` bytes, or an error when that much
+/// memory cannot be had.
+fn reserve(size: u64) -> Result<Vec<u8>, IoError> {
+    let mut bytes = Vec::new();
+    match usize::try_from(size).map(|size| bytes.try_reserve_exact(size)) {
+        Ok(Ok(())) => Ok(bytes),
+        _ => Err(IoError::Io(io::Error::new(
+            io::ErrorKind::OutOfMemory,
+            format!("not enough memory to read this file ({} MB)", size.div_ceil(1 << 20)),
+        ))),
+    }
 }
 
 /// `scene.g4d` → `scene.g4d.tmp`, in the same directory (so the rename is atomic).
@@ -270,4 +294,52 @@ fn temp_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".tmp");
     path.with_file_name(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_larger_than_memory_is_refused_with_a_message() {
+        for size in [u64::MAX, 1 << 62] {
+            let Err(IoError::Io(err)) = reserve(size) else {
+                panic!("{size} bytes reserved");
+            };
+            assert_eq!(err.kind(), io::ErrorKind::OutOfMemory);
+            assert!(
+                err.to_string().starts_with("not enough memory to read this file ("),
+                "{err}"
+            );
+        }
+        assert!(reserve(1 << 20).unwrap().capacity() >= 1 << 20);
+    }
+
+    #[test]
+    fn a_save_that_cannot_be_written_keeps_the_old_file() {
+        let dir = std::env::temp_dir().join(format!("grid4d-io-failed-save-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.g4d");
+        let old = Document::with_demo_scene();
+        save(&old, &path).unwrap();
+        let before = fs::read(&path).unwrap();
+
+        // What a full disk does to the temporary file, made certain: it
+        // cannot be written (a folder is in its place).
+        fs::create_dir(temp_path(&path)).unwrap();
+        let err = save(&Document::new("Newer"), &path).unwrap_err();
+        assert!(matches!(err, IoError::Io(_)), "{err}");
+        assert_eq!(fs::read(&path).unwrap(), before, "the old file is untouched");
+        assert_eq!(load(&path).unwrap().name, old.name);
+
+        // A temporary file left half written is removed.
+        fs::remove_dir(temp_path(&path)).unwrap();
+        fs::write(temp_path(&path), b"PK half").unwrap();
+        save(&Document::new("Newer"), &path).unwrap();
+        assert!(!temp_path(&path).exists());
+        assert_eq!(read_file(&path).unwrap(), fs::read(&path).unwrap());
+        assert_eq!(load(&path).unwrap().name, "Newer");
+        let _ = fs::remove_dir_all(dir);
+    }
 }

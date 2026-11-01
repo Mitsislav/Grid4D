@@ -7,7 +7,7 @@
 //! ## Architecture rule
 //!
 //! Depends on `grid4d-geom` (the spline types and [`Text`], plain data),
-//! `ttf-parser` and the typeface egui already embeds in Grid4D; no scene, no
+//! `skrifa` and the typeface egui already embeds in Grid4D; no scene, no
 //! GPU, no UI. The scene stores only a text's parameters; evaluation turns them
 //! into curves through [`text_spline`].
 
@@ -15,17 +15,38 @@ use std::sync::OnceLock;
 
 use glam::{Vec2, Vec3};
 use grid4d_geom::spline::{Segment, Spline, SplineType, Text, TextAlign};
-use ttf_parser::{Face, GlyphId, OutlineBuilder};
+use skrifa::{
+    FontRef, GlyphId, MetadataProvider,
+    instance::{LocationRef, Size},
+    metrics::{GlyphMetrics, Metrics},
+    outline::{DrawSettings, OutlineGlyphCollection, OutlinePen},
+};
 
 /// The typeface text splines are written in (the one egui uses for its
 /// interface, already part of the program).
 pub const FONT_NAME: &str = "Ubuntu Light";
 
-/// The built-in font, parsed once.
-fn face() -> Option<&'static Face<'static>> {
-    static FACE: OnceLock<Option<Face<'static>>> = OnceLock::new();
-    FACE.get_or_init(|| Face::parse(epaint_default_fonts::UBUNTU_LIGHT, 0).ok())
-        .as_ref()
+/// The built-in font, read once: its glyph map, metrics in font units, and
+/// outlines.
+struct Face {
+    font: FontRef<'static>,
+    metrics: Metrics,
+    glyph_metrics: GlyphMetrics<'static>,
+    outlines: OutlineGlyphCollection<'static>,
+}
+
+fn face() -> Option<&'static Face> {
+    static FACE: OnceLock<Option<Face>> = OnceLock::new();
+    FACE.get_or_init(|| {
+        let font = FontRef::new(epaint_default_fonts::UBUNTU_LIGHT).ok()?;
+        Some(Face {
+            metrics: font.metrics(Size::unscaled(), LocationRef::default()),
+            glyph_metrics: font.glyph_metrics(Size::unscaled(), LocationRef::default()),
+            outlines: font.outline_glyphs(),
+            font,
+        })
+    })
+    .as_ref()
 }
 
 /// The outline of `text`, laid out line by line from the origin (the first
@@ -42,9 +63,10 @@ pub fn text_spline(text: &Text) -> Spline {
     let Some(face) = face() else {
         return out;
     };
-    let scale = text.height.max(0.0) / f32::from(face.units_per_em());
-    let line_height = (f32::from(face.ascender()) - f32::from(face.descender()) + f32::from(face.line_gap())) * scale
-        + text.vertical_spacing;
+    let metrics = &face.metrics;
+    let scale = text.height.max(0.0) / f32::from(metrics.units_per_em.max(1));
+    let line_height = (metrics.ascent - metrics.descent + metrics.leading) * scale + text.vertical_spacing;
+    let charmap = face.font.charmap();
     let mut placed: Vec<(Option<GlyphId>, f32)> = Vec::new();
     for (row, line) in text.text.split('\n').enumerate() {
         // Where each letter starts, and how wide the line is.
@@ -52,13 +74,17 @@ pub fn text_spline(text: &Text) -> Spline {
         let mut pen = 0.0;
         for (k, ch) in line.chars().filter(|&c| c != '\r').enumerate() {
             let ch = if ch == '\t' { ' ' } else { ch };
-            let glyph = face.glyph_index(ch);
+            // Glyph 0 is the font's "missing letter" box.
+            let glyph = charmap.map(ch).filter(|&glyph| glyph != GlyphId::NOTDEF);
             if k > 0 {
                 pen += text.horizontal_spacing;
             }
             placed.push((glyph, pen));
-            let advance = face.glyph_hor_advance(glyph.unwrap_or(GlyphId(0))).unwrap_or(0);
-            pen += f32::from(advance) * scale;
+            let advance = face
+                .glyph_metrics
+                .advance_width(glyph.unwrap_or(GlyphId::NOTDEF))
+                .unwrap_or(0.0);
+            pen += advance * scale;
         }
         let shift = match text.align {
             TextAlign::Left => 0.0,
@@ -75,7 +101,13 @@ pub fn text_spline(text: &Text) -> Spline {
                 scale,
                 start: None,
             };
-            face.outline_glyph(glyph, &mut builder);
+            if let Some(outline) = face.outlines.get(glyph) {
+                // A broken glyph draws what it managed to.
+                let _ = outline.draw(
+                    DrawSettings::unhinted(Size::unscaled(), LocationRef::default()),
+                    &mut builder,
+                );
+            }
             builder.finish();
         }
     }
@@ -137,7 +169,7 @@ impl Builder<'_> {
     }
 }
 
-impl OutlineBuilder for Builder<'_> {
+impl OutlinePen for Builder<'_> {
     fn move_to(&mut self, x: f32, y: f32) {
         self.finish();
         self.start = Some(self.out.points.len());

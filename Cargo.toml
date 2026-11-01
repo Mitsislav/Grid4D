@@ -99,7 +99,7 @@ exr = "1.73"
 rhai = "1.27"
 
 # Text splines (grid4d-text): glyph outlines, and the typeface egui already embeds.
-ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
+skrifa = { version = "0.44", default-features = false, features = ["std"] }
 epaint_default_fonts = "0.37"
 
 # Diagnostics
