@@ -36,6 +36,7 @@ references, no `unsafe`, no `unwrap`, exhaustive `match`, and
 15. [Phase 11 — Simulation](#phase-11--simulation-v011)
 16. [Phase 12 — Workspace](#phase-12--workspace-v012)
     · [Phase 13 — Extensibility](#phase-13--extensibility-v013)
+    · [Phase 14 — Stabilisation](#phase-14--stabilisation-v10)
 17. [Cross-cutting: testing, performance, CI, docs](#cross-cutting-testing-performance-ci-docs)
 18. [Risks & open decisions](#risks--open-decisions)
 
@@ -152,7 +153,7 @@ Two architectural moves carry most of the later phases:
 | v0.11 | Simulation | 11 | Rigid and collider bodies (rapier3d) on objects and clones, cached per frame and saved when baked; renders and export show the simulation |
 | v0.12 | Workspace | 12 | Docking layouts with presets (egui_tiles), Preferences (units, undo depth, autosave, themes), Layers, Takes, the interface in Greek |
 | v0.13 | Extensibility | 13 | Plugins built in through `grid4d-plugin` (generators, deformers, commands; missing plugins kept), Rhai scripts as one undo step, the Script Manager and its library ✅ |
-| v1.0 | Stabilisation | — | File format frozen (with migrations), docs, packaging, perf budget met |
+| v1.0 | Stabilisation | 14 | `.g4d` frozen and specified, fuzzed and property-tested files, crash reports, the performance budget measured and met, licences checked, installable packages for Windows / macOS / Linux from a tagged release, complete documentation |
 
 Phases 1 and 2 are independent and can run in parallel. Phase 5 needs Phase 3;
 Phase 6 animation needs Phase 1 (edits) and Phase 3 (evaluation).
@@ -1087,6 +1088,134 @@ step; a script that builds a coloured grid of cubes runs as one undo step,
 an error points at its line, an endless loop is stopped; everything new
 reads in Greek.
 
+## Phase 14 — Stabilisation (v1.0)
+
+**Goal:** Grid4D 1.0 — something a stranger can download, install, use and
+trust. Nothing big is added; what is there becomes dependable: the `.g4d`
+format is **frozen** and documented, files and edits survive random and
+broken input, a crash leaves a report and loses no work, the performance
+budget is **measured and met**, every licence is in order, and each tagged
+release builds **installable packages for Windows, macOS and Linux**. The
+documentation is complete for users, plugin and script writers and
+contributors.
+
+**Behaviour specs** (our own, for what users see): `reference/app-release.md`
+— the version and licences in Help ▸ About, the crash report and the offer
+to recover, the frame-time readout (14.3–14.5).
+
+### Where things stand (2026-11-01)
+
+* CI: rustfmt, clippy and tests on Windows / Linux / macOS, MSRV 1.95 — all
+  green. Its actions still run on Node.js 20 (deprecated: `actions/checkout@v4`).
+  No `cargo deny`, no fuzzing, no release builds.
+* `.g4d` version 3 has grown additively since Phase 3 (golden fixtures
+  `demo_v3.g4d` and `demo_v3_initial.g4d`; versions 1 – 2 read-only). It is not
+  documented outside the code.
+* Tests: 751 unit and integration tests, the random undo/redo round trip,
+  `extract_reuses_capacity`, golden files and the path tracer's reference
+  image. Not yet: property tests of file round trips, headless UI tests
+  (`egui_kittest`), the counting allocator for steady frames.
+* Benchmarks: one (`falling_cubes`). The performance budget (below, under
+  Cross-cutting) has never been measured end to end.
+* A panic ends the program; autosave (12.3) recovers unsaved work on the next
+  start, but nothing records what happened.
+* The workspace version is still `0.1.0`; there is no changelog and no list
+  of third-party licences (the Ubuntu font egui embeds has its own licence).
+* egui 0.37 / wgpu 30 are the newest releases — no major upgrade is due
+  before 1.0 (R1).
+
+### Design
+
+* **The format freeze** (decision D20). 14.2 reviews version 3 field by field
+  against the scene model (names, units, defaults, what is optional) and
+  decides: freeze v3 as it is, or — if something must change — write v4 with a
+  migration from v3 and freeze that. From 1.0 on a released version never
+  changes: new data needs a new version and a migration, older versions keep
+  opening, and Grid4D refuses (with a clear message) files from newer
+  versions. `docs/FILE_FORMAT.md` specifies the frozen version (the zip's
+  entries, `document.json` field by field, the binary mesh and simulation
+  layouts, the rules for unknown plugin values), so other programs can read
+  and write `.g4d`.
+* **Hardening by machine** (14.2–14.3): `proptest` generates random
+  documents (objects of every kind, hierarchy, tags, tracks, materials,
+  layers, takes, plugin values) and checks save → load gives them back; a
+  `cargo fuzz` target feeds `grid4d_io::from_bytes` mutated archives
+  (seeded with the fixtures) and must never panic, hang or allocate what a
+  file merely claims — run for a while on every push to `main` (Linux,
+  nightly) and longer weekly; a random-command test runs long sequences of
+  `EditorCommand`s with undo and redo on the demo scene and checks the
+  invariants (no panic, undo all returns the start, redo all returns the
+  end, every id valid).
+* **Crash reports, local only** (decision D23): a panic hook writes a report
+  (version, commit, OS, GPU, the panic message and a backtrace, the last log
+  lines) into `<data dir>/crashes/`, and the next start offers to recover the
+  autosaved work and shows where the report is. Nothing is sent anywhere.
+* **Performance, measured**: `criterion` benches for each hot path that can
+  run without a GPU — evaluation of 10 000 objects (static and animated),
+  `FrameData::extract`, triangulation and subdivision of a 1 M-triangle mesh,
+  generators, `.g4d` save / load of a 50 MB document, the path tracer on a
+  small scene — and the **counting global allocator** test that a steady
+  frame of evaluation and extraction allocates nothing. A stress-scene
+  generator (`cargo run --release --example stress`) writes the budget's
+  scenes as `.g4d` files; a **frame-time readout** (View ▸ Show ▸ Frame
+  Time, off by default) shows the frame time and the slowest part; the GPU
+  budgets are measured by hand on the reference machine (RTX 3050 Laptop,
+  Windows 11) and recorded in `docs/performance.md`, with each miss fixed or
+  explicitly accepted.
+* **Licences and supply chain** (decision D21): `cargo deny` in CI
+  (licences on an allow-list — MIT, Apache-2.0, BSD, ISC, Zlib, Unicode, MPL-2.0
+  only where a file-level copyleft is acceptable, the Ubuntu Font Licence for
+  the embedded font — advisories, duplicate major versions reported, crates
+  only from crates.io); `cargo about` generates `THIRD_PARTY_LICENSES.html`,
+  shipped with every package and shown from Help ▸ About ▸ Licences.
+* **Releases from a tag** (decision D19): pushing `v1.0.0` runs a release
+  workflow that builds optimised binaries on the three systems and publishes
+  a GitHub Release with: Windows `.zip` (the exe with its icon and version
+  resources) and an `.msi` installer (Start menu entry, `.g4d` file
+  association); macOS `.dmg` holding `Grid4D.app` (Info.plist, `.icns` icon,
+  `.g4d` document type; universal binary: x86-64 and arm64); Linux `.tar.gz`
+  and an **AppImage** (with a `.desktop` file and icons); SHA-256 sums for
+  all. Packages are **not code-signed** for 1.0 (the README explains how to
+  open them on Windows SmartScreen and macOS Gatekeeper); signing is a later
+  step. The version follows SemVer (decision D22): 1.x minor versions add
+  features and open every 1.x file; the plugin API (`grid4d-plugin`) and the
+  script API may grow, and only a major version may break them.
+* **The interface pass** (14.5): headless UI tests with `egui_kittest` for
+  what posted window messages cannot reach on screen — Object Manager drag
+  and drop, renaming, typing into fields, dragging viewport handles,
+  Shift / Ctrl clicks — and a walkthrough of the whole manual on screen in
+  English and Greek and in the Dark and Light themes, fixing what reads or
+  behaves wrong. One table of shortcuts feeds Help ▸ About, and a test
+  keeps the manual's table equal to it.
+* **Not in Phase 14:** new modelling, animation or rendering features; code
+  signing and notarisation; automatic updates; telemetry; a web build;
+  dynamic plugins.
+
+### Steps
+
+| Step | Size | Work |
+|------|------|------|
+| 14.1 | S | **CI and supply chain:** actions on Node 24 (`actions/checkout@v5`, current `rust-toolchain` and cache actions); `cargo deny` (`deny.toml`: licences, advisories, bans, sources) as a CI job; `cargo about` → `THIRD_PARTY_LICENSES.html` (checked in CI to be current); Help ▸ About shows the version, commit and build date (from `build.rs`) and a **Licences** button; `cargo update` within the pinned majors |
+| 14.2 | L | **File format freeze:** the review of v3 (and v4 with a migration if it finds anything to change); `docs/FILE_FORMAT.md`; golden fixtures for every version, including one with plugins, takes, layers, a simulation cache; `proptest` round trips of random documents; the `cargo fuzz` target (`fuzz/`, seeded with the fixtures) and a CI job (short on push, long weekly); fixes for whatever they find |
+| 14.3 | M | **Robustness:** the crash report (panic hook, report file, the next start's offer and the report's place), spec `reference/app-release.md`; the random-command test (long `EditorCommand` sequences with undo / redo invariants); start-up without a usable GPU, a missing or unreadable data folder, a full disk while saving (the old file kept), files larger than memory allows — each tested or handled with a message |
+| 14.4 | L | **Performance budget:** `criterion` benches (eval, extract, triangulation, subdivision, generators, io, path tracer) and `cargo bench --no-run` in CI; the counting-allocator test; `examples/stress.rs`; the frame-time readout; measurements on the reference machine in `docs/performance.md`; optimisations for every budget missed (or an accepted, documented exception) |
+| 14.5 | M | **The interface pass:** `egui_kittest` tests (drag-reparent, rename, typed values with undo, a gizmo drag, a deformer handle drag, Shift / Ctrl selection, a menu command); the one shortcut table and its test; the manual walked through on screen in English and Greek, Dark and Light; fixes; fresh screenshots where the interface changed |
+| 14.6 | L | **Packaging and the release workflow:** the workspace version to `1.0.0-rc.1`; `assets/` for packaging (`.icns`, Linux icons, `.desktop`, `Info.plist`, WiX source); the release workflow (on a `v*` tag: three builds, the `.zip`, `.msi`, `.dmg`, `.tar.gz`, AppImage, SHA-256 sums, a draft GitHub Release with the changelog's section); a release candidate built and each package installed and opened on a clean machine or VM of each system (the demo, every example file, a script, a plugin object) |
+| 14.7 | M | **Documentation and 1.0:** `docs/ARCHITECTURE.md` (the crates and their rules, the data flow of a frame, where to add things), `CHANGELOG.md` (1.0.0, and the road there by phase), the README for 1.0 (what Grid4D is, screenshots, installing, building, documentation), `CONTRIBUTING.md` (the rules, the docs to update, how to add a panel / object / plugin), a final pass over the manual and guides; the trademark and trade-dress review (R2) of menus, labels, icons and docs; the version to `1.0.0` and the `v1.0.0` tag after the acceptance |
+
+**Acceptance:** CI green with `cargo deny` and the short fuzz run; the
+`v1.0.0` tag produced a GitHub Release with the Windows `.zip` and `.msi`,
+the macOS `.dmg` and the Linux `.tar.gz` and AppImage, each installed and
+started on a clean system, opening the demo and every example document and
+running a script; `.g4d` frozen and specified in `docs/FILE_FORMAT.md`, files
+of every earlier version opening; the fuzz target ran for at least four hours
+without a failure; every budget of the performance table measured on the
+reference machine and met or accepted in `docs/performance.md`; a forced
+panic leaves a report and the next start recovers the unsaved work; Help ▸
+About shows 1.0.0 and the licences; the manual walked through in English and
+Greek without a fault; `CHANGELOG.md`, `ARCHITECTURE.md`, `FILE_FORMAT.md`,
+the README and the guides complete.
+
 ---
 
 ## Cross-cutting: testing, performance, CI, docs
@@ -1118,8 +1247,9 @@ per steady-state frame" for the hot path, complementing `extract_reuses_capacity
 ### CI
 
 `fmt --check` · `clippy -D warnings` · `test` on Windows/Linux/macOS · MSRV job
-(1.95) · `cargo deny` (licenses, advisories) · later: fuzzing the `.g4d` parser
-(`cargo fuzz`, nightly, scheduled) and release builds via `cargo-dist`.
+(1.95) · from Phase 14: `cargo deny` (licences, advisories), fuzzing the `.g4d`
+parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
+--no-run`, and the release workflow on `v*` tags (D19).
 
 ### Documentation
 
@@ -1156,8 +1286,14 @@ per steady-state frame" for the hot path, complementing `extract_reuses_capacity
 | D17 | Scripting language | Rhai (`rhai` 1.27, pure Rust, sandboxed, no external runtime) rather than Python via `pyo3` (needs a Python installation, complicates builds and distribution) | Phase 13 |
 | D18 | How scripts change the document | Only through `SceneEdit`s recorded while running on a copy, applied as one undo step when the script finishes (nothing on an error or stop); an operations limit stops endless loops | Phase 13 |
 | R3 | Scope creep | Ship the release train in order; each phase must leave the app usable and tests green | ongoing |
+| D19 | How releases are built | A workflow of our own on a `v*` tag: optimised builds on the three systems, a Windows `.zip` and WiX `.msi`, a macOS `.dmg` with a universal `Grid4D.app`, a Linux `.tar.gz` and AppImage, SHA-256 sums, a draft GitHub Release — rather than `cargo-dist`, so every step is visible and the app bundle and file associations are ours. Not code-signed for 1.0 | Phase 14 |
+| D20 | The file format at 1.0 | Review v3 and freeze it (or a v4 with a migration, if the review finds something to change); released versions never change again — new data means a new version and a migration; every older version keeps opening; newer files are refused with a message; the frozen version is specified in `docs/FILE_FORMAT.md` | Phase 14 |
+| D21 | Licences | `cargo deny` with an allow-list in CI, `cargo about` for the third-party licence file shipped with the packages and shown in Help ▸ About | Phase 14 |
+| D22 | Versioning after 1.0 | SemVer for the application: minor versions add features and open every 1.x file; the plugin and script APIs may grow in a minor version and break only in a major one | Phase 14 |
+| D23 | Crash reports | Written locally into the data folder and pointed to on the next start (beside the autosave offer); never sent anywhere | Phase 14 |
+| R4 | Unsigned packages | Windows SmartScreen and macOS Gatekeeper warn about unsigned apps; the README explains how to open them; signing and notarisation after 1.0 | Phase 14 |
 
 ---
 
-**Next action:** Phase 0 (toolchain, git, CI, A1–A5), then Phase 1 step 1.1
-(`NodeData` split + soft delete) — the foundation every later phase builds on.
+**Next action:** Phase 14 step 14.1 (CI and supply chain) — then the format
+freeze (14.2), on which the rest of the stabilisation builds.

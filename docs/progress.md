@@ -12,10 +12,10 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 13 — Extensibility (v0.13), complete |
-| Last step done | 13.6 — SDK documentation and finish; Phase 13 complete (2026-10-31) |
-| Next step | Plan the next phase (towards v1.0: stabilisation) |
-| Tests | 751, all passing; clippy and rustfmt clean |
+| Current phase | 14 — Stabilisation (v1.0) |
+| Last step done | Phase 14 planned (2026-11-01) |
+| Next step | 14.1 — CI and supply chain |
+| Tests | 751, all passing; clippy and rustfmt clean; CI green on all platforms |
 
 ---
 
@@ -2037,6 +2037,29 @@ intact; the Gear, Wave and Scatter examples. Scripts in Rhai run on a copy
 of the document as one undo step, with errors at their line, a limit for
 endless loops, a library with examples and the Script Manager. Guides:
 `plugins.md`, `scripting.md`.
+
+---
+
+## Phase 14 — Stabilisation (2026-11-01 – )
+
+| Step | What was built | Tests |
+|------|----------------|-------|
+| — | Phase 14 planned in detail: CI on Node 24 with `cargo deny` and third-party licences; the `.g4d` format reviewed, frozen and specified, property-tested and fuzzed; crash reports and a random-command test; the performance budget benchmarked and measured; `egui_kittest` UI tests and a walkthrough in English and Greek; packages for Windows, macOS and Linux from a tagged release; the 1.0 documentation (`IMPLEMENTATION_PLAN.md`) | 751 |
+
+**Planning notes:**
+- **What "stable" means here.** No new features: the format frozen and
+  written down, inputs that cannot crash the program, work that a crash
+  cannot lose, the budget measured rather than assumed, licences in order,
+  and packages anyone can install.
+- **Why the format is reviewed before it is frozen.** Version 3 grew one
+  step at a time for eleven phases; once 1.0 ships, its shape is a promise.
+  The review may produce a v4 with a migration — cheaper now than a
+  compatibility burden later.
+- **Why our own release workflow.** The app bundle, the installer's file
+  association and the AppImage need hand-made pieces anyway; a plain
+  workflow keeps every step visible (D19).
+- **Unsigned for 1.0** (R4): signing needs paid certificates and an Apple
+  developer account; the README will explain the warnings.
 
 ---
 
