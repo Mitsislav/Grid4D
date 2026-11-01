@@ -2048,6 +2048,7 @@ endless loops, a library with examples and the Script Manager. Guides:
 | 14.1 | CI on Node 24; `cargo deny` (licences, advisories, duplicates, sources) and the third-party licence list checked in CI; Help ▸ About shows the version, commit and date and a Licences page; version 0.13.0; dependencies updated | 751 |
 | 14.2 | `.g4d` v3 reviewed and frozen, specified in `docs/FILE_FORMAT.md`; a golden fixture with everything v3 holds; property-tested round trips; damaged and hostile files; a fuzz target with a CI job and a weekly run; saved rotations kept exact and never NaN | 756 |
 | 14.3 | Text outlines read with `skrifa` (egui's own font reader) instead of the unmaintained `ttf-parser`, identical to the byte; local crash reports (a panic hook, the log's last lines, pointed to on the next start, Show Report); the random-command test (long `EditorCommand` sequences with undo / redo); start-up without graphics or a data folder told in words; autosave's first failure an alert; failed saves keep the old file; files too large for memory refused | 767 |
+| — | The itch.io page prepared ([`assets/itch/page.md`](../assets/itch/page.md): its fields, description and pictures); step 14.6 also pushes the packages there with `butler` | — |
 
 **Planning notes:**
 - **What "stable" means here.** No new features: the format frozen and
