@@ -1127,18 +1127,28 @@ impl SimCacheDto {
             .as_chunks::<7>()
             .0
             .iter()
-            .map(|v| {
-                (
-                    Vec3::new(v[0], v[1], v[2]),
-                    glam::Quat::from_xyzw(v[3], v[4], v[5], v[6]).normalize(),
-                )
-            })
+            .map(|v| (Vec3::new(v[0], v[1], v[2]), unit_rotation(v[3], v[4], v[5], v[6])))
             .collect();
         Ok(SimulationCache {
             start: self.start,
             bodies,
             poses,
         })
+    }
+}
+
+/// A saved rotation as a unit quaternion: kept bit for bit when it is one
+/// already (so a file saves back unchanged), normalised when it is off, and no
+/// rotation when it has no length (normalising that would give NaNs).
+fn unit_rotation(x: f32, y: f32, z: f32, w: f32) -> glam::Quat {
+    let q = glam::Quat::from_xyzw(x, y, z, w);
+    let length = q.length_squared();
+    if !(length > 1e-12 && length.is_finite()) {
+        glam::Quat::IDENTITY
+    } else if (length - 1.0).abs() > 1e-5 {
+        q.normalize()
+    } else {
+        q
     }
 }
 
@@ -4905,6 +4915,16 @@ mod tests {
         let json = String::from_utf8(archive.read(DOCUMENT_ENTRY, 1 << 20).unwrap()).unwrap();
         let lying = File::parse(&json.replace("\"frames\": 3", "\"frames\": 4")).unwrap();
         assert!(lying.into_document(&mut archive).is_err());
+    }
+
+    #[test]
+    fn saved_rotations_stay_exact_and_never_become_nan() {
+        let unit = glam::Quat::from_rotation_y(0.3);
+        assert_eq!(unit_rotation(unit.x, unit.y, unit.z, unit.w), unit, "bit for bit");
+        assert_eq!(unit_rotation(0.0, 0.0, 0.0, 0.0), glam::Quat::IDENTITY);
+        let long = unit_rotation(0.0, 0.0, 0.0, 2.0);
+        assert!((long.length() - 1.0).abs() < 1e-6);
+        assert_eq!(unit_rotation(1e30, 1e30, 0.0, 0.0), glam::Quat::IDENTITY, "overflowing");
     }
 
     #[test]

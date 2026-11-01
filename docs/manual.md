@@ -725,6 +725,11 @@ and drop `.obj` files like glTF files, and pick the `.obj` type in
 
 ![Top: the document; bottom: its OBJ export opened again. One polygon object per mesh, in the same places, quads intact](images/manual/obj_export.png)
 
+**The file format** is documented in [`FILE_FORMAT.md`](FILE_FORMAT.md), so
+other programs can read and write `.g4d` files; from Grid4D 1.0 a released
+version of it never changes, and every Grid4D opens the files of every
+earlier version.
+
 ## 10. Timeline and playback
 
 ![The timeline](images/manual/timeline.png)
@@ -2320,8 +2325,18 @@ Esc cancels a chord.
 | H / S (pointer over the F-Curve graph) | Frame all curves / the selected keys |
 
 **Help ▸ Keyboard Shortcuts & About** shows this list inside the application.
+Its first line is the version and the build — the version number, then the
+source commit and its date, e.g. "Version 0.13.0 (f030cc8, 2026-11-01)":
+mention it when you report a problem.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
+
+Its **Licences** page says how Grid4D is licensed (MIT or Apache-2.0, at your
+option) and lists the third-party software it is built from, each licence
+with its full text; the same list comes with Grid4D as
+`THIRD_PARTY_LICENSES.txt`.
+
+![The Licences page](images/manual/about-licences.png)
 
 ## 24. Limitations and what is planned
 

@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 14 — Stabilisation (v1.0) |
-| Last step done | Phase 14 planned (2026-11-01) |
-| Next step | 14.1 — CI and supply chain |
-| Tests | 751, all passing; clippy and rustfmt clean; CI green on all platforms |
+| Last step done | 14.2 — File format freeze (2026-11-01) |
+| Next step | 14.3 — Robustness |
+| Tests | 756, all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2045,6 +2045,8 @@ endless loops, a library with examples and the Script Manager. Guides:
 | Step | What was built | Tests |
 |------|----------------|-------|
 | — | Phase 14 planned in detail: CI on Node 24 with `cargo deny` and third-party licences; the `.g4d` format reviewed, frozen and specified, property-tested and fuzzed; crash reports and a random-command test; the performance budget benchmarked and measured; `egui_kittest` UI tests and a walkthrough in English and Greek; packages for Windows, macOS and Linux from a tagged release; the 1.0 documentation (`IMPLEMENTATION_PLAN.md`) | 751 |
+| 14.1 | CI on Node 24; `cargo deny` (licences, advisories, duplicates, sources) and the third-party licence list checked in CI; Help ▸ About shows the version, commit and date and a Licences page; version 0.13.0; dependencies updated | 751 |
+| 14.2 | `.g4d` v3 reviewed and frozen, specified in `docs/FILE_FORMAT.md`; a golden fixture with everything v3 holds; property-tested round trips; damaged and hostile files; a fuzz target with a CI job and a weekly run; saved rotations kept exact and never NaN | 756 |
 
 **Planning notes:**
 - **What "stable" means here.** No new features: the format frozen and
@@ -2060,6 +2062,62 @@ endless loops, a library with examples and the Script Manager. Guides:
   workflow keeps every step visible (D19).
 - **Unsigned for 1.0** (R4): signing needs paid certificates and an Apple
   developer account; the README will explain the warnings.
+
+**14.1 — CI and supply chain**
+
+*Problems and solutions:*
+- **Licences outside the list:** the font egui embeds is `Ubuntu-font-1.0`
+  (with `OFL-1.1`), allowed; Rhai's `smartstring` is MPL-2.0, a file-level
+  copyleft that is fine for a crate used unmodified — allowed for that crate
+  only.
+- **An unmaintained dependency:** `ttf-parser`, which grid4d-text uses for
+  Text outlines, was declared unmaintained (RUSTSEC-2026-0192; no
+  vulnerability). Ignored with a reason in `deny.toml`; moving to `skrifa`
+  is the follow-up. A yanked `clipboard-win` went with `cargo update`.
+- **`cargo-about` without a command:** its binary needs the `cli` feature
+  (`cargo install cargo-about --features cli`); CI installs a prebuilt one.
+  Its template escaped text as HTML (`&quot;`) until the fields were written
+  with triple braces, and some crates' licence files have CR line ends — the
+  generation pipes through `tr -d '\r'`, locally and in CI alike, so the
+  committed file can be compared byte for byte.
+- **A deterministic build identity:** the commit's date, not the build's,
+  so two builds of one commit are identical; without git both are empty and
+  About shows the version alone.
+- **The Licences page:** 365 KB of text shown a row at a time
+  (`ScrollArea::show_rows`); wrapped lines broke the row height and widened
+  the window, so lines are not wrapped and scroll sideways; the row height
+  given to `show_rows` excludes the spacing it adds itself.
+- **On-screen testing:** Help ▸ Keyboard Shortcuts & About showed "Version
+  0.13.0 (f030cc8, 2026-11-01)", the two pages, and the licence list
+  scrolling inside the window.
+
+**14.2 — File format freeze**
+
+*Problems and solutions:*
+- **Freeze v3 or write v4?** The review went through every DTO: later
+  additions are all optional with defaults, references are indices, units
+  are consistent (radians; the two degree fields say `_deg`). Nothing had to
+  change, so v3 is frozen as it is — no migration to write.
+- **The golden file covered little.** `demo_v3.g4d` is the demo scene with
+  one mesh; most of what eleven phases added (splines, deformers, Cloners,
+  effectors, plugins, tracks, layers, takes, a saved simulation) was only
+  tested by round trips that would accept a silent format change. A second
+  fixture, `full_v3.g4d`, pins all of it byte for byte.
+- **Bugs found by the new tests:** re-saving a loaded file changed
+  `simulation.bin` — loading normalised every quaternion, which moves the
+  last bit of ones that were already unit length; and a zero quaternion in a
+  file became NaNs. Rotations are now kept exactly when they are unit length,
+  normalised when they are off, and the identity when they have no length.
+- **The property test's own mistake:** the generator could give a plugin
+  object two tracks for one value — a document the application cannot make
+  (loading keeps one); the generator was fixed, not the loader.
+- **Fuzzing needs nightly** and runs best on Linux, so `cargo fuzz` runs in
+  CI (two minutes on every push, an hour weekly or as long as asked by hand)
+  and a stable test does the same kind of damage locally on every platform.
+- **The disk filled up** while building the release tests: `target/` had
+  grown to about 95 GB (57 GB of incremental cache, 36 GB of old test
+  binaries). The incremental cache and the half-built release folder were
+  deleted (rebuilt as needed); `cargo clean` now and then keeps it in check.
 
 ---
 

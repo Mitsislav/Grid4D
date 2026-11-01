@@ -40,9 +40,9 @@ pub mod workspace;
 
 pub use commands::{CommandQueue, EditorCommand, SelectMode, SplineOp};
 pub use editor::{
-    AnimationSettings, CurveKey, CurveSelection, EditMode, EditorState, FrameCurves, KeySelection, MaterialDrag,
-    MaterialSelection, ModelingSettings, Selection, SelectionSettings, SnapSettings, SnapType, TagRef, Tool,
-    TransformSettings,
+    AnimationSettings, BuildInfo, CurveKey, CurveSelection, EditMode, EditorState, FrameCurves, KeySelection,
+    MaterialDrag, MaterialSelection, ModelingSettings, Selection, SelectionSettings, SnapSettings, SnapType, TagRef,
+    Tool, TransformSettings,
 };
 pub use file::{DocumentFile, FileAction, FileDialogs, NativeDialogs, UnsavedChoice};
 pub use history::{History, UndoGroup};

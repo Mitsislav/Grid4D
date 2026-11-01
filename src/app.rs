@@ -45,6 +45,13 @@ impl Grid4DApp {
                     format!("{} · {:?}", info.name, info.backend)
                 },
             ),
+            // The build's identity (see build.rs) and the licences it contains.
+            build: grid4d_ui::BuildInfo {
+                version: env!("CARGO_PKG_VERSION"),
+                commit: env!("GRID4D_COMMIT"),
+                date: env!("GRID4D_COMMIT_DATE"),
+                licences: include_str!("../assets/THIRD_PARTY_LICENSES.txt"),
+            },
             ..EditorState::default()
         };
         log::info!("Renderer: {}", editor.renderer_info);

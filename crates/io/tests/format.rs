@@ -17,11 +17,17 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use glam::Vec3;
-use grid4d_scene::{ComponentState, Components, Document, MeshHandle, ObjectKind};
+use glam::{Quat, Vec3};
+use grid4d_scene::{
+    Axis, Body, CachedBody, ComponentState, Components, Curve, Document, Interpolation, Key, Layer, Material,
+    MeshHandle, Node, ObjectKind, ObjectKindTag, ObjectParam, Override, Param, PluginObject, PluginValue, SceneEdit,
+    SimulationCache, Tag, Take, Tangents, Track,
+};
 
 /// Written by the current format version (an archive).
 const GOLDEN: &str = "tests/fixtures/demo_v3.g4d";
+/// Everything version 3 can hold (see `full_document`), frozen with 1.0.
+const FULL: &str = "tests/fixtures/full_v3.g4d";
 /// Version 3 as first released in step 3.6, before component selections were
 /// added (additively): must keep loading.
 const DEMO_V3_INITIAL: &str = "tests/fixtures/demo_v3_initial.g4d";
@@ -79,6 +85,170 @@ fn golden_document() -> Document {
     doc
 }
 
+/// Everything a version 3 file can hold, which 1.0 freezes (see
+/// `docs/FILE_FORMAT.md`): every kind of object at its defaults, a mesh with
+/// selected and hidden components, a plugin object with every kind of value
+/// (no plugin needed), a hierarchy, every tag, tracks (transform, an object
+/// parameter, a plugin value; every interpolation and manual tangents),
+/// materials, layers, takes (one active with Main's values beside it, one
+/// with its own overrides), changed render and simulation settings, and a
+/// saved simulation with a clone.
+fn full_document() -> (Document, SimulationCache) {
+    let mut doc = Document::new("Full");
+    let mut red = Material::new("Red");
+    red.color = [0.8, 0.1, 0.1];
+    red.roughness = 0.25;
+    red.metallic = 1.0;
+    red.emission = [0.5, 0.0, 0.0];
+    let red = doc.scene.materials_mut().insert(red);
+    let mut props = Layer::new("Props", Layer::COLORS[2]);
+    props.switches.locked = true;
+    props.switches.render = false;
+    let props = doc.scene.layers_mut().insert(props);
+
+    // Every kind, at its defaults, inside a group.
+    let group = doc.scene.insert(Node::new("Everything", ObjectKind::Null));
+    for tag in ObjectKindTag::ALL {
+        doc.scene
+            .insert_child(group, Node::new(tag.label(), tag.default_kind()))
+            .unwrap();
+    }
+    let id = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+
+    // A mesh with flagged components.
+    let mut state = ComponentState::default();
+    state.selected.points.extend([0, 1, 2]);
+    state.selected.edges.insert_range(0..4);
+    state.hidden.polygons.insert(5);
+    doc.scene.insert(Node::new(
+        "Mesh",
+        ObjectKind::Polygon {
+            mesh: MeshHandle::new(grid4d_geom::primitives::cube(Vec3::splat(80.0), [1, 2, 1])),
+            components: Components::new(state),
+        },
+    ));
+
+    // A plugin object with every kind of value.
+    let mut gear = PluginObject::new("example.gear");
+    gear.set("Radius", PluginValue::Float(120.0));
+    gear.set("Teeth", PluginValue::Int(16));
+    gear.set("Hole", PluginValue::Bool(true));
+    gear.set("Shape", PluginValue::Choice(2));
+    gear.set("Axis", PluginValue::Vector(Vec3::new(0.0, 1.0, 0.0)));
+    gear.set("Tint", PluginValue::Color([0.2, 0.4, 0.6]));
+    let mut gear = Node::new("Gear", ObjectKind::Plugin(gear));
+    gear.data.tracks.push(Track {
+        param: Param::Object(ObjectParam::Plugin(0)),
+        curve: Curve::from_keys([Key::new(0.0, 120.0), Key::new(30.0, 60.0)]),
+    });
+    doc.scene.insert(gear);
+
+    // A cube with every tag, on a layer, animated.
+    let (cube, sphere) = (id(&doc, "Cube"), id(&doc, "Sphere"));
+    let mut data = doc.scene.get(cube).unwrap().data.clone();
+    data.layer = Some(props);
+    data.transform.rotation = Vec3::new(0.5, 0.25, 0.0);
+    data.tags = vec![
+        Tag::Phong {
+            angle_limit: true,
+            angle: 0.6,
+        },
+        Tag::Protection {
+            position: true,
+            scale: false,
+            rotation: true,
+        },
+        Tag::Target {
+            target: Some(sphere),
+            up: None,
+            pitch: true,
+        },
+        Tag::Material { material: Some(red) },
+        Tag::Dynamics(Body::rigid()),
+    ];
+    data.tracks = vec![
+        Track {
+            param: Param::Position(Axis::X),
+            curve: Curve::from_keys([
+                Key {
+                    interpolation: Interpolation::Linear,
+                    ..Key::new(0.0, 0.0)
+                },
+                Key {
+                    tangents: Tangents::Manual {
+                        left: (4.0, -10.0),
+                        right: (6.0, 15.0),
+                    },
+                    ..Key::new(12.5, 100.0)
+                },
+                Key {
+                    interpolation: Interpolation::Step,
+                    ..Key::new(24.0, 50.0)
+                },
+            ]),
+        },
+        Track {
+            param: Param::Object(ObjectParam::Size(Axis::Y)),
+            curve: Curve::from_keys([Key::new(0.0, 200.0), Key::new(10.0, 300.0)]),
+        },
+    ];
+    doc.scene.get_mut(cube).unwrap().data = data;
+
+    // Settings away from their defaults.
+    doc.render.width = 640;
+    doc.render.height = 360;
+    doc.render.samples = 16;
+    doc.simulation.enabled = true;
+    doc.simulation.gravity = Vec3::new(0.0, -490.0, 0.0);
+
+    // Takes: "Night" active (the cube's colour and size overridden), "Day"
+    // with an override of its own.
+    let night = doc.takes.insert(Take::new("Night"));
+    let day = doc.takes.insert(Take::new("Day"));
+    doc.takes.render_take = Some(day);
+    doc.apply(SceneEdit::SwitchTake(Some(night))).unwrap();
+    let mut data = doc.scene.get(cube).unwrap().data.clone();
+    data.display_color = [0.1, 0.1, 0.4];
+    data.kind = ObjectKind::Cube {
+        size: Vec3::splat(150.0),
+        segments: [2, 2, 2],
+    };
+    let inverse = doc.apply(SceneEdit::SetData { id: cube, data }).unwrap();
+    doc.record_in_take(&[inverse]).unwrap();
+    let mut moved = doc.scene.get(sphere).unwrap().data.transform;
+    moved.position.y = 75.0;
+    doc.takes
+        .get_mut(day)
+        .unwrap()
+        .objects
+        .insert(sphere, vec![Override::Transform(moved)]);
+
+    // A saved simulation: the cube and a Cloner's clone, two frames.
+    let cloner = id(&doc, "Cloner");
+    let cache = SimulationCache {
+        start: 0,
+        bodies: vec![
+            CachedBody {
+                node: cube,
+                clone: None,
+                scale: Vec3::ONE,
+            },
+            CachedBody {
+                node: cloner,
+                clone: Some(2),
+                scale: Vec3::new(1.0, 2.0, 1.0),
+            },
+        ],
+        poses: (0..4)
+            .map(|i| {
+                let i = f32::from(u8::try_from(i).unwrap());
+                (Vec3::new(i, 10.0 - i, 0.0), Quat::from_rotation_y(i * 0.25))
+            })
+            .collect(),
+    };
+    (doc, cache)
+}
+
 /// An archive's entries, in order, decompressed.
 fn entries(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
@@ -110,6 +280,47 @@ fn the_golden_document_matches_the_golden_file() {
         "the current file format changed; see the note at the top of this file"
     );
     assert_eq!(written, golden, "a mesh file changed");
+}
+
+/// Compares an archive with a fixture entry by entry (the JSON as text, for a
+/// readable diff).
+fn assert_same_entries(bytes: &[u8], fixture: &[u8]) {
+    let (written, golden) = (entries(bytes), entries(fixture));
+    let names = |e: &[(String, Vec<u8>)]| e.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&written), names(&golden));
+    let text = |e: &[(String, Vec<u8>)]| String::from_utf8(e[0].1.clone()).unwrap();
+    assert_eq!(
+        text(&written),
+        text(&golden),
+        "the current file format changed; see the note at the top of this file"
+    );
+    for ((name, a), (_, b)) in written.iter().zip(&golden).skip(1) {
+        assert!(a == b, "{name} changed");
+    }
+}
+
+#[test]
+fn everything_version_3_holds_matches_its_golden_file_and_round_trips() {
+    let (doc, cache) = full_document();
+    let bytes = grid4d_io::to_bytes_with_cache(&doc, Some(&cache)).unwrap();
+    let path = fixture_path(FULL);
+    if std::env::var_os("GRID4D_UPDATE_FIXTURES").is_some() {
+        fs::write(&path, &bytes).unwrap();
+    }
+    let fixture = fs::read(&path).unwrap();
+    assert_same_entries(&bytes, &fixture);
+    let json = String::from_utf8(entries(&fixture)[0].1.clone()).unwrap();
+    for kind in ObjectKindTag::ALL {
+        let name = format!("\"name\": \"{}\"", kind.label());
+        assert!(json.contains(&name), "{name} is in the fixture");
+    }
+
+    // Loaded and saved again: the same file, so nothing was lost.
+    let (loaded, back) = grid4d_io::from_bytes_with_cache(&fixture).unwrap();
+    assert_eq!(loaded.scene.len(), doc.scene.len());
+    assert_eq!(loaded.takes.ids().len(), 2);
+    let again = grid4d_io::to_bytes_with_cache(&loaded, back.as_ref()).unwrap();
+    assert_same_entries(&again, &fixture);
 }
 
 #[test]

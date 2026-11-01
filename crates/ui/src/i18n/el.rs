@@ -737,6 +737,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Layout: {0}", "Διάταξη: {0}"),
     ("Left", "Αριστερά"),
     ("Length Unit", "Μονάδα μήκους"),
+    ("Licences", "Άδειες"),
     ("Light", "Φως"),
     ("Light a scene that has no lights", "Φωτισμός σκηνής χωρίς φώτα"),
     ("Limit", "Όριο"),
@@ -1611,6 +1612,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Thickness", "Πάχος"),
     (
+        "This build has no licence list.",
+        "Αυτή η έκδοση δεν έχει λίστα αδειών.",
+    ),
+    (
         "This tool has no options yet.",
         "Αυτό το εργαλείο δεν έχει ακόμη επιλογές.",
     ),
@@ -1678,6 +1683,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Velocity . X", "Ταχύτητα . X"),
     ("Velocity . Y", "Ταχύτητα . Y"),
     ("Velocity . Z", "Ταχύτητα . Z"),
+    (
+        "Version {0} ({1}, {2}) · open-source 3D content creation suite",
+        "Έκδοση {0} ({1}, {2}) · σουίτα δημιουργίας τρισδιάστατου περιεχομένου ανοικτού κώδικα",
+    ),
     (
         "Version {0} · open-source 3D content creation suite",
         "Έκδοση {0} · σουίτα δημιουργίας τρισδιάστατου περιεχομένου ανοικτού κώδικα",

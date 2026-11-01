@@ -1,0 +1,24 @@
+[package]
+name = "grid4d-fuzz"
+description = "Fuzz targets for Grid4D (cargo fuzz, nightly): the .g4d loader."
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+grid4d-io = { path = "../crates/io" }
+
+# Not part of the main workspace: built only by `cargo fuzz` (nightly).
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "load"
+path = "fuzz_targets/load.rs"
+test = false
+doc = false
+bench = false

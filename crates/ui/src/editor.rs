@@ -459,6 +459,30 @@ pub struct CurveKey {
     pub frame: f64,
 }
 
+/// What the running program is, for Help ▸ About (see
+/// `docs/reference/app-release.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BuildInfo {
+    pub version: &'static str,
+    /// The source commit (a short hash); empty outside a git checkout.
+    pub commit: &'static str,
+    /// The commit's date, `YYYY-MM-DD`.
+    pub date: &'static str,
+    /// The third-party licences (`assets/THIRD_PARTY_LICENSES.txt`).
+    pub licences: &'static str,
+}
+
+impl Default for BuildInfo {
+    fn default() -> Self {
+        Self {
+            version: env!("CARGO_PKG_VERSION"),
+            commit: "",
+            date: "",
+            licences: "",
+        }
+    }
+}
+
 /// Command plugins' options (Plugins ▸): the dialog open, and the values each
 /// command had when it last ran or was edited, for the next time (this
 /// session only).
@@ -748,6 +772,10 @@ pub struct EditorState {
     /// Graphics adapter description shown in the status bar.
     pub renderer_info: String,
     pub show_about: bool,
+    /// The About window shows the licences instead of the shortcuts.
+    pub show_licences: bool,
+    /// What the running program is (Help ▸ About); filled in by the binary.
+    pub build: BuildInfo,
     /// Mesh ▸ Optimize… dialog is open.
     pub show_optimize: bool,
     /// Plugins ▸: the command whose options dialog is open, and each
@@ -816,6 +844,8 @@ impl Default for EditorState {
             status_hint: None,
             renderer_info: String::new(),
             show_about: false,
+            show_licences: false,
+            build: BuildInfo::default(),
             show_optimize: false,
             plugin_commands: PluginCommands::default(),
             scripts: crate::scripts::Scripts::default(),

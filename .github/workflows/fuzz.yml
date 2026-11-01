@@ -1,0 +1,41 @@
+name: Fuzz
+
+# A long run of the .g4d loader's fuzz target (fuzz/): weekly, or by hand
+# for as long as asked. CI runs it for two minutes on every push.
+
+on:
+  schedule:
+    - cron: "17 3 * * 0" # Sundays, 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: How long to fuzz (minutes, at most 345)
+        default: "60"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  load:
+    name: fuzz the .g4d loader
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Fuzz, starting from the test fixtures
+        env:
+          MINUTES: ${{ inputs.minutes || '60' }}
+        run: |
+          mkdir -p fuzz/corpus/load
+          cargo fuzz run load fuzz/corpus/load crates/io/tests/fixtures -- \
+            -max_total_time=$((MINUTES * 60)) -rss_limit_mb=2048 -timeout=10
+      - name: Keep what failed
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts

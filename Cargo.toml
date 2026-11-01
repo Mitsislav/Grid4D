@@ -22,9 +22,10 @@
 [workspace]
 resolver = "3"
 members = ["crates/geom", "crates/text", "crates/scene", "crates/plugin", "crates/script", "crates/eval", "crates/render", "crates/raytrace", "crates/sim", "crates/io", "crates/ui", "plugins/gear", "plugins/wave", "plugins/scatter"]
+exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.13.0"
 edition = "2024"
 rust-version = "1.95" # eframe 0.37 requires 1.95
 license = "MIT OR Apache-2.0"
@@ -86,6 +87,8 @@ rayon = "1.10"
 rapier3d = "0.36"
 # Benchmarks (dev only): plain measurements, no plots or thread pool.
 criterion = { version = "0.8", default-features = false }
+# Property tests (dev only): random documents through save and load.
+proptest = { version = "1.12", default-features = false, features = ["std"] }
 # Rendered pictures (grid4d-io): PNG; OpenEXR written by hand with zlib (the
 # backend zip already uses) and half floats. `exr` (dev only) reads them back in tests.
 png = "0.18"

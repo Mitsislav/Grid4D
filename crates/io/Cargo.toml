@@ -22,6 +22,7 @@ half.workspace = true
 
 [dev-dependencies]
 exr.workspace = true
+proptest.workspace = true
 
 [lints]
 workspace = true

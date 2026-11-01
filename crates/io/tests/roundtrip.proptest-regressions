@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d450b8a19f6ecbeee693ef68bc0554d8df93a280fe507c4ad79f754759a4fdb8 # shrinks to objects = [RandomObject { name: "", kind: Plugin(PluginObject { type_id: "a.a", values: [("Float", Float(0.0)), ("Int", Int(0)), ("Bool", Bool(false)), ("Choice", Choice(0)), ("Vector", Vector(Vec3(0.0, 0.0, 0.0))), ("Color", Color([0.0, 0.0, 0.0]))] }), position: Vec3(0.0, 0.0, 0.0), rotation: Vec3(0.0, 0.0, 0.0), scale: Vec3(0.1, 0.1, 0.1), color: [0.0, 0.0, 0.0], switches: [false, false, false], parent: 0, phong: None, protection: None, material: None, layer: None, keys: [(0.0, 0.0, 0)] }], materials = [], layers = []
