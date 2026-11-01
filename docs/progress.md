@@ -2156,6 +2156,12 @@ endless loops, a library with examples and the Script Manager. Guides:
   but no box appeared: the failed event loop leaves a quit message in the
   main thread's queue, and `MessageBoxW` returns at once when it sees one.
   The box is now shown from a thread of its own, and stays until OK.
+- **The fuzz job failed in CI** (the first run after 14.2): cargo-fuzz
+  built for `x86_64-unknown-linux-musl`, which has no standard library on
+  the runner and does not allow the address sanitizer. The prebuilt
+  cargo-fuzz that the install action fetches is a static musl binary, and
+  cargo-fuzz defaults to the target it was itself built for. Both fuzz
+  workflows now pass `--target x86_64-unknown-linux-gnu`.
 - **The random-command test** found no bug in 120 000 commands (300 seeds
   of 400, frame changes and component modes included) — so it was checked
   against a deliberate one: a command that renamed the document without an
