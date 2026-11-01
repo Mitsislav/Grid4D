@@ -290,4 +290,28 @@ mod tests {
             assert_eq!(outcome.output.len(), 1, "{name} says what it did");
         }
     }
+
+    /// The examples are the guide's too, word for word.
+    #[test]
+    fn every_rhai_block_of_the_scripting_guide_runs_and_the_examples_are_in_it() {
+        crate::test_plugins();
+        let guide = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/scripting.md")).unwrap();
+        let blocks: Vec<&str> = guide
+            .split("```rhai\n")
+            .skip(1)
+            .filter_map(|rest| rest.split("```").next())
+            .collect();
+        assert!(blocks.len() >= 10, "{} blocks", blocks.len());
+        for (_, text) in EXAMPLES {
+            assert!(blocks.contains(text), "the guide shows {text:?}");
+        }
+        let doc = grid4d_scene::Document::with_demo_scene();
+        let id = |name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+        let selection = [id("Sphere"), id("Cube")];
+        for block in blocks {
+            if let Err(err) = grid4d_script::run(&doc, &selection, 0.0, crate::commands::shape_of, block) {
+                panic!("{err}\n{block}");
+            }
+        }
+    }
 }

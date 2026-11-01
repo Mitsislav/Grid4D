@@ -1283,6 +1283,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Run Script", "Εκτέλεση script"),
     ("Run Script File", "Εκτέλεση αρχείου script"),
     ("Run Script File…", "Εκτέλεση αρχείου script…"),
+    ("Run the script", "Εκτέλεση του script"),
     (
         "Run the tool once with these options on the selection (or on everything)",
         "Εκτέλεση του εργαλείου μία φορά με αυτές τις επιλογές στην επιλογή (ή σε όλα)",

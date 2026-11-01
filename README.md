@@ -103,6 +103,12 @@ the [progress log](docs/progress.md).
 - **Undo / redo** (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`, toolbar, Edit menu): create,
   delete, re-parent, gizmo drags, attribute and project-setting edits, renames and
   visibility toggles — one step per interaction, restoring the selection too.
+- **Plugins** (Create ▸ Plugins, the Plugins menu): Rust crates built in through the
+  `grid4d-plugin` API — kinds of objects (the Gear), deformers (the Wave) and
+  commands (Scatter); see [`docs/plugins.md`](docs/plugins.md).
+- **Scripts** in [Rhai](https://rhai.rs) (Script menu, Script Manager): build,
+  arrange and change objects; each run is one undo step; see
+  [`docs/scripting.md`](docs/scripting.md).
 
 ## Build & run
 

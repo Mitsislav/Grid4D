@@ -4054,6 +4054,94 @@ mod tests {
         assert!(editor.scripts.name.is_empty() && !editor.scripts.is_dirty());
     }
 
+    /// Phase 13's acceptance (`docs/IMPLEMENTATION_PLAN.md`) for the Gear: its
+    /// parameters edit, undo, animate, override in a take and save; the file
+    /// round-trips as it is, whether or not the plugin is installed (the file
+    /// layer never asks). The Wave, Scatter and scripts have their own tests.
+    #[test]
+    fn phase_13_acceptance_a_gear_edits_animates_overrides_and_saves() {
+        use grid4d_scene::{ObjectParam, PluginValue};
+        crate::test_plugins();
+        let (mut doc, mut editor, mut vp) = demo();
+        let create = EditorCommand::CreatePlugin {
+            type_id: "grid4d.gear".to_owned(),
+            child: false,
+        };
+        run(&mut doc, &mut editor, &mut vp, &[create]);
+        let gear = editor.selection.active().unwrap();
+        let value = |doc: &Document, name: &str, frame: f64| match &*doc.scene.get(gear).unwrap().data.kind_at(frame) {
+            ObjectKind::Plugin(o) => o.get(name),
+            _ => None,
+        };
+        let edit = |doc: &Document, change: &dyn Fn(&mut NodeData)| {
+            let mut data = doc.scene.get(gear).unwrap().data.clone();
+            change(&mut data);
+            EditorCommand::Edit {
+                edit: SceneEdit::SetData { id: gear, data },
+                label: "Edit",
+            }
+        };
+        let set = |name: &'static str, v: PluginValue| {
+            move |data: &mut NodeData| {
+                if let ObjectKind::Plugin(o) = &mut data.kind {
+                    o.set(name, v);
+                }
+            }
+        };
+
+        // Edited, undone, redone.
+        let teeth = edit(&doc, &set("Teeth", PluginValue::Int(20)));
+        run(&mut doc, &mut editor, &mut vp, &[teeth]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(value(&doc, "Teeth", 0.0), Some(PluginValue::Int(12)));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        assert_eq!(value(&doc, "Teeth", 0.0), Some(PluginValue::Int(20)));
+
+        // Its Radius keyed from 100 to 150 over ten frames.
+        let radius = {
+            let ObjectKind::Plugin(o) = &doc.scene.get(gear).unwrap().data.kind else {
+                unreachable!()
+            };
+            let index = o.values.iter().position(|(n, _)| n == "Radius").unwrap();
+            Param::Object(ObjectParam::Plugin(u8::try_from(index).unwrap()))
+        };
+        let keys = edit(&doc, &|data: &mut NodeData| {
+            data.toggle_key(radius, 0.0); // a key at 0 with its 100
+            data.set_value_at(radius, 150.0, 10.0, true);
+        });
+        run(&mut doc, &mut editor, &mut vp, &[keys]);
+        let Some(PluginValue::Float(halfway)) = value(&doc, "Radius", 5.0) else {
+            panic!("a radius")
+        };
+        assert!(halfway > 100.0 && halfway < 150.0, "{halfway}");
+
+        // A take with a thicker gear; Main keeps its own.
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::NewTake]);
+        let take = doc.takes.ids()[0];
+        let thicker = edit(&doc, &set("Thickness", PluginValue::Float(40.0)));
+        run(&mut doc, &mut editor, &mut vp, &[thicker]);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SwitchTake(None)]);
+        assert_eq!(value(&doc, "Thickness", 0.0), Some(PluginValue::Float(20.0)));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::SwitchTake(Some(take))]);
+        assert_eq!(value(&doc, "Thickness", 0.0), Some(PluginValue::Float(40.0)));
+
+        // Saved and opened again: the same object, its keys found by name.
+        let bytes = grid4d_io::to_bytes(&doc).unwrap();
+        let loaded = grid4d_io::from_bytes(&bytes).unwrap();
+        let find = |doc: &Document| {
+            doc.scene
+                .iter()
+                .find(|(_, n)| n.data.name == "Gear")
+                .unwrap()
+                .1
+                .data
+                .clone()
+        };
+        let (before, after) = (find(&doc), find(&loaded));
+        assert_eq!((&after.kind, &after.tracks), (&before.kind, &before.tracks));
+        assert_eq!(grid4d_io::to_bytes(&loaded).unwrap(), bytes, "saved back unchanged");
+    }
+
     #[test]
     fn a_plugin_object_is_created_undone_and_made_editable() {
         crate::test_plugins();

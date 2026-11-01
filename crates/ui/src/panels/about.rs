@@ -5,7 +5,7 @@ use egui::{Grid, Id, Modal, RichText, ScrollArea};
 use crate::i18n::{key, tr, trf};
 use crate::{EditorState, theme::palette as p};
 
-const SHORTCUTS: [(&str, &str); 43] = [
+const SHORTCUTS: [(&str, &str); 44] = [
     ("Alt + Left drag", key("Orbit")),
     ("Alt + Middle drag / Middle drag", key("Pan")),
     ("Alt + Right drag / Wheel", key("Zoom")),
@@ -53,6 +53,7 @@ const SHORTCUTS: [(&str, &str); 43] = [
     ("Ctrl+B", key("Render Settings")),
     ("Shift+R", key("Render to Picture Viewer")),
     ("Ctrl+R / Esc", key("Render View / clear it")),
+    ("Ctrl+Enter (in the Script Manager)", key("Run the script")),
     ("Double-click name", key("Rename (Object Manager)")),
     ("Drag row onto row", key("Re-parent (Object Manager)")),
 ];

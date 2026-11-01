@@ -30,9 +30,10 @@ screenshots come from the application itself.
 18. [Tags](#18-tags)
 19. [Materials](#19-materials)
 20. [Rendering](#20-rendering)
-21. [Scripts](#21-scripts)
-22. [Keyboard shortcuts](#22-keyboard-shortcuts)
-23. [Limitations and what is planned](#23-limitations-and-what-is-planned)
+21. [Plugins](#21-plugins)
+22. [Scripts](#22-scripts)
+23. [Keyboard shortcuts](#23-keyboard-shortcuts)
+24. [Limitations and what is planned](#24-limitations-and-what-is-planned)
 
 ---
 
@@ -423,74 +424,8 @@ makes a surface glow whatever the light.
 
 ### 4.2 Plugins
 
-Plugins add kinds of objects that Grid4D does not have itself. **Create ▸
-Plugins** lists the plugins of this Grid4D — objects first, then, after a
-line, deformers; hover one to see what it does, click it to create one (at
-the top of the Object Manager, selected). Grid4D comes with two plugins as
-examples:
-
-| Plugin | Parameters (Attribute Manager ▸ Object) |
-|--------|-------------------------------------------|
-| Gear (an object) | Teeth, Radius (to the tips), Tooth Depth, Tooth Width (share of the space between teeth), Thickness, Hole Radius (0: no hole) |
-| Wave (a deformer) | Size (its box), Amplitude (how far points move up and down), Wavelength (crest to crest), Phase (shifts the wave along), Direction (Along X, Along Z or Radial), Within Box (only points inside the box move) |
-
-![A Gear made from Create ▸ Plugins, its parameters on the Object tab](images/manual/plugin-gear.png)
-
-A plugin's object works like any other: move and scale it, give it a
-material, put it on a layer, bend it with a deformer, change its parameters
-in a take, render and export it; **Make Editable** (C) turns it into a
-polygon object.
-
-**A plugin deformer** works like the built-in ones (see [Deformers](#14-deformers)): it
-reshapes the object it is under and everything below that object. Hold
-**Shift** while you choose it in Create ▸ Plugins to put it under the
-selected object with its box fitted around it; **Fit to Parent** on its
-Object tab does the same later. Its box is drawn in the views, and the Wave's
-orange handle above the box sets its Amplitude: drag it up and down (Shift:
-whole centimetres).
-
-![A Wave deformer under a plane: the ripples, its box and handle, and its parameters with their key buttons](images/manual/plugin-wave.png)
-
-**Animating plugin parameters:** every number of a plugin (not the choices,
-check boxes or vectors) has a key button on the Object tab, and records keys
-with Autokeying like any parameter. Its curve appears in the F-Curve editor
-under the plugin's name for it. Key the Wave's Phase from 0° to −360° over a
-second or two, and the ripples run outwards.
-
-**Plugin commands** do a job once, like a menu command. The **Plugins** menu
-(between Render and Window) lists them; one whose name ends in "…" first
-asks for its options in a small window — click **OK** to run it, **Cancel**
-to leave things as they are. The options you set are kept until you quit.
-Whatever a command does is one step: **Ctrl+Z** takes all of it back. When
-it cannot run (nothing suitable selected, say), it tells you why and
-changes nothing. Grid4D comes with one command as an example:
-
-**Plugins ▸ Scatter…** spreads copies of objects over the surface of
-another. Select the objects to copy, then the surface **last** (Shift +
-click in the Object Manager), and choose Scatter….
-
-| Option | What it does |
-|--------|--------------|
-| Count | How many copies (each one picks one of the selected objects at random) |
-| Seed | Which random arrangement: the same seed always gives the same result |
-| Align to Surface | Each copy stands up along the surface where it lands |
-| Random Rotation | Turns each copy about its up axis by up to this much either way |
-| Scale Variation | Makes each copy bigger or smaller by up to this much |
-
-![Scatter's options](images/manual/plugin-scatter-options.png)
-
-The copies (each with everything under it) go under a new Null named
-"Scatter", which is selected afterwards; the originals stay as they are.
-The surface is used as its own shape at the current frame — a primitive, a
-polygon object, a generator's result or a plugin object — without its
-deformers.
-
-![Twenty pebbles scattered over a sphere, under the new Scatter Null](images/manual/plugin-scatter.png)
-
-**If a document uses a plugin this Grid4D does not have**, it still opens:
-the object keeps its place and its values but shows nothing, and its Object
-tab names the missing plugin and lists the values. Saving keeps them, so the
-file works again where the plugin is installed.
+**Create ▸ Plugins** lists the kinds of objects and deformers that plugins
+add to Grid4D (it comes with a Gear and a Wave): see [Plugins](#21-plugins).
 
 ## 5. Selecting and transforming objects
 
@@ -2157,12 +2092,96 @@ overlays stay on top, so you can carry on working. **Ctrl+R** again renders
 afresh. The Render View is never saved and does not appear in the Picture
 Viewer's history; use **Shift+R** for a picture to keep.
 
-## 21. Scripts
+## 21. Plugins
+
+Plugins add to Grid4D things it does not have itself — kinds of objects,
+deformers and commands — and they work like its own: their parameters are in
+the Attribute Manager, their changes undo, their objects save with the
+document. Plugins are built into Grid4D; Grid4D comes with three as
+examples: the Gear, the Wave and Scatter. (Writing one is explained in
+[`plugins.md`](plugins.md).)
+
+### 21.1 Plugin objects and deformers
+
+**Create ▸ Plugins** lists the plugins that make objects — then, after a
+line, the deformers; hover one to see what it does, click it to create one
+(at the top of the Object Manager, selected).
+
+| Plugin | Parameters (Attribute Manager ▸ Object) |
+|--------|-------------------------------------------|
+| Gear (an object) | Teeth, Radius (to the tips), Tooth Depth, Tooth Width (share of the space between teeth), Thickness, Hole Radius (0: no hole) |
+| Wave (a deformer) | Size (its box), Amplitude (how far points move up and down), Wavelength (crest to crest), Phase (shifts the wave along), Direction (Along X, Along Z or Radial), Within Box (only points inside the box move) |
+
+![A Gear made from Create ▸ Plugins, its parameters on the Object tab](images/manual/plugin-gear.png)
+
+A plugin's object works like any other: move and scale it, give it a
+material, put it on a layer, bend it with a deformer, change its parameters
+in a take, render and export it; **Make Editable** (C) turns it into a
+polygon object.
+
+**A plugin deformer** works like the built-in ones (see [Deformers](#14-deformers)): it
+reshapes the object it is under and everything below that object. Hold
+**Shift** while you choose it in Create ▸ Plugins to put it under the
+selected object with its box fitted around it; **Fit to Parent** on its
+Object tab does the same later. Its box is drawn in the views, and the Wave's
+orange handle above the box sets its Amplitude: drag it up and down (Shift:
+whole centimetres).
+
+![A Wave deformer under a plane: the ripples, its box and handle, and its parameters with their key buttons](images/manual/plugin-wave.png)
+
+**Animating plugin parameters:** every number of a plugin (not the choices,
+check boxes or vectors) has a key button on the Object tab, and records keys
+with Autokeying like any parameter. Its curve appears in the F-Curve editor
+under the plugin's name for it. Key the Wave's Phase from 0° to −360° over a
+second or two, and the ripples run outwards.
+
+### 21.2 Plugin commands
+
+**Plugin commands** do a job once, like a menu command. The **Plugins** menu
+(between Render and Window) lists them; one whose name ends in "…" first
+asks for its options in a small window — click **OK** to run it, **Cancel**
+to leave things as they are. The options you set are kept until you quit.
+Whatever a command does is one step: **Ctrl+Z** takes all of it back. When
+it cannot run (nothing suitable selected, say), it tells you why and
+changes nothing. Grid4D comes with one command as an example:
+
+**Plugins ▸ Scatter…** spreads copies of objects over the surface of
+another. Select the objects to copy, then the surface **last** (Shift +
+click in the Object Manager), and choose Scatter….
+
+| Option | What it does |
+|--------|--------------|
+| Count | How many copies (each one picks one of the selected objects at random) |
+| Seed | Which random arrangement: the same seed always gives the same result |
+| Align to Surface | Each copy stands up along the surface where it lands |
+| Random Rotation | Turns each copy about its up axis by up to this much either way |
+| Scale Variation | Makes each copy bigger or smaller by up to this much |
+
+![Scatter's options](images/manual/plugin-scatter-options.png)
+
+The copies (each with everything under it) go under a new Null named
+"Scatter", which is selected afterwards; the originals stay as they are.
+The surface is used as its own shape at the current frame — a primitive, a
+polygon object, a generator's result or a plugin object — without its
+deformers.
+
+![Twenty pebbles scattered over a sphere, under the new Scatter Null](images/manual/plugin-scatter.png)
+
+### 21.3 Documents with a missing plugin
+
+**If a document uses a plugin this Grid4D does not have**, it still opens:
+the object keeps its place and its values but shows nothing, and its Object
+tab names the missing plugin and lists the values. Saving keeps them, so the
+file works again where the plugin is installed.
+
+## 22. Scripts
 
 A script is a short program that does a job on the open document for you —
 build a row of objects, rename or recolour many at once. Scripts are text
 files ending in `.rhai`, written in [Rhai](https://rhai.rs), a small
-language that reads much like Rust or JavaScript.
+language that reads much like Rust or JavaScript. The complete guide to
+writing them, with every function and many examples, is
+[`scripting.md`](scripting.md).
 
 **Your script library.** Grid4D keeps your scripts in a folder of its own
 (in its data folder, beside its settings: on Windows
@@ -2240,7 +2259,7 @@ from 0 to 1.
 | `frame()` | the current frame |
 | `create("Cube")`, `create("Cube", parent)` | a new object of a kind from the Create menu or a plugin ("Gear") |
 | `delete(object)` | deletes it and everything under it |
-| `run_command("Scatter", #{ Count: 50, Seed: 2 })` | runs a plugin command on the script's selection (see [Plugins](#42-plugins)) |
+| `run_command("Scatter", #{ Count: 50, Seed: 2 })` | runs a plugin command on the script's selection (see [Plugins](#21-plugins)) |
 | `print(…)` | a line of output |
 | `o.name`, `o.kind`, `o.position`, `o.rotation`, `o.scale`, `o.color` | an object's name, kind and placement (set them with `=`) |
 | `o.visible`, `o.visible_in_render`, `o.enabled` | its switches |
@@ -2248,7 +2267,7 @@ from 0 to 1.
 | `o.material`, `o.layer` | the name of its material or layer; set them by name |
 | `o.get("Radius")`, `o.set("Radius", 50)` | a parameter by its name on the Object tab |
 
-## 22. Keyboard shortcuts
+## 23. Keyboard shortcuts
 
 Shortcuts follow Cinema 4D. **Chords** like `U~L` mean: press U, release it, then
 press L. The status bar shows the pending first key and its choices. Any other key or
@@ -2296,6 +2315,7 @@ Esc cancels a chord.
 | Ctrl+B | Render Settings |
 | Shift+R | Render to Picture Viewer |
 | Ctrl+R / Esc | Render View / clear it |
+| Ctrl+Enter (in the Script Manager's editor) | Run the script |
 | Tab (pointer over the timeline) | Timeline / F-Curve tab |
 | H / S (pointer over the F-Curve graph) | Frame all curves / the selected keys |
 
@@ -2303,7 +2323,7 @@ Esc cancels a chord.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)
 
-## 23. Limitations and what is planned
+## 24. Limitations and what is planned
 
 The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there yet:
 

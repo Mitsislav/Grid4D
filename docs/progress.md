@@ -12,10 +12,10 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 13 — Extensibility (v0.13) |
-| Last step done | 13.5 — The Script Manager (2026-10-31) |
-| Next step | 13.6 — SDK documentation and finish |
-| Tests | 749, all passing; clippy and rustfmt clean |
+| Current phase | 13 — Extensibility (v0.13), complete |
+| Last step done | 13.6 — SDK documentation and finish; Phase 13 complete (2026-10-31) |
+| Next step | Plan the next phase (towards v1.0: stabilisation) |
+| Tests | 751, all passing; clippy and rustfmt clean |
 
 ---
 
@@ -1837,6 +1837,7 @@ the interface in Greek.
 | 13.3 | Command plugins: the Plugins menu, an options dialog from the plugin's description, changes applied as one undo step (or the plugin's message); the example Scatter | 737 |
 | 13.4 | Scripting core: Rhai scripts on a copy of the document (objects, placement, parameters, hierarchy, materials and layers, plugin commands), one undo step, errors with line and column, an operations limit; Script ▸ Run Script File… | 743 |
 | 13.5 | The Script Manager: the script library with five examples, the editor with line numbers, Run and Ctrl+Enter, the console; Script ▸ lists the library | 749 |
+| 13.6 | Guides for plugin and script writers (`plugins.md`, `scripting.md`, its examples tested), the manual's Plugins and Scripts chapters, the Greek checked on screen, the phase's acceptance; Phase 13 complete | 751 |
 
 **Planning notes:**
 - **Why plugins are built in.** Loading plugin libraries at run time would
@@ -2004,6 +2005,38 @@ test makes fifty at once.
   script and line numbers; Open ▸ Grid of Cubes, Run made the grid
   ("made 25 cubes" in the console); Random Colours and Spread Selected
   Objects ran on the selected Grid and wrote their lines below.
+
+**13.6 — SDK documentation and finish**
+
+*Problems and solutions:*
+- **Guides that stay true.** Every ```` ```rhai ```` block of `scripting.md`
+  is run by a test on the demo scene (the Sphere and the Cube selected), and
+  the test checks that the five built-in examples appear in the guide word
+  for word — an API change that breaks an example fails the build. Blocks
+  meant to show errors are marked `text`.
+- **Bugs found by testing in Greek:** on a deformer's Object tab (built-in or
+  plugin) the key buttons were missing in Greek: the Fit to Parent hint, much
+  longer in Greek, sat in the grid's middle column and widened it until the
+  key column fell off the panel. The hint now wraps at about a field and a
+  half.
+- **The phase's acceptance** is a test for the Gear (edit and undo, keys on
+  its Radius, a take's Thickness, save and reload with the keys found by
+  name, saved back to the same bytes) beside the earlier tests for the Wave,
+  Scatter and scripts; the missing-plugin case was checked on screen in 13.1
+  and the file layer never asks for plugins.
+- **On-screen testing in Greek:** the Wave's Object tab (Πλάτος κύματος,
+  Μήκος κύματος, Φάση, Κατεύθυνση: Ακτινικά, key buttons), Script ▸ with
+  Διαχείριση scripts… and Εκτέλεση αρχείου script…, and the Script Manager
+  (Νέο, Άνοιγμα, Αποθήκευση, Εκτέλεση, Κονσόλα) all read in Greek.
+
+**Phase 13 complete.** Plugins are Rust crates built into Grid4D behind the
+`grid4d-plugin` API: generators, deformers (in the deformer chain, with a
+box and a handle) and commands (changes as one undo step), their numbers
+animated and overridden in takes, documents with missing plugins kept
+intact; the Gear, Wave and Scatter examples. Scripts in Rhai run on a copy
+of the document as one undo step, with errors at their line, a limit for
+endless loops, a library with examples and the Script Manager. Guides:
+`plugins.md`, `scripting.md`.
 
 ---
 

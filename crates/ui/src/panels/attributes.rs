@@ -2049,7 +2049,12 @@ fn fit_row(ui: &mut Ui, k: &mut KeyRows, hint: &str) {
     }
     ui.end_row();
     ui.label("");
-    ui.label(RichText::new(tr(hint)).color(p().text_dim));
+    // Wrapped at a field's width or so: a long translation must not widen
+    // the column and push the key buttons out of sight.
+    ui.vertical(|ui| {
+        ui.set_max_width(FIELD_WIDTH * 1.5);
+        ui.add(egui::Label::new(RichText::new(tr(hint)).color(p().text_dim)).wrap());
+    });
     ui.end_row();
 }
 
