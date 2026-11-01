@@ -425,23 +425,26 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData, keying: Keying) -> Option<&'stati
         .show(ui, |ui| {
             for (axis, [pl, sl, rl]) in ROWS.into_iter().enumerate() {
                 let axis_id = Axis::ALL[axis];
+                // Each field is named by its label (screen readers, tests).
                 let mut label = |ui: &mut Ui, param: Param, text: &str| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 3.0;
                         if let Some(click) = key_button(ui, data.key_state(param, frame)) {
                             clicked = Some((param, click));
                         }
-                        small_label(ui, text);
-                    });
+                        small_label(ui, text).id
+                    })
+                    .inner
                 };
-                label(ui, Param::Position(axis_id), pl);
+                let named = label(ui, Param::Position(axis_id), pl);
                 ui.add_enabled_ui(!protection.position, |ui| {
                     ui.add_sized(
                         [64.0, 19.0],
                         widgets::length(ui, &mut t.position[axis]).speed(1.0).max_decimals(2),
                     )
+                    .labelled_by(named)
                 });
-                label(ui, Param::Scale(axis_id), sl);
+                let named = label(ui, Param::Scale(axis_id), sl);
                 ui.add_enabled_ui(!protection.scale, |ui| {
                     ui.add_sized(
                         [48.0, 19.0],
@@ -450,8 +453,9 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData, keying: Keying) -> Option<&'stati
                             .range(0.001..=10_000.0)
                             .max_decimals(3),
                     )
+                    .labelled_by(named)
                 });
-                label(ui, Param::Rotation(axis_id), rl);
+                let named = label(ui, Param::Rotation(axis_id), rl);
                 let mut degrees = t.rotation[axis].to_degrees();
                 let rotated = ui
                     .add_enabled_ui(!protection.rotation, |ui| {
@@ -459,6 +463,7 @@ fn coord_tab(ui: &mut Ui, data: &mut NodeData, keying: Keying) -> Option<&'stati
                             [56.0, 19.0],
                             DragValue::new(&mut degrees).speed(0.5).suffix("°").max_decimals(2),
                         )
+                        .labelled_by(named)
                     })
                     .inner
                     .changed();
@@ -1871,7 +1876,7 @@ fn effector_list_rows(ui: &mut Ui, effectors: &mut Vec<NodeId>, scene: &Scene) {
         ui.horizontal(|ui| {
             ui.label(name);
             if ui
-                .small_button(tr("✕"))
+                .small_button(tr("×"))
                 .on_hover_text(tr("Remove from the list"))
                 .clicked()
             {
@@ -2424,8 +2429,8 @@ fn plugin_rows(ui: &mut Ui, k: &mut KeyRows, object: &mut grid4d_scene::PluginOb
     }
 }
 
-fn small_label(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(tr(text)).color(p().text_dim).size(11.5));
+fn small_label(ui: &mut Ui, text: &str) -> egui::Response {
+    ui.label(RichText::new(tr(text)).color(p().text_dim).size(11.5))
 }
 
 #[cfg(test)]

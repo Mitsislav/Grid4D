@@ -6,7 +6,8 @@
 > after a crash and how fast it draws.
 >
 > Covers implementation-plan steps **14.1** (About), **14.3** (crash reports
-> and robustness) and **14.4** (the frame-time readout).
+> and robustness), **14.4** (the frame-time readout) and **14.5** (the
+> interface pass).
 
 ## Purpose
 
@@ -134,6 +135,24 @@ accepted as an exception, are recorded in `docs/performance.md`.
 `cargo run --release --example stress -- <folder>` writes the scenes these
 are measured on (`stress-10k.g4d`, `stress-1m.g4d`, `stress-50mb.g4d`).
 
+## Behaviour (14.5)
+
+- **One list of shortcuts.** Help ▸ Keyboard Shortcuts & About and the
+  manual's chapter on shortcuts show the same list, in the same order: the
+  keys (as written on the keyboard, not translated) and what they do
+  (translated). A shortcut added to Grid4D is added to that list once.
+- **Every field and list row has a name** for screen readers: the
+  Coordinates fields are named by their labels (P . X, S . X, R . H …), the
+  timeline's frame-rate menu is "Frame Rate", and each Object Manager row is
+  the object's name, with whether it is selected.
+- **Text uses only the built-in font.** Every character the interface shows
+  is in the typeface Grid4D carries (Ubuntu Light, with egui's icons), so no
+  system font is needed: menu paths read "Render › Render to Picture
+  Viewer", and the remove button of a list is "×".
+- **Every text in the interface is translated**, the Coordinate Manager's
+  column titles (Position, Scale / Size, Rotation) included.
+- Dialogs are wide enough for their texts in both languages (Optimize).
+
 ## Grid4D mapping
 
 | Piece | Where |
@@ -153,6 +172,10 @@ are measured on (`stress-10k.g4d`, `stress-1m.g4d`, `stress-50mb.g4d`).
 | Zero allocations in a steady frame (a counting allocator) | `crates/render/tests/steady_frame.rs` |
 | The stress scenes | `examples/stress.rs` (the binary's package) |
 | Measurements | `docs/performance.md` |
+| The shortcut list (`shortcuts::TABLE`), shown by About; a test keeps the manual's §23 equal to it | `grid4d-ui::shortcuts`, `panels::about` |
+| The whole interface as one value (`Shell`: document, editor, panels; one frame in `ui`), used by the binary and by tests | `grid4d-ui::shell` |
+| Interface tests (selection with Shift / Ctrl, drag to re-parent, rename, a typed value, a gizmo drag, a deformer handle drag, a menu command — each with undo) | `crates/ui/tests/interface.rs` (`egui_kittest`) |
+| The walkthrough: the interface rendered in English and Greek, Dark and Light (menus, panes, windows) for review | `crates/ui/tests/walkthrough.rs` (ignored; run by hand) |
 
 ## Decisions (2026-11-01)
 
@@ -186,6 +209,18 @@ are measured on (`stress-10k.g4d`, `stress-1m.g4d`, `stress-50mb.g4d`).
    (its own global allocator; the workspace forbids `unsafe`, so Grid4D
    cannot write one), linked into that one test binary only.
 
+## Decisions (14.5)
+
+10. **The walkthrough is pictures, not a window.** Posted mouse input does
+    not reach the window from a test driver, so the interface is rendered
+    headless with `egui_kittest` and wgpu (a software adapter will do) and
+    the pictures are read; clicks and drags are tested the same way, through
+    egui's own input.
+11. **Keys stay in English in the shortcut list**: they name the keys on
+    the keyboard (Ctrl, Shift, F8); the actions are translated.
+12. **No system fonts**: characters outside the built-in font are replaced
+    rather than a font added (› for ▸, × for ✕).
+
 ## Acceptance criteria
 
 - [x] About shows the version, commit and date; the Licences page lists every
@@ -204,3 +239,8 @@ are measured on (`stress-10k.g4d`, `stress-1m.g4d`, `stress-50mb.g4d`).
       frame and the slowest part.
 - [x] Every budget measured on the reference machine and met, or accepted
       with a reason, in `docs/performance.md`.
+- [x] Help ▸ About and the manual list the same shortcuts (a test).
+- [x] Interface tests drive selection, re-parenting, renaming, typing, the
+      gizmo, a deformer handle and a menu, each with undo.
+- [x] The interface read in English and Greek, Dark and Light; what read
+      wrong fixed.

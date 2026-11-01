@@ -196,6 +196,10 @@ impl OutlinerPanel {
         let selected = editor.selection.contains(id);
         let active = editor.selection.active() == Some(id);
         let cy = rect.center().y;
+        // Screen readers (and the interface tests) know a row by its object's name.
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::accesskit::Role::TreeItem, true, selected, &node.data.name)
+        });
 
         // Background.
         if selected {

@@ -2331,10 +2331,12 @@ Esc cancels a chord.
 
 | Keys | Action |
 |------|--------|
-| Alt + left / middle / right drag, wheel | Orbit / pan / zoom |
+| Alt + left drag | Orbit |
+| Alt + middle drag, middle drag | Pan |
+| Alt + right drag, wheel | Zoom |
 | H / O | Frame scene / frame selected objects |
 | F1–F4 / F5 | View 1–4 alone / all four views |
-| Middle click on a view | Show it alone / back among the others |
+| Middle click | Show the view under the pointer alone / back among the others |
 | N~A / N~B / N~C / N~D | Gouraud Shading / Gouraud Shading (Lines) / Quick Shading / Quick Shading (Lines) |
 | N~E / N~F / N~G | Constant Shading / Hidden Line / Lines |
 | N~H / N~K | Wireframe / Box |
@@ -2342,11 +2344,12 @@ Esc cancels a chord.
 | 9 / 0 | Live / Rectangle Selection tool |
 | U~L / U~B | Loop / Ring Selection tool |
 | U~I / U~W / U~Y / U~K | Invert / Select Connected / Grow / Shrink selection |
+| Click / Shift+click / Ctrl+click | Select / add / toggle (in a component mode: remove) |
 | C | Make Editable |
 | Q | Switch the selected generator (or the one above the selection) off / on |
-| Shift+S | Snapping on / off |
-| Alt + click a generator button | Create the generator around the selected object |
-| D / I | Extrude / Inset tool |
+| Shift+S | Snapping on / off (right-click the snap button: settings) |
+| Alt+click | Create a generator around the selected object (on a generator button) |
+| D / I | Extrude / Inset tool (drag left or right) |
 | M~T / M~W | Extrude / Inset tool (alternatives) |
 | K~L (M~L) / K~K (M~K) | Loop/Path Cut / Line Cut tool |
 | M~S | Bevel tool |
@@ -2367,13 +2370,15 @@ Esc cancels a chord.
 | Ctrl+F9 | Autokeying on / off |
 | Shift+F5 / Shift+F7 | Attribute Manager / Coordinate Manager |
 | Shift+F2 | Material Manager |
-| Ctrl+N (pointer over the Material Manager) | New material |
+| Ctrl+N | New material (pointer over the Material Manager) |
 | Ctrl+B | Render Settings |
 | Shift+R | Render to Picture Viewer |
 | Ctrl+R / Esc | Render View / clear it |
-| Ctrl+Enter (in the Script Manager's editor) | Run the script |
-| Tab (pointer over the timeline) | Timeline / F-Curve tab |
-| H / S (pointer over the F-Curve graph) | Frame all curves / the selected keys |
+| Ctrl+Enter | Run the script (in the Script Manager's editor) |
+| Tab | Timeline / F-Curve tab (pointer over the timeline) |
+| H / S | Frame all curves / the selected keys (pointer over the F-Curve graph) |
+| Double-click | Rename (a name in the Object Manager) |
+| Drag | Re-parent (a row onto another in the Object Manager) |
 
 **Help ▸ Keyboard Shortcuts & About** shows this list inside the application.
 Its first line is the version and the build — the version number, then the

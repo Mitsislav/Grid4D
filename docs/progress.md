@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 14 — Stabilisation (v1.0) |
-| Last step done | 14.4 — Performance budget (2026-11-01) |
-| Next step | 14.5 — The interface pass |
-| Tests | 770 (and 2 ignored measurements), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 14.5 — The interface pass (2026-11-02) |
+| Next step | 14.6 — Packaging and the release workflow |
+| Tests | 778 (and 3 ignored, run by hand: two timings and the walkthrough), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2049,6 +2049,7 @@ endless loops, a library with examples and the Script Manager. Guides:
 | 14.2 | `.g4d` v3 reviewed and frozen, specified in `docs/FILE_FORMAT.md`; a golden fixture with everything v3 holds; property-tested round trips; damaged and hostile files; a fuzz target with a CI job and a weekly run; saved rotations kept exact and never NaN | 756 |
 | 14.3 | Text outlines read with `skrifa` (egui's own font reader) instead of the unmaintained `ttf-parser`, identical to the byte; local crash reports (a panic hook, the log's last lines, pointed to on the next start, Show Report); the random-command test (long `EditorCommand` sequences with undo / redo); start-up without graphics or a data folder told in words; autosave's first failure an alert; failed saves keep the old file; files too large for memory refused | 767 |
 | 14.4 | The performance budget measured and met (`docs/performance.md`): `criterion` benches for geometry, evaluation, extraction, files and the path tracer (built in CI); a counting-allocator test of steady frames; the stress scenes (`examples/stress.rs`); View ▸ Frame Time; topology 10× and the BVH build a fifth faster | 770 |
+| 14.5 | The interface pass: the whole interface as one `Shell` driven headless by `egui_kittest` (Shift / Ctrl selection, drag to re-parent, rename, a typed value, a gizmo drag, a Bend handle drag, a menu command, each with undo); one shortcut list for Help and the manual, kept equal by a test; accessible names for fields and Object Manager rows; the interface rendered in English and Greek, Dark and Light, and fixed where it read wrong | 778 |
 | — | The itch.io page prepared ([`assets/itch/page.md`](../assets/itch/page.md): its fields, description and pictures); step 14.6 also pushes the packages there with `butler` | — |
 
 **Planning notes:**
@@ -2207,6 +2208,37 @@ endless loops, a library with examples and the Script Manager. Guides:
 - **Where the time to open a big file goes:** 0.4 – 0.5 s reading and
   replacing the document, the rest (to 1.3 – 1.7 s) the first frame
   triangulating and uploading about 4.5 million triangles.
+
+**14.5 — The interface pass**
+
+*Problems and solutions:*
+- **Driving the interface without a window.** The layout the binary drew
+  each frame moved into `grid4d_ui::shell::Shell`, so tests run the very
+  same interface; `egui_kittest` feeds it clicks, drags, modifier keys and
+  typing through egui's own input, and finds widgets by their accessible
+  names.
+- **Tests without fonts.** egui 0.37 no longer bundles its fonts by
+  default — the application gets them through eframe — so every headless
+  test so far had laid text out with no font at all (silently, as empty
+  boxes). The interface tests turn egui's `default_fonts` on.
+- **Found by the accessibility check:** six Coordinates fields and the
+  frame-rate menu had no name, and Object Manager rows were not in the
+  accessibility tree at all. Fields are now named by their labels, rows by
+  their objects (as tree items, with their selection).
+- **Found by laying out every text:** the menu-path arrow "▸" and the
+  remove button's "✕" are not in the built-in font; Windows drew them from
+  a system font, a system without one would not. Replaced by "›" and "×".
+- **Found by reading the pictures:** the Coordinate Manager's column titles
+  were not translated (written without `tr`, so the completeness test could
+  not see them), and the Optimize dialog was too narrow for its Greek.
+- **A false alarm:** in the first Light-theme pictures menus were invisible
+  and fields black — the test harness re-applies its own (dark) theme after
+  setup; the walkthrough now names the theme to the harness too.
+- **The two shortcut lists had drifted** (each had rows the other lacked);
+  they are one table now, and the manual's table is checked against it.
+- **On-screen driving:** posted (and real) mouse clicks from the test driver
+  no longer reach the window, which is why the walkthrough is rendered
+  headless rather than clicked through on screen.
 
 ---
 

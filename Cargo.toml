@@ -90,6 +90,9 @@ criterion = { version = "0.8", default-features = false }
 # Counts allocations per thread (dev only): its own global allocator, linked
 # only into the test that uses it (crates/render/tests/steady_frame.rs).
 allocation-counter = "0.8"
+# Headless interface tests (dev only, grid4d-ui): simulated clicks, drags and
+# typing through AccessKit; `wgpu` renders the interface to pictures.
+egui_kittest = { version = "0.37", features = ["wgpu"] }
 # Property tests (dev only): random documents through save and load.
 proptest = { version = "1.12", default-features = false, features = ["std"] }
 # Rendered pictures (grid4d-io): PNG; OpenEXR written by hand with zlib (the

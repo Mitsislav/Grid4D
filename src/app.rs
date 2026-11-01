@@ -1,34 +1,21 @@
-//! The application shell: owns the document and every panel, and lays out the
-//! fixed bars around the docked workspace each frame.
+//! The application: the interface (`grid4d_ui::shell::Shell`) set up from
+//! the settings eframe keeps between sessions, and those settings saved.
 
-use egui::{CentralPanel, Margin, Panel};
 use grid4d_scene::Document;
 use grid4d_ui::{
-    EditorCommand, EditorState, PictureViewerPanel, RecentFiles, RenderSettingsPanel, ViewportPanel,
+    EditorCommand, EditorState, RecentFiles, ViewportPanel,
     autosave::Autosave,
-    commands, file,
-    panels::{
-        about, alert, drop_overlay, menu_bar, mode_palette, optimize, plugin_command,
-        preferences as preferences_window, recovery, script_manager, status_bar, toolbar, unsaved_changes,
-    },
     preferences::{self, Preferences},
-    recent, shortcuts,
-    theme::{self, metrics},
-    window::WindowFit,
-    workspace::{self, Panels, Workspace},
+    recent,
+    shell::Shell,
+    theme,
+    workspace::{self, Workspace},
 };
 
+/// The interface ([`Shell`]) with what only the application has: settings
+/// kept in eframe storage between sessions.
 pub struct Grid4DApp {
-    doc: Document,
-    editor: EditorState,
-    /// The docked panels and their arrangement.
-    panels: Panels,
-    workspace: Workspace,
-    render_settings: RenderSettingsPanel,
-    picture_viewer: PictureViewerPanel,
-    /// Time of the previous playback tick (egui clock, seconds).
-    last_tick: Option<f64>,
-    window_fit: WindowFit,
+    shell: Shell,
 }
 
 impl Grid4DApp {
@@ -95,20 +82,14 @@ impl Grid4DApp {
             editor.commands.push(EditorCommand::OpenFile(path));
         }
 
+        // The arrangement the user left, repaired if it lacks a pane.
+        let workspace = cc
+            .storage
+            .and_then(|s| eframe::get_value::<Workspace>(s, workspace::STORAGE_KEY))
+            .map(Workspace::repaired)
+            .unwrap_or_default();
         Self {
-            doc,
-            editor,
-            panels: Panels::new(viewport),
-            // The arrangement the user left, repaired if it lacks a pane.
-            workspace: cc
-                .storage
-                .and_then(|s| eframe::get_value::<Workspace>(s, workspace::STORAGE_KEY))
-                .map(Workspace::repaired)
-                .unwrap_or_default(),
-            render_settings: RenderSettingsPanel::default(),
-            picture_viewer: PictureViewerPanel::default(),
-            last_tick: None,
-            window_fit: WindowFit::default(),
+            shell: Shell::new(doc, editor, viewport, workspace),
         }
     }
 }
@@ -117,92 +98,27 @@ impl eframe::App for Grid4DApp {
     /// Called by eframe on exit and periodically. Window geometry and panel sizes
     /// are persisted by eframe itself (the `persistence` feature).
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        storage.set_string(recent::STORAGE_KEY, self.editor.file.recent.to_storage());
-        eframe::set_value(storage, workspace::STORAGE_KEY, &self.workspace);
-        eframe::set_value(storage, preferences::STORAGE_KEY, &self.editor.preferences);
+        let editor = &self.shell.editor;
+        storage.set_string(recent::STORAGE_KEY, editor.file.recent.to_storage());
+        eframe::set_value(storage, workspace::STORAGE_KEY, &self.shell.workspace);
+        eframe::set_value(storage, preferences::STORAGE_KEY, &editor.preferences);
     }
 
     /// A normal exit: the recovery copy is no longer needed.
     fn on_exit(&mut self) {
-        self.editor.autosave.finish();
+        self.shell.editor.autosave.finish();
     }
 
-    /// Tab over the bottom panel switches its tab, before egui moves focus with it.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        shortcuts::take_tab(ctx, &mut self.editor, raw_input);
+        self.shell.raw_input_hook(ctx, raw_input);
     }
 
-    /// Advances playback before the UI runs, using real elapsed time.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.doc.time.is_playing() {
-            let now = ctx.input(|i| i.time);
-            let dt = self.last_tick.map_or(0.0, |prev| (now - prev).clamp(0.0, 0.25));
-            self.doc.time.advance(dt);
-            self.last_tick = Some(now);
-            ctx.request_repaint();
-        } else {
-            self.last_tick = None;
-        }
+        self.shell.logic(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-        self.window_fit.check(&ctx);
-        preferences::set_units(&ctx, self.editor.preferences.units);
-        theme::follow(&ctx, self.editor.preferences.theme);
-        grid4d_ui::i18n::set_language(self.editor.preferences.language);
-        shortcuts::handle(&ctx, &mut self.doc, &mut self.editor);
-        file::accept_dropped_files(&ctx, &mut self.editor);
-
-        // Order matters: the top and bottom bars span the full width, then the
-        // mode palette takes the left edge and the docked panes fill the rest.
-        Panel::top("grid4d.menu_bar")
-            .frame(theme::header_frame())
-            .exact_size(metrics::MENU_BAR_HEIGHT)
-            .show(ui, |ui| menu_bar::show(ui, &mut self.doc, &mut self.editor));
-
-        Panel::top("grid4d.toolbar")
-            .frame(theme::panel_frame().inner_margin(Margin::symmetric(6, 0)))
-            .exact_size(metrics::TOOLBAR_HEIGHT)
-            .show(ui, |ui| toolbar::show(ui, &mut self.editor));
-
-        Panel::bottom("grid4d.status_bar")
-            .frame(theme::header_frame())
-            .exact_size(metrics::STATUS_BAR_HEIGHT)
-            .show(ui, |ui| status_bar::show(ui, &self.doc, &self.editor));
-        // The status bar shows last frame's hint; panels below set this frame's.
-        self.editor.status_hint = None;
-
-        Panel::left("grid4d.mode_palette")
-            .frame(theme::panel_frame())
-            .resizable(false)
-            .exact_size(40.0)
-            .show(ui, |ui| mode_palette::show(ui, &self.doc, &mut self.editor));
-
-        // The viewport and the managers, docked as the user arranged them.
-        CentralPanel::no_frame().show(ui, |ui| {
-            self.workspace
-                .show(ui, &mut self.panels, &mut self.doc, &mut self.editor);
-        });
-
-        self.render_settings.show(&ctx, &mut self.doc, &mut self.editor);
-        self.picture_viewer.show(&ctx, &mut self.editor);
-        about::show(&ctx, &mut self.editor);
-        preferences_window::show(&ctx, &mut self.editor);
-        recovery::show(&ctx, &mut self.editor);
-        optimize::show(&ctx, &mut self.editor);
-        plugin_command::show(&ctx, &mut self.editor);
-        script_manager::show(&ctx, &mut self.editor);
-        unsaved_changes::show(&ctx, &self.doc, &mut self.editor);
-        alert::show(&ctx, &mut self.editor);
-        drop_overlay::show(&ctx);
-
-        if commands::apply_pending(&mut self.doc, &mut self.editor, &mut self.panels.viewport) {
-            ctx.request_repaint();
-        }
-        // Title, close button and confirmed quit follow the document's file state.
-        file::sync_window(&ctx, &self.doc, &mut self.editor);
-        file::autosave(&ctx, &self.doc, &mut self.editor);
+        self.shell.ui(ui);
     }
 }
 

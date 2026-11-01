@@ -29,6 +29,10 @@ rfd.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+egui_kittest.workspace = true
+# The app gets egui's fonts through eframe; tests need them too (egui 0.37
+# no longer has them by default), so text is laid out as the user sees it.
+egui = { workspace = true, features = ["default_fonts"] }
 grid4d-plugin-gear.workspace = true
 grid4d-plugin-wave.workspace = true
 grid4d-plugin-scatter.workspace = true

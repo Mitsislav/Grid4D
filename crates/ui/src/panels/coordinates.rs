@@ -261,14 +261,15 @@ fn target(doc: &Document, editor: &EditorState) -> Option<Target> {
 fn fields_grid(ui: &mut Ui, fields: &mut Fields, middle: Middle, locks: grid4d_scene::Protection) -> bool {
     let mut changed = false;
     let (middle_title, middle_is_length, middle_speed) = match middle {
-        Middle::Scale => ("Scale", false, 0.01),
-        Middle::Size | Middle::SizePlus => ("Size", true, 1.0),
+        Middle::Scale => (key("Scale"), false, 0.01),
+        Middle::Size | Middle::SizePlus => (key("Size"), true, 1.0),
     };
     Grid::new("grid4d.coordinates.fields")
         .num_columns(6)
         .spacing([4.0, 4.0])
         .show(ui, |ui| {
-            for title in ["", "Position", "", middle_title, "", "Rotation"] {
+            for title in ["", key("Position"), "", middle_title, "", key("Rotation")] {
+                let title = if title.is_empty() { "" } else { tr(title) };
                 ui.label(RichText::new(title).color(p().text_dim).size(11.5));
             }
             ui.end_row();

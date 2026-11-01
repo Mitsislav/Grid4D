@@ -304,6 +304,6 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Flower => key("Add Flower"),
         ObjectKindTag::Text => key("Add Text"),
         ObjectKindTag::Spline => key("Add Spline"),
-        ObjectKindTag::Plugin => key("Add a plugin's object from Create ▸ Plugins"),
+        ObjectKindTag::Plugin => key("Add a plugin's object from Create › Plugins"),
     }
 }

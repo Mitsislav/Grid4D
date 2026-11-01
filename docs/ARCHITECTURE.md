@@ -28,7 +28,7 @@ grid4d-geom ◀── grid4d-scene ◀── grid4d-eval ◀── grid4d-render
 | `grid4d-io` | `.g4d` files (a versioned zip: JSON and binary meshes), glTF and OBJ import / export, PNG and OpenEXR | geom, scene |
 | `grid4d-script` | Rhai scripts working on a copy of the document | geom, scene, plugin |
 | `grid4d-ui` | The egui interface: panels, theme, icons, shortcuts, commands, undo history, translations, autosave, crash reports | all of the above |
-| `grid4d` | The binary: the window, start-up (the logger and the panic hook first), the list of built-in plugins — no logic of its own | ui, scene, plugin, plugins |
+| `grid4d` | The binary: the window, start-up (the logger and the panic hook first), settings kept between sessions, the list of built-in plugins — the interface itself is `grid4d_ui::shell::Shell` | ui, scene, plugin, plugins |
 | `plugins/*` | The example plugins: Gear, Wave, Scatter | plugin, geom, scene |
 
 ## How a frame works
@@ -104,7 +104,16 @@ says so (`ui/src/startup.rs`). Errors the user can act on are alerts
 
 **Every text the interface shows is translated**: `i18n::tr("English text")`,
 with the Greek in `crates/ui/src/i18n/el.rs`; a test lists what is missing.
-Document data (names) is never translated.
+Document data (names) is never translated. Texts use only characters of the
+built-in font (Ubuntu Light and egui's icons), and widgets have accessible
+names (a field is `labelled_by` its label).
+
+**The interface is tested headless.** `crates/ui/tests/interface.rs` drives
+the whole `Shell` with `egui_kittest` (clicks, drags, keys, typing — through
+egui's input, as a user would); `crates/ui/tests/walkthrough.rs` (run by
+hand) renders it in both languages and themes for review. Shortcuts live in
+one table, `shortcuts::TABLE`: Help ▸ About shows it and a test keeps the
+manual's list equal to it.
 
 **Inspired by, never copied.** The workflow follows Cinema 4D's; no Maxon
 icons, artwork, trademarks or file formats, and behaviour specs in

@@ -153,7 +153,7 @@ impl PictureViewerPanel {
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                tr("Render ▸ Render to Picture Viewer (Shift+R)"),
+                tr("Render › Render to Picture Viewer (Shift+R)"),
                 egui::FontId::proportional(13.0),
                 p().text_dim,
             );

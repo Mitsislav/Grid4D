@@ -356,6 +356,14 @@ impl ViewportPanel {
         &self.camera
     }
 
+    /// Where the world point `world` appears in the active view as last drawn
+    /// (screen points); `None` behind the camera.
+    #[must_use]
+    pub fn screen_position(&self, world: Vec3) -> Option<Pos2> {
+        let rect = self.view_rect;
+        project(&self.camera.view_projection(rect.aspect_ratio()), rect, world)
+    }
+
     pub fn reset_view(&mut self) {
         self.camera = OrbitCamera::default();
     }

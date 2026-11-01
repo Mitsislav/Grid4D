@@ -1,35 +1,6 @@
-//! Global keyboard shortcuts (Cinema 4D defaults where they exist).
-//!
-//! | Key            | Action                     |
-//! |----------------|----------------------------|
-//! | `E` / `T` / `R`| Move / Scale / Rotate tool |
-//! | `9` / `0`      | Live / Rectangle Selection tool |
-//! | `D` / `I`      | Extrude / Inset tool       |
-//! | `C`            | Make Editable              |
-//! | `Ctrl+⌫` / `Alt+⌫` | Dissolve / Melt        |
-//! | `H`            | Frame scene                |
-//! | `O`            | Frame selected objects     |
-//! | `Delete`/`⌫`   | Delete selection           |
-//! | `Ctrl+A`       | Select all                 |
-//! | `Ctrl+Shift+A` | Deselect all               |
-//! | `Ctrl+N` / `Ctrl+O` | New / open document   |
-//! | `Ctrl+S` / `Ctrl+Shift+S` | Save / save as  |
-//! | `Ctrl+Z`       | Undo                       |
-//! | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo            |
-//! | `F6` / `F7` / `F8` | Play backwards / stop / play forwards |
-//! | `F` / `G`      | Previous / next frame      |
-//! | `Ctrl+F` / `Ctrl+G` | Previous / next key   |
-//! | `F9`           | Record Active Objects      |
-//! | `F1`–`F4` / `F5` | View 1–4 alone / all views |
-//! | `Tab` (over the bottom panel) | Timeline / F-Curve ([`take_tab`]) |
-//! | `H` / `S` (over the F-Curve graph) | Frame all / selected keys |
-//! | `Ctrl+F9`      | Autokeying on / off        |
-//! | `Shift+F5` / `Shift+F7` | Attribute / Coordinate Manager |
-//! | `Shift+F2`     | Material Manager (bottom tab) |
-//! | `Ctrl+N` (over the Material Manager) | New material |
-//! | `Ctrl+B`       | Render Settings window open / closed |
-//! | `Shift+R`      | Render to Picture Viewer   |
-//! | `Ctrl+R` / `Esc` | Render View / clear it   |
+//! Global keyboard shortcuts (Cinema 4D defaults where they exist). The one
+//! list of them, shown in Help ▸ Keyboard Shortcuts & About and in the
+//! manual, is [`TABLE`].
 //!
 //! Two-key chords (press the first key, then the second) are listed in
 //! [`Chord::complete`]: `U~L` Loop Selection, `K~L` Loop/Path Cut, `M~M` Connect,
@@ -39,7 +10,92 @@ use egui::{Event, Key};
 use grid4d_render::{DisplayStyle, ShadingMode};
 use grid4d_scene::Document;
 
+use crate::i18n::key;
 use crate::{EditorCommand, EditorState, FrameCurves, Tool, workspace::Pane};
+
+/// Every shortcut, in the order Help ▸ Keyboard Shortcuts & About and the
+/// manual (§23, kept equal to this by a test) list them: the keys, then
+/// what they do (a translation key). Chords like `U~L`: U, then L.
+pub const TABLE: &[(&str, &str)] = &[
+    ("Alt + left drag", key("Orbit")),
+    ("Alt + middle drag, middle drag", key("Pan")),
+    ("Alt + right drag, wheel", key("Zoom")),
+    ("H / O", key("Frame scene / frame selected objects")),
+    ("F1–F4 / F5", key("View 1–4 alone / all four views")),
+    (
+        "Middle click",
+        key("Show the view under the pointer alone / back among the others"),
+    ),
+    (
+        "N~A / N~B / N~C / N~D",
+        key("Gouraud Shading / Gouraud Shading (Lines) / Quick Shading / Quick Shading (Lines)"),
+    ),
+    ("N~E / N~F / N~G", key("Constant Shading / Hidden Line / Lines")),
+    ("N~H / N~K", key("Wireframe / Box")),
+    ("E / T / R", key("Move / Scale / Rotate tool")),
+    ("9 / 0", key("Live / Rectangle Selection tool")),
+    ("U~L / U~B", key("Loop / Ring Selection tool")),
+    (
+        "U~I / U~W / U~Y / U~K",
+        key("Invert / Select Connected / Grow / Shrink selection"),
+    ),
+    (
+        "Click / Shift+click / Ctrl+click",
+        key("Select / add / toggle (in a component mode: remove)"),
+    ),
+    ("C", key("Make Editable")),
+    (
+        "Q",
+        key("Switch the selected generator (or the one above the selection) off / on"),
+    ),
+    (
+        "Shift+S",
+        key("Snapping on / off (right-click the snap button: settings)"),
+    ),
+    (
+        "Alt+click",
+        key("Create a generator around the selected object (on a generator button)"),
+    ),
+    ("D / I", key("Extrude / Inset tool (drag left or right)")),
+    ("M~T / M~W", key("Extrude / Inset tool (alternatives)")),
+    ("K~L (M~L) / K~K (M~K)", key("Loop/Path Cut / Line Cut tool")),
+    ("M~S", key("Bevel tool")),
+    ("B (M~B)", key("Bridge tool")),
+    ("M~M", key("Connect Points/Edges")),
+    ("M~N or Ctrl+Backspace", key("Dissolve")),
+    ("U~Z or Alt+Backspace", key("Melt")),
+    ("U~O", key("Optimize…")),
+    (
+        "Delete / Backspace",
+        key("Delete (objects in Model mode, components otherwise; keys after a click in the timeline's key strip)"),
+    ),
+    ("Ctrl+A / Ctrl+Shift+A", key("Select all / deselect all")),
+    ("Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z)", key("Undo / redo")),
+    (
+        "Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S",
+        key("New / open / save / save as"),
+    ),
+    ("Ctrl+Shift+O", key("Merge a file into the document")),
+    ("F8 / F6 / F7", key("Play / play backwards / stop")),
+    ("F / G", key("Previous / next frame")),
+    ("Ctrl+F / Ctrl+G", key("Previous / next key")),
+    ("F9", key("Record Active Objects")),
+    ("Ctrl+F9", key("Autokeying on / off")),
+    ("Shift+F5 / Shift+F7", key("Attribute Manager / Coordinate Manager")),
+    ("Shift+F2", key("Material Manager")),
+    ("Ctrl+N", key("New material (pointer over the Material Manager)")),
+    ("Ctrl+B", key("Render Settings")),
+    ("Shift+R", key("Render to Picture Viewer")),
+    ("Ctrl+R / Esc", key("Render View / clear it")),
+    ("Ctrl+Enter", key("Run the script (in the Script Manager's editor)")),
+    ("Tab", key("Timeline / F-Curve tab (pointer over the timeline)")),
+    (
+        "H / S",
+        key("Frame all curves / the selected keys (pointer over the F-Curve graph)"),
+    ),
+    ("Double-click", key("Rename (a name in the Object Manager)")),
+    ("Drag", key("Re-parent (a row onto another in the Object Manager)")),
+];
 
 /// The first key of a two-key shortcut, Cinema 4D style (`U~L`: U, then L).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -392,6 +448,24 @@ mod tests {
     use egui::{Event, Modifiers, PointerButton, Pos2, RawInput};
 
     use super::*;
+
+    /// The manual's §23 lists exactly [`TABLE`], in its order: one list for
+    /// Help ▸ About and the documentation.
+    #[test]
+    fn the_manual_lists_the_shortcut_table() {
+        let manual = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/manual.md")).unwrap();
+        let section = manual
+            .split("## 23. Keyboard shortcuts")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .unwrap();
+        let rows: Vec<(&str, &str)> = section
+            .lines()
+            .filter_map(|line| line.strip_prefix("| ")?.strip_suffix(" |")?.split_once(" | "))
+            .filter(|&(keys, _)| keys != "Keys" && !keys.starts_with('-'))
+            .collect();
+        assert_eq!(rows, TABLE, "docs/manual.md §23 and shortcuts::TABLE differ");
+    }
 
     /// Presses `key` with `modifiers` in one headless frame and returns the
     /// queued commands. With `dragging`, the primary mouse button is held.

@@ -544,14 +544,18 @@ fn transport(ui: &mut Ui, time: &mut TimeState, editor: &mut EditorState) {
             .layout(Layout::right_to_left(Align::Center)),
         |ui| {
             let mut fps = time.fps();
-            ComboBox::from_id_salt("grid4d.timeline.fps")
+            let combo = ComboBox::from_id_salt("grid4d.timeline.fps")
                 .width(64.0)
                 .selected_text(format!("{fps} fps"))
                 .show_ui(ui, |ui| {
                     for preset in FPS_PRESETS {
                         ui.selectable_value(&mut fps, preset, format!("{preset} fps"));
                     }
-                });
+                })
+                .response;
+            // Named for screen readers (it shows only its value).
+            ui.ctx()
+                .accesskit_node_builder(combo.id, |node| node.set_label(tr("Frame Rate")));
             if fps != time.fps() {
                 time.set_fps(fps);
             }

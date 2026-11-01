@@ -154,8 +154,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Add a layer", "Προσθήκη στρώματος"),
     (
-        "Add a plugin's object from Create ▸ Plugins",
-        "Προσθέστε αντικείμενο plugin από Δημιουργία ▸ Plugins",
+        "Add a plugin's object from Create › Plugins",
+        "Προσθέστε αντικείμενο plugin από Δημιουργία › Plugins",
     ),
     (
         "Add a take and make it active: changes are then recorded in it",
@@ -212,8 +212,11 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Area", "Εμβαδόν"),
     ("Aspect", "Αναλογία"),
     ("Assign Material", "Ανάθεση υλικού"),
-    ("Attribute / Coordinate Manager", "Διαχείριση Ιδιοτήτων / Συντεταγμένων"),
     ("Attribute Manager", "Διαχείριση Ιδιοτήτων"),
+    (
+        "Attribute Manager / Coordinate Manager",
+        "Διαχείριση Ιδιοτήτων / Διαχείριση Συντεταγμένων",
+    ),
     ("Attributes", "Ιδιότητες"),
     ("Auto", "Αυτόματο"),
     ("Auto Light", "Αυτόματος φωτισμός"),
@@ -244,7 +247,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Bends its parent's subtree", "Κάμπτει το υποδέντρο του γονέα του"),
     ("Bevel", "Λοξοτόμηση"),
     ("Bevel (M~S)", "Λοξοτόμηση (M~S)"),
-    ("Bevel / Bridge tool", "Εργαλείο Λοξοτόμησης / Γεφύρωσης"),
+    ("Bevel tool", "Εργαλείο λοξοτόμησης"),
     (
         "Bevel works on edges or points: switch to Edges or Points mode",
         "Η Λοξοτόμηση δουλεύει σε ακμές ή σημεία: μεταβείτε σε λειτουργία Ακμών ή Σημείων",
@@ -272,6 +275,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Bridge the two selected polygons or border edges",
         "Γεφύρωση των δύο επιλεγμένων πολυγώνων ή ακμών ορίου",
     ),
+    ("Bridge tool", "Εργαλείο γεφύρωσης"),
     (
         "Bridge works in Polygons or Edges mode",
         "Η Γεφύρωση δουλεύει σε λειτουργία Πολυγώνων ή Ακμών",
@@ -345,13 +349,16 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Compound", "Σύνθετο"),
     ("Cone", "Κώνος"),
     ("Connect", "Σύνδεση"),
-    ("Connect / Dissolve / Melt", "Σύνδεση / Διάλυση / Τήξη"),
     ("Connect Cut Edges", "Σύνδεση ακμών τομής"),
     ("Connect Points/Edges", "Σύνδεση σημείων/ακμών"),
     ("Console", "Κονσόλα"),
     ("Constant Cross Section", "Σταθερή διατομή"),
     ("Constant Shading", "Σταθερή σκίαση"),
     ("Constant Shading (Lines)", "Σταθερή σκίαση (γραμμές)"),
+    (
+        "Constant Shading / Hidden Line / Lines",
+        "Σταθερή σκίαση / Κρυφές γραμμές / Γραμμές",
+    ),
     ("Conversion", "Μετατροπή"),
     ("Convert Selection", "Μετατροπή επιλογής"),
     ("Convex Hull", "Κυρτό περίβλημα"),
@@ -389,6 +396,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Create Generator", "Δημιουργία γεννήτριας"),
     ("Create N-gons", "Δημιουργία ν-γώνων"),
     ("Create Object", "Δημιουργία αντικειμένου"),
+    (
+        "Create a generator around the selected object (on a generator button)",
+        "Δημιουργία generator γύρω από το επιλεγμένο αντικείμενο (σε κουμπί generator)",
+    ),
     ("Ctrl+click: show only this", "Ctrl+κλικ: μόνο αυτό"),
     ("Cube", "Κύβος"),
     ("Cubic", "Κυβική"),
@@ -411,6 +422,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Παραμορφωτές: οι παραμορφωτές παραμορφώνουν",
     ),
     ("Delete", "Διαγραφή"),
+    (
+        "Delete (objects in Model mode, components otherwise; keys after a click in the timeline's key strip)",
+        "Διαγραφή (αντικείμενα σε λειτουργία Model, αλλιώς στοιχεία· κλειδιά μετά από κλικ στη λωρίδα κλειδιών του χρονολογίου)",
+    ),
     ("Delete Edges", "Διαγραφή ακμών"),
     ("Delete Keys", "Διαγραφή κλειδιών"),
     ("Delete Layer", "Διαγραφή στρώματος"),
@@ -421,10 +436,6 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Delete Tag", "Διαγραφή ετικέτας"),
     ("Delete Take", "Διαγραφή λήψης"),
     ("Delete Track", "Διαγραφή καναλιού"),
-    (
-        "Delete selection (objects or components)",
-        "Διαγραφή επιλογής (αντικείμενα ή στοιχεία)",
-    ),
     ("Density", "Πυκνότητα"),
     ("Depth", "Βάθος"),
     ("Deselect All", "Αποεπιλογή όλων"),
@@ -435,7 +446,6 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Display", "Εμφάνιση"),
     ("Display Color", "Χρώμα εμφάνισης"),
     ("Dissolve", "Διάλυση"),
-    ("Dissolve / Melt", "Διάλυση / Τήξη"),
     ("Distribution", "Κατανομή"),
     ("Don't Save", "Χωρίς αποθήκευση"),
     (
@@ -504,10 +514,6 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Ellipse", "Έλλειψη"),
     ("Enable", "Ενεργοποίηση"),
     ("Enable / disable object", "Ενεργοποίηση / απενεργοποίηση αντικειμένου"),
-    (
-        "Enable / disable the (parent) generator",
-        "Ενεργοποίηση / απενεργοποίηση της (γονικής) γεννήτριας",
-    ),
     ("Enable Snapping", "Ενεργοποίηση έλξης"),
     ("Enable Snapping  (Shift+S)", "Ενεργοποίηση έλξης  (Shift+S)"),
     (
@@ -530,6 +536,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Extraction", "Εξαγωγή"),
     ("Extrude", "Εξώθηση"),
     ("Extrude (D)", "Εξώθηση (D)"),
+    (
+        "Extrude / Inset tool (alternatives)",
+        "Εργαλείο εξώθησης / ένθεσης (εναλλακτικά)",
+    ),
     (
         "Extrude / Inset tool (drag left or right)",
         "Εργαλείο Εξώθησης / Ένθεσης (σύρσιμο αριστερά ή δεξιά)",
@@ -580,6 +590,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Frame All", "Πλαισίωση όλων"),
     ("Frame Object", "Πλαισίωση αντικειμένου"),
     ("Frame Range", "Εύρος καρέ"),
+    ("Frame Rate", "Ρυθμός καρέ"),
     ("Frame Scene", "Πλαισίωση σκηνής"),
     ("Frame Scene (H)", "Πλαισίωση σκηνής (H)"),
     ("Frame Selected", "Πλαισίωση επιλεγμένων"),
@@ -587,9 +598,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Frame Selected Objects (O)", "Πλαισίωση επιλεγμένων αντικειμένων (O)"),
     ("Frame Step", "Βήμα καρέ"),
     ("Frame Time", "Χρόνος καρέ"),
-    ("Frame all / selected keys", "Πλαισίωση όλων / επιλεγμένων κλειδιών"),
-    ("Frame scene", "Πλαισίωση σκηνής"),
-    ("Frame selected objects", "Πλαισίωση επιλεγμένων αντικειμένων"),
+    (
+        "Frame all curves / the selected keys (pointer over the F-Curve graph)",
+        "Πλαισίωση όλων των καμπυλών / των επιλεγμένων κλειδιών (δείκτης πάνω από το γράφημα F-Curve)",
+    ),
+    (
+        "Frame scene / frame selected objects",
+        "Πλαισίωση σκηνής / πλαισίωση επιλεγμένων αντικειμένων",
+    ),
     ("Frames", "Καρέ"),
     ("Friction", "Τριβή"),
     ("From", "Από"),
@@ -614,8 +630,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Gouraud Shading", "Σκίαση Gouraud"),
     ("Gouraud Shading (Lines)", "Σκίαση Gouraud (γραμμές)"),
     (
-        "Gouraud, Gouraud (Lines), Quick, Quick (Lines), Constant, Hidden Line, Lines",
-        "Gouraud, Gouraud (γραμμές), Γρήγορη, Γρήγορη (γραμμές), Σταθερή, Κρυφές γραμμές, Γραμμές",
+        "Gouraud Shading / Gouraud Shading (Lines) / Quick Shading / Quick Shading (Lines)",
+        "Σκίαση Gouraud / Σκίαση Gouraud (γραμμές) / Γρήγορη σκίαση / Γρήγορη σκίαση (γραμμές)",
     ),
     ("Gravity . X", "Βαρύτητα . X"),
     ("Gravity . Y", "Βαρύτητα . Y"),
@@ -709,13 +725,17 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Intensity", "Ένταση"),
     ("Interface", "Περιβάλλον"),
     (
-        "Interface in English and Greek (Preferences ▸ Interface ▸ Language)",
-        "Περιβάλλον στα Αγγλικά και τα Ελληνικά (Προτιμήσεις ▸ Περιβάλλον ▸ Γλώσσα)",
+        "Interface in English and Greek (Preferences › Interface › Language)",
+        "Περιβάλλον στα Αγγλικά και τα Ελληνικά (Προτιμήσεις › Περιβάλλον › Γλώσσα)",
     ),
     ("Intermediate Points", "Ενδιάμεσα σημεία"),
     ("Interpolation", "Παρεμβολή"),
     ("Inverse Square", "Αντίστροφο τετράγωνο"),
     ("Invert", "Αντιστροφή"),
+    (
+        "Invert / Select Connected / Grow / Shrink selection",
+        "Αντιστροφή / Επιλογή συνδεδεμένων / Επέκταση / Σμίκρυνση επιλογής",
+    ),
     ("Invert Selection", "Αντιστροφή επιλογής"),
     ("Isoparms — planned", "Ισοπαραμετρικές — προγραμματίζεται"),
     (
@@ -803,10 +823,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Θέαση κατά τον άξονα −Z του ενεργού αντικειμένου (π.χ. για στόχευση φωτός)",
     ),
     ("Loop", "Βρόχος"),
-    (
-        "Loop / Ring Selection tool (U, then L)",
-        "Εργαλείο επιλογής Βρόχου / Δακτυλίου (U, μετά L)",
-    ),
+    ("Loop / Ring Selection tool", "Εργαλείο επιλογής βρόχου / δακτυλίου"),
     ("Loop Cut", "Κοπή βρόχου"),
     ("Loop Playback", "Επανάληψη αναπαραγωγής"),
     ("Loop Selection", "Επιλογή βρόχου"),
@@ -843,10 +860,6 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Make Editable", "Μετατροπή σε επεξεργάσιμο"),
     ("Make Editable (C)", "Μετατροπή σε επεξεργάσιμο (C)"),
     (
-        "Make editable (primitive → polygon object)",
-        "Μετατροπή σε επεξεργάσιμο (πρωτογενές → πολυγωνικό αντικείμενο)",
-    ),
-    (
         "Makes each copy bigger or smaller by up to this much",
         "Μεγαλώνει ή μικραίνει κάθε αντίγραφο έως τόσο",
     ),
@@ -873,10 +886,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Maximum Time", "Μέγιστος χρόνος"),
     ("Melt", "Τήξη"),
     ("Merge", "Συγχώνευση"),
-    (
-        "Merge a .g4d, glTF or OBJ file into the document",
-        "Συγχώνευση αρχείου .g4d, glTF ή OBJ στο έγγραφο",
-    ),
+    ("Merge a file into the document", "Συγχώνευση αρχείου στο έγγραφο"),
     (
         "Merge points closer than the tolerance",
         "Συγχώνευση σημείων πιο κοντινών από την ανοχή",
@@ -939,13 +949,16 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Natural", "Φυσική"),
     ("New", "Νέο"),
     (
-        "New / open document (also glTF, OBJ)",
-        "Νέο / άνοιγμα εγγράφου (και glTF, OBJ)",
+        "New / open / save / save as",
+        "Νέο / άνοιγμα / αποθήκευση / αποθήκευση ως",
     ),
     ("New Layer", "Νέο στρώμα"),
     ("New Material", "Νέο υλικό"),
     ("New Take", "Νέα λήψη"),
-    ("New material", "Νέο υλικό"),
+    (
+        "New material (pointer over the Material Manager)",
+        "Νέο υλικό (δείκτης πάνω από τη Διαχείριση Υλικών)",
+    ),
     ("Next Frame", "Επόμενο καρέ"),
     ("No cameras in the scene", "Δεν υπάρχουν κάμερες στη σκηνή"),
     ("No commands installed", "Δεν υπάρχουν εντολές plugin"),
@@ -1156,7 +1169,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Random", "Τυχαίος"),
     ("Random Rotation", "Τυχαία περιστροφή"),
     ("Raytraced (Hard)", "Ιχνηλατημένη (σκληρή)"),
-    ("Re-parent (Object Manager)", "Αλλαγή γονέα (Διαχείριση Αντικειμένων)"),
+    (
+        "Re-parent (a row onto another in the Object Manager)",
+        "Αλλαγή γονέα (μια γραμμή πάνω σε άλλη στη Διαχείριση Αντικειμένων)",
+    ),
     ("Record", "Καταγραφή"),
     ("Record Active Objects", "Καταγραφή ενεργών αντικειμένων"),
     (
@@ -1199,7 +1215,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Αφαίρεση σημείων που δεν χρησιμοποιεί κανένα πολύγωνο",
     ),
     ("Rename", "Μετονομασία"),
-    ("Rename (Object Manager)", "Μετονομασία (Διαχείριση Αντικειμένων)"),
+    (
+        "Rename (a name in the Object Manager)",
+        "Μετονομασία (ένα όνομα στη Διαχείριση Αντικειμένων)",
+    ),
     ("Rename Layer", "Μετονομασία στρώματος"),
     ("Rename Project", "Μετονομασία έργου"),
     ("Rename Take", "Μετονομασία λήψης"),
@@ -1239,8 +1258,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Απόδοση {0}{1}\n{2} × {3} · {4} δείγματα{5} · {6}",
     ),
     (
-        "Render ▸ Render to Picture Viewer (Shift+R)",
-        "Απόδοση ▸ Απόδοση στην Προβολή Εικόνων (Shift+R)",
+        "Render › Render to Picture Viewer (Shift+R)",
+        "Απόδοση › Απόδοση στην Προβολή Εικόνων (Shift+R)",
     ),
     ("Render: shown in renders", "Απόδοση: εμφανίζεται στις αποδόσεις"),
     ("Rendering · {0}", "Απόδοση · {0}"),
@@ -1305,7 +1324,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Run Script", "Εκτέλεση script"),
     ("Run Script File", "Εκτέλεση αρχείου script"),
     ("Run Script File…", "Εκτέλεση αρχείου script…"),
-    ("Run the script", "Εκτέλεση του script"),
+    (
+        "Run the script (in the Script Manager's editor)",
+        "Εκτέλεση του script (στον επεξεργαστή της Διαχείρισης scripts)",
+    ),
     (
         "Run the tool once with these options on the selection (or on everything)",
         "Εκτέλεση του εργαλείου μία φορά με αυτές τις επιλογές στην επιλογή (ή σε όλα)",
@@ -1322,7 +1344,6 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Samples", "Δείγματα"),
     ("Sampling", "Δειγματοληψία"),
     ("Save", "Αποθήκευση"),
-    ("Save / save as", "Αποθήκευση / αποθήκευση ως"),
     ("Save As", "Αποθήκευση ως"),
     ("Save As…", "Αποθήκευση ως…"),
     ("Save Render As", "Αποθήκευση απόδοσης ως"),
@@ -1372,7 +1393,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Segments Y", "Τμήματα Y"),
     ("Segments Z", "Τμήματα Z"),
     ("Select", "Επιλογή"),
-    ("Select / add / toggle", "Επιλογή / προσθήκη / εναλλαγή"),
+    (
+        "Select / add / toggle (in a component mode: remove)",
+        "Επιλογή / προσθήκη / εναλλαγή (σε λειτουργία στοιχείων: αφαίρεση)",
+    ),
     ("Select All", "Επιλογή όλων"),
     ("Select Connected", "Επιλογή συνδεδεμένων"),
     ("Select Cuts", "Επιλογή τομών"),
@@ -1446,7 +1470,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Μετατοπίζει το κύμα· βάλτε της κλειδιά για να ταξιδεύει",
     ),
     ("Show Report", "Εμφάνιση αναφοράς"),
-    ("Show it alone / back in the arrangement", "Μόνη της / πίσω στη διάταξη"),
+    (
+        "Show the view under the pointer alone / back among the others",
+        "Η προβολή κάτω από τον δείκτη μόνη / πίσω ανάμεσα στις άλλες",
+    ),
     (
         "Shows how long frames take, and the slowest part",
         "Δείχνει πόσο διαρκούν τα καρέ και το πιο αργό τμήμα",
@@ -1533,6 +1560,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Subdivision Viewport", "Υποδιαίρεση προβολής"),
     ("Sweep", "Σάρωση"),
     ("Switch Take", "Αλλαγή λήψης"),
+    (
+        "Switch the selected generator (or the one above the selection) off / on",
+        "Απενεργοποίηση / ενεργοποίηση του επιλεγμένου generator (ή αυτού πάνω από την επιλογή)",
+    ),
     ("Tag Properties", "Ιδιότητες ετικέτας"),
     ("Tags", "Ετικέτες"),
     ("Take", "Λήψη"),
@@ -1655,7 +1686,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Time Scale", "Κλίμακα χρόνου"),
     ("Timeline", "Χρονολόγιο"),
-    ("Timeline / F-Curve tab", "Καρτέλα Χρονολογίου / F-Curve"),
+    (
+        "Timeline / F-Curve tab (pointer over the timeline)",
+        "Καρτέλα Χρονολόγιο / F-Curve (δείκτης πάνω από το χρονολόγιο)",
+    ),
     (
         "Timeline: click or drag to scrub · F / G step frames · F8 play",
         "Χρονολόγιο: κλικ ή σύρσιμο για μετακίνηση · F / G βήμα καρέ · F8 αναπαραγωγή",

@@ -34,6 +34,7 @@ mod random_commands;
 pub mod recent;
 pub mod rendering;
 pub mod scripts;
+pub mod shell;
 pub mod shortcuts;
 pub mod simulation;
 pub mod startup;

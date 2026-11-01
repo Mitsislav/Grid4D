@@ -11,7 +11,9 @@ pub fn show(ctx: &egui::Context, editor: &mut EditorState) {
     }
     let mut run = false;
     let response = Modal::new(Id::unique("grid4d.optimize")).show(ctx, |ui| {
-        ui.set_width(320.0);
+        // Wide enough for the longest option in either language (the
+        // grid's rows do not wrap).
+        ui.set_width(500.0);
         ui.label(RichText::new(tr("Optimize")).size(16.0).strong().color(p().text_strong));
         ui.label(
             RichText::new(tr("Merges points that lie together and removes unused ones (the selection's points, or the whole object)."))
