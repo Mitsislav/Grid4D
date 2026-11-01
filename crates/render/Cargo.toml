@@ -16,7 +16,13 @@ wgpu.workspace = true
 bytemuck.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 naga.workspace = true
+allocation-counter.workspace = true
+
+[[bench]]
+name = "extract"
+harness = false
 
 [lints]
 workspace = true

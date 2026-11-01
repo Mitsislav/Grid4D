@@ -48,6 +48,22 @@ jobs:
       # Unit tests + offline WGSL validation; no GPU is needed.
       - run: cargo test --workspace --locked
 
+  benches:
+    name: benchmarks build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux windowing dev packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Built, not run: timings on shared runners mean nothing. They are run
+      # by hand on the reference machine (docs/performance.md).
+      - run: cargo bench --workspace --locked --no-run
+
   msrv:
     name: MSRV (1.95)
     runs-on: ubuntu-latest

@@ -28,6 +28,21 @@ struct Node {
     count: u32,
 }
 
+/// A triangle while the hierarchy is built: its box and its index.
+#[derive(Clone, Copy)]
+struct Item {
+    min: Vec3,
+    max: Vec3,
+    triangle: u32,
+}
+
+impl Item {
+    /// Twice the box's centre (only compared).
+    fn centroid(&self) -> Vec3 {
+        self.min + self.max
+    }
+}
+
 /// Bounding volume hierarchy over the triangles of a [`PolyMesh`].
 ///
 /// Built once per mesh (in `O(n log n)`, splitting each node at the median of
@@ -51,41 +66,42 @@ impl Bvh {
         let (mut triangles, mut faces) = (Vec::new(), Vec::new());
         Triangulator::new().triangulate_points(mesh, &mut triangles, &mut faces);
         let points = mesh.points();
-        let boxes: Vec<(Vec3, Vec3)> = triangles
+        // Each triangle's box travels with it, so splitting reads memory in
+        // order instead of jumping through an index.
+        let mut items: Vec<Item> = triangles
             .iter()
-            .map(|t| {
+            .enumerate()
+            .map(|(k, t)| {
                 let [a, b, c] = t.map(|p| points[us(p)]);
-                (a.min(b).min(c), a.max(b).max(c))
+                Item {
+                    min: a.min(b).min(c),
+                    max: a.max(b).max(c),
+                    triangle: u32_index(k),
+                }
             })
             .collect();
-        let centroid = |t: u32| {
-            let (min, max) = boxes[us(t)];
-            (min + max) * 0.5
-        };
-
-        let mut order: Vec<u32> = (0..triangles.len()).map(u32_index).collect();
         let mut nodes = Vec::new();
-        if !order.is_empty() {
-            nodes.reserve(2 * order.len() / LEAF_SIZE + 1);
+        if !items.is_empty() {
+            nodes.reserve(2 * items.len() / LEAF_SIZE + 1);
             nodes.push(Node::default());
         }
-        let mut pending = vec![(0usize, 0usize, order.len())];
+        let mut pending = vec![(0usize, 0usize, items.len())];
         while let Some((node, start, end)) = pending.pop() {
             if nodes.is_empty() {
                 break;
             }
-            let span = &mut order[start..end];
-            let (min, max) = span.iter().fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(lo, hi), &t| {
-                let (a, b) = boxes[us(t)];
-                (lo.min(a), hi.max(b))
-            });
+            let span = &mut items[start..end];
+            let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+            let (mut cmin, mut cmax) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+            for item in span.iter() {
+                min = min.min(item.min);
+                max = max.max(item.max);
+                let centroid = item.centroid();
+                cmin = cmin.min(centroid);
+                cmax = cmax.max(centroid);
+            }
             nodes[node].min = min;
             nodes[node].max = max;
-
-            let (cmin, cmax) = span.iter().fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(lo, hi), &t| {
-                let c = centroid(t);
-                (lo.min(c), hi.max(c))
-            });
             let extent = cmax - cmin;
             let axis = if extent.x >= extent.y && extent.x >= extent.z {
                 0
@@ -101,7 +117,7 @@ impl Bvh {
                 continue;
             }
             let half = span.len() / 2;
-            span.select_nth_unstable_by(half, |&a, &b| centroid(a)[axis].total_cmp(&centroid(b)[axis]));
+            span.select_nth_unstable_by(half, |a, b| a.centroid()[axis].total_cmp(&b.centroid()[axis]));
             let left = nodes.len();
             nodes.push(Node::default());
             nodes.push(Node::default());
@@ -109,11 +125,10 @@ impl Bvh {
             pending.push((left, start, start + half));
             pending.push((left + 1, start + half, end));
         }
-
         Self {
             nodes,
-            triangles: order.iter().map(|&t| triangles[us(t)]).collect(),
-            faces: order.iter().map(|&t| faces[us(t)]).collect(),
+            triangles: items.iter().map(|item| triangles[us(item.triangle)]).collect(),
+            faces: items.iter().map(|item| faces[us(item.triangle)]).collect(),
         }
     }
 

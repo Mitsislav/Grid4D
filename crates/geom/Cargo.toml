@@ -10,5 +10,12 @@ publish.workspace = true
 [dependencies]
 glam.workspace = true
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "mesh"
+harness = false
+
 [lints]
 workspace = true

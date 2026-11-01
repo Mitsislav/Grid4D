@@ -87,6 +87,9 @@ rayon = "1.10"
 rapier3d = "0.36"
 # Benchmarks (dev only): plain measurements, no plots or thread pool.
 criterion = { version = "0.8", default-features = false }
+# Counts allocations per thread (dev only): its own global allocator, linked
+# only into the test that uses it (crates/render/tests/steady_frame.rs).
+allocation-counter = "0.8"
 # Property tests (dev only): random documents through save and load.
 proptest = { version = "1.12", default-features = false, features = ["std"] }
 # Rendered pictures (grid4d-io): PNG; OpenEXR written by hand with zlib (the
@@ -154,6 +157,12 @@ eframe = { workspace = true, features = ["persistence"] }
 egui.workspace = true
 log.workspace = true
 env_logger.workspace = true
+
+# The stress scenes (examples/stress.rs).
+[dev-dependencies]
+grid4d-io.workspace = true
+grid4d-geom.workspace = true
+glam.workspace = true
 
 [build-dependencies]
 winresource.workspace = true

@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use crate::{PolyMesh, u32_index, us};
 
 /// Adjacency of a [`PolyMesh`]: its unique edges and which faces use each edge
@@ -35,23 +33,47 @@ pub struct Topology {
 impl Topology {
     #[must_use]
     pub fn build(mesh: &PolyMesh) -> Self {
-        let mut edge_index: HashMap<[u32; 2], u32> = HashMap::with_capacity(mesh.corner_count());
-        let mut directed: HashSet<[u32; 2]> = HashSet::with_capacity(mesh.corner_count());
-        let mut edges = Vec::new();
-        let mut corner_edges = Vec::with_capacity(mesh.corner_count());
-        let mut consistently_oriented = true;
-
-        for face in mesh.faces() {
-            for (i, &a) in face.iter().enumerate() {
-                let b = face[(i + 1) % face.len()];
-                consistently_oriented &= directed.insert([a, b]);
-                let key = [a.min(b), a.max(b)];
-                let edge = *edge_index.entry(key).or_insert_with(|| {
-                    edges.push(key);
-                    u32_index(edges.len() - 1)
-                });
-                corner_edges.push(edge);
+        // Each corner's directed edge, to the next corner of its face.
+        let points = mesh.corner_points();
+        let mut ends: Vec<[u32; 2]> = Vec::with_capacity(mesh.corner_count());
+        for f in 0..mesh.face_count() {
+            let range = mesh.corner_range(f);
+            for c in range.clone() {
+                let next = if c + 1 == range.end { range.start } else { c + 1 };
+                ends.push([points[c], points[next]]);
             }
+        }
+        // Corners by their edge's lower point, in corner order: an edge's
+        // earlier corners are found among a point's few, without hashing.
+        let (low_offsets, low_list) = pack(mesh.point_count(), |emit| {
+            for (c, &[a, b]) in ends.iter().enumerate() {
+                emit(us(a.min(b)), u32_index(c));
+            }
+        });
+
+        let mut edges = Vec::new();
+        let mut corner_edges: Vec<u32> = Vec::with_capacity(ends.len());
+        let mut consistently_oriented = true;
+        for (c, &[a, b]) in ends.iter().enumerate() {
+            let (low, high) = (a.min(b), a.max(b));
+            let mut edge = None;
+            for &earlier in slice(&low_offsets, &low_list, us(low)) {
+                let earlier = us(earlier);
+                if earlier >= c {
+                    break;
+                }
+                let [ea, eb] = ends[earlier];
+                if ea.max(eb) == high {
+                    edge = edge.or(Some(corner_edges[earlier]));
+                    // The same directed edge in two faces: they disagree on
+                    // their winding.
+                    consistently_oriented &= ea != a;
+                }
+            }
+            corner_edges.push(edge.unwrap_or_else(|| {
+                edges.push([low, high]);
+                u32_index(edges.len() - 1)
+            }));
         }
 
         // Faces per edge.
@@ -206,6 +228,73 @@ mod tests {
 
     use super::*;
     use crate::shapes;
+
+    /// The edges, corner edges and orientation as the first version found
+    /// them, with hash maps: the packed search must give exactly the same.
+    fn by_hashing(mesh: &PolyMesh) -> (Vec<[u32; 2]>, Vec<u32>, bool) {
+        use std::collections::{HashMap, HashSet};
+        let mut index: HashMap<[u32; 2], u32> = HashMap::new();
+        let mut directed = HashSet::new();
+        let (mut edges, mut corner_edges, mut oriented) = (Vec::new(), Vec::new(), true);
+        for face in mesh.faces() {
+            for (i, &a) in face.iter().enumerate() {
+                let b = face[(i + 1) % face.len()];
+                oriented &= directed.insert([a, b]);
+                let key = [a.min(b), a.max(b)];
+                let edge = *index.entry(key).or_insert_with(|| {
+                    edges.push(key);
+                    u32_index(edges.len() - 1)
+                });
+                corner_edges.push(edge);
+            }
+        }
+        (edges, corner_edges, oriented)
+    }
+
+    #[test]
+    fn edges_are_found_as_by_hashing() {
+        let mut meshes: Vec<PolyMesh> = shapes::closed().into_iter().map(|(_, mesh)| mesh).collect();
+        meshes.extend([
+            shapes::open_box(),
+            shapes::grid(7, 3),
+            shapes::l_shape(),
+            shapes::star(),
+        ]);
+        // A face turned the other way, and faces sharing an edge three times.
+        let mut flipped = shapes::grid(2, 1);
+        flipped.add_face(&[0, 3, 4, 1]).unwrap();
+        meshes.push(flipped);
+        // Random faces over a few points: repeated and non-manifold edges.
+        let mut seed = 7u32;
+        for _ in 0..20 {
+            let mut mesh = PolyMesh::new();
+            for k in 0..12u8 {
+                mesh.add_point(Vec3::new(f32::from(k), 0.0, 0.0)).unwrap();
+            }
+            for _ in 0..30 {
+                let mut corners = Vec::new();
+                while corners.len() < 3 + usize::try_from(seed % 3).unwrap() {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    let point = seed % 12;
+                    if !corners.contains(&point) {
+                        corners.push(point);
+                    }
+                }
+                mesh.add_face(&corners).unwrap();
+            }
+            meshes.push(mesh);
+        }
+        for mesh in &meshes {
+            let topology = Topology::build(mesh);
+            let (edges, corner_edges, oriented) = by_hashing(mesh);
+            assert_eq!(topology.edges, edges);
+            assert_eq!(topology.corner_edges, corner_edges);
+            assert_eq!(topology.consistently_oriented, oriented);
+        }
+        assert!(meshes.iter().any(|m| !Topology::build(m).consistently_oriented));
+    }
 
     fn summary(mesh: &PolyMesh) -> (usize, usize, i64, bool, bool) {
         let t = Topology::build(mesh);

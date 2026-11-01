@@ -75,7 +75,12 @@ brings back the same ids.
 viewport — evaluation, extraction, the renderer, picking, gizmo maths —
 reuses its buffers (`clear()` keeps capacity), never calls `format!`,
 `collect()` or `Box::new`, and grows GPU buffers geometrically. Tests guard
-the buffers (`extract_reuses_capacity`).
+the buffers (`extract_reuses_capacity`), and `crates/render/tests/steady_frame.rs`
+counts allocations over whole frames of 10 000 objects (playing, orbiting,
+selecting): there must be none. The budget (frame rates, opening times) and
+its measurements are in [`performance.md`](performance.md); `criterion`
+benches live in each crate's `benches/` (`cargo bench -p <crate>`), and
+`cargo run --release --example stress` writes the scenes it is measured on.
 
 **Safe and explicit Rust.** No `unsafe` (forbidden workspace-wide), no
 `unwrap()` / `expect()` outside tests, conversions with `try_from` unless

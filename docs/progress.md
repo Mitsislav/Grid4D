@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 14 — Stabilisation (v1.0) |
-| Last step done | 14.3 — Robustness (2026-11-01) |
-| Next step | 14.4 — Performance budget |
-| Tests | 767, all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 14.4 — Performance budget (2026-11-01) |
+| Next step | 14.5 — The interface pass |
+| Tests | 770 (and 2 ignored measurements), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2048,6 +2048,7 @@ endless loops, a library with examples and the Script Manager. Guides:
 | 14.1 | CI on Node 24; `cargo deny` (licences, advisories, duplicates, sources) and the third-party licence list checked in CI; Help ▸ About shows the version, commit and date and a Licences page; version 0.13.0; dependencies updated | 751 |
 | 14.2 | `.g4d` v3 reviewed and frozen, specified in `docs/FILE_FORMAT.md`; a golden fixture with everything v3 holds; property-tested round trips; damaged and hostile files; a fuzz target with a CI job and a weekly run; saved rotations kept exact and never NaN | 756 |
 | 14.3 | Text outlines read with `skrifa` (egui's own font reader) instead of the unmaintained `ttf-parser`, identical to the byte; local crash reports (a panic hook, the log's last lines, pointed to on the next start, Show Report); the random-command test (long `EditorCommand` sequences with undo / redo); start-up without graphics or a data folder told in words; autosave's first failure an alert; failed saves keep the old file; files too large for memory refused | 767 |
+| 14.4 | The performance budget measured and met (`docs/performance.md`): `criterion` benches for geometry, evaluation, extraction, files and the path tracer (built in CI); a counting-allocator test of steady frames; the stress scenes (`examples/stress.rs`); View ▸ Frame Time; topology 10× and the BVH build a fifth faster | 770 |
 | — | The itch.io page prepared ([`assets/itch/page.md`](../assets/itch/page.md): its fields, description and pictures); step 14.6 also pushes the packages there with `butler` | — |
 
 **Planning notes:**
@@ -2173,6 +2174,39 @@ endless loops, a library with examples and the Script Manager. Guides:
   Coverage was checked by counting the undo labels it produced: almost
   every command that changes the document, including Extrude, Bevel,
   Bridge, Weld, Loop and Line Cut.
+
+**14.4 — Performance budget**
+
+*Problems and solutions:*
+- **A counting allocator without `unsafe`.** Counting allocations needs a
+  global allocator, which Rust only lets one write with `unsafe` — forbidden
+  in the workspace. `allocation-counter` (MIT / Apache-2.0, no dependencies)
+  brings its own; as a dev-dependency used by one integration test, it is
+  linked into that test binary alone.
+- **A test that passed for the wrong reason.** The first scenes for the
+  allocation test and the benches set "animated" values with
+  `NodeData::set_value_at`, which only writes a key on a parameter that
+  already has a track — so nothing was animated, and "evaluating the next
+  frame" measured 12 ns. Noticed from that number; the scenes now push
+  tracks, and the test checks that the objects really move between frames.
+  With real animation it still allocates nothing.
+- **Topology was the slowest thing found** (580 ms for a million triangles,
+  on entering a component mode): two hash maps over every corner. Rewritten
+  with a counting sort by each edge's lower point: 57 ms, and a test
+  compares it with the hashing version on every test shape and on random
+  non-manifold meshes (same edges, same order, same orientation verdict).
+- **Measuring on screen without a mouse.** Neither posted nor real mouse
+  clicks reached the window from the test driver this time (keys did), and
+  posted Ctrl combinations arrive without Ctrl. The measurements used keys
+  only (F8 to play) and a local build — not committed — with the readout on
+  from the start and an environment variable choosing a component mode;
+  Select All was timed headless instead, in an ignored test that draws
+  every panel.
+- **The readout's average hid hitches**, so it also shows the worst frame of
+  the last 128 (a fixed ring, nothing allocated).
+- **Where the time to open a big file goes:** 0.4 – 0.5 s reading and
+  replacing the document, the rest (to 1.3 – 1.7 s) the first frame
+  triangulating and uploading about 4.5 million triangles.
 
 ---
 

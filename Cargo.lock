@@ -168,6 +168,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocation-counter"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "beb9e990c0a33699f1984d85a6abead615ccc72dd8130bf3e15dcabe2ca149c9"
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1878,6 +1884,9 @@ dependencies = [
  "eframe",
  "egui",
  "env_logger",
+ "glam 0.34.2",
+ "grid4d-geom",
+ "grid4d-io",
  "grid4d-plugin",
  "grid4d-plugin-gear",
  "grid4d-plugin-scatter",
@@ -1892,6 +1901,7 @@ dependencies = [
 name = "grid4d-eval"
 version = "0.13.0"
 dependencies = [
+ "criterion",
  "glam 0.34.2",
  "grid4d-geom",
  "grid4d-plugin",
@@ -1905,6 +1915,7 @@ dependencies = [
 name = "grid4d-geom"
 version = "0.13.0"
 dependencies = [
+ "criterion",
  "glam 0.34.2",
 ]
 
@@ -1912,6 +1923,7 @@ dependencies = [
 name = "grid4d-io"
 version = "0.13.0"
 dependencies = [
+ "criterion",
  "exr",
  "flate2",
  "glam 0.34.2",
@@ -1971,6 +1983,7 @@ dependencies = [
 name = "grid4d-raytrace"
 version = "0.13.0"
 dependencies = [
+ "criterion",
  "glam 0.34.2",
  "grid4d-eval",
  "grid4d-geom",
@@ -1984,7 +1997,9 @@ dependencies = [
 name = "grid4d-render"
 version = "0.13.0"
 dependencies = [
+ "allocation-counter",
  "bytemuck",
+ "criterion",
  "glam 0.34.2",
  "grid4d-eval",
  "grid4d-geom",

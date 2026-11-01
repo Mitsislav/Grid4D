@@ -153,6 +153,61 @@ mod tests {
         assert_idle_frames_leave_the_document_alone(doc, editor);
     }
 
+    /// The performance budget's "Select All on 10 000 objects, no frame
+    /// noticeably slower": every panel drawn headless (no GPU), frames timed
+    /// before, around and after Select All. A measurement, not a check —
+    /// timings depend on the machine: `cargo test --release -p grid4d-ui --
+    /// --ignored --nocapture select_all_on_10k` (see `docs/performance.md`).
+    #[test]
+    #[ignore = "a measurement, run by hand in release"]
+    fn select_all_on_10k_objects_timed() {
+        let mut doc = Document::new("10k");
+        for k in 0..100 {
+            let group = doc.scene.insert(grid4d_scene::Node::new(
+                format!("Row {k}"),
+                grid4d_scene::ObjectKind::Null,
+            ));
+            for _ in 0..100 {
+                let cube = grid4d_scene::ObjectKindTag::Cube;
+                doc.scene
+                    .insert_child(group, grid4d_scene::Node::new("Cube", cube.default_kind()))
+                    .unwrap();
+            }
+        }
+        let mut editor = EditorState::default();
+        let ctx = egui::Context::default();
+        let mut outliner = OutlinerPanel::default();
+        let mut attributes = AttributesPanel::default();
+        let mut timeline = TimelinePanel::default();
+        let mut coordinates = CoordinatesPanel::default();
+        let mut viewport = ViewportPanel::new(None);
+        let mut frame = |doc: &mut Document, editor: &mut EditorState| {
+            let start = std::time::Instant::now();
+            ctx.run_ui(RawInput::default(), |ui| {
+                menu_bar::show(ui, doc, editor);
+                outliner.show(ui, doc, editor);
+                attributes.show(ui, doc, editor);
+                timeline.show(ui, doc, editor);
+                coordinates.show(ui, doc, editor);
+                viewport.show(ui, doc, editor);
+            })
+            .drop_without_applying_deltas();
+            commands::apply_pending(doc, editor, &mut viewport);
+            start.elapsed().as_secs_f64() * 1000.0
+        };
+        let mut times = |label: &str, frames: usize, doc: &mut Document, editor: &mut EditorState| {
+            let ms: Vec<String> = (0..frames).map(|_| format!("{:.2}", frame(doc, editor))).collect();
+            println!("{label}: {} ms", ms.join(", "));
+        };
+        times("warming up", 5, &mut doc, &mut editor);
+        times("nothing selected", 5, &mut doc, &mut editor);
+        editor.commands.push(crate::EditorCommand::SelectAll);
+        times("Select All, then", 5, &mut doc, &mut editor);
+        editor.commands.push(crate::EditorCommand::DeselectAll);
+        times("Deselect All, then", 5, &mut doc, &mut editor);
+        assert_eq!(editor.selection.len(), 0);
+    }
+
     fn assert_idle_frames_leave_the_document_alone(mut doc: Document, mut editor: EditorState) {
         let ctx = egui::Context::default();
         let mut outliner = OutlinerPanel::default();

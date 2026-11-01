@@ -6,7 +6,7 @@
 > after a crash and how fast it draws.
 >
 > Covers implementation-plan steps **14.1** (About), **14.3** (crash reports
-> and robustness) and 14.4 (the frame-time readout).
+> and robustness) and **14.4** (the frame-time readout).
 
 ## Purpose
 
@@ -92,6 +92,48 @@ large for memory — Grid4D says so in words and loses no work it could keep.
   is refused with "not enough memory to read this file (<size>)" instead of
   Grid4D stopping.
 
+## Behaviour (14.4)
+
+### The frame-time readout
+
+- **View ▸ Frame Time** (in any view's View menu; off when Grid4D starts,
+  not saved) shows, in the top-right corner of the active view, how long
+  frames take:
+  - first line: the time between frames, the rate and the slowest frame of
+    about the last two seconds, "16.7 ms · 60 fps · worst 18.2 ms" (a
+    single slow frame — a hitch — shows there even when the average hides
+    it);
+  - second line: the slowest part of the viewport's own work in that frame
+    and its time, "slowest: Evaluation 2.1 ms" — one of **Evaluation**
+    (animation, generators, deformers, clones), **Extraction** (what to
+    draw, batched) and **Drawing** (the commands sent to the graphics card).
+- The values are averaged over the last frames so they can be read while
+  the view moves. A frame is only drawn when something changes (orbiting,
+  playing, editing); with nothing moving the readout keeps its last
+  values, and pauses longer than a quarter of a second do not count.
+- The rate cannot go above the display's refresh rate (frames wait for the
+  screen); a time between frames at the refresh interval means the budget
+  is met. The parts are processor time; the graphics card's own time is not
+  measured.
+- Choosing it again hides it. It is drawn in every theme with the view's
+  own (dark) colours, like the HUD.
+
+### The performance budget
+
+What Grid4D promises on a mid-range computer (the reference: an RTX 3050
+Laptop GPU on Windows 11), release build. Measured results, and anything
+accepted as an exception, are recorded in `docs/performance.md`.
+
+| Scenario | Budget |
+|----------|--------|
+| 10 000 primitive objects, orbiting or playing | ≥ 60 fps; no memory allocated per frame by evaluation and extraction once warm |
+| One mesh of 1 000 000 triangles | ≥ 60 fps orbiting; Points / Edges / Polygons mode ≥ 30 fps |
+| Select All on 10 000 objects | no frame noticeably slower than its neighbours |
+| Opening a 50 MB `.g4d` | under 2 s |
+
+`cargo run --release --example stress -- <folder>` writes the scenes these
+are measured on (`stress-10k.g4d`, `stress-1m.g4d`, `stress-50mb.g4d`).
+
 ## Grid4D mapping
 
 | Piece | Where |
@@ -106,6 +148,11 @@ large for memory — Grid4D says so in words and loses no work it could keep.
 | The data folder check and the start-up failure message (`startup::check_data_folder`, `startup::cannot_start`) | `grid4d-ui::startup`; called by `src/main.rs` and `src/app.rs` |
 | Autosave's first failure as an alert | `grid4d-ui::autosave`, `file::autosave` |
 | Reading files with the memory reserved first (`read_file`) | `grid4d-io` |
+| The readout: `FrameTimes` (averaged parts, the slowest), View ▸ Frame Time | `grid4d-ui::panels::viewport::frame_time` |
+| Benchmarks (`cargo bench`): evaluation, extraction, triangulation, subdivision, generators, `.g4d` save / load, the path tracer | `crates/*/benches/` |
+| Zero allocations in a steady frame (a counting allocator) | `crates/render/tests/steady_frame.rs` |
+| The stress scenes | `examples/stress.rs` (the binary's package) |
+| Measurements | `docs/performance.md` |
 
 ## Decisions (2026-11-01)
 
@@ -126,6 +173,19 @@ large for memory — Grid4D says so in words and loses no work it could keep.
    rendering) is not part of eframe's wgpu path, and the viewport needs
    wgpu. A clear message instead of a silent exit.
 
+## Decisions (14.4)
+
+7. **The readout times the viewport's own work** (evaluation, extraction,
+   drawing commands) with a clock read per part — nothing allocates while
+   it is off, and the parts a user can influence (scene size, generators,
+   the display mode) are the ones named.
+8. **Benchmarks are built in CI, run by hand**: timings on shared runners
+   vary too much to compare; the reference machine's numbers live in
+   `docs/performance.md`.
+9. **The allocation test counts per thread** with `allocation-counter`
+   (its own global allocator; the workspace forbids `unsafe`, so Grid4D
+   cannot write one), linked into that one test binary only.
+
 ## Acceptance criteria
 
 - [x] About shows the version, commit and date; the Licences page lists every
@@ -140,3 +200,7 @@ large for memory — Grid4D says so in words and loses no work it could keep.
       folder it starts and says what is not kept.
 - [x] A save that cannot be written keeps the old file; a file too large
       for memory is refused with a message.
+- [x] View ▸ Frame Time shows the time between frames, the worst recent
+      frame and the slowest part.
+- [x] Every budget measured on the reference machine and met, or accepted
+      with a reason, in `docs/performance.md`.

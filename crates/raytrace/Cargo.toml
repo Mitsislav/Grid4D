@@ -15,8 +15,13 @@ glam.workspace = true
 rayon.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 grid4d-io.workspace = true
 png.workspace = true
+
+[[bench]]
+name = "trace"
+harness = false
 
 [lints]
 workspace = true

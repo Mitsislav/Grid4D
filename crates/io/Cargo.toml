@@ -21,8 +21,13 @@ flate2.workspace = true
 half.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 exr.workspace = true
 proptest.workspace = true
+
+[[bench]]
+name = "files"
+harness = false
 
 [lints]
 workspace = true

@@ -3,6 +3,7 @@
 
 mod cut_tools;
 mod deformer_tools;
+mod frame_time;
 mod gizmo;
 mod gpu_view;
 mod join_tools;
@@ -14,6 +15,7 @@ mod snapping;
 mod spline_tools;
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use egui::{Align, Align2, Layout, Margin, PointerButton, Pos2, Rect, Response, Sense, Ui, pos2};
 use glam::{Mat4, Vec2 as GVec2, Vec3};
@@ -25,7 +27,7 @@ use grid4d_render::{
 };
 use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, Tags, Transform, WalkItem};
 
-use self::{gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView, select_tools::Gesture};
+use self::{frame_time::Part, gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView, select_tools::Gesture};
 use crate::i18n::{key, tr, trf};
 use crate::{
     EditorCommand, EditorState, SelectMode, Selection, Tool,
@@ -258,6 +260,8 @@ pub struct ViewportPanel {
     pen: pen_tool::PenState,
     /// A deformer's strength handle being dragged.
     deformer_drag: Option<deformer_tools::DeformerDrag>,
+    /// View ▸ Frame Time: how long frames and their parts take.
+    times: frame_time::FrameTimes,
 }
 
 /// The Render View's picture as a texture, with the version it was made from.
@@ -323,6 +327,7 @@ impl ViewportPanel {
             point_stroke: None,
             pen: pen_tool::PenState::default(),
             deformer_drag: None,
+            times: frame_time::FrameTimes::default(),
         }
     }
 
@@ -553,6 +558,7 @@ impl ViewportPanel {
         if area.width() < 2.0 || area.height() < 2.0 {
             return;
         }
+        self.times.begin(ui.input(|i| i.unstable_dt));
         // The simulation at this frame: a little more of it each refresh.
         let frame = doc.time.frame();
         if editor.simulation.advance(doc, frame) {
@@ -699,8 +705,7 @@ impl ViewportPanel {
             interaction.owns_pointer
         };
         if !navigating && !gizmo_owns_pointer {
-            self.evaluated.set_frame(f64::from(doc.time.frame()));
-            self.evaluated.update(&doc.scene);
+            self.evaluate(doc);
             if !self.pen_tool(ui, &response, rect, doc, editor)
                 && !self.handle_drag(ui, &response, rect, doc, editor)
                 && !self.mesh_tools(ui, &response, rect, doc, editor)
@@ -715,8 +720,7 @@ impl ViewportPanel {
 
         // A gizmo drag above may have moved an object; free if nothing changed.
         // Animation is shown at the current (whole) frame.
-        self.evaluated.set_frame(f64::from(doc.time.frame()));
-        self.evaluated.update(&doc.scene);
+        self.evaluate(doc);
         self.drop_material(ui, rect, editor);
         // Component modes: the active polygon object, and what a click would select.
         let target = self.component_target(editor);
@@ -768,8 +772,7 @@ impl ViewportPanel {
         gizmo: Option<&GizmoGeometry>,
     ) {
         overlay::background(painter, rect);
-        self.evaluated.set_frame(f64::from(doc.time.frame()));
-        self.evaluated.update(&doc.scene);
+        self.evaluate(doc);
         let target = self.component_target(editor);
         let interactive = index == self.active;
         if let Some(gpu) = &mut self.gpu {
@@ -778,12 +781,16 @@ impl ViewportPanel {
             self.frame.display = self.display;
             self.frame.filter = self.filter;
             self.frame.effects = self.effects;
+            let start = Instant::now();
             self.frame.extract(&self.evaluated, |id| editor.selection.contains(id));
             self.frame.component_style = component_style(ui.ctx().pixels_per_point());
             // What a click would select shows where the pointer is.
             let hover: &[ComponentHit] = if interactive { &self.hover } else { &[] };
             self.frame.extract_components(&self.evaluated, target, hover);
+            self.times.add(Part::Extraction, start);
+            let start = Instant::now();
             let texture = gpu.render(index, &self.frame, pixel_size(rect, ui.ctx().pixels_per_point()));
+            self.times.add(Part::Drawing, start);
             // Drawn over the background gradient: the target is cleared to transparent.
             painter.image(
                 texture,
@@ -860,6 +867,18 @@ impl ViewportPanel {
         if self.filter.shows(FilterItem::Hud) {
             overlay::hud(painter, rect, &self.camera);
         }
+        if interactive && self.times.shown {
+            self.times.paint(painter, rect);
+        }
+    }
+
+    /// Brings the evaluation to the document's current (whole) frame; free
+    /// when nothing changed. Timed for View ▸ Frame Time.
+    fn evaluate(&mut self, doc: &Document) {
+        let start = Instant::now();
+        self.evaluated.set_frame(f64::from(doc.time.frame()));
+        self.evaluated.update(&doc.scene);
+        self.times.add(Part::Evaluation, start);
     }
 
     /// The active object and the component kind of the current mode, when the
@@ -1090,6 +1109,15 @@ impl ViewportPanel {
                                     editor.commands.push(cmd);
                                     ui.close();
                                 }
+                            }
+                            ui.separator();
+                            if ui
+                                .add(egui::Button::new(tr("Frame Time")).selected(self.times.shown))
+                                .on_hover_text(tr("Shows how long frames take, and the slowest part"))
+                                .clicked()
+                            {
+                                self.times.shown = !self.times.shown;
+                                ui.close();
                             }
                         });
                         ui.menu_button(tr("Cameras"), |ui| {

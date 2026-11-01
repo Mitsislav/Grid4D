@@ -15,8 +15,13 @@ grid4d-text.workspace = true
 glam.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 grid4d-plugin-gear.workspace = true
 grid4d-plugin-wave.workspace = true
+
+[[bench]]
+name = "evaluate"
+harness = false
 
 [lints]
 workspace = true
