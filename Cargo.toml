@@ -16,7 +16,7 @@
 #  Plugins (plugins/*) depend on grid4d-plugin; the binary lists them (src/plugins.rs).
 #  grid4d-script (Rhai scripts) depends on geom, scene and plugin; ui uses it.
 #
-#  See ARCHITECTURE.md for the architectural rules.
+#  See docs/ARCHITECTURE.md for the architectural rules.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [workspace]

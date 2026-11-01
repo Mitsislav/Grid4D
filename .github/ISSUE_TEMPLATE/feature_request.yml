@@ -1,0 +1,16 @@
+name: Suggestion
+description: An idea for Grid4D, or something that could work better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What would you like to do, and how would it work?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What would it make easier? If Cinema 4D or another program does it, how?

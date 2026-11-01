@@ -1,45 +1,77 @@
 # Contributing to Grid4D
 
-Thanks for helping build an open-source 3D content creation suite!
+Thanks for your interest in Grid4D! You can help by trying it and reporting
+what goes wrong, by suggesting improvements, or with code, plugins, scripts
+and documentation.
 
-## Before you start
+## Reporting a problem
 
-* Read [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) — it holds the **architectural rules** (crate
-  dependency direction, the `EditorCommand` choke point, the allocation-free
-  render loop, no `unsafe`, no `unwrap`, exhaustive `match`). Pull requests that
-  break them will be asked to change.
-* Read [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) to see what is
-  planned and in which order. For larger work, open an issue first so we can agree
-  on the design.
+Open an [issue](../../issues/new/choose) and include:
 
-## Development
+- what you did, what you expected and what happened instead;
+- your system (Windows / macOS / Linux and its version) and graphics card;
+- the Grid4D version or commit (Help ▸ Keyboard Shortcuts & About);
+- a `.g4d` file or a screenshot when it helps.
 
-Requires Rust **1.95+**. On Windows you also need the MSVC build tools; on Linux the
-usual X11/Wayland development packages (see the README).
+If Grid4D closed unexpectedly, mention it: unsaved work is offered back on the
+next start.
+
+## Building from source
+
+You need Rust **1.95 or newer** (`rustup update stable`). On Windows also the
+MSVC build tools (installed with Visual Studio's "Desktop development with
+C++"); on Linux the usual X11 / Wayland development packages:
 
 ```bash
-cargo run                                              # dev build
-cargo fmt --all                                        # format
-cargo clippy --workspace --all-targets -- -D warnings  # lint
-cargo test --workspace                                 # unit tests + WGSL validation
+sudo apt-get install libxkbcommon-dev libwayland-dev libx11-dev \
+  libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 ```
 
-All three checks must pass before a change is considered done; CI runs them on
-Windows, Linux and macOS.
+Then:
 
-## Pull requests
+```bash
+cargo run --release
+```
 
-* One topic per pull request; keep them reviewable.
-* Add tests next to the code you change. Hot-path buffers get a capacity-reuse
-  test; `#[repr(C)]` structs get a size test; new shaders are added to
-  `shaders_validate`.
-* Update `ARCHITECTURE.md` (workspace tree, rules) and the implementation plan when your
-  change adds a crate, panel or object type.
+## Making a change
 
-## Legal
+Before larger work, open an issue so we can agree on the approach.
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) explains how the code is
+organised and the rules every change follows — in short: dependencies point
+one way between crates, every document change goes through an undoable
+`SceneEdit`, the per-frame code does not allocate, and there is no `unsafe`
+and no `unwrap()` outside tests. What is planned, and in which order, is in
+[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
 
-Grid4D is *inspired by* the Cinema 4D workflow and must never copy it: no Maxon
-icons, artwork, trademarks or file formats. All artwork must be original.
+Before you open a pull request, these must pass (CI runs them on Windows,
+Linux and macOS):
+
+```bash
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+And please:
+
+- keep one topic per pull request;
+- add tests next to the code you change;
+- update the [manual](docs/manual.md) when users will notice the change, and
+  give new interface texts their Greek in `crates/ui/src/i18n/el.rs` (a test
+  lists the missing ones);
+- update [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) when you add a crate,
+  a panel or a kind of object.
+
+Writing a plugin or a script? See [`docs/plugins.md`](docs/plugins.md) and
+[`docs/scripting.md`](docs/scripting.md).
+
+## Inspired by, never copied
+
+Grid4D follows the workflow of Cinema 4D but must never copy it: no Maxon
+icons, artwork, trademarks, text or file formats. All artwork is original, and
+descriptions of behaviour are written in our own words.
+
+## Licence
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in Grid4D by you, as defined in the Apache-2.0 license, shall be

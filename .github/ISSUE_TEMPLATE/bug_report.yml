@@ -1,0 +1,35 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        1. Create a Cube
+        2. Make it editable (C)
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Grid4D version or commit
+      description: Help ▸ Keyboard Shortcuts & About, or `git log -1 --oneline`.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Operating system and version, graphics card.
+      placeholder: Windows 11, NVIDIA RTX 3050 Laptop
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: A screenshot, the `.g4d` file (zipped), or the log output if you ran Grid4D from a terminal.

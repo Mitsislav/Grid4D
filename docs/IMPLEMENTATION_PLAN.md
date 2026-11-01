@@ -1,16 +1,16 @@
 # Grid4D — Implementation Plan
 
 > Status of this document: **v1, 2026-10-18.** Written after a full read of the
-> v0.1 codebase (≈ 6.1 k lines, 27 tests). It turns the short roadmap in
-> `ARCHITECTURE.md` into ordered, PR-sized work with design decisions, acceptance
-> criteria and the files each step touches. Update it when a phase lands.
+> v0.1 codebase (≈ 6.1 k lines, 27 tests). It turns the short roadmap into
+> ordered, PR-sized work with design decisions, acceptance criteria and the
+> files each step touches. Update it when a phase lands.
 >
 > **2026-10-19: the project was renamed from OpenC4D to Grid4D** — crates
 > `oc4d-*` → `grid4d-*`, binary `grid4d`, documents `.oc4d` → `.g4d` (old files
 > still open), original app icon in `assets/icon/`. Older entries below use the
 > new names.
 
-All rules in `ARCHITECTURE.md` still apply to every step below — dependency direction,
+All rules in [`ARCHITECTURE.md`](ARCHITECTURE.md) apply to every step below — dependency direction,
 the `EditorCommand` choke point, the allocation-free hot path, `NodeId`-only
 references, no `unsafe`, no `unwrap`, exhaustive `match`, and
 **inspired by, never copied** (no Maxon assets, icons, file formats or trademarks).
@@ -172,7 +172,7 @@ Phase 6 animation needs Phase 1 (edits) and Phase 3 (evaluation).
 | Step | Size | Work |
 |------|------|------|
 | 0.1 | S | Install toolchain (`rustup`, stable ≥ 1.95, MSVC build tools on Windows); run `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`; fix anything the first build reveals. |
-| 0.2 | S | `git init`, first commit of v0.1, add `LICENSE-MIT` + `LICENSE-APACHE` (README already proposes the Rust default), `CONTRIBUTING.md` (points to `ARCHITECTURE.md` rules). |
+| 0.2 | S | `git init`, first commit of v0.1, add `LICENSE-MIT` + `LICENSE-APACHE` (README already proposes the Rust default), `CONTRIBUTING.md` (points to the architecture rules). |
 | 0.3 | S | CI (GitHub Actions): matrix Windows / Ubuntu / macOS; jobs `fmt --check`, `clippy -D warnings`, `test`; cache `~/.cargo` + `target`; Linux job installs the X11/Wayland dev packages listed in the README. |
 | 0.4 | S | **A1:** give `Selection` O(1) membership — keep the ordered `Vec<NodeId>` (active = last) plus a `slotmap::SecondaryMap<NodeId, ()>`; keep the API identical. Add a test that `contains` agrees with the Vec after add/toggle/retain. |
 | 0.5 | S | **A2:** build `GizmoGeometry` once per frame and reuse it for interaction and painting; compute `rings` only for `Tool::Rotate` (`Option` per tool). |
@@ -244,7 +244,7 @@ pub struct History  { undo: Vec<UndoGroup>, redo: Vec<UndoGroup>, revision: u64,
   A plain revision counter would call a document dirty after edit + undo.
 
 **5. Interactive value edits.** Plain value edits may keep writing the scene
-directly for live feedback (ARCHITECTURE.md rule), but commit an undo step **on
+directly for live feedback (an architecture rule), but commit an undo step **on
 interaction end**:
 
 * Gizmo: snapshot `NodeData` on drag start, write live while dragging, on drag end
@@ -1201,7 +1201,7 @@ to recover, the frame-time readout (14.3–14.5).
 | 14.4 | L | **Performance budget:** `criterion` benches (eval, extract, triangulation, subdivision, generators, io, path tracer) and `cargo bench --no-run` in CI; the counting-allocator test; `examples/stress.rs`; the frame-time readout; measurements on the reference machine in `docs/performance.md`; optimisations for every budget missed (or an accepted, documented exception) |
 | 14.5 | M | **The interface pass:** `egui_kittest` tests (drag-reparent, rename, typed values with undo, a gizmo drag, a deformer handle drag, Shift / Ctrl selection, a menu command); the one shortcut table and its test; the manual walked through on screen in English and Greek, Dark and Light; fixes; fresh screenshots where the interface changed |
 | 14.6 | L | **Packaging and the release workflow:** the workspace version to `1.0.0-rc.1`; `assets/` for packaging (`.icns`, Linux icons, `.desktop`, `Info.plist`, WiX source); the release workflow (on a `v*` tag: three builds, the `.zip`, `.msi`, `.dmg`, `.tar.gz`, AppImage, SHA-256 sums, a draft GitHub Release with the changelog's section); a release candidate built and each package installed and opened on a clean machine or VM of each system (the demo, every example file, a script, a plugin object) |
-| 14.7 | M | **Documentation and 1.0:** `docs/ARCHITECTURE.md` (the crates and their rules, the data flow of a frame, where to add things), `CHANGELOG.md` (1.0.0, and the road there by phase), the README for 1.0 (what Grid4D is, screenshots, installing, building, documentation), `CONTRIBUTING.md` (the rules, the docs to update, how to add a panel / object / plugin), a final pass over the manual and guides; the trademark and trade-dress review (R2) of menus, labels, icons and docs; the version to `1.0.0` and the `v1.0.0` tag after the acceptance |
+| 14.7 | M | **Documentation and 1.0:** `docs/ARCHITECTURE.md` (the crates and their rules, the data flow of a frame, where to add things — first written 2026-11-01; brought up to date), `CHANGELOG.md` (1.0.0, and the road there by phase), the README for 1.0 (what Grid4D is, screenshots, installing, building, documentation), `CONTRIBUTING.md` (the rules, the docs to update, how to add a panel / object / plugin), a final pass over the manual and guides; the trademark and trade-dress review (R2) of menus, labels, icons and docs; the version to `1.0.0` and the `v1.0.0` tag after the acceptance |
 
 **Acceptance:** CI green with `cargo deny` and the short fuzz run; the
 `v1.0.0` tag produced a GitHub Release with the Windows `.zip` and `.msi`,
@@ -1253,10 +1253,10 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 
 ### Documentation
 
-* Keep `ARCHITECTURE.md` as the rules file; update its workspace tree and roadmap when a
-  phase adds crates/panels.
-* `docs/ARCHITECTURE.md` (diagram from §2, data flow per frame),
-  `docs/FILE_FORMAT.md` (versioned `.g4d` spec), user-facing shortcut list
+* [`ARCHITECTURE.md`](ARCHITECTURE.md) is the rules file (crates, data flow per
+  frame, rules, where to add things); update it when a phase adds crates or
+  panels.
+* `docs/FILE_FORMAT.md` (versioned `.g4d` spec), user-facing shortcut list
   generated from `shortcuts.rs` so Help ▸ About never drifts.
 
 ---

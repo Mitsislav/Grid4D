@@ -7,11 +7,13 @@ workflow and layout inspired by Cinema 4D.
 
 ![Grid4D workspace](docs/screenshot.png)
 
-**Status: v0.6 in progress — tags and animation data done; recording keys next.** The workspace, scene graph, GPU
-viewport, undo/redo and `.g4d` files work, and polygon objects can be modelled with
-component selection, Extrude, Inset, Bevel, Bridge, cuts and more, then smoothed with
-the Subdivision Surface generator; keyframes, glTF and rendering are on the roadmap (see
-[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)).
+**Status: v0.13 — every planned feature phase is done; work towards 1.0
+(stabilisation, installable packages) has begun.** Modelling with polygon tools
+and generators, splines, deformers and MoGraph cloners, keyframe animation with
+F-curves, rigid-body simulation, materials and lights, a CPU path tracer,
+glTF / OBJ interchange, layers and takes, a docking workspace, plugins and
+scripts — in English or Greek. See what is planned in
+[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
 
 **How to use it:** the [user manual](docs/manual.md). **What changed in each step:**
 the [progress log](docs/progress.md).
@@ -130,26 +132,19 @@ cargo clippy --workspace --all-targets -- -D warnings   # lints
 
 ## Architecture
 
-```
-grid4d-geom  ◀──  grid4d-scene  ◀──  grid4d-eval  ◀──  grid4d-render  ◀──  grid4d-ui  ◀──  grid4d (binary)
-(geometry)        (data)             (evaluation)      (wgpu)              (egui)          (composition root)
-                        ▲                                                      │
-                        └────────────────────  grid4d-io  ◀────────────────────┘
-                                               (.g4d files)
-```
+Grid4D is a Rust workspace of small crates — geometry, the document, evaluation,
+the wgpu viewport, a CPU path tracer, simulation, files, plugins, scripts and
+the egui interface — whose dependencies point one way only.
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the crates, how a
+frame flows through them and the rules every change follows.
 
-| Crate            | Responsibility                                                      |
-|------------------|---------------------------------------------------------------------|
-| `grid4d-geom`    | Polygon meshes with n-gons, topology, vertex normals (Phong angle), triangulation for the GPU. glam only. |
-| `grid4d-scene`   | Scene graph (slotmap arena, generational `NodeId`), transforms (HPB), bounds, document time. No GPU, no UI. |
-| `grid4d-eval`    | Evaluated scene: visible nodes with world matrices, drawables (unit mesh keys) and pick shapes; skipped when nothing changed. No GPU, no UI. |
-| `grid4d-render`  | Orbit camera, per-frame `FrameData` extraction, generated-mesh cache, wgpu pipelines + WGSL shaders, picking. No UI. |
-| `grid4d-io`      | `.g4d` document files: versioned zip archive (JSON + binary meshes), atomic save, load with clear errors. No GPU, no UI. |
-| `grid4d-ui`      | Theme, painted vector icons, panels, gizmo, shortcuts, command queue, undo history. |
-| `grid4d`         | Window / GPU surface setup and panel layout.                         |
+## Trying it and reporting problems
 
-The rules (dependency direction, command queue, allocation-free render loop,
-module layout) are in [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Grid4D runs on Windows, macOS and Linux. Until the 1.0 packages are out, build
+it from source as above. If something goes wrong or could be better, please
+[open an issue](../../issues/new/choose) — with your system, graphics card and
+what you did; [CONTRIBUTING.md](CONTRIBUTING.md) explains how to help with
+code, plugins, scripts and documentation.
 
 ## Legal
 

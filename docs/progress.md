@@ -88,7 +88,7 @@ The starting point, `64d00bf`:
 - **"Unsaved changes" had to survive undo.** A document counts as changed when the
   history state differs from the state at the last save, so undoing back to it is
   clean again.
-- **A stray control character (BEL) slipped into ARCHITECTURE.md.** Every commit is now
+- **A stray control character (BEL) slipped into a docs file.** Every commit is now
   scanned for CR and control bytes first.
 
 ## Phase 3 — Geometry core and viewport (2026-10-18 – 19)
