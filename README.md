@@ -5,6 +5,8 @@
 An open-source, modular 3D content creation suite written in Rust, with a
 workflow and layout inspired by Cinema 4D.
 
+<a href="https://buymeacoffee.com/mitsislav"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="40"></a>
+
 ![Grid4D workspace](docs/screenshot.png)
 
 **Status: v0.13 — every planned feature phase is done; work towards 1.0
@@ -145,6 +147,12 @@ it from source as above. If something goes wrong or could be better, please
 [open an issue](../../issues/new/choose) — with your system, graphics card and
 what you did; [CONTRIBUTING.md](CONTRIBUTING.md) explains how to help with
 code, plugins, scripts and documentation.
+
+## Support
+
+Grid4D is free and developed in spare time. If you find it useful and want to
+help it grow, you can [buy me a coffee](https://buymeacoffee.com/mitsislav) —
+thank you! Trying it and reporting what goes wrong helps just as much.
 
 ## Legal
 
