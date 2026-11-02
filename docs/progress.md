@@ -2270,6 +2270,10 @@ endless loops, a library with examples and the Script Manager. Guides:
   now builds with line-table debug information only and, on Linux, first
   removes preinstalled tools Grid4D never uses (Android SDK, .NET, GHC,
   CodeQL).
+- **The first dry run** built the macOS and Linux packages at once; the
+  `.msi` failed: WiX gives a component a generated GUID only when it holds
+  one unversioned file (or a versioned key file), and the licence files
+  shared one component. Each has its own now.
 
 ---
 

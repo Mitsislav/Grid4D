@@ -47,10 +47,15 @@
             </Extension>
           </ProgId>
         </Component>
-        <Component Id="Licences" Guid="*">
+        <!-- One file each: a generated GUID needs a single unversioned file. -->
+        <Component Id="LicenceMit" Guid="*">
           <File Id="LICENSE_MIT" Source="$(var.Bin)\LICENSE-MIT" KeyPath="yes" />
-          <File Id="LICENSE_APACHE" Source="$(var.Bin)\LICENSE-APACHE" />
-          <File Id="THIRD_PARTY_LICENSES" Source="$(var.Bin)\THIRD_PARTY_LICENSES.txt" />
+        </Component>
+        <Component Id="LicenceApache" Guid="*">
+          <File Id="LICENSE_APACHE" Source="$(var.Bin)\LICENSE-APACHE" KeyPath="yes" />
+        </Component>
+        <Component Id="ThirdPartyLicences" Guid="*">
+          <File Id="THIRD_PARTY_LICENSES" Source="$(var.Bin)\THIRD_PARTY_LICENSES.txt" KeyPath="yes" />
         </Component>
       </Directory>
     </StandardDirectory>
@@ -60,7 +65,9 @@
 
     <Feature Id="Main" Title="Grid4D">
       <ComponentRef Id="Application" />
-      <ComponentRef Id="Licences" />
+      <ComponentRef Id="LicenceMit" />
+      <ComponentRef Id="LicenceApache" />
+      <ComponentRef Id="ThirdPartyLicences" />
     </Feature>
   </Package>
 </Wix>
