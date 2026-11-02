@@ -2068,6 +2068,14 @@ endless loops, a library with examples and the Script Manager. Guides:
 - **Unsigned for 1.0** (R4): signing needs paid certificates and an Apple
   developer account; the README will explain the warnings.
 
+**After 1.0, planned (2026-11-02):** the plan's new section *After 1.0*
+compares Grid4D 1.0 with what artists expect from the established suites and
+lays out ten phases, v1.1 – v2.0: materials, UVs and textures (Phase 15,
+planned in detail, with `.g4d` v4); render quality; modelling 2; fields and
+motion graphics 2; sculpting and painting; characters and animation 2;
+simulation 2; nodes; GPU rendering; the pipeline. Decisions D24 – D30 and
+risks R5 – R8 go with it.
+
 **14.1 — CI and supply chain**
 
 *Problems and solutions:*

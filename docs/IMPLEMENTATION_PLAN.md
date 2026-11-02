@@ -37,8 +37,12 @@ references, no `unsafe`, no `unwrap`, exhaustive `match`, and
 16. [Phase 12 — Workspace](#phase-12--workspace-v012)
     · [Phase 13 — Extensibility](#phase-13--extensibility-v013)
     · [Phase 14 — Stabilisation](#phase-14--stabilisation-v10)
-17. [Cross-cutting: testing, performance, CI, docs](#cross-cutting-testing-performance-ci-docs)
-18. [Risks & open decisions](#risks--open-decisions)
+17. [After 1.0 — the road to a complete suite](#after-10--the-road-to-a-complete-suite)
+    · [Phase 15 — Materials, UVs and textures](#phase-15--materials-uvs-and-textures-v11)
+    · Phases 16 – 24 (outlines): render quality, modelling 2, fields and motion graphics 2,
+    sculpting and painting, characters and animation 2, simulation 2, nodes, GPU rendering, pipeline
+18. [Cross-cutting: testing, performance, CI, docs](#cross-cutting-testing-performance-ci-docs)
+19. [Risks & open decisions](#risks--open-decisions)
 
 Size legend for steps: **S** ≈ one small PR (< 300 lines), **M** ≈ one focused PR
 (300–1000 lines), **L** ≈ several PRs.
@@ -154,6 +158,9 @@ Two architectural moves carry most of the later phases:
 | v0.12 | Workspace | 12 | Docking layouts with presets (egui_tiles), Preferences (units, undo depth, autosave, themes), Layers, Takes, the interface in Greek |
 | v0.13 | Extensibility | 13 | Plugins built in through `grid4d-plugin` (generators, deformers, commands; missing plugins kept), Rhai scripts as one undo step, the Script Manager and its library ✅ |
 | v1.0 | Stabilisation | 14 | `.g4d` frozen and specified, fuzzed and property-tested files, crash reports, the performance budget measured and met, licences checked, installable packages for Windows / macOS / Linux from a tagged release, complete documentation |
+
+After 1.0: v1.1 – v2.0 (Phases 15 – 24), in
+[After 1.0](#after-10--the-road-to-a-complete-suite).
 
 Phases 1 and 2 are independent and can run in parallel. Phase 5 needs Phase 3;
 Phase 6 animation needs Phase 1 (edits) and Phase 3 (evaluation).
@@ -1218,6 +1225,307 @@ the README and the guides complete.
 
 ---
 
+## After 1.0 — the road to a complete suite
+
+> Written 2026-11-02, before 1.0 is tagged. Phase 15 is planned in detail;
+> Phases 16 – 24 are outlined (goal, scope, the order of their steps) and get
+> their full design when they start, as every phase so far did.
+
+### Where Grid4D stands at 1.0 — an honest comparison
+
+What an artist who knows the established 3D suites (the commercial one whose
+workflow Grid4D follows, and the leading open-source one) will look for, and
+how far Grid4D 1.0 is from it.
+
+| Area | Grid4D 1.0 | What artists expect | Gap |
+|------|-----------|---------------------|-----|
+| Polygon modelling | Components, extrude, inset, bevel, bridge, cuts, weld, melt, dissolve, optimize, snapping, SDS | Booleans, symmetry, soft selection, slide, knife variants, edge creases, normal editing, remesh, polygon reduction | **Medium** |
+| Procedural modelling | Extrude, Lathe, Sweep, Loft, Text, 5 deformers | Booleans and symmetry as live objects, instances, spline masks, many more deformers (wrap, spline, displacer, shrink-wrap, smooth) | Medium |
+| Sculpting and painting | — | Brushes, multi-resolution, masks, vertex and weight painting | **High** |
+| UVs and textures | Imported UVs only; no images | UV editor, unwrap, projections, image textures in viewport and render | **High** |
+| Materials | Colour, roughness, metallic, emission | Layered PBR (normal / bump maps, transparency, glass, subsurface, clearcoat), material previews, node graphs | **High** |
+| Lighting and rendering | Omni / spot / sun, CPU path tracer, PNG / EXR | Area lights, sky and HDRI, glass, depth of field, motion blur, render passes, denoising, GPU rendering, real-time preview | **High** |
+| Animation | Keys on transforms and parameters, F-curves, autokey | Dope sheet, motion layers / clips, constraints, path animation, drivers / expressions, onion skin, sound | Medium |
+| Characters | — | Joints, skinning, weights, IK, pose morphs, skinned glTF | **High** |
+| Motion graphics | Cloner (4 modes), Plain and Random effectors | A fields system (falloffs that layer), a dozen effectors, matrix, text cloning, fracture, tracer | **High** (this workflow's signature) |
+| Simulation | Rigid and collider bodies | Particles and forces, cloth, soft bodies, ropes, hair; fluids later | High |
+| Pipeline | `.g4d`, glTF, OBJ | FBX, Alembic, USD; materials, skins and animation in glTF; STL / PLY | Medium |
+| Extending | Rhai scripts, Rust plugins built in | Python, node-based expressions, plugins loaded at run time, an asset library | Medium |
+| Interface | Docking layouts, themes, EN / EL | Node editor, asset browser, customisable shortcuts, more languages, a navigation cube | Medium |
+
+**Where Grid4D can win** (and what the phases protect): a calm, familiar
+layout without hunting through modes; motion graphics as a first-class
+workflow; a small, fast native program that opens in a second; free and open
+source with a frozen, documented file format; undo for everything. **What
+Grid4D will not chase:** a video editor, a game engine, 2D drawing in 3D,
+compositing — the open-source suite does those, and they are not why people
+choose this workflow.
+
+**The order** follows one question: *can someone finish a real project?*
+Today an object cannot carry a picture, so every render looks like plastic —
+materials and textures come first. Then the render itself (light, glass,
+noise), then the modelling power and the procedural tools that define the
+workflow, then characters, simulation, nodes, speed and the pipeline.
+
+### The release train after 1.0
+
+| Version | Phase | Theme | "Done" means |
+|---------|-------|-------|--------------|
+| v1.1 | 15 | Materials, UVs and textures | Image textures on every channel, UVs on everything, a UV editor with unwrapping, textures in the viewport and the render, glTF / OBJ materials in and out |
+| v1.2 | 16 | Render quality | Area lights, sky and HDRI, glass and transmission, depth of field, motion blur, render passes, a denoiser, a render queue |
+| v1.3 | 17 | Modelling 2 | Booleans, Symmetry, Instance and Connect objects, soft selection, slide, knife variants, edge creases, more deformers |
+| v1.4 | 18 | Fields and motion graphics 2 | Layered fields for effectors, deformers and selections; vertex maps; a dozen effectors; Matrix, text cloning, Fracture, Tracer |
+| v1.5 | 19 | Sculpting and painting | Brushes on a multi-resolution mesh, masks, symmetry; vertex colour and weight painting |
+| v1.6 | 20 | Characters and animation 2 | Joints, skinning, weights, IK, constraints, pose morphs; a dope sheet and motion layers; skinned glTF |
+| v1.7 | 21 | Simulation 2 | Particles and forces, cloth and soft bodies (XPBD), ropes; caches on disk |
+| v1.8 | 22 | Nodes | A node editor: material graphs and expressions that drive parameters |
+| v1.9 | 23 | GPU rendering | The path tracer on the GPU (wgpu compute), matching the CPU reference; a real-time preview mode |
+| v2.0 | 24 | Pipeline | FBX, Alembic and USD where licences and pure-Rust tools allow; Python scripting; an asset library; plugins at run time |
+
+Each minor version keeps the rules of 1.x (D22): every older file opens, the
+plugin and script APIs only grow. A version that adds document data brings a
+new `.g4d` format version with a migration (D24) — one per release at most.
+
+---
+
+## Phase 15 — Materials, UVs and textures (v1.1)
+
+**Goal:** an object can wear a picture. Every primitive and generator has
+UVs; a Texture tag projects them where needed; a UV editor shows, edits and
+unwraps them; materials take image textures on every channel; the viewport
+and the path tracer show them; glTF and OBJ carry materials and textures in
+and out.
+
+### Where things stand (2026-11-02)
+
+* `Material` holds four numbers (colour, roughness, metallic, emission);
+  `Tag::Material` links one; children inherit (`Scene::effective_material`).
+* `PolyMesh` can hold one UV per corner (`set_uvs`), filled only by glTF / OBJ
+  import; primitives and generators make none; mesh operations carry UVs
+  linearly.
+* No image is ever decoded except PNG for tests; the viewport shader has no
+  texture bindings; the path tracer shades from the four numbers.
+* `.g4d` v3 is frozen (D20): any of this data needs v4.
+
+### Design
+
+* **The `.g4d` format v4** (D24): materials with channels, the document's
+  textures (each linked by a path relative to the document, or embedded in
+  the archive as `textures/<n>.<ext>`), Texture tags, UVs on polygon objects
+  already stored. A migration from v3 (materials' four numbers become the
+  base channels); `FILE_FORMAT.md` gains v4; a v4 golden fixture; v3 stays
+  readable forever. Grid4D 1.1 writes v4; 1.0 refuses v4 with its existing
+  "newer version" message.
+* **Images** (D25): decoded with the `image` crate limited to PNG, JPEG,
+  TIFF, WebP, HDR and EXR (permissive licences, no C); loaded in the
+  background, cached by path and modification time, mip-mapped once;
+  colour data in sRGB, data maps (roughness, normal, bump) linear — a
+  per-texture *colour space* setting with the usual default by channel.
+  A missing file shows a magenta checker and a warning in the Texture
+  Manager, never an error on opening.
+* **The material model** (D26): one fixed, principled set of channels —
+  *Base colour, Metallic, Roughness, Specular, Normal / Bump, Emission,
+  Opacity (cut-out), Transmission + IOR, Clearcoat* — each a value or a
+  texture (with tiling, offset and a value range), plus a *Two-sided*
+  switch. The viewport, the path tracer, glTF and OBJ all read this one
+  model; Phase 22's node graphs will compile into it. Our own names and
+  layout, not another program's channel list.
+* **UVs everywhere:** every primitive, spline generator, Subdivision Surface
+  and Cloner result makes UVs at evaluation (per corner, in the mesh cache);
+  Make Editable keeps them. The **Texture tag** (material + projection:
+  *UV, Box, Spherical, Cylindrical, Flat, Camera*, with offset, tiling and
+  rotation) evaluates per corner in `grid4d-eval`; several Texture tags
+  layer in order (the last one wins where it is opaque).
+* **The UV editor** (a pane): the active object's UVs in 2D over its
+  texture; Points / Edges / Polygons selection shared with the viewport;
+  move, scale, rotate; **Unwrap** (LSCM, from the selected polygons or the
+  whole mesh, seams from the selected edges or sharp edges), **Project**
+  (the Texture tag's projections baked into the mesh's UVs), **Pack
+  islands**, **Relax**. All of it pure geometry in `grid4d-geom` (`uv.rs`),
+  undoable like any mesh edit.
+* **Viewport:** textures uploaded once per image (GPU memory budgeted,
+  smaller mips first), a texture array per material, normal maps in the
+  shader (tangents computed per corner, MikkTSpace-compatible), opacity
+  cut-out, emission maps; shading modes unchanged otherwise. The
+  allocation-free frame rule holds: uploads happen when an image arrives,
+  not per frame.
+* **Path tracer:** bilinear texture sampling with mip selection from the
+  ray's footprint, normal and bump mapping, opacity cut-out, transmission
+  (glass, rough glass) with IOR; the reference image test grows a textured
+  scene.
+* **Material Manager:** a preview ball per material (a small path-traced
+  render in the background, cached), drag a texture file onto a channel or
+  a material onto an object; a **Texture Manager** listing every image the
+  document uses (missing ones flagged, *Relink…*, *Embed / Unembed*).
+* **Interchange:** glTF PBR metallic-roughness with textures (embedded
+  `.glb` images, external `.gltf` images), `KHR_texture_transform`; OBJ
+  `.mtl` maps (`map_Kd`, `map_Bump`, `map_Ns`, `map_d`); export writes them
+  back.
+
+### Steps
+
+| Step | Size | Work |
+|------|------|------|
+| 15.1 | M | Specs (`reference/material-channels.md`, `uv-editor.md`, `texture-tag.md`, `format-v4.md`); `.g4d` v4 with the migration from v3, `FILE_FORMAT.md` v4, a v4 golden fixture, the fuzz target and property tests on v4 |
+| 15.2 | M | UVs from every primitive and generator (evaluation, mesh cache, Make Editable, export); tests that every kind's UVs cover 0 – 1 without NaNs |
+| 15.3 | L | Images: the `image` crate (limited features, `cargo deny` / licences), background loading and cache, mip-maps, colour spaces, the document's texture table (linked / embedded), the Texture Manager pane, missing-file handling |
+| 15.4 | L | The material channels: scene model, `SceneEdit`s, the Material Manager and Attribute Manager pages, preview balls, the Texture tag with its projections |
+| 15.5 | L | Viewport textures: GPU upload and budget, sampler and mip-maps, tangents and normal maps, opacity, emission; shader size tests; a counting-allocator frame with textures |
+| 15.6 | M | Path tracer: texture sampling, normal / bump, opacity, transmission and IOR; a textured reference image |
+| 15.7 | L | The UV editor pane: display over the texture, selection, transform; Unwrap (LSCM), seams, Project, Pack, Relax — algorithms in `grid4d-geom::uv` with tests (no flipped faces, area distortion bounds) |
+| 15.8 | M | glTF and OBJ materials and textures, in and out; round-trip tests against sample files |
+| 15.9 | S | Manual chapter "Materials and textures" with screenshots in both languages; the walkthrough extended; performance budget re-measured with textured scenes; release v1.1 |
+
+### Acceptance
+
+A user imports a textured glTF model and it renders with its textures; makes
+a cube, applies a photo with a Box projection, unwraps a character-like mesh
+from marked seams, paints nothing but arranges the UV islands in the UV
+editor, gives a glass material to a sphere and a brushed-metal one (with a
+normal map) to a plane, and renders a still that looks like the viewport —
+saved as `.g4d` v4, reopened identically, exported to glTF and read back with
+its materials. A 1.0 file opens in 1.1 unchanged.
+
+**Not in Phase 15:** texture painting, procedural noise textures (Phase 22's
+nodes), displacement (Phase 16), UDIMs, video textures.
+
+---
+
+## Phase 16 — Render quality (v1.2) — outline
+
+**Goal:** stills and animations that can be shown to a client: real light,
+real glass, clean images in reasonable time.
+
+* **Lights:** area lights (rectangle, disc, sphere; visible or not), a
+  physical sky with a sun, an HDRI dome (equirectangular EXR / HDR, importance
+  sampled), light linking (include / exclude), light groups.
+* **Materials in the render:** subsurface scattering (random walk), thin
+  film and sheen if cheap; displacement (subdivided at render time).
+* **Camera:** depth of field (aperture, focus distance, a focus object),
+  motion blur (camera and objects, deformation), bokeh shape.
+* **Output:** render passes / AOVs (beauty, alpha, depth, normal, albedo,
+  object and material IDs, light groups) into multi-layer EXR; a render
+  queue (several documents or takes, one after another); a render region.
+* **Speed and noise:** adaptive sampling; a **denoiser** guided by albedo
+  and normal (D27: our own first, an optional OIDN build later); the Render
+  View re-rendering while editing (interactive preview).
+* Steps (outline): area lights and sky → HDRI and importance sampling →
+  depth of field and motion blur → passes and multi-layer EXR → adaptive
+  sampling and the denoiser → render queue and region → interactive Render
+  View → SSS and displacement → manual and release.
+
+## Phase 17 — Modelling 2 (v1.3) — outline
+
+**Goal:** the modelling tools a hard-surface or product artist reaches for
+every day.
+
+* **Live objects:** Boolean (union, subtract, intersect; robust predicates,
+  quads where possible), Symmetry (with welding at the plane), Instance,
+  Connect (join children into one mesh), Spline Mask (2D booleans of
+  splines), Polygon Reduction.
+* **Tools:** soft selection (proportional falloff for every transform),
+  slide (edges and points), knife variants (plane, loop, path), polygon pen,
+  extrude along a spline, mirror, array of selection, bevel improvements
+  (profiles, point mode), edge creases and weights for the Subdivision
+  Surface, normal editing (smoothing groups, weighted normals).
+* **More deformers:** wrap, spline, displacer (with Phase 15's textures),
+  shrink-wrap, smoothing, correction, explosion.
+* Risks: robust mesh booleans (R6) — budget a spike step first; every
+  operation keeps component selections through `Rebuilt::carry`.
+
+## Phase 18 — Fields and motion graphics 2 (v1.4) — outline
+
+**Goal:** the procedural animation workflow that is this kind of program's
+signature — strong enough to make broadcast-style animation without keys.
+
+* **Fields:** shape fields (linear, spherical, box, cylinder, cone, torus,
+  radial), random and noise fields, a formula field, a field from a texture;
+  **layers** with blend modes, remapping, delay and decay; one field list
+  drives effectors, deformers, selections and **vertex maps**.
+* **Effectors:** shader, delay, formula, step, time, target, inheritance,
+  push apart, volume, spline.
+* **Objects:** Matrix (placements without geometry), text cloning (letters
+  as clones), Fracture (by connected parts or Voronoi), Tracer (trails as
+  splines), a Cloner on splines and on a polygon's surface by area; clone
+  selections and weights.
+* Naming: our own names throughout (R2); "motion graphics" in the
+  interface, never another product's brand terms.
+
+## Phase 19 — Sculpting and painting (v1.5) — outline
+
+**Goal:** organic shapes and painted data.
+
+* A multi-resolution mesh (subdivision levels kept as offsets), brushes
+  (grab, draw, smooth, inflate, pinch, crease, flatten, clay, mask), stroke
+  options (spacing, falloff, pressure from a tablet), symmetry, masks and
+  freezing; baking detail into normal / displacement maps (with Phase 15).
+* Painting **vertex colours and vertex maps** (weights) with the same brush
+  engine — the base of Phase 20's skin weights.
+* Performance: brushes on a million polygons at interactive rates
+  (partial BVH updates, GPU upload of changed ranges only).
+
+## Phase 20 — Characters and animation 2 (v1.6) — outline
+
+**Goal:** rig and animate a character, and organise longer animations.
+
+* **Rigging:** joints and hierarchies, a skin deformer with weights
+  (painted in Phase 19's engine, automatic weights by heat diffusion), IK
+  (two-bone and chain, pole targets), constraints (parent, aim, position,
+  rotation, path), pose morphs (blend shapes), mirroring a rig.
+* **Animation:** a dope sheet, motion layers / clips with blending, path
+  animation (align to spline), onion skinning, a sound track for timing.
+* **Interchange:** glTF skins, morph targets and animation, in and out.
+
+## Phase 21 — Simulation 2 (v1.7) — outline
+
+**Goal:** the effects that rigid bodies cannot do.
+
+* Particles: emitters (from objects, surfaces, splines), forces (gravity,
+  wind, turbulence, attractor, drag, vortex), collisions with the scene,
+  particles rendered as clones, points or spheres.
+* Cloth and soft bodies on XPBD (one solver, in `grid4d-sim`), ropes and
+  simple hair; pinning, self-collision, tearing later.
+* Caches on disk beside the document (our own format, streamed per frame),
+  so long simulations neither live in memory nor in the `.g4d`.
+
+## Phase 22 — Nodes (v1.8) — outline
+
+**Goal:** one visual graph editor for what fixed panels cannot express.
+
+* A node editor pane (typed sockets, groups, comments, search-to-add,
+  undo through `SceneEdit`s like everything else).
+* **Material graphs** compiling to Phase 15's channels (and a WGSL / path
+  tracer evaluator): procedural noises, gradients, mixing, maths.
+* **Expression graphs** driving any animatable parameter from others (time,
+  distance, user data) — our own design, evaluated in `grid4d-eval` each
+  frame without allocation (compiled once per edit).
+
+## Phase 23 — GPU rendering (v1.9) — outline
+
+**Goal:** final renders an order of magnitude faster.
+
+* The path tracer on wgpu compute (BVH on the GPU, wavefront kernels),
+  matching the CPU tracer's reference images within noise (D28); the CPU
+  tracer stays the reference and the fallback.
+* A real-time preview mode in the viewport (image-based lighting,
+  screen-space reflections, the Phase 15 materials) for look development.
+* Risks: compute portability across Vulkan / Metal / DX12 (R7); a GPU memory
+  budget for big scenes.
+
+## Phase 24 — Pipeline (v2.0) — outline
+
+**Goal:** work with every studio's other tools.
+
+* FBX (through a permissively licensed reader; a C dependency only if
+  packaging and `cargo deny` allow it — D29), Alembic caches, USD export
+  (USDA / USDC written by our own code), STL / PLY.
+* Python scripting beside Rhai (an optional component, D30), an asset
+  library (objects, materials, presets) with thumbnails, plugins loaded at
+  run time (WebAssembly, sandboxed), customisable shortcuts, more languages.
+* 2.0 is the version that may change the plugin and script APIs (D22).
+
+---
+
 ## Cross-cutting: testing, performance, CI, docs
 
 ### Testing
@@ -1292,9 +1600,20 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 | D22 | Versioning after 1.0 | SemVer for the application: minor versions add features and open every 1.x file; the plugin and script APIs may grow in a minor version and break only in a major one | Phase 14 |
 | D23 | Crash reports | Written locally into the data folder and pointed to on the next start (beside the autosave offer); never sent anywhere | Phase 14 |
 | R4 | Unsigned packages | Windows SmartScreen and macOS Gatekeeper warn about unsigned apps; the README explains how to open them; signing and notarisation after 1.0 | Phase 14 |
+| D24 | The file format after 1.0 | A release that adds document data brings one new `.g4d` version (v4 in 1.1) with a migration from the previous one, its own golden fixture and its section in `FILE_FORMAT.md`; older versions open forever; a version is frozen when its release ships | Phase 15 |
+| D25 | Decoding images | The `image` crate limited to PNG, JPEG, TIFF, WebP, HDR and EXR (permissive, no C); colour space per texture (sRGB for colour, linear for data); linked by relative path or embedded in the `.g4d` | Phase 15 |
+| D26 | The material model | One fixed, principled set of channels shared by the viewport, the path tracer and interchange; Phase 22's node graphs compile into it rather than replacing it | Phase 15 |
+| D27 | Denoising | A guided denoiser of our own first (albedo and normal passes, pure Rust); an optional Open Image Denoise build later, if its C++ library fits the packaging and licence checks | Phase 16 |
+| D28 | GPU rendering | wgpu compute, never a vendor API; the CPU path tracer stays the reference (tests compare against it) and the fallback | Phase 23 |
+| D29 | Formats beyond glTF / OBJ | Pure-Rust readers and writers first; a C dependency only when no other way exists and it passes `cargo deny` and packaging on all three systems | Phase 24 |
+| D30 | Python | Optional, beside Rhai (which stays the sandboxed default); the same `SceneEdit`-based API, one undo step per run | Phase 24 |
+| R5 | Scope against capacity | The suites Grid4D is compared with have large teams. Ship one phase per minor release in the order above; a phase may be cut, never the rules (undo, tests, docs, the frame budget) | ongoing |
+| R6 | Robust mesh booleans | Coplanar and degenerate cases break naive booleans; Phase 17 starts with a spike on exact predicates and a fuzzed test corpus before any interface | Phase 17 |
+| R7 | GPU compute portability | Shader behaviour differs between Vulkan, Metal and DX12; CI renders the reference scenes on every backend it has and compares with the CPU tracer | Phase 23 |
+| R8 | Feature names | Other products' feature names are often trademarks; every new feature gets a plain, descriptive name of our own (reviewed with R2 at each release) | ongoing |
 
 ---
 
-**Next action:** a dry run of the release workflow on GitHub, the
-`v1.0.0-rc.1` tag and the packages tried on each system (14.6); then Phase 14
-step 14.7 (documentation and 1.0).
+**Next action:** the `v1.0.0-rc.1` tag and the packages tried on each system
+(14.6); Phase 14 step 14.7 (documentation and 1.0); then Phase 15 (materials,
+UVs and textures, v1.1), starting with its specs and the `.g4d` v4 format.
