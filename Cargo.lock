@@ -1897,7 +1897,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "eframe",
  "egui",
@@ -1917,7 +1917,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-eval"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "glam 0.34.2",
@@ -1931,7 +1931,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-geom"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "glam 0.34.2",
@@ -1939,7 +1939,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-io"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "exr",
@@ -1959,7 +1959,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-plugin"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -1969,7 +1969,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-plugin-gear"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -1979,7 +1979,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-plugin-scatter"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -1989,7 +1989,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-plugin-wave"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -1999,7 +1999,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-raytrace"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "glam 0.34.2",
@@ -2013,7 +2013,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-render"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "allocation-counter",
  "bytemuck",
@@ -2028,7 +2028,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-scene"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -2037,7 +2037,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-script"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -2050,7 +2050,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-sim"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "glam 0.34.2",
@@ -2062,7 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-text"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "epaint_default_fonts",
  "glam 0.34.2",
@@ -2072,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-ui"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 dependencies = [
  "egui",
  "egui-wgpu",

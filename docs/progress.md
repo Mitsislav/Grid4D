@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 14 — Stabilisation (v1.0) |
-| Last step done | 14.6 — Packaging and the release workflow (2026-11-02; the dry run on GitHub and the installs on macOS and Linux still to do) |
-| Next step | 14.7 — Documentation and 1.0 |
-| Tests | 778 (and 3 ignored, run by hand: two timings and the walkthrough), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 14.7 — Documentation and 1.0 (2026-11-02) |
+| Next step | the `v1.0.0` tag and release; then Phase 15 — Materials, UVs and textures (v1.1) |
+| Tests | 778 (and 4 ignored, run by hand: two timings, the walkthrough and the README pictures), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2050,6 +2050,7 @@ endless loops, a library with examples and the Script Manager. Guides:
 | 14.3 | Text outlines read with `skrifa` (egui's own font reader) instead of the unmaintained `ttf-parser`, identical to the byte; local crash reports (a panic hook, the log's last lines, pointed to on the next start, Show Report); the random-command test (long `EditorCommand` sequences with undo / redo); start-up without graphics or a data folder told in words; autosave's first failure an alert; failed saves keep the old file; files too large for memory refused | 767 |
 | 14.4 | The performance budget measured and met (`docs/performance.md`): `criterion` benches for geometry, evaluation, extraction, files and the path tracer (built in CI); a counting-allocator test of steady frames; the stress scenes (`examples/stress.rs`); View ▸ Frame Time; topology 10× and the BVH build a fifth faster | 770 |
 | 14.5 | The interface pass: the whole interface as one `Shell` driven headless by `egui_kittest` (Shift / Ctrl selection, drag to re-parent, rename, a typed value, a gizmo drag, a Bend handle drag, a menu command, each with undo); one shortcut list for Help and the manual, kept equal by a test; accessible names for fields and Object Manager rows; the interface rendered in English and Greek, Dark and Light, and fixed where it read wrong | 778 |
+| 14.7 | Documentation and 1.0: a new README (download table, what Grid4D does, fresh pictures of the workspace and a path-traced render, made headless from a showcase scene), `CHANGELOG.md` with 1.0.0 and the road there by version, CONTRIBUTING (where things go, how releases are made), the names-and-wording review (R2), the manual's last stale notes; version 1.0.0 | 778 |
 | 14.6 | Packaging and the release workflow: version 1.0.0-rc.1; icons rendered from the SVG masters (PNG 16 – 1024, `.icns`), the macOS `Info.plist`, the Linux `.desktop` and MIME type, the WiX installer source; `release.yml` (three builds; `.zip`, `.msi`, universal `.dmg`, `.tar.gz`, AppImage; SHA-256 sums; a draft release with the `CHANGELOG.md` section; itch.io with butler when its key exists; a dry run by hand); the Windows `.zip` built and started here | 778 |
 | — | The itch.io page prepared ([`assets/itch/page.md`](../assets/itch/page.md): its fields, description and pictures); step 14.6 also pushes the packages there with `butler` | — |
 
@@ -2285,6 +2286,23 @@ risks R5 – R8 go with it.
   run builds the same old commit again; a new run is needed after a fix.)
   The second dry run built every package: Windows in 18 minutes, macOS in 5,
   Linux in 8.
+
+**14.7 — Documentation and 1.0**
+
+*Problems and solutions:*
+- **Pictures for the README without a window.** The old screenshot showed
+  a toolbar from months ago. A showcase scene (clones moved by a Random
+  effector, extruded text, a Subdivision Surface, a bent column, a light
+  with soft shadows) is built in code and rendered headless twice — the
+  whole workspace with shadows and ambient occlusion on, and the same view
+  through the path tracer (`readme_pictures`, beside the walkthrough).
+- **The names-and-wording review (R2):** the interface names no other
+  product (only About's "not affiliated" note); the documentation mentions
+  Cinema 4D only to describe the workflow it follows, always with the
+  trademark note; "MoGraph" (a Maxon product name) was left in the
+  changelog and a code comment and is gone. The icons are original.
+- **The `.msi` tried by hand:** installed, started from the Start menu and
+  uninstalled from Settings ▸ Apps on the reference laptop.
 
 ---
 

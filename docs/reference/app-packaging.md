@@ -103,7 +103,8 @@ Every package contains `LICENSE-MIT`, `LICENSE-APACHE` and
 - [ ] The release candidate's packages each install and open on a clean
       Windows, macOS and Linux system: the demo, a saved document, a
       script, a plugin object.
-      (So far: the Windows `.zip` opened; the `.msi`, `.dmg` and AppImage
-      are built but not yet installed and tried.)
+      (So far: the Windows `.zip` opened; the `.msi` installed, started
+      and uninstalled from Settings ▸ Apps; the `.dmg` and AppImage are
+      built but not yet tried on a Mac or a Linux system.)
 - [ ] `.g4d` files open with Grid4D from the file manager on Windows and
       Linux.

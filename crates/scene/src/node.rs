@@ -278,7 +278,7 @@ impl ObjectKindTag {
         Self::Cloner,
     ];
 
-    /// Effectors: objects that change a Cloner's clones (the "Create ▸ MoGraph"
+    /// Effectors: objects that change a Cloner's clones (the "Create ▸ Effector"
     /// family).
     pub const EFFECTORS: [Self; 2] = [Self::PlainEffector, Self::RandomEffector];
 

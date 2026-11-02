@@ -2,165 +2,105 @@
 
 # Grid4D
 
-An open-source, modular 3D content creation suite written in Rust, with a
-workflow and layout inspired by Cinema 4D.
+A free, open-source 3D content creation suite for Windows, macOS and Linux:
+model, animate, simulate and render in a calm, familiar layout — one viewport,
+an Object Manager, an Attribute Manager and a timeline. Written in Rust.
 
 <a href="https://buymeacoffee.com/mitsislav"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="40"></a>
 
-![Grid4D workspace](docs/screenshot.png)
+![The Grid4D workspace: clones moved by an effector, extruded text, a smoothed cube and a bent column, with shadows and ambient occlusion](docs/screenshot.png)
 
-**Status: v0.13 — every planned feature phase is done; work towards 1.0
-(stabilisation, installable packages) has begun.** Modelling with polygon tools
-and generators, splines, deformers and MoGraph cloners, keyframe animation with
-F-curves, rigid-body simulation, materials and lights, a CPU path tracer,
-glTF / OBJ interchange, layers and takes, a docking workspace, plugins and
-scripts — in English or Greek. See what is planned in
-[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+## Download
 
-**How to use it:** the [user manual](docs/manual.md). **What changed in each step:**
-the [progress log](docs/progress.md).
+Get the package for your system from the
+[latest release](../../releases/latest):
 
-## What works today
+| System | Package |
+|--------|---------|
+| Windows 10 or later | `…-windows-x64.msi` (installer) or `…-windows-x64.zip` (unpack and run `grid4d.exe`) |
+| macOS 11 or later (Apple silicon and Intel) | `…-macos-universal.dmg` — drag Grid4D into *Applications* |
+| Linux (64-bit) | `…-linux-x64.AppImage` (make it executable and run it) or `…-linux-x64.tar.gz` |
 
-- C4D-style **Standard layout**: menu bar, command palette, mode palette,
-  3D viewport, Object Manager, Attribute Manager, timeline, status bar — all
-  panels resize with the window and the right-hand managers can be dragged wider.
-- **Parametric primitives** with Cinema 4D-style parameters and segment counts:
-  cube, sphere, cylinder, plane, cone, torus, disc and capsule, plus nulls, cameras
-  and lights.
-- **Make Editable** (`C`, Mesh ▸ Conversion, or the top of the left palette): turns
-  primitives into polygon objects (triangles, quads and n-gons) that look the same,
-  in one undo step; polygon objects are picked by their actual triangles.
-- **Component modes** (Points / Edges / Polygons, left palette) on the active
-  polygon object: points, edges and selected polygons drawn over the surface (hidden
-  ones stay hidden), the component under the cursor highlighted; click selects, Shift
-  adds, Ctrl removes, empty space deselects (each an undo step, saved with the file);
-  Shift/Ctrl+click on another mode converts the selection; Select All / Deselect All
-  work on components. The Move / Scale / Rotate gizmo transforms the selected points,
-  edges or polygons around the selection's centre (one undo step per drag); with the
-  Move tool's *Tweak Mode* on and nothing selected, drag any component directly.
-- **Selection tools**: Live Selection (paint, middle-drag sizes the brush), Rectangle
-  Selection (also selects objects in Model mode), Loop and Ring Selection with a
-  preview under the cursor; Select ▸ Invert, Select Connected, Grow / Shrink, Hide
-  Selected / Unselected, Unhide All; double-click an edge for its loop or a polygon for
-  its connected part. Options (visible only, tolerant, stop at …) in the Attribute
-  Manager's Tool mode. Hidden polygons disappear from the viewport until Unhide All.
-- **Modelling tools**: Extrude (`D`) for polygons and border edges, Inset (`I`) for
-  polygons — drag left/right in the viewport (Esc cancels) or set the options and
-  *Apply* in the Attribute Manager; Preserve Groups, Maximum Angle, Subdivision,
-  N-gons, Caps. Loop/Path Cut (`K~L`: hover an edge to preview the loop, click to cut,
-  several evenly spaced cuts), Line Cut (`K~K`: drag a line across the object, visible
-  only or through), Connect Points/Edges (`M~M`), Melt (`U~Z`), Dissolve (`M~N`) and
-  Delete in every component mode; Bevel (`M~S`, edges and points, with a rounded
-  profile), Bridge (`B`, between polygons or border edges), Weld and Optimize (`U~O`).
-  Each operation is one undo step, and selections follow their components.
-- **Animation playback**: objects with keys (position, rotation, scale; Spline,
-  Linear or Step) move as the timeline plays; children follow; saved in `.g4d`.
-  Recording keys comes next.
-- **Tags** (Object Manager ▸ Tags): Phong (smoothing angle per object), Protection
-  (locks position / scale / rotation), Target (an object turns to face another);
-  click a tag icon to edit it, Delete removes it, all undoable and saved.
-- **glTF 2.0 import**: open a `.gltf`/`.glb` model as a new document, or merge it
-  (File ▸ Merge…, `Ctrl+Shift+O`, or drag and drop) into the current one as one undo
-  step: hierarchy, transforms, meshes (welded, with UVs), colours, cameras, lights.
-- **glTF 2.0 export** (File ▸ Export…, `.glb` or `.gltf` + `.bin`): the whole scene
-  with primitives and Subdivision Surfaces baked, smoothing normals, UVs, colours,
-  cameras and lights.
-- **OBJ import and export** (`.obj` + `.mtl`): polygons keep all their corners both
-  ways, with UVs and colours; meshes are exported in world space.
-- **Snapping** (`Shift+S`): drag a Move arrow (or Tweak a component) and point the
-  cursor at a vertex, edge, edge middle, polygon centre, surface, axis or grid
-  crossing; the target is highlighted and the element lines up with it. 2D or 3D,
-  adjustable radius and targets.
-- **Subdivision Surface** generator: smooths its first child (the cage) live with
-  Catmull-Clark (levels, Linear Pre-Subdivision, border rule). Alt + create wraps the
-  selected object, `Q` switches it off and on, Make Editable bakes the result; edit
-  the cage in the component modes while the smooth surface follows.
-- **Cinema 4D shortcuts**, including two-key chords such as `U~L` (Loop Selection) and
-  `M~N` (Dissolve); the status bar shows a pending first key.
-- **wgpu viewport**: renders into its own offscreen target (4× MSAA, depth) shown as
-  an image; generated meshes cached per shape and drawn instanced, Phong-angle
-  smoothing, anti-aliased adaptive grid, orange selection rim, axis triad and
-  "Grid Spacing" HUD.
-- **Navigation**: Alt+LMB orbit · Alt+MMB / MMB pan · Alt+RMB / wheel zoom ·
-  `H` frame scene · `O` frame selection. Drag the icons at the top-right of the
-  viewport header to orbit / zoom / pan with one button.
-- **Selection & tools**: click to pick (Shift adds, Ctrl toggles), Move (`E`),
-  Scale (`T`) and Rotate (`R`) gizmos with X/Y/Z axis locks and World/Object
-  coordinates.
-- **Object Manager**: hierarchy tree, fold arrows, editor/render visibility dots,
-  enable check mark, double-click rename, drag-and-drop re-parenting (keeps the
-  world position), search.
-- **Attribute Manager**: Basic / Coord. / Object tabs (P/S/R in cm and degrees),
-  primitive parameters, and project settings when nothing is selected.
-- **Timeline**: ruler with scrubbable playhead, play/pause/step/loop
-  (`F8`, `F6`, `F7`, `F`, `G`), preview range and fps.
-- **Files**: New / Open / Save / Save As (`Ctrl+N`, `Ctrl+O`, `Ctrl+S`,
-  `Ctrl+Shift+S`) with native dialogs; `.g4d` is a versioned zip archive (JSON plus
-  binary meshes), and `.oc4d` files from before the rename (the project was called
-  OpenC4D) open too. The title shows the file name and `*` for unsaved changes, and
-  New, Open, Quit and the window's close button ask "Save changes?" first. File ▸
-  Open Recent remembers the last ten documents, a `.g4d` dropped onto the window (or
-  given on the command line:
-  `grid4d scene.g4d`) opens it, and the window size and panel layout are
-  restored on the next start.
-- **Undo / redo** (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`, toolbar, Edit menu): create,
-  delete, re-parent, gizmo drags, attribute and project-setting edits, renames and
-  visibility toggles — one step per interaction, restoring the selection too.
-- **Plugins** (Create ▸ Plugins, the Plugins menu): Rust crates built in through the
-  `grid4d-plugin` API — kinds of objects (the Gear), deformers (the Wave) and
-  commands (Scatter); see [`docs/plugins.md`](docs/plugins.md).
-- **Scripts** in [Rhai](https://rhai.rs) (Script menu, Script Manager): build,
-  arrange and change objects; each run is one undo step; see
-  [`docs/scripting.md`](docs/scripting.md).
+The packages are not code-signed yet. On Windows, if SmartScreen warns, choose
+**More info ▸ Run anyway**; on macOS, right-click Grid4D in *Applications* and
+choose **Open** the first time. You need a graphics card with Vulkan,
+Direct3D 12 or Metal (any from the last decade).
 
-## Build & run
+## What it does
 
-Requires Rust **1.95+** (`rustup update stable`).
-On Windows you also need the *MSVC build tools* (installed by `rustup` / Visual Studio Installer).
+- **Modelling** — parametric primitives; polygon modelling in Points, Edges
+  and Polygons modes (extrude, inset, bevel, bridge, loop and line cuts,
+  weld, melt, dissolve, optimize) with snapping; Subdivision Surfaces.
+- **Splines** — spline shapes, the Pen, point and handle editing; surfaces
+  from splines: Extrude, Lathe, Sweep, Loft; 3D text.
+- **Deformers and clones** — Bend, Twist, Taper, Bulge and FFD; a Cloner
+  (linear, radial, grid, on a surface) with Plain and Random effectors — all
+  live and non-destructive.
+- **Animation** — keys on positions and on object parameters, Autokeying,
+  the timeline and an F-Curve editor.
+- **Simulation** — rigid and collider bodies on objects and on clones,
+  cached and saved with the document.
+- **Rendering** — materials and lights; a viewport with shading modes,
+  shadows, ambient occlusion, up to four views and scene cameras; a built-in
+  path tracer with an interactive Render View, a Picture Viewer, and stills
+  and animations to PNG or OpenEXR.
+- **Workspace** — dockable layouts, Layers, Takes, Preferences, Dark /
+  Darker / Light themes, English and Greek.
+- **Files** — the documented `.g4d` format; glTF 2.0 and OBJ import and
+  export.
+- **Extending** — scripts in [Rhai](https://rhai.rs) with a Script Manager;
+  plugins written in Rust.
+- **Peace of mind** — undo for every change, autosave with recovery after a
+  crash, local crash reports (never sent anywhere).
+
+![The same scene rendered with the built-in path tracer](docs/images/render.png)
+
+## Documentation
+
+- [User manual](docs/manual.md) — every tool and command, with pictures.
+- [Scripting](docs/scripting.md) and [writing plugins](docs/plugins.md).
+- [The `.g4d` file format](docs/FILE_FORMAT.md), so other programs can read
+  and write it.
+- [Changelog](CHANGELOG.md) and the [plan](docs/IMPLEMENTATION_PLAN.md),
+  including what comes after 1.0.
+- [Architecture](docs/ARCHITECTURE.md) — how the code is organised, for
+  contributors; [performance](docs/performance.md) — what is measured.
+
+## Building from source
+
+You need Rust **1.95 or newer** (`rustup update stable`); on Windows also the
+MSVC build tools, on Linux the usual X11 / Wayland development packages
+(`libxkbcommon-dev`, `libwayland-dev`, `libx11-dev` …). Then:
 
 ```bash
 cargo run --release
 ```
 
-The first build compiles egui and wgpu and takes a few minutes; later builds are
-incremental. On Linux you may need the usual X11/Wayland development packages
-(`libxkbcommon-dev`, `libwayland-dev`, `libx11-dev` …).
+The first build takes a few minutes. `cargo test --workspace` runs the tests;
+[CONTRIBUTING.md](CONTRIBUTING.md) explains the rest.
 
-```bash
-cargo test --workspace                                  # unit tests + WGSL validation
-cargo clippy --workspace --all-targets -- -D warnings   # lints
-```
+## Reporting problems
 
-## Architecture
-
-Grid4D is a Rust workspace of small crates — geometry, the document, evaluation,
-the wgpu viewport, a CPU path tracer, simulation, files, plugins, scripts and
-the egui interface — whose dependencies point one way only.
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the crates, how a
-frame flows through them and the rules every change follows.
-
-## Trying it and reporting problems
-
-Grid4D runs on Windows, macOS and Linux. Until the 1.0 packages are out, build
-it from source as above. If something goes wrong or could be better, please
-[open an issue](../../issues/new/choose) — with your system, graphics card and
-what you did; [CONTRIBUTING.md](CONTRIBUTING.md) explains how to help with
-code, plugins, scripts and documentation.
+If something goes wrong or could be better, please
+[open an issue](../../issues/new/choose) with your system, graphics card,
+the version from **Help ▸ Keyboard Shortcuts & About**, and what you did. If
+Grid4D stopped unexpectedly, it wrote a crash report on your computer and
+points to it on the next start — attaching it helps a lot.
 
 ## Support
 
-Grid4D is free and developed in spare time. If you find it useful and want to
-help it grow, you can [buy me a coffee](https://buymeacoffee.com/mitsislav) —
-thank you! Trying it and reporting what goes wrong helps just as much.
+Grid4D is free and developed in spare time. If you find it useful, you can
+[buy me a coffee](https://buymeacoffee.com/mitsislav) — thank you! Trying it
+and reporting what goes wrong helps just as much.
 
 ## Legal
 
-Grid4D is an independent open-source project inspired by the Cinema 4D
-workflow. It is not affiliated with or endorsed by Maxon. Cinema 4D is a
-trademark of Maxon Computer GmbH. All icons and artwork in this repository are
-original.
+Grid4D is an independent open-source project whose workflow is inspired by
+Cinema 4D. It is not affiliated with or endorsed by Maxon. Cinema 4D is a
+trademark of Maxon Computer GmbH. All icons and artwork in this repository
+are original.
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
-[MIT license](LICENSE-MIT) at your option. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for how to contribute.
+Licensed under either of the [Apache License, Version 2.0](LICENSE-APACHE) or
+the [MIT license](LICENSE-MIT), at your option. The third-party software
+Grid4D contains is listed in
+[`assets/THIRD_PARTY_LICENSES.txt`](assets/THIRD_PARTY_LICENSES.txt).

@@ -6,7 +6,8 @@ screenshots come from the application itself.
 
 > Grid4D follows the workflow of Cinema 4D's Standard layout, so the names of tools
 > and shortcuts will feel familiar to Cinema 4D users. It is an independent project,
-> not affiliated with Maxon.
+> not affiliated with or endorsed by Maxon; Cinema 4D is a trademark of Maxon
+> Computer GmbH.
 
 **Contents**
 
@@ -91,7 +92,7 @@ sessions.
 | # | Area | What it is for |
 |---|------|----------------|
 | 1 | **Menu bar** | Every command: File, Edit, Create, Modes, Select, Tools, Mesh, Animate, Window, Help. |
-| 2 | **Command palette** | Undo/redo, the selection tools, Move/Scale/Rotate, axis locks, World/Object coordinates, render buttons (*planned*) and buttons that create objects. |
+| 2 | **Command palette** | Undo/redo, the selection tools, Move/Scale/Rotate, axis locks, World/Object coordinates, render buttons (Render View, Render to Picture Viewer, Render Settings) and buttons that create objects. |
 | 3 | **Mode palette** | Make Editable, then the four modes: Model, Points, Edges, Polygons; the snapping toggle ([§17](#17-snapping)). |
 | 4 | **Viewport** | The 3D view of the scene, or up to four views ([§3.2](#32-several-views-top-front-and-side)). Each view's header has the View, Cameras, Display, Options, Filter and Panel menus and three navigation icons. |
 | 5 | **Object Manager** | The scene's objects as a hierarchy. |
@@ -2407,7 +2408,7 @@ Esc cancels a chord.
 
 **Help ▸ Keyboard Shortcuts & About** shows this list inside the application.
 Its first line is the version and the build — the version number, then the
-source commit and its date, e.g. "Version 0.13.0 (f030cc8, 2026-11-01)":
+source commit and its date, e.g. "Version 1.0.0 (f030cc8, 2026-11-02)":
 mention it when you report a problem.
 
 ![The shortcuts dialog](images/manual/shortcuts.png)

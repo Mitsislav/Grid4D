@@ -65,6 +65,35 @@ And please:
 Writing a plugin or a script? See [`docs/plugins.md`](docs/plugins.md) and
 [`docs/scripting.md`](docs/scripting.md).
 
+### Where things go
+
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#where-to-add-things) lists
+the steps in full; in short:
+
+- **A panel** — a file in `crates/ui/src/panels/`, a `Pane` of the
+  workspace with a place in every layout.
+- **A kind of object** — `ObjectKind` in `grid4d-scene`, its geometry,
+  evaluation, drawing, icon and Attribute Manager page; the compiler's
+  exhaustive `match`es point at every place to update. New saved data needs
+  a new file-format version with a migration
+  ([`docs/FILE_FORMAT.md`](docs/FILE_FORMAT.md)).
+- **A command** — a variant of `EditorCommand`; a change to the document
+  goes through `commit` as one undo step, with an undo / redo test.
+- **A feature users see** — a short behaviour spec in `docs/reference/`
+  first (in our own words), then the code, then its chapter in the manual.
+
+Every interface text goes through `tr("…")` with its Greek in
+`crates/ui/src/i18n/el.rs`, uses only characters of the built-in font, and
+gives each field a name screen readers can read (the interface tests fail
+otherwise).
+
+### Releases
+
+A release is made by pushing a tag `v<version>` equal to the version in
+`Cargo.toml`, after `CHANGELOG.md` has a section for it: the release
+workflow builds the packages for the three systems and opens a draft
+release to check and publish. It can also be run by hand as a dry run.
+
 ## Inspired by, never copied
 
 Grid4D follows the workflow of Cinema 4D but must never copy it: no Maxon
