@@ -16,7 +16,7 @@ hand.
 | Release status | In development until 1.0, then Released |
 | Pricing | No payments ▸ *Donate*, or *Pay what you want* with a minimum of 0 and a suggested 3 € |
 | Platforms | Windows, macOS, Linux (set per upload by butler's channel names) |
-| Cover image | 630 × 500, the workspace with a Cloner scene (see *Pictures*) |
+| Cover image | `cover.png` (630 × 500, see *Pictures*) |
 | Genre / tags | 3d, modeling, animation, motion-graphics, rendering, open-source, rust |
 | Source code | `https://github.com/Mitsislav/Grid4D` |
 | Licence | MIT OR Apache-2.0 |
@@ -60,13 +60,15 @@ hand.
 
 ## Pictures
 
-Five screenshots of 1920 × 1080 or smaller, taken from the app in Dark:
+Ready in this folder: `cover.png` (630 × 500, cropped from the README's
+path-traced render) and five screenshots in `screenshots/`, in the order to
+upload them:
 
-1. the Standard layout with a modelled object and its Subdivision Surface;
-2. a Cloner with a Random effector in the viewport;
-3. the F-curve editor beside the timeline;
-4. a path-traced still in the Picture Viewer;
-5. four views with shadows and ambient occlusion.
+1. `1-workspace.png` — the Standard layout with the README's showcase scene;
+2. `2-path-traced.png` — the same scene through the path tracer;
+3. `3-cloner-effectors.png` — a Cloner moved by Plain and Random effectors;
+4. `4-subdivision-surface.png` — a Subdivision Surface and its settings;
+5. `5-four-views.png` — four views of one scene.
 
 ## Wording
 
