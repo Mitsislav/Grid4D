@@ -13,8 +13,8 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 14 — Stabilisation (v1.0) |
-| Last step done | 14.5 — The interface pass (2026-11-02) |
-| Next step | 14.6 — Packaging and the release workflow |
+| Last step done | 14.6 — Packaging and the release workflow (2026-11-02; the dry run on GitHub and the installs on macOS and Linux still to do) |
+| Next step | 14.7 — Documentation and 1.0 |
 | Tests | 778 (and 3 ignored, run by hand: two timings and the walkthrough), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
@@ -2050,6 +2050,7 @@ endless loops, a library with examples and the Script Manager. Guides:
 | 14.3 | Text outlines read with `skrifa` (egui's own font reader) instead of the unmaintained `ttf-parser`, identical to the byte; local crash reports (a panic hook, the log's last lines, pointed to on the next start, Show Report); the random-command test (long `EditorCommand` sequences with undo / redo); start-up without graphics or a data folder told in words; autosave's first failure an alert; failed saves keep the old file; files too large for memory refused | 767 |
 | 14.4 | The performance budget measured and met (`docs/performance.md`): `criterion` benches for geometry, evaluation, extraction, files and the path tracer (built in CI); a counting-allocator test of steady frames; the stress scenes (`examples/stress.rs`); View ▸ Frame Time; topology 10× and the BVH build a fifth faster | 770 |
 | 14.5 | The interface pass: the whole interface as one `Shell` driven headless by `egui_kittest` (Shift / Ctrl selection, drag to re-parent, rename, a typed value, a gizmo drag, a Bend handle drag, a menu command, each with undo); one shortcut list for Help and the manual, kept equal by a test; accessible names for fields and Object Manager rows; the interface rendered in English and Greek, Dark and Light, and fixed where it read wrong | 778 |
+| 14.6 | Packaging and the release workflow: version 1.0.0-rc.1; icons rendered from the SVG masters (PNG 16 – 1024, `.icns`), the macOS `Info.plist`, the Linux `.desktop` and MIME type, the WiX installer source; `release.yml` (three builds; `.zip`, `.msi`, universal `.dmg`, `.tar.gz`, AppImage; SHA-256 sums; a draft release with the `CHANGELOG.md` section; itch.io with butler when its key exists; a dry run by hand); the Windows `.zip` built and started here | 778 |
 | — | The itch.io page prepared ([`assets/itch/page.md`](../assets/itch/page.md): its fields, description and pictures); step 14.6 also pushes the packages there with `butler` | — |
 
 **Planning notes:**
@@ -2239,6 +2240,30 @@ endless loops, a library with examples and the Script Manager. Guides:
 - **On-screen driving:** posted (and real) mouse clicks from the test driver
   no longer reach the window, which is why the walkthrough is rendered
   headless rather than clicked through on screen.
+
+**14.6 — Packaging and the release workflow**
+
+*Problems and solutions:*
+- **Icons at every size without image tools.** Only a 256-pixel PNG and
+  the Windows `.ico` existed. A small throw-away program (the `resvg` crate,
+  outside the repository) rendered the SVG masters at 16 – 1024 pixels (the
+  small master below 48); the `.icns` is written directly (its PNG entries
+  behind a short header). The results are committed, so the workflow needs
+  no image tools.
+- **Nothing here to build an `.msi`, `.dmg` or AppImage** (no WiX, no Mac,
+  no Linux). The workflow therefore has a dry run by hand that builds every
+  package as an artifact without publishing anything; the Windows `.zip` was
+  built and started here (its file properties say Grid4D 1.0.0-rc.1).
+- **Apple silicon refuses an unsigned bundle** whose parts disagree, so
+  the universal app gets an ad-hoc signature (not a certificate: R4 holds).
+- **An MSI version must be numeric**: the installer takes `1.0.0` from
+  `1.0.0-rc.1` and allows a same-version upgrade, so 1.0.0 replaces the
+  release candidate.
+- **macOS document opening:** the bundle declares `.g4d` documents, but the
+  "open document" event macOS sends does not reach the app through eframe
+  yet; double-clicking starts Grid4D without the file (written in the manual).
+- **Pinned tools:** WiX 5.0.2, appimagetool 1.9.1, and action versions
+  checked to exist before use.
 
 ---
 

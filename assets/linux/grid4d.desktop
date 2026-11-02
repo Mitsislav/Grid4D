@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Grid4D
+GenericName=3D Content Creation
+GenericName[el]=Δημιουργία τρισδιάστατου περιεχομένου
+Comment=Model, animate and render in 3D
+Comment[el]=Μοντελοποίηση, κίνηση και απόδοση σε 3Δ
+Exec=grid4d %f
+Icon=grid4d
+Terminal=false
+Categories=Graphics;3DGraphics;
+MimeType=application/x-grid4d;
+Keywords=3D;modelling;modeling;animation;render;
+StartupWMClass=grid4d

@@ -31,7 +31,8 @@ large for memory — Grid4D says so in words and loses no work it could keep.
   is the same as `THIRD_PARTY_LICENSES.txt` shipped beside the program, whose
   first lines say Grid4D's own licence.
 - The version numbers follow the plan's releases: 0.13.0 for the work of
-  Phase 13, 1.0.0 for the first stable release.
+  Phase 13, 1.0.0-rc.1 for the first release candidate (the packages of
+  14.6), 1.0.0 for the first stable release.
 
 ## Behaviour (14.3)
 

@@ -1,0 +1,66 @@
+<!--
+  The Windows installer (WiX v5): Grid4D in Program Files, a Start menu entry,
+  .g4d documents opening with Grid4D, removable from Settings > Apps.
+  Built by the release workflow:
+
+    wix build assets/windows/grid4d.wxs -arch x64 -d Version=1.0.0 -d Bin=<folder> -o Grid4D.msi
+
+  `Version` is the numeric part of the release's version (an MSI version is
+  numeric); a package of the same or a newer version replaces an installed
+  one. `Bin` holds grid4d.exe and the licence files.
+  Spec: docs/reference/app-packaging.md.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Grid4D"
+      Manufacturer="Grid4D contributors"
+      Version="$(var.Version)"
+      UpgradeCode="9321137C-5668-49BA-AFD4-3B6315EE4FF5"
+      Scope="perMachine"
+      Compressed="yes">
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of Grid4D is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="grid4d.ico" SourceFile="assets\icon\grid4d.ico" />
+    <Property Id="ARPPRODUCTICON" Value="grid4d.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Mitsislav/Grid4D" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Grid4D">
+        <Component Id="Application" Guid="*">
+          <File Id="grid4d.exe" Source="$(var.Bin)\grid4d.exe" KeyPath="yes">
+            <Shortcut
+                Id="StartMenuShortcut"
+                Directory="ProgramMenuFolder"
+                Name="Grid4D"
+                Description="Model, animate and render in 3D"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="grid4d.ico"
+                Advertise="yes" />
+          </File>
+          <!-- .g4d documents: "Grid4D Document", opened with Grid4D. -->
+          <ProgId Id="Grid4D.Document" Description="Grid4D Document" Icon="grid4d.ico" Advertise="yes">
+            <Extension Id="g4d" ContentType="application/x-grid4d">
+              <Verb Id="open" Command="Open" Argument="&quot;%1&quot;" />
+            </Extension>
+          </ProgId>
+        </Component>
+        <Component Id="Licences" Guid="*">
+          <File Id="LICENSE_MIT" Source="$(var.Bin)\LICENSE-MIT" KeyPath="yes" />
+          <File Id="LICENSE_APACHE" Source="$(var.Bin)\LICENSE-APACHE" />
+          <File Id="THIRD_PARTY_LICENSES" Source="$(var.Bin)\THIRD_PARTY_LICENSES.txt" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Where the Start menu entry goes. -->
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="Grid4D">
+      <ComponentRef Id="Application" />
+      <ComponentRef Id="Licences" />
+    </Feature>
+  </Package>
+</Wix>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The .g4d document type for shared-mime-info (installed to
+     ~/.local/share/mime/packages/ or /usr/share/mime/packages/). -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-grid4d">
+    <comment>Grid4D Document</comment>
+    <comment xml:lang="el">Έγγραφο Grid4D</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.g4d"/>
+    <icon name="grid4d"/>
+  </mime-type>
+</mime-info>

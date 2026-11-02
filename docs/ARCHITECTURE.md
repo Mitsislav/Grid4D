@@ -115,6 +115,13 @@ hand) renders it in both languages and themes for review. Shortcuts live in
 one table, `shortcuts::TABLE`: Help ▸ About shows it and a test keeps the
 manual's list equal to it.
 
+**Releases** are built by `.github/workflows/release.yml` on a `v*` tag (or
+as a dry run by hand): packages for Windows (`.zip`, WiX `.msi`), macOS
+(universal `.dmg`) and Linux (`.tar.gz`, AppImage) from the files in
+`assets/` (icons, `Info.plist`, `.desktop`, MIME type, WiX source), a draft
+GitHub Release with the version's `CHANGELOG.md` section, and itch.io when a
+`BUTLER_API_KEY` secret exists. The tag must equal the workspace version.
+
 **Inspired by, never copied.** The workflow follows Cinema 4D's; no Maxon
 icons, artwork, trademarks or file formats, and behaviour specs in
 `docs/reference/` are written in our own words from public documentation.

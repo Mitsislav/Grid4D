@@ -45,6 +45,28 @@ start its graphics (no driver, an unsupported card, a remote session without
 graphics), it says so in a message, **Grid4D Cannot Start**, with the reason,
 instead of closing silently; updating the graphics driver often helps.
 
+**Installing.** Download the package for your system from the project's
+GitHub Releases (or its itch.io page):
+
+| System | Download | How |
+|--------|----------|-----|
+| Windows 10 or later | `…-windows-x64.msi` | Run it: Grid4D goes into *Program Files* with a Start menu entry, and `.g4d` files open with it. Remove it from *Settings ▸ Apps*. |
+| | `…-windows-x64.zip` | Unpack it anywhere and run `grid4d.exe` — nothing is installed. |
+| macOS 11 or later | `…-macos-universal.dmg` | Open it and drag **Grid4D** into *Applications*. Runs on Apple silicon and Intel Macs. |
+| Linux | `…-linux-x64.AppImage` | Make it executable (`chmod +x`) and run it. |
+| | `…-linux-x64.tar.gz` | Unpack it and run `grid4d`; the folder also holds the icons, a `.desktop` launcher and the `.g4d` MIME type to install if you like. |
+
+The packages are not code-signed yet, so the first start asks for a
+confirmation: on Windows, if SmartScreen says the publisher is unknown,
+choose **More info ▸ Run anyway**; on macOS, if it says the app cannot be
+checked, right-click **Grid4D** in *Applications* and choose **Open**, then
+**Open** again (once). `SHA256SUMS.txt` beside the downloads lists every
+file's checksum.
+
+Your settings, scripts and recovery copies are kept in your user data folder
+([§2.2](#22-preferences)), not with the program, so they survive updates and
+reinstalls.
+
 **Running from source** (needs the Rust toolchain, 1.95 or newer):
 
 ```bash
@@ -52,7 +74,10 @@ cargo run --release
 ```
 
 **Opening a document directly:** pass its path, e.g. `grid4d scene.g4d`. This is
-also what "Open with" and file associations use.
+also what "Open with" and file associations use: with the Windows installer
+or the Linux launcher, double-clicking a `.g4d` file opens it in Grid4D. On
+macOS, double-clicking starts Grid4D; open the file with **File ▸ Open** or
+drop it on the window.
 
 Grid4D starts maximized with a small demo scene (a cube, a sphere, a group with a
 cylinder and a box, a light and a camera), so there is something to try right away.
