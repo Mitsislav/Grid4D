@@ -32,8 +32,18 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # Line numbers only: the test binaries (the interface tests link egui,
+      # wgpu and egui_kittest) stay small enough for the runners' disks.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v7
+      # The Linux runner has about 14 GB free; tools we never use take 20+.
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       - name: Install Linux windowing dev packages
         if: runner.os == 'Linux'
         run: |

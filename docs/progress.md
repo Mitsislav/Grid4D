@@ -2264,6 +2264,12 @@ endless loops, a library with examples and the Script Manager. Guides:
   yet; double-clicking starts Grid4D without the file (written in the manual).
 - **Pinned tools:** WiX 5.0.2, appimagetool 1.9.1, and action versions
   checked to exist before use.
+- **CI ran out of disk linking the interface tests** (Linux: the linker died
+  with a bus error, the usual sign of a full disk): since 14.5 the
+  `grid4d-ui` test binary links egui, wgpu and `egui_kittest`. The test job
+  now builds with line-table debug information only and, on Linux, first
+  removes preinstalled tools Grid4D never uses (Android SDK, .NET, GHC,
+  CodeQL).
 
 ---
 
