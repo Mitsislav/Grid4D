@@ -98,9 +98,12 @@ Every package contains `LICENSE-MIT`, `LICENSE-APACHE` and
 
 ## Acceptance criteria
 
-- [ ] A dry run of the workflow builds every package.
+- [x] A dry run of the workflow builds every package (2026-11-02, the second
+      run: Windows 18 min, macOS 5 min, Linux 8 min).
 - [ ] The release candidate's packages each install and open on a clean
       Windows, macOS and Linux system: the demo, a saved document, a
       script, a plugin object.
+      (So far: the Windows `.zip` opened; the `.msi`, `.dmg` and AppImage
+      are built but not yet installed and tried.)
 - [ ] `.g4d` files open with Grid4D from the file manager on Windows and
       Linux.

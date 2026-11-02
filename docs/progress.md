@@ -2273,7 +2273,10 @@ endless loops, a library with examples and the Script Manager. Guides:
 - **The first dry run** built the macOS and Linux packages at once; the
   `.msi` failed: WiX gives a component a generated GUID only when it holds
   one unversioned file (or a versioned key file), and the licence files
-  shared one component. Each has its own now.
+  shared one component. Each has its own now. (A "Re-run jobs" of a failed
+  run builds the same old commit again; a new run is needed after a fix.)
+  The second dry run built every package: Windows in 18 minutes, macOS in 5,
+  Linux in 8.
 
 ---
 
