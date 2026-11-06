@@ -4,7 +4,8 @@
 //! Regenerate the current golden file after an *intentional* format change (which
 //! also needs a new format version and a migration) with:
 //! `GRID4D_UPDATE_FIXTURES=1 cargo test -p grid4d-io --test format`
-//! Older fixtures (`demo_v1.oc4d`, `demo_v2.g4d`) are never regenerated.
+//! Older fixtures (`demo_v1.oc4d`, `demo_v2.g4d`, the `_v3` files) are never
+//! regenerated.
 //!
 //! The golden archive is compared entry by entry, decompressed: the compressed
 //! bytes may legitimately change with the deflate library.
@@ -25,9 +26,13 @@ use grid4d_scene::{
 };
 
 /// Written by the current format version (an archive).
-const GOLDEN: &str = "tests/fixtures/demo_v3.g4d";
-/// Everything version 3 can hold (see `full_document`), frozen with 1.0.
-const FULL: &str = "tests/fixtures/full_v3.g4d";
+const GOLDEN: &str = "tests/fixtures/demo_v4.g4d";
+/// Everything the current version can hold (see `full_document`).
+const FULL: &str = "tests/fixtures/full_v4.g4d";
+/// `golden_document` as Grid4D 1.0 wrote it (format version 3, frozen).
+const DEMO_V3: &str = "tests/fixtures/demo_v3.g4d";
+/// Everything version 3 can hold (see `full_v3_document`), frozen with 1.0.
+const FULL_V3: &str = "tests/fixtures/full_v3.g4d";
 /// Version 3 as first released in step 3.6, before component selections were
 /// added (additively): must keep loading.
 const DEMO_V3_INITIAL: &str = "tests/fixtures/demo_v3_initial.g4d";
@@ -85,15 +90,21 @@ fn golden_document() -> Document {
     doc
 }
 
-/// Everything a version 3 file can hold, which 1.0 freezes (see
-/// `docs/FILE_FORMAT.md`): every kind of object at its defaults, a mesh with
+/// Everything a version 4 file can hold (see `docs/FILE_FORMAT.md`): version
+/// 3's, and what Phase 15 adds as it arrives.
+fn full_document() -> (Document, SimulationCache) {
+    full_v3_document()
+}
+
+/// Everything a version 3 file can hold, which 1.0 froze (`full_v3.g4d`; never
+/// change it): every kind of object at its defaults, a mesh with
 /// selected and hidden components, a plugin object with every kind of value
 /// (no plugin needed), a hierarchy, every tag, tracks (transform, an object
 /// parameter, a plugin value; every interpolation and manual tangents),
 /// materials, layers, takes (one active with Main's values beside it, one
 /// with its own overrides), changed render and simulation settings, and a
 /// saved simulation with a clone.
-fn full_document() -> (Document, SimulationCache) {
+fn full_v3_document() -> (Document, SimulationCache) {
     let mut doc = Document::new("Full");
     let mut red = Material::new("Red");
     red.color = [0.8, 0.1, 0.1];
@@ -300,7 +311,7 @@ fn assert_same_entries(bytes: &[u8], fixture: &[u8]) {
 }
 
 #[test]
-fn everything_version_3_holds_matches_its_golden_file_and_round_trips() {
+fn everything_version_4_holds_matches_its_golden_file_and_round_trips() {
     let (doc, cache) = full_document();
     let bytes = grid4d_io::to_bytes_with_cache(&doc, Some(&cache)).unwrap();
     let path = fixture_path(FULL);
@@ -334,6 +345,28 @@ fn the_golden_file_loads() {
         node.data.kind.clone()
     };
     assert_eq!(kind(&doc), kind(&reference), "the mesh, point for point");
+}
+
+#[test]
+fn everything_version_3_held_still_loads_the_same() {
+    // Read from the frozen file and saved: exactly what the current version
+    // writes for the same document, so version 3's meaning has not moved.
+    let (loaded, cache) = grid4d_io::load_with_cache(&fixture_path(FULL_V3)).unwrap();
+    let (doc, expected_cache) = full_v3_document();
+    assert_same_entries(
+        &grid4d_io::to_bytes_with_cache(&loaded, cache.as_ref()).unwrap(),
+        &grid4d_io::to_bytes_with_cache(&doc, Some(&expected_cache)).unwrap(),
+    );
+}
+
+#[test]
+fn the_version_3_golden_file_still_loads_the_same() {
+    let doc = grid4d_io::load(&fixture_path(DEMO_V3)).unwrap();
+    assert_eq!(outline(&doc), DEMO_OUTLINE.map(|(d, n)| (d, n.to_owned())));
+    assert_same_entries(
+        &grid4d_io::to_bytes(&doc).unwrap(),
+        &grid4d_io::to_bytes(&golden_document()).unwrap(),
+    );
 }
 
 #[test]

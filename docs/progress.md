@@ -12,10 +12,10 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 14 — Stabilisation (v1.0) |
-| Last step done | 14.7 — Documentation and 1.0 (2026-11-02) |
-| Next step | the `v1.0.0` tag and release; then Phase 15 — Materials, UVs and textures (v1.1) |
-| Tests | 778 (and 4 ignored, run by hand: two timings, the walkthrough and the README pictures), all passing; clippy, rustfmt and `cargo deny` clean |
+| Current phase | 15 — Materials, UVs and textures (v1.1) |
+| Last step done | 15.1 — Specs and the `.g4d` format version 4 (2026-11-06) |
+| Next step | 15.2 — UVs from every primitive and generator |
+| Tests | 783 (and 4 ignored, run by hand: two timings, the walkthrough and the README pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2303,6 +2303,41 @@ risks R5 – R8 go with it.
   changelog and a code comment and is gone. The icons are original.
 - **The `.msi` tried by hand:** installed, started from the Start menu and
   uninstalled from Settings ▸ Apps on the reference laptop.
+
+---
+
+## Phase 15 — Materials, UVs and textures (2026-11-06 – )
+
+| Step | What was built | Tests |
+|------|----------------|-------|
+| 15.1 | Five specs: the format version 4, material channels, textures and the Texture Manager, the Material tag's projections and layers, the UV editor; `.g4d` version 4 written (version 3's module moved to `v4.rs`; `v3.rs` upgrades a version 3 `document.json` as JSON), `FILE_FORMAT.md` for version 4, golden `demo_v4.g4d` / `full_v4.g4d`, the version 3 fixtures frozen and checked to read exactly as before, a property test of documents labelled version 3, the fuzz corpus with both versions; the manual and changelog say what 1.1 files mean for 1.0 | 783 |
+
+**15.1 — Specs and the format version 4**
+
+*Problems and solutions:*
+- **A new version without a second copy of the format.** Version 3's
+  module was the whole reader and writer (4,000 lines besides its tests).
+  A frozen copy beside a new one would have doubled it and let the two
+  drift apart. Version 4 only adds to version 3, so the module became
+  `v4.rs`, and version 3 is now an upgrade of the parsed JSON before
+  version 4's types read it: it removes every field version 4 adds
+  (Grid4D 1.0 ignored unknown fields) and will convert any value whose form
+  changes. What a version 3 file means is pinned by its fixtures: the
+  frozen `full_v3.g4d`, loaded and saved, must give exactly what the same
+  document gives when written now.
+- **Errors without a position.** Read from JSON already parsed, serde knows
+  no line or column; such errors (only in upgraded files) show the message
+  alone.
+- **The plan's "Texture tag".** Grid4D already has a Material tag that
+  links a material; a second tag doing the same with a projection would
+  raise the question of which wins. The spec grows the Material tag instead
+  (projections, several per object layered in order), as the reference's
+  own tag does.
+- **Version 4 holds no new data yet.** The plan puts the format first; the
+  data arrives with the steps that make it (textures 15.3, channels and
+  projections 15.4, seams 15.7), each adding to version 4 while it is open
+  and listing the addition in `v3.rs` and `FILE_FORMAT.md`. Version 4 is
+  frozen when 1.1 ships.
 
 ---
 

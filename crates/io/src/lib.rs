@@ -10,7 +10,7 @@
 //! format version has its own module; older versions are migrated on load.
 //! This crate never depends on `wgpu`, `egui` or `grid4d-ui`.
 //!
-//! ## Format, version 3 (current)
+//! ## Format, version 4 (current)
 //!
 //! A zip archive (deflate) with fixed timestamps, so the same document always
 //! gives the same bytes:
@@ -18,7 +18,7 @@
 //! * `document.json` — UTF-8 JSON:
 //!
 //!   ```text
-//!   { "format": "grid4d", "version": 3,
+//!   { "format": "grid4d", "version": 4,
 //!     "document": { "name": …, "time": { "fps", "start", "end", "looping" },
 //!                   "objects": [ { "name", "parent"?, "kind": { "type": "cube", … },
 //!                                  "position", "rotation_hpb", "scale", "display_color",
@@ -26,7 +26,7 @@
 //!     "meshes": [ { "points", "faces", "corners", "uvs" } ] }
 //!   ```
 //!
-//! * `meshes/<index>.bin` — each polygon mesh's arrays, little-endian (see `v3.rs`);
+//! * `meshes/<index>.bin` — each polygon mesh's arrays, little-endian (see `v4.rs`);
 //!   a polygon object's kind is `{ "type": "polygon", "mesh": <index> }`, and objects
 //!   sharing a mesh share the file.
 //!
@@ -38,9 +38,12 @@
 //! * Primitive kinds carry their segment counts (`"segments"`, `"rotation_segments"`, …).
 //! * Detached (deleted but undoable) nodes and editor state are never saved.
 //!
-//! Versions 1 and 2 were plain JSON documents (tag `"oc4d"`, no polygon objects);
-//! they are still read and migrated on load. Files are always written in the
-//! current version.
+//! Version 3 (Grid4D 1.0) is the same archive, frozen; version 4 only adds to it,
+//! so a version 3 `document.json` is upgraded as JSON (`v3.rs`) and read through
+//! version 4's types. Versions 1 and 2 were plain JSON documents (tag `"oc4d"`,
+//! no polygon objects); they are still read and migrated on load. Files are
+//! always written in the current version. The format is specified in
+//! `docs/FILE_FORMAT.md`.
 
 mod common;
 mod gltf_export;
@@ -51,6 +54,7 @@ mod picture;
 mod v1;
 mod v2;
 mod v3;
+mod v4;
 
 use std::{
     fmt, fs,
@@ -79,7 +83,7 @@ pub const EXTENSION: &str = "g4d";
 /// the project was renamed from OpenC4D (same format). Files are saved as `EXTENSION`.
 pub const OPEN_EXTENSIONS: [&str; 2] = [EXTENSION, "oc4d"];
 /// The format version this build writes (and the newest it reads).
-pub const FORMAT_VERSION: u32 = v3::VERSION;
+pub const FORMAT_VERSION: u32 = v4::VERSION;
 /// The `"format"` tag of archives (version 3 and later).
 const FORMAT_TAG: &str = "grid4d";
 /// The tag of the JSON files of versions 1 and 2, from the project's former name.
@@ -114,6 +118,8 @@ impl fmt::Display for IoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(err) => write!(f, "{err}"),
+            // Line 0: found in JSON already parsed (an older version's, upgraded).
+            Self::Parse { line: 0, message, .. } => f.write_str(message),
             Self::Parse { line, column, message } => write!(f, "line {line}, column {column}: {message}"),
             Self::NotADocument => f.write_str("not a Grid4D document"),
             Self::UnsupportedVersion { found, newest } => write!(
@@ -162,12 +168,12 @@ impl From<serde_json::Error> for IoError {
 
 /// Serialises `doc` in the current format.
 pub fn to_bytes(doc: &Document) -> Result<Vec<u8>, IoError> {
-    v3::write(doc, None)
+    v4::write(doc, None)
 }
 
 /// [`to_bytes`], with a simulation's frames saved beside the document.
 pub fn to_bytes_with_cache(doc: &Document, cache: Option<&SimulationCache>) -> Result<Vec<u8>, IoError> {
-    v3::write(doc, cache)
+    v4::write(doc, cache)
 }
 
 /// Reads a document written by this or an older format version: an archive
@@ -181,10 +187,13 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Document, IoError> {
 pub fn from_bytes_with_cache(bytes: &[u8]) -> Result<(Document, Option<SimulationCache>), IoError> {
     if bytes.starts_with(ZIP_MAGIC) {
         let mut archive = Archive::new(bytes)?;
-        let json = archive.read(v3::DOCUMENT_ENTRY, MAX_DOCUMENT_BYTES)?;
+        let json = archive.read(v4::DOCUMENT_ENTRY, MAX_DOCUMENT_BYTES)?;
         let text = std::str::from_utf8(&json).map_err(|_| IoError::NotADocument)?;
         return match Header::parse(text)? {
-            (FORMAT_TAG, v3::VERSION) => v3::File::parse(text)?.into_document(&mut archive),
+            (FORMAT_TAG, v4::VERSION) => v4::File::parse(text)?.into_document(&mut archive),
+            (FORMAT_TAG, v3::VERSION) => {
+                v4::File::from_value(v3::upgrade(serde_json::from_str(text)?)?)?.into_document(&mut archive)
+            }
             (FORMAT_TAG, found) if found > FORMAT_VERSION => Err(IoError::UnsupportedVersion {
                 found,
                 newest: FORMAT_VERSION,

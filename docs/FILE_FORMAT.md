@@ -1,8 +1,15 @@
 # The `.g4d` file format
 
 The specification of Grid4D's document files, so that other programs can read
-and write them. This describes **format version 3**, which Grid4D writes and
-which is **frozen** from Grid4D 1.0 on (see [Versions](#versions)).
+and write them. This describes **format version 4**, which Grid4D 1.1 writes.
+Version 3 (Grid4D 1.0, **frozen**) is the same format without version 4's
+additions — see [Version 4 and version 3](#version-4-and-version-3) and
+[Versions](#versions).
+
+> Version 4 is being completed during the development of Grid4D 1.1: until
+> 1.1 is released it may still gain optional fields and new types (each
+> listed under [Version 4 and version 3](#version-4-and-version-3)); from
+> the release on it never changes.
 
 ## The container
 
@@ -26,7 +33,7 @@ The top level:
 ```json
 {
   "format": "grid4d",
-  "version": 3,
+  "version": 4,
   "document": { … },
   "meshes": [ { "points": 8, "faces": 6, "corners": 24, "uvs": false } ]
 }
@@ -35,7 +42,7 @@ The top level:
 | Field | Type | Meaning |
 |-------|------|---------|
 | `format` | string | Always `"grid4d"` |
-| `version` | integer | `3` |
+| `version` | integer | `4` (`3` for a version 3 file) |
 | `document` | object | The document (below) |
 | `meshes` | array | One entry per `meshes/<n>.bin`, in order: its numbers of `points`, `faces`, `corners` and whether it has `uvs` |
 
@@ -240,15 +247,32 @@ give, `simulation.bin` is read up to 2 GiB. Indices out of range, a parent
 index not smaller than the object's own, mesh faces pointing past their
 points, and numbers that are not finite make the file invalid.
 
+## Version 4 and version 3
+
+Version 4 keeps everything about version 3 — the container, every field and
+its meaning — and only adds to it. What it adds, as of this writing:
+
+| Addition | Since |
+|----------|-------|
+| nothing but the version number | Grid4D 1.1 development (step 15.1) |
+
+A version 3 file is therefore read as a version 4 file with the version
+number changed, minus any field this table lists (version 3 readers ignore
+unknown fields, so such a field in a version 3 file means nothing). A
+version 4 file that uses none of the additions is a valid version 3 file once
+its `version` says `3`.
+
 ## Versions
 
 | Version | Container | Read by Grid4D |
 |---------|-----------|----------------|
 | 1, 2 | a single JSON file, `"format": "oc4d"` (from the project's former name OpenC4D; extension `.oc4d`) | yes, converted when opened |
-| 3 | the zip archive above, `"format": "grid4d"` | yes; written |
+| 3 | the zip archive above, `"format": "grid4d"`; Grid4D 1.0 | yes, converted when opened |
+| 4 | the same archive with version 4's additions; Grid4D 1.1 | yes; written |
 
-Version 3 grew during development only by optional fields and new kinds. **From
-Grid4D 1.0 a released version never changes:** new data means a new version
-number, written by newer Grid4Ds and converted from every older version when
-opened. A Grid4D refuses files with a version newer than it knows, with a
-message naming both versions.
+A version grows during development only by optional fields and new types.
+**From Grid4D 1.0 a released version never changes:** new data means a new
+version number, written by newer Grid4Ds and converted from every older
+version when opened. A Grid4D refuses files with a version newer than it
+knows, with a message naming both versions (Grid4D 1.0 refuses version 4
+files this way).

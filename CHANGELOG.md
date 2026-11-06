@@ -5,6 +5,14 @@ Notable changes to Grid4D, newest first. Versions follow
 opens every file of the same major version; the plugin and script interfaces
 may grow in a minor version and change only in a major one.
 
+## [Unreleased]
+
+Toward 1.1: materials, UVs and textures.
+
+- **Files** — documents are saved in `.g4d` format version 4. Every file of
+  Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
+  files and says they come from a newer Grid4D.
+
 ## [1.0.0] - 2026-11-02
 
 The first stable release: installable packages for Windows, macOS and Linux,

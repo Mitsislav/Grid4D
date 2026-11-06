@@ -1,7 +1,8 @@
 //! Property tests: random documents go through save and load and come back
 //! the same — saved again, they give the same bytes. Every kind of object with
 //! random parameters, a random hierarchy, transforms, switches, tags,
-//! animation, materials, layers and plugin values (see `docs/FILE_FORMAT.md`).
+//! animation, materials, layers and plugin values (see `docs/FILE_FORMAT.md`);
+//! the same documents labelled version 3 read the same.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -229,4 +230,41 @@ proptest! {
         let again = grid4d_io::to_bytes(&loaded).unwrap();
         prop_assert!(again == bytes, "saved again, the file changed");
     }
+
+    /// Written as version 3 (Grid4D 1.0) would have: the same document comes
+    /// back. Every document the strategies make holds only what version 3
+    /// holds; Phase 15's additions get strategies of their own.
+    #[test]
+    fn random_version_3_documents_read_as_the_same_document(
+        objects in prop::collection::vec(object(), 0..12),
+        materials in prop::collection::vec((colour(), 0.0f32..=1.0), 0..3),
+        layers in prop::collection::vec(colour(), 0..3),
+    ) {
+        let doc = document(objects, materials, layers);
+        let bytes = grid4d_io::to_bytes(&doc).unwrap();
+        let loaded = grid4d_io::from_bytes(&as_version_3(&bytes)).unwrap();
+        prop_assert!(grid4d_io::to_bytes(&loaded).unwrap() == bytes, "version 3 read differently");
+    }
+}
+
+/// The archive `bytes` with its `document.json` labelled version 3.
+fn as_version_3(bytes: &[u8]) -> Vec<u8> {
+    use std::io::{Cursor, Read as _, Write as _};
+
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).unwrap();
+        let name = entry.name().unwrap().into_owned();
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data).unwrap();
+        if name == "document.json" {
+            let text = String::from_utf8(data).unwrap();
+            assert!(text.contains("\"version\": 4"));
+            data = text.replacen("\"version\": 4", "\"version\": 3", 1).into_bytes();
+        }
+        out.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        out.write_all(&data).unwrap();
+    }
+    out.finish().unwrap().into_inner()
 }
