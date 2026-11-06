@@ -34,6 +34,7 @@ mod scene;
 mod spline;
 mod tag;
 mod take;
+mod texture;
 mod time;
 mod transform;
 
@@ -59,5 +60,6 @@ pub use scene::{Detached, Scene, SceneError, WalkItem};
 pub use spline::{SplineHandle, SplineId};
 pub use tag::{Aim, DEFAULT_PHONG_ANGLE, Protection, Tag, TagKind, Tags};
 pub use take::{ObjectOverrides, Override, OverrideGroup, Take, TakeId, Takes, overridable};
+pub use texture::{ColorSpace, Texture, TextureId, TextureSource, Textures};
 pub use time::{Playback, TimeSettings, TimeState};
 pub use transform::Transform;

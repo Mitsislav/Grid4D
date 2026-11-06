@@ -164,6 +164,7 @@ fn pass(dir: &Path, language: Language, theme: ColorTheme) {
         Pane::Coordinates,
         Pane::FCurve,
         Pane::Materials,
+        Pane::Textures,
     ]
     .into_iter()
     .enumerate()
@@ -227,6 +228,107 @@ fn render_the_interface_for_review() {
         }
     }
     println!("pictures in {}", dir.display());
+}
+
+/// The manual's picture of the Texture Manager: a few pictures (one embedded,
+/// one missing), in the Animate layout where the bottom pane is tall:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored texture_manager`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn texture_manager_picture() {
+    use grid4d_scene::{ColorSpace, Texture, TextureSource};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    let maps = dir.join("maps");
+    std::fs::create_dir_all(&maps).unwrap();
+    // Small pictures drawn here: planks, a checker, a sky gradient.
+    let picture = |name: &str, colour: &dyn Fn(u32, u32) -> [u8; 3]| {
+        let (w, h) = (256u32, 256u32);
+        let mut pixels = Vec::with_capacity(256 * 256 * 3);
+        for y in 0..h {
+            for x in 0..w {
+                pixels.extend(colour(x, y));
+            }
+        }
+        let path = maps.join(name);
+        grid4d_io::save_png(&path, w, h, grid4d_io::Channels::Rgb, &pixels).unwrap();
+        path
+    };
+    let byte = |v: u32| u8::try_from(v.min(255)).unwrap();
+    let planks = picture("oak planks.png", &|x, y| {
+        let grain = (x * 7 + (y / 64) * 37) % 23;
+        [byte(150 + grain * 2), byte(100 + grain), byte(60)]
+    });
+    let checker = picture("checker.png", &|x, y| {
+        if (x / 32 + y / 32) % 2 == 0 {
+            [230, 230, 230]
+        } else {
+            [40, 40, 40]
+        }
+    });
+    let sky = picture("sky.png", &|_, y| [byte(90 + y / 4), byte(140 + y / 3), 235]);
+
+    let mut doc = Document::with_demo_scene();
+    doc.name = "Lighthouse".to_owned();
+    let textures = doc.scene.textures_mut();
+    textures.insert(Texture::linked(planks));
+    let roughness = textures.insert(Texture {
+        color_space: ColorSpace::Linear,
+        ..Texture::linked(checker)
+    });
+    textures.get_mut(roughness).unwrap().name = "Roughness checker".to_owned();
+    textures.insert(Texture {
+        name: "Sky".to_owned(),
+        source: TextureSource::Embedded {
+            file_name: "sky.png".to_owned(),
+            bytes: std::fs::read(sky).unwrap().into(),
+        },
+        color_space: ColorSpace::Srgb,
+    });
+    textures.insert(Texture::linked(maps.join("brick wall.jpg")));
+    // Saved and opened again, so the manager shows paths from its folder.
+    let file = dir.join("Lighthouse.g4d");
+    grid4d_io::save(&doc, &file).unwrap();
+    let mut h = harness_with(Document::new("Untitled"), Language::English, ColorTheme::Dark);
+    h.state_mut()
+        .editor
+        .commands
+        .push(grid4d_ui::EditorCommand::OpenFile(file));
+    h.run_steps(2);
+    {
+        let shell = h.state_mut();
+        let selected = shell
+            .doc
+            .scene
+            .textures()
+            .iter()
+            .find(|(_, t)| t.name == "Roughness checker")
+            .map(|(id, _)| id);
+        shell.editor.panes.layout = Some(grid4d_ui::workspace::Layout::Animate);
+        shell.editor.texture_selection = selected;
+    }
+    let _ = roughness;
+    h.run_steps(2);
+    h.state_mut().editor.panes.show = Some(Pane::Textures);
+    // The pictures load in the background.
+    for _ in 0..500 {
+        h.run_steps(1);
+        let shell = h.state();
+        let loading = shell.doc.scene.textures().iter().any(|(id, t)| {
+            matches!(
+                shell.editor.textures.status(id, t),
+                grid4d_ui::textures::Status::Loading
+            )
+        });
+        if !loading {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    save(&mut h, &dir, "texture-manager");
+    println!("picture in {}", dir.display());
 }
 
 /// A scene that shows what Grid4D does at a glance: clones moved by an

@@ -19,15 +19,15 @@ grid4d-geom ◀── grid4d-scene ◀── grid4d-eval ◀── grid4d-render
 |-------|--------------|----------------------|
 | `grid4d-geom` | Geometry: polygon meshes (n-gons), topology, normals, triangulation, BVH, primitives, splines, the maths of deformers, Cloner layouts, surfaces from splines, mesh operations (extrude, bevel, cuts, …), UVs (projections, checks) | — |
 | `grid4d-text` | Glyph outlines of the built-in font, for Text splines | geom |
-| `grid4d-scene` | The document — the single source of truth: the scene graph, object kinds and parameters, tags, animation tracks, materials, layers, takes, render and simulation settings, and `SceneEdit` (every undoable change). No GPU, no interface, no file formats | geom |
+| `grid4d-scene` | The document — the single source of truth: the scene graph, object kinds and parameters, tags, animation tracks, materials, textures, layers, takes, render and simulation settings, and `SceneEdit` (every undoable change). No GPU, no interface, no file formats | geom |
 | `grid4d-plugin` | The plugin API: parameter descriptions, generator / deformer / command traits, the registry | geom, scene |
 | `grid4d-eval` | What is shown at a frame: world matrices, drawables, pick shapes, generated and deformed meshes, clones, lights — cached, and skipped when nothing changed | geom, text, scene, plugin |
 | `grid4d-render` | The wgpu viewport: per-frame extraction, mesh cache, shading modes, shadows, SSAO, picking, snapping. Reads the evaluated scene, never the document | geom, scene, eval |
 | `grid4d-raytrace` | The final renderer: a deterministic CPU path tracer over the evaluated scene | geom, scene, eval |
 | `grid4d-sim` | Rigid-body simulation, cached per frame; the only crate that sees `rapier3d` | geom, scene, eval |
-| `grid4d-io` | `.g4d` files (a versioned zip: JSON and binary meshes), glTF and OBJ import / export, PNG and OpenEXR | geom, scene |
+| `grid4d-io` | `.g4d` files (a versioned zip: JSON, binary meshes, embedded pictures), glTF and OBJ import / export, PNG and OpenEXR out, texture pictures in (decoded with mip-maps) | geom, scene |
 | `grid4d-script` | Rhai scripts working on a copy of the document | geom, scene, plugin |
-| `grid4d-ui` | The egui interface: panels, theme, icons, shortcuts, commands, undo history, translations, autosave, crash reports | all of the above |
+| `grid4d-ui` | The egui interface: panels, theme, icons, shortcuts, commands, undo history, translations, autosave, crash reports, texture pictures loaded in the background | all of the above |
 | `grid4d` | The binary: the window, start-up (the logger and the panic hook first), settings kept between sessions, the list of built-in plugins — the interface itself is `grid4d_ui::shell::Shell` | ui, scene, plugin, plugins |
 | `plugins/*` | The example plugins: Gear, Wave, Scatter | plugin, geom, scene |
 

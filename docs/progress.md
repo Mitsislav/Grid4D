@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.2 — UVs from every primitive and generator (2026-11-06) |
-| Next step | 15.3 — Images: decoding, background loading, the document's textures, the Texture Manager |
-| Tests | 792 (and 4 ignored, run by hand: two timings, the walkthrough and the README pictures), all passing; clippy and rustfmt clean |
+| Last step done | 15.3 — Images, the document's textures and the Texture Manager (2026-11-06) |
+| Next step | 15.4 — The material channels, the Material tag's projections, preview balls |
+| Tests | 804 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2312,6 +2312,7 @@ risks R5 – R8 go with it.
 |------|----------------|-------|
 | 15.1 | Five specs: the format version 4, material channels, textures and the Texture Manager, the Material tag's projections and layers, the UV editor; `.g4d` version 4 written (version 3's module moved to `v4.rs`; `v3.rs` upgrades a version 3 `document.json` as JSON), `FILE_FORMAT.md` for version 4, golden `demo_v4.g4d` / `full_v4.g4d`, the version 3 fixtures frozen and checked to read exactly as before, a property test of documents labelled version 3, the fuzz corpus with both versions; the manual and changelog say what 1.1 files mean for 1.0 | 783 |
 | 15.2 | UVs everywhere: `grid4d_geom::uv` (conventions, planar and box projections, mirrored-face check); every primitive (size-independent, so the shared unit meshes stay correct); the walls and caps of Extrude, Lathe, Sweep and Loft; the Subdivision Surface's merged cage keeps its parts' UVs (a Box projection for parts without); plugin generators without UVs get a Box projection; Make Editable, Current State and glTF / OBJ export carry them; the layouts written in `tag-material.md`; the v4 golden files regenerated (the frozen v3 ones compared with UV-less meshes) | 792 |
+| 15.3 | Images and textures: the `image` crate (six decoders, no C; licences regenerated, `cargo deny` clean); `grid4d_io::decode_texture` under limits with mip-maps; the document's `Textures` table (`SceneEdit::SetTextures`), linked or embedded; `.g4d` v4 `textures` and `textures/<n>.<ext>` (paths inside the document's folder stored relative); `ui::textures::TextureCache` decoding on a worker thread and noticing changed files; the Texture Manager pane (Add, Relink, Relink Folder, Embed, Unembed, Reveal, Delete, Remove Unused, name and colour space); dropped pictures; the status bar's count of missing pictures; Greek; the manual's §19.1 with a picture rendered headless | 804 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2367,6 +2368,43 @@ risks R5 – R8 go with it.
   now has UVs, so the v4 golden files were regenerated (v4 is still open)
   and the v3 comparisons build their reference documents with UV-less
   meshes, as Grid4D 1.0 made them.
+
+**15.3 — Images, the document's textures and the Texture Manager**
+
+*Problems and solutions:*
+- **Relative paths without rewriting the document.** A Save As to another
+  folder would otherwise have to change every linked path (a document change
+  outside undo). Instead the document always holds the path as chosen, and
+  only the file stores paths inside its folder relative: `grid4d_io::save`
+  writes them against the folder it saves into, `load` reads them against
+  the folder it opens from. Autosave copies (no folder) keep paths whole.
+- **One more image library?** `image` 0.25 was already in the build through
+  eframe (PNG and TIFF for the clipboard); turning on JPEG, WebP, HDR and
+  OpenEXR added one crate (`image-webp`) to the lock file and a few licences
+  (`exr` and its helpers, used only in tests before). `cargo deny` is clean.
+- **Hostile pictures.** The decoder runs under limits (16 384 pixels a side,
+  1 GiB); a PNG claiming 100 000 × 100 000 pixels is refused before
+  anything is allocated (a test).
+- **Wide pictures in memory.** 16-bit, HDR and OpenEXR pictures are kept as
+  half floats (half the memory of `f32`), the rest as 8-bit RGBA; mip-maps
+  average sRGB colour in linear light (black and white make 188, not 128).
+- **A reload that looked finished.** Reading a changed file again kept the
+  old picture on screen (no flicker), so "is anything loading" could not be
+  read from the shown state; each entry now compares the ticket of the load
+  it shows with the latest one asked for.
+- **Undo labels the translation test could not see.** Texture changes go
+  through small helpers (`edit_textures`, `push_change`); the completeness
+  test now reads their label argument like `commit`'s.
+- **Bug found by the new picture test:** with nothing selected the Attribute
+  Manager's Project page had ten fields without accessible names (Name, FPS,
+  the time range, Loop Playback, the simulation's settings); `egui_kittest`
+  refused the frame. They are named now, and so is every row drawn with
+  `check_row` and `bounded_count_row` elsewhere.
+- **The manual's picture without a window**: an ignored test builds a
+  document with drawn pictures (planks, a checker, a sky; one missing),
+  saves it, opens it in the headless interface (so paths show relative to
+  its folder, not the temp folder's full path), waits for the loads and
+  renders the Animate layout with the Textures tab in front.
 
 ---
 

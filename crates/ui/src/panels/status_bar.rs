@@ -37,6 +37,19 @@ pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
                     .size(11.0),
             );
             ui.separator();
+            // Linked pictures that are not where the document says.
+            let missing = editor.textures.missing(doc.scene.textures());
+            if missing > 0 {
+                ui.label(
+                    RichText::new(trf("Missing textures: {0}", &[&missing]))
+                        .color(p().warning)
+                        .size(11.0),
+                )
+                .on_hover_text(tr(
+                    "Window › Texture Manager shows them; Relink… or Relink Folder… finds them",
+                ));
+                ui.separator();
+            }
             let objects = doc.scene.len();
             let selected = editor.selection.len();
             ui.label(

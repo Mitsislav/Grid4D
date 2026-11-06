@@ -56,6 +56,9 @@ pub enum SceneEdit {
     /// Replaces the document's layers (the whole table, ids included: objects
     /// keep naming the same layers across undo and redo).
     SetLayers(crate::Layers),
+    /// Replaces the document's textures (the whole table, ids included;
+    /// embedded pictures are shared, never copied).
+    SetTextures(crate::Textures),
     /// Replaces the document's takes (overrides recorded, takes added, renamed
     /// or removed; Main's values kept beside the active one).
     SetTakes(crate::Takes),
@@ -81,6 +84,7 @@ impl SceneEdit {
             | Self::SetName(_)
             | Self::SetMaterials(_)
             | Self::SetLayers(_)
+            | Self::SetTextures(_)
             | Self::SetTakes(_)
             | Self::SwitchTake(_)
             | Self::SetRender(_)
@@ -147,6 +151,10 @@ impl Document {
             SceneEdit::SetLayers(layers) => {
                 Ok(SceneEdit::SetLayers(std::mem::replace(self.scene.layers_mut(), layers)))
             }
+            SceneEdit::SetTextures(textures) => Ok(SceneEdit::SetTextures(std::mem::replace(
+                self.scene.textures_mut(),
+                textures,
+            ))),
             SceneEdit::SetTakes(takes) => Ok(SceneEdit::SetTakes(std::mem::replace(&mut self.takes, takes))),
             SceneEdit::SwitchTake(to) => Ok(SceneEdit::SwitchTake(self.switch_take(to))),
             SceneEdit::SetRender(settings) => Ok(SceneEdit::SetRender(std::mem::replace(
@@ -200,6 +208,7 @@ mod tests {
         time: TimeSettings,
         materials: Materials,
         layers: crate::Layers,
+        textures: crate::Textures,
         takes: crate::Takes,
         render: RenderSettings,
         simulation: crate::SimulationSettings,
@@ -218,6 +227,7 @@ mod tests {
             time: doc.time.settings(),
             materials: doc.scene.materials().clone(),
             layers: doc.scene.layers().clone(),
+            textures: doc.scene.textures().clone(),
             takes: doc.takes.clone(),
             render: doc.render.clone(),
             simulation: doc.simulation,
@@ -587,6 +597,29 @@ mod tests {
                     }
                 }
                 SceneEdit::SetLayers(layers)
+            }
+            (8, _) if rng.chance(3) => {
+                // Add a texture (linked or embedded) or remove one.
+                let mut textures = doc.scene.textures().clone();
+                match rng.pick(textures.ids()) {
+                    Some(id) if rng.chance(2) => {
+                        textures.remove(id);
+                    }
+                    _ if rng.chance(2) => {
+                        textures.insert(crate::Texture::linked(format!("maps/{}.png", rng.below(9)).into()));
+                    }
+                    _ => {
+                        textures.insert(crate::Texture {
+                            name: textures.unique_name("Logo"),
+                            source: crate::TextureSource::Embedded {
+                                file_name: "logo.png".to_owned(),
+                                bytes: std::sync::Arc::from(vec![u8::try_from(rng.below(256)).unwrap(); 4]),
+                            },
+                            color_space: crate::ColorSpace::Linear,
+                        });
+                    }
+                }
+                SceneEdit::SetTextures(textures)
             }
             (8, _) => {
                 // Add a material or remove one (the table is replaced whole).

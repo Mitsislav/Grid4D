@@ -38,6 +38,7 @@ pub mod shell;
 pub mod shortcuts;
 pub mod simulation;
 pub mod startup;
+pub mod textures;
 pub mod theme;
 mod widgets;
 pub mod window;

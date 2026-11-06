@@ -25,7 +25,11 @@ pub(crate) const VERSION: u32 = 3;
 /// Fields of `document` that version 4 adds: absent from version 3, and
 /// dropped from a version 3 file (Grid4D 1.0 ignored them). Each step of
 /// Phase 15 that adds one lists it here.
-const V4_DOCUMENT_FIELDS: &[&str] = &[];
+const V4_DOCUMENT_FIELDS: &[&str] = &[
+    // Step 15.3: the document's textures (embedded ones' entries are never
+    // read without it).
+    "textures",
+];
 
 /// A version 3 `document.json`, already parsed, as version 4 (see the module
 /// documentation).
@@ -62,6 +66,16 @@ mod tests {
         assert_eq!(v4["version"], 4);
         assert_eq!(v4["document"], v3["document"]);
         assert_eq!(v4["format"], "grid4d");
+    }
+
+    #[test]
+    fn what_version_4_adds_is_dropped_from_a_version_3_file() {
+        let v3 = json!({
+            "version": 3,
+            "document": { "name": "Shot", "textures": [{ "name": "Wood", "file": "wood.png" }] }
+        });
+        let v4 = upgrade(v3).unwrap();
+        assert_eq!(v4["document"], json!({ "name": "Shot" }));
     }
 
     #[test]

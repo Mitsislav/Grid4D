@@ -51,6 +51,7 @@ mod gltf_import;
 mod import;
 mod obj;
 mod picture;
+mod texture;
 mod v1;
 mod v2;
 mod v3;
@@ -75,6 +76,9 @@ pub use crate::{
     },
     obj::{export_obj, import_obj, obj_text},
     picture::{Channels, exr_bytes, png_bytes, save_exr, save_png},
+    texture::{
+        Level, MAX_TEXTURE_SIDE, Pixels, TEXTURE_EXTENSIONS, TextureImage, decode_texture, is_texture_extension,
+    },
 };
 
 /// File extension, without the dot.
@@ -166,14 +170,21 @@ impl From<serde_json::Error> for IoError {
     }
 }
 
-/// Serialises `doc` in the current format.
+/// Serialises `doc` in the current format (linked textures' paths as they
+/// are; see [`to_bytes_at`]).
 pub fn to_bytes(doc: &Document) -> Result<Vec<u8>, IoError> {
-    v4::write(doc, None)
+    v4::write(doc, None, None)
 }
 
 /// [`to_bytes`], with a simulation's frames saved beside the document.
 pub fn to_bytes_with_cache(doc: &Document, cache: Option<&SimulationCache>) -> Result<Vec<u8>, IoError> {
-    v4::write(doc, cache)
+    v4::write(doc, cache, None)
+}
+
+/// [`to_bytes_with_cache`] for a file in `folder`: linked textures inside it
+/// are stored relative to it, so the folder can move with its pictures.
+pub fn to_bytes_at(doc: &Document, cache: Option<&SimulationCache>, folder: &Path) -> Result<Vec<u8>, IoError> {
+    v4::write(doc, cache, Some(folder))
 }
 
 /// Reads a document written by this or an older format version: an archive
@@ -185,14 +196,24 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Document, IoError> {
 /// [`from_bytes`], with the simulation's frames saved beside the document, if
 /// any.
 pub fn from_bytes_with_cache(bytes: &[u8]) -> Result<(Document, Option<SimulationCache>), IoError> {
+    read_bytes(bytes, None)
+}
+
+/// [`from_bytes_with_cache`] for a file in `folder`: relative texture paths
+/// are taken from it.
+pub fn from_bytes_at(bytes: &[u8], folder: &Path) -> Result<(Document, Option<SimulationCache>), IoError> {
+    read_bytes(bytes, Some(folder))
+}
+
+fn read_bytes(bytes: &[u8], folder: Option<&Path>) -> Result<(Document, Option<SimulationCache>), IoError> {
     if bytes.starts_with(ZIP_MAGIC) {
         let mut archive = Archive::new(bytes)?;
         let json = archive.read(v4::DOCUMENT_ENTRY, MAX_DOCUMENT_BYTES)?;
         let text = std::str::from_utf8(&json).map_err(|_| IoError::NotADocument)?;
         return match Header::parse(text)? {
-            (FORMAT_TAG, v4::VERSION) => v4::File::parse(text)?.into_document(&mut archive),
+            (FORMAT_TAG, v4::VERSION) => v4::File::parse(text)?.into_document(&mut archive, folder),
             (FORMAT_TAG, v3::VERSION) => {
-                v4::File::from_value(v3::upgrade(serde_json::from_str(text)?)?)?.into_document(&mut archive)
+                v4::File::from_value(v3::upgrade(serde_json::from_str(text)?)?)?.into_document(&mut archive, folder)
             }
             (FORMAT_TAG, found) if found > FORMAT_VERSION => Err(IoError::UnsupportedVersion {
                 found,
@@ -246,12 +267,18 @@ impl Header {
 /// Writes a temporary file next to `path` and renames it over the target, so a
 /// crash or a full disk never leaves a half-written document behind.
 pub fn save(doc: &Document, path: &Path) -> Result<(), IoError> {
-    write_atomic(path, &to_bytes(doc)?)
+    save_with_cache(doc, None, path)
 }
 
-/// [`save`], with a simulation's frames saved beside the document.
+/// [`save`], with a simulation's frames saved beside the document. Linked
+/// textures inside the file's folder are stored relative to it.
 pub fn save_with_cache(doc: &Document, cache: Option<&SimulationCache>, path: &Path) -> Result<(), IoError> {
-    write_atomic(path, &to_bytes_with_cache(doc, cache)?)
+    write_atomic(path, &v4::write(doc, cache, Some(folder_of(path)))?)
+}
+
+/// The folder a file lies in (the current one for a bare name).
+fn folder_of(path: &Path) -> &Path {
+    path.parent().unwrap_or(Path::new(""))
 }
 
 /// Writes `bytes` to a temporary file next to `path` and renames it over `path`.
@@ -267,12 +294,13 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), IoError> {
 
 /// Loads the document at `path`.
 pub fn load(path: &Path) -> Result<Document, IoError> {
-    from_bytes(&read_file(path)?)
+    load_with_cache(path).map(|(doc, _)| doc)
 }
 
 /// [`load`], with the simulation's frames saved beside the document, if any.
+/// Relative texture paths are taken from the file's folder.
 pub fn load_with_cache(path: &Path) -> Result<(Document, Option<SimulationCache>), IoError> {
-    from_bytes_with_cache(&read_file(path)?)
+    read_bytes(&read_file(path)?, Some(folder_of(path)))
 }
 
 /// Reads the whole file at `path`, reserving the memory it needs first: a

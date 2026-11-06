@@ -40,6 +40,7 @@ use grid4d_scene::{
     ObjectOverrides, ObjectParam, Override, Param, PluginObject, PluginValue, RenderSettings, SimulationCache,
     SimulationSettings, SplineHandle, Tag, Take, TakeId, Takes, Tangents, TimeSettings, Track, Transform,
 };
+use grid4d_scene::{ColorSpace, Texture, TextureSource};
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
 
@@ -94,6 +95,137 @@ struct DocumentDto {
     /// Added in step 11.5: the simulated frames, when saved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     simulation_cache: Option<SimCacheDto>,
+    /// Added in version 4 (step 15.3): the document's textures, linked or
+    /// embedded (`textures/<n>.<ext>`); absent when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    textures: Vec<TextureDto>,
+}
+
+/// A texture: a linked `file` (relative to the document's folder when it lies
+/// inside it, with `/` between folders) or an `embedded` file's original
+/// name, whose bytes are the entry `textures/<index>.<ext>`.
+#[derive(Debug, Serialize, Deserialize)]
+struct TextureDto {
+    name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    embedded: Option<String>,
+    #[serde(default, skip_serializing_if = "ColorSpaceDto::is_srgb")]
+    color_space: ColorSpaceDto,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ColorSpaceDto {
+    #[default]
+    Srgb,
+    Linear,
+}
+
+impl ColorSpaceDto {
+    #[allow(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_srgb(&self) -> bool {
+        *self == Self::Srgb
+    }
+}
+
+/// The most an embedded texture's entry may hold.
+const MAX_TEXTURE_BYTES: u64 = 1 << 30;
+
+/// The archive entry of embedded texture `index` with original file `name`:
+/// `textures/<index>.<ext>`, the extension lower case and plain (else `bin`).
+fn texture_entry(index: usize, name: &str) -> String {
+    let ext = std::path::Path::new(name)
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .filter(|e| !e.is_empty() && e.len() <= 8 && e.bytes().all(|b| b.is_ascii_alphanumeric()))
+        .unwrap_or_else(|| "bin".to_owned());
+    format!("textures/{index}.{ext}")
+}
+
+/// `path` as a file stores it: relative to `folder` (with `/`) when it lies
+/// inside it, else as it is.
+fn path_text(path: &std::path::Path, folder: Option<&std::path::Path>) -> String {
+    if let Some(inside) = folder.and_then(|folder| path.strip_prefix(folder).ok()) {
+        let parts: Vec<String> = inside
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        return parts.join("/");
+    }
+    if path.is_relative() {
+        // Kept relative: written with `/`, whatever the system.
+        let parts: Vec<String> = path
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        return parts.join("/");
+    }
+    path.to_string_lossy().into_owned()
+}
+
+/// A stored path: a relative one is taken from `folder` (if known).
+fn read_path(text: &str, folder: Option<&std::path::Path>) -> std::path::PathBuf {
+    let relative: std::path::PathBuf = text.split('/').collect();
+    match folder {
+        Some(folder) if std::path::Path::new(text).is_relative() && !text.contains('\\') => folder.join(relative),
+        _ if std::path::Path::new(text).is_relative() && !text.contains('\\') => relative,
+        _ => std::path::PathBuf::from(text),
+    }
+}
+
+impl TextureDto {
+    fn new(texture: &Texture, folder: Option<&std::path::Path>) -> Self {
+        let (file, embedded) = match &texture.source {
+            TextureSource::Linked(path) => (Some(path_text(path, folder)), None),
+            TextureSource::Embedded { file_name, .. } => (None, Some(file_name.clone())),
+        };
+        Self {
+            name: texture.name.clone(),
+            file,
+            embedded,
+            color_space: match texture.color_space {
+                ColorSpace::Srgb => ColorSpaceDto::Srgb,
+                ColorSpace::Linear => ColorSpaceDto::Linear,
+            },
+        }
+    }
+
+    fn into_texture(
+        self,
+        index: usize,
+        archive: &mut Archive<'_>,
+        folder: Option<&std::path::Path>,
+    ) -> Result<Texture, IoError> {
+        let source = match (self.file, self.embedded) {
+            (Some(file), None) => TextureSource::Linked(read_path(&file, folder)),
+            (None, Some(file_name)) => {
+                let bytes = archive.read(&texture_entry(index, &file_name), MAX_TEXTURE_BYTES)?;
+                TextureSource::Embedded {
+                    file_name,
+                    bytes: bytes.into(),
+                }
+            }
+            _ => {
+                return Err(IoError::Invalid(format!(
+                    "texture \"{}\" needs either a file or an embedded picture",
+                    self.name
+                )));
+            }
+        };
+        Ok(Texture {
+            name: self.name,
+            source,
+            color_space: match self.color_space {
+                ColorSpaceDto::Srgb => ColorSpace::Srgb,
+                ColorSpaceDto::Linear => ColorSpace::Linear,
+            },
+        })
+    }
 }
 
 /// The takes, the active one and Main's values beside it.
@@ -2857,7 +2989,11 @@ fn read_takes(
 }
 
 /// Writes `doc` as a version 4 archive.
-pub(crate) fn write(doc: &Document, cache: Option<&SimulationCache>) -> Result<Vec<u8>, IoError> {
+pub(crate) fn write(
+    doc: &Document,
+    cache: Option<&SimulationCache>,
+    folder: Option<&std::path::Path>,
+) -> Result<Vec<u8>, IoError> {
     // Pre-order: a parent is always written (and indexed) before its children.
     // Indexed first, so tags can refer to objects written after them.
     let mut order: Vec<NodeId> = Vec::with_capacity(doc.scene.len());
@@ -2930,6 +3066,12 @@ pub(crate) fn write(doc: &Document, cache: Option<&SimulationCache>) -> Result<V
             render: RenderDto::new(&doc.render),
             simulation: SimulationDto::new(&doc.simulation),
             simulation_cache,
+            textures: doc
+                .scene
+                .textures()
+                .iter()
+                .map(|(_, t)| TextureDto::new(t, folder))
+                .collect(),
         },
         meshes: table.meshes.iter().map(|(mesh, _)| MeshDto::of(mesh.mesh())).collect(),
     };
@@ -2948,6 +3090,13 @@ pub(crate) fn write(doc: &Document, cache: Option<&SimulationCache>) -> Result<V
         let large = u64::try_from(bytes.len()).unwrap_or(u64::MAX) >= u64::from(u32::MAX);
         zip.start_file(mesh_entry(index), options.large_file(large))?;
         zip.write_all(&bytes)?;
+    }
+    for (index, (_, texture)) in doc.scene.textures().iter().enumerate() {
+        if let TextureSource::Embedded { file_name, bytes } = &texture.source {
+            let large = u64::try_from(bytes.len()).unwrap_or(u64::MAX) >= u64::from(u32::MAX);
+            zip.start_file(texture_entry(index, file_name), options.large_file(large))?;
+            zip.write_all(bytes)?;
+        }
     }
     if let Some(bytes) = cache_bytes {
         let large = u64::try_from(bytes.len()).unwrap_or(u64::MAX) >= u64::from(u32::MAX);
@@ -2972,6 +3121,7 @@ impl File {
     pub(crate) fn into_document(
         self,
         archive: &mut Archive<'_>,
+        folder: Option<&std::path::Path>,
     ) -> Result<(Document, Option<SimulationCache>), IoError> {
         let meshes = self
             .meshes
@@ -3004,7 +3154,13 @@ impl File {
             render,
             simulation,
             simulation_cache,
+            textures,
         } = self.document;
+        let textures = textures
+            .into_iter()
+            .enumerate()
+            .map(|(index, dto)| dto.into_texture(index, archive, folder))
+            .collect::<Result<Vec<_>, IoError>>()?;
         let materials = materials
             .into_iter()
             .map(MaterialDto::into_material)
@@ -3083,6 +3239,9 @@ impl File {
         }
         if let Some(takes) = takes {
             read_takes(&mut doc, takes, &ids, &material_ids, &meshes)?;
+        }
+        for texture in textures {
+            doc.scene.textures_mut().insert(texture);
         }
         let cache = simulation_cache.map(|dto| dto.into_cache(archive, &ids)).transpose()?;
         Ok((doc, cache))
@@ -4922,7 +5081,7 @@ mod tests {
         let mut archive = Archive::new(&bytes).unwrap();
         let json = String::from_utf8(archive.read(DOCUMENT_ENTRY, 1 << 20).unwrap()).unwrap();
         let lying = File::parse(&json.replace("\"frames\": 3", "\"frames\": 4")).unwrap();
-        assert!(lying.into_document(&mut archive).is_err());
+        assert!(lying.into_document(&mut archive, None).is_err());
     }
 
     #[test]
@@ -5394,6 +5553,96 @@ mod tests {
         let (name, json) = entries(&to_bytes(doc).unwrap()).swap_remove(0);
         assert_eq!(name, DOCUMENT_ENTRY);
         String::from_utf8(json).unwrap()
+    }
+
+    #[test]
+    fn textures_are_linked_relative_to_the_folder_or_embedded() {
+        use std::{path::Path, sync::Arc};
+
+        use grid4d_scene::{ColorSpace, Texture, TextureSource};
+
+        let folder = std::env::temp_dir().join("grid4d-textures").join("shot");
+        let inside = folder.join("maps").join("wood.jpg");
+        let outside = std::env::temp_dir().join("elsewhere").join("sky.hdr");
+        let mut doc = Document::new("textures");
+        let textures = doc.scene.textures_mut();
+        textures.insert(Texture::linked(inside.clone()));
+        textures.insert(Texture::linked(outside.clone()));
+        textures.insert(Texture::linked(Path::new("relative").join("brick.png")));
+        let logo = Texture {
+            name: "Logo".to_owned(),
+            source: TextureSource::Embedded {
+                file_name: "Company Logo.PNG".to_owned(),
+                bytes: Arc::from(b"picture bytes".as_slice()),
+            },
+            color_space: ColorSpace::Srgb,
+        };
+        textures.insert(logo.clone());
+        textures.insert(Texture {
+            source: TextureSource::Embedded {
+                file_name: "no extension".to_owned(),
+                bytes: Arc::from(b"more".as_slice()),
+            },
+            ..logo
+        });
+
+        let bytes = write(&doc, None, Some(&folder)).unwrap();
+        let files = entries(&bytes);
+        let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, [DOCUMENT_ENTRY, "textures/3.png", "textures/4.bin"]);
+        assert_eq!(files[1].1, b"picture bytes");
+        let json = String::from_utf8(files[0].1.clone()).unwrap();
+        assert!(
+            json.contains("\"file\": \"maps/wood.jpg\""),
+            "relative inside the folder: {json}"
+        );
+        assert!(json.contains("\"file\": \"relative/brick.png\""), "{json}");
+        assert!(json.contains("\"color_space\": \"linear\""), "the HDR's: {json}");
+
+        // Read in another folder: the relative ones follow it.
+        let moved = std::env::temp_dir().join("grid4d-textures").join("moved");
+        let (back, _) = crate::from_bytes_at(&bytes, &moved).unwrap();
+        let sources: Vec<TextureSource> = back.scene.textures().iter().map(|(_, t)| t.source.clone()).collect();
+        assert_eq!(sources[0], TextureSource::Linked(moved.join("maps").join("wood.jpg")));
+        assert_eq!(sources[1], TextureSource::Linked(outside));
+        assert_eq!(
+            sources[2],
+            TextureSource::Linked(moved.join("relative").join("brick.png"))
+        );
+        assert_eq!(
+            &sources[3..],
+            [
+                doc.scene.textures().iter().nth(3).unwrap().1.source.clone(),
+                doc.scene.textures().iter().nth(4).unwrap().1.source.clone()
+            ]
+        );
+        // Read back in the same folder: the same paths (a relative one now
+        // taken from the folder).
+        let (same, _) = crate::from_bytes_at(&bytes, &folder).unwrap();
+        let paths: Vec<TextureSource> = same.scene.textures().iter().map(|(_, t)| t.source.clone()).collect();
+        assert_eq!(paths[0], TextureSource::Linked(inside));
+        assert_eq!(
+            paths[2],
+            TextureSource::Linked(folder.join("relative").join("brick.png"))
+        );
+        assert_eq!(
+            write(&same, None, Some(&folder)).unwrap(),
+            bytes,
+            "saved again: the same file"
+        );
+
+        // Neither or both sources, or an embedded entry missing: errors.
+        let ok = String::from_utf8(entries(&to_bytes(&doc).unwrap()).swap_remove(0).1).unwrap();
+        let load = |json: &str| from_bytes(&archive(&[(DOCUMENT_ENTRY, json.as_bytes())]));
+        let both = ok.replacen(
+            "\"embedded\": \"no extension\"",
+            "\"embedded\": \"no extension\", \"file\": \"x.png\"",
+            1,
+        );
+        assert!(matches!(load(&both), Err(IoError::Invalid(_))));
+        let neither = ok.replacen("\"file\": \"maps", "\"elsewhere\": \"maps", 1);
+        assert!(matches!(load(&neither), Err(IoError::Invalid(_))));
+        assert!(matches!(load(&ok), Err(IoError::Invalid(message)) if message.contains("textures/3.png")));
     }
 
     #[test]

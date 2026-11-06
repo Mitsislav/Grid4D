@@ -24,6 +24,7 @@ use grid4d_scene::{
     MeshHandle, Node, ObjectKind, ObjectKindTag, ObjectParam, Override, Param, PluginObject, PluginValue, SceneEdit,
     SimulationCache, Tag, Take, Tangents, Track,
 };
+use grid4d_scene::{ColorSpace, Texture, TextureSource};
 
 /// Written by the current format version (an archive).
 const GOLDEN: &str = "tests/fixtures/demo_v4.g4d";
@@ -104,9 +105,22 @@ fn golden_with(mesh: grid4d_geom::PolyMesh) -> Document {
 }
 
 /// Everything a version 4 file can hold (see `docs/FILE_FORMAT.md`): version
-/// 3's, and what Phase 15 adds as it arrives — its mesh has UVs (15.2).
+/// 3's, and what Phase 15 adds as it arrives — its mesh has UVs (15.2); a
+/// linked and an embedded texture (15.3).
 fn full_document() -> (Document, SimulationCache) {
     let (mut doc, cache) = full_v3_document();
+    let textures = doc.scene.textures_mut();
+    textures.insert(Texture::linked(PathBuf::from("maps/wood.jpg")));
+    let pixels = [255u8, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255];
+    let png = grid4d_io::png_bytes(2, 2, grid4d_io::Channels::Rgba, &pixels).unwrap();
+    textures.insert(Texture {
+        name: "Checker".to_owned(),
+        source: TextureSource::Embedded {
+            file_name: "checker.png".to_owned(),
+            bytes: png.into(),
+        },
+        color_space: ColorSpace::Linear,
+    });
     let id = doc.scene.iter().find(|(_, n)| n.data.name == "Mesh").unwrap().0;
     let node = doc.scene.get_mut(id).unwrap();
     let ObjectKind::Polygon { mesh, .. } = &mut node.data.kind else {

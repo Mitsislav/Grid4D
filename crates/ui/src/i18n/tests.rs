@@ -159,6 +159,8 @@ fn shown_texts() -> BTreeSet<String> {
             "icon_button(",
             "_row(",
             "commit(",
+            "edit_textures(",
+            "push_change(",
             "record(",
             "record_as_is(",
             "status_hint = Some(",

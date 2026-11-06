@@ -32,10 +32,11 @@ pub enum Pane {
     Timeline,
     FCurve,
     Materials,
+    Textures,
 }
 
 impl Pane {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Viewport,
         Self::Objects,
         Self::Takes,
@@ -45,6 +46,7 @@ impl Pane {
         Self::Timeline,
         Self::FCurve,
         Self::Materials,
+        Self::Textures,
     ];
 
     /// Its tab's title.
@@ -60,6 +62,7 @@ impl Pane {
             Self::Timeline => "Timeline",
             Self::FCurve => "F-Curve",
             Self::Materials => "Materials",
+            Self::Textures => "Textures",
         }
     }
 
@@ -76,6 +79,7 @@ impl Pane {
             Self::Timeline => "Timeline",
             Self::FCurve => "F-Curve Editor",
             Self::Materials => "Material Manager",
+            Self::Textures => "Texture Manager",
         }
     }
 
@@ -91,6 +95,7 @@ impl Pane {
             Self::Timeline => &[Self::FCurve, Self::Materials],
             Self::FCurve => &[Self::Timeline, Self::Materials],
             Self::Materials => &[Self::Timeline, Self::FCurve, Self::Objects],
+            Self::Textures => &[Self::Materials, Self::Timeline, Self::Objects],
         }
     }
 
@@ -175,6 +180,7 @@ pub struct Panels {
     pub timeline: TimelinePanel,
     pub fcurve: FCurvePanel,
     pub materials: MaterialsPanel,
+    pub textures: crate::panels::TextureManagerPanel,
     pub layers: crate::panels::LayersPanel,
     pub takes: crate::panels::TakesPanel,
 }
@@ -190,6 +196,7 @@ impl Panels {
             timeline: TimelinePanel::default(),
             fcurve: FCurvePanel::default(),
             materials: MaterialsPanel,
+            textures: crate::panels::TextureManagerPanel::default(),
             layers: crate::panels::LayersPanel::default(),
             takes: crate::panels::TakesPanel::default(),
         }
@@ -356,6 +363,7 @@ impl Behavior<Pane> for Dispatch<'_> {
                         Pane::Timeline => panels.timeline.show(ui, doc, editor),
                         Pane::FCurve => panels.fcurve.show(ui, doc, editor),
                         Pane::Materials => panels.materials.show(ui, doc, editor),
+                        Pane::Textures => panels.textures.show(ui, doc, editor),
                         Pane::Takes => panels.takes.show(ui, doc, editor),
                         Pane::Layers => panels.layers.show(ui, doc, editor),
                         Pane::Viewport => {}
@@ -459,13 +467,13 @@ fn linear(tiles: &mut Tiles<Pane>, horizontal: bool, children: &[(TileId, f32)])
 
 /// The tree of a preset layout.
 fn preset(layout: Layout) -> Tree<Pane> {
-    use Pane::{Attributes, Coordinates, FCurve, Layers, Materials, Objects, Takes, Timeline, Viewport};
+    use Pane::{Attributes, Coordinates, FCurve, Layers, Materials, Objects, Takes, Textures, Timeline, Viewport};
     let mut tiles = Tiles::default();
     let t = &mut tiles;
     let root = match layout {
         Layout::Standard => {
             let viewport = tabs(t, &[Viewport]);
-            let bottom = tabs(t, &[Timeline, FCurve, Materials]);
+            let bottom = tabs(t, &[Timeline, FCurve, Materials, Textures]);
             let left = linear(t, false, &[(viewport, 0.8), (bottom, 0.2)]);
             let objects = tabs(t, &[Objects, Takes]);
             let attributes = tabs(t, &[Attributes, Coordinates, Layers]);
@@ -476,7 +484,7 @@ fn preset(layout: Layout) -> Tree<Pane> {
             let viewport = tabs(t, &[Viewport]);
             let bottom = tabs(t, &[Timeline, FCurve]);
             let left = linear(t, false, &[(viewport, 0.86), (bottom, 0.14)]);
-            let objects = tabs(t, &[Objects, Takes, Layers, Materials]);
+            let objects = tabs(t, &[Objects, Takes, Layers, Materials, Textures]);
             let attributes = tabs(t, &[Attributes]);
             let coordinates = tabs(t, &[Coordinates]);
             let managers = linear(t, true, &[(attributes, 0.55), (coordinates, 0.45)]);
@@ -485,7 +493,7 @@ fn preset(layout: Layout) -> Tree<Pane> {
         }
         Layout::Animate => {
             let viewport = tabs(t, &[Viewport]);
-            let bottom = tabs(t, &[FCurve, Timeline, Materials]);
+            let bottom = tabs(t, &[FCurve, Timeline, Materials, Textures]);
             let left = linear(t, false, &[(viewport, 0.55), (bottom, 0.45)]);
             let objects = tabs(t, &[Objects, Takes, Layers]);
             let attributes = tabs(t, &[Attributes, Coordinates]);

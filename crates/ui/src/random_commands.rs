@@ -143,7 +143,7 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
         _ => SelectMode::Remove,
     };
 
-    match rng.below(52) {
+    match rng.below(53) {
         0..=2 => EditorCommand::CreateObject(tag(rng)),
         3 => EditorCommand::CreateObject(ObjectKindTag::Cube),
         4 => EditorCommand::CreateChild(tag(rng)),
@@ -407,6 +407,19 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
                     settings.inset.offset = rng.range(0.0, 20.0);
                     settings.bevel.offset = rng.range(0.0, 20.0);
                     EditorCommand::ApplyMeshTool
+                }
+            }
+        }
+        51 => {
+            // The Texture Manager: pictures that need not exist (embedding a
+            // missing one is an alert and changes nothing).
+            let textures = doc.scene.textures().ids().to_vec();
+            match (rng.pick(&textures), rng.below(4)) {
+                (Some(id), 0) => EditorCommand::DeleteTexture(id),
+                (Some(id), 1) => EditorCommand::EmbedTexture(id),
+                (_, 2) => EditorCommand::RemoveUnusedTextures,
+                _ => {
+                    EditorCommand::AddTextureFiles(vec![std::path::PathBuf::from(format!("maps/{}.png", rng.below(5)))])
                 }
             }
         }

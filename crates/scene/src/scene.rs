@@ -93,6 +93,8 @@ pub struct Scene {
     materials: crate::Materials,
     /// The document's layers (here for the same reason).
     layers: crate::Layers,
+    /// The document's textures (here for the same reason).
+    textures: crate::Textures,
     revision: u64,
 }
 
@@ -105,6 +107,7 @@ impl Default for Scene {
             detached_count: 0,
             materials: crate::Materials::default(),
             layers: crate::Layers::default(),
+            textures: crate::Textures::default(),
             revision: next_revision(),
         }
     }
@@ -132,6 +135,18 @@ impl Scene {
     pub fn materials_mut(&mut self) -> &mut crate::Materials {
         self.touch();
         &mut self.materials
+    }
+
+    /// The document's textures.
+    #[must_use]
+    pub fn textures(&self) -> &crate::Textures {
+        &self.textures
+    }
+
+    /// Write access to the textures (marks the scene as changed).
+    pub fn textures_mut(&mut self) -> &mut crate::Textures {
+        self.touch();
+        &mut self.textures
     }
 
     /// The document's layers.

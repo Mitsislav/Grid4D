@@ -34,8 +34,10 @@ pub fn show(ctx: &egui::Context) {
 fn hover_label<'a>(paths: impl Iterator<Item = Option<&'a std::path::Path>>) -> Option<String> {
     let mut any = false;
     let mut any_path = false;
-    // A document wins over a model anywhere in the same drop.
+    // A document wins over a model anywhere in the same drop, a model over
+    // pictures.
     let mut merge: Option<String> = None;
+    let mut pictures = 0usize;
     for path in paths {
         any = true;
         let Some(path) = path else { continue };
@@ -47,14 +49,20 @@ fn hover_label<'a>(paths: impl Iterator<Item = Option<&'a std::path::Path>>) -> 
         if merge.is_none() && grid4d_io::is_importable(path) {
             merge = Some(trf("Drop to merge {0}", &[&name()]));
         }
+        if file::is_picture(path) {
+            pictures += 1;
+        }
     }
     match (any, any_path, merge) {
         (false, _, _) => None,
         (true, true, Some(merge)) => Some(merge),
+        (true, true, None) if pictures > 0 => Some(trf("Drop to add {0} as textures", &[&pictures])),
         (true, true, None) => {
-            Some(tr("Only Grid4D documents (.g4d) and models (.gltf, .glb, .obj) can be dropped").to_owned())
+            Some(tr("Only Grid4D documents (.g4d), models (.gltf, .glb, .obj) and pictures can be dropped").to_owned())
         }
-        (true, false, _) => Some(tr("Drop a .g4d document to open it, or a model to merge it").to_owned()),
+        (true, false, _) => {
+            Some(tr("Drop a .g4d document to open it, a model to merge it, or pictures to add them").to_owned())
+        }
     }
 }
 
@@ -73,11 +81,11 @@ mod tests {
         );
         assert_eq!(
             hover_label([Some(Path::new("notes.txt"))].into_iter()).as_deref(),
-            Some("Only Grid4D documents (.g4d) and models (.gltf, .glb, .obj) can be dropped")
+            Some("Only Grid4D documents (.g4d), models (.gltf, .glb, .obj) and pictures can be dropped")
         );
         assert_eq!(
             hover_label([None].into_iter()).as_deref(),
-            Some("Drop a .g4d document to open it, or a model to merge it")
+            Some("Drop a .g4d document to open it, a model to merge it, or pictures to add them")
         );
         assert_eq!(
             hover_label([Some(Path::new("duck.glb")), Some(Path::new("shot.g4d"))].into_iter()).as_deref(),

@@ -128,10 +128,10 @@ except the viewport has a tab with its name.
   - **Standard** — the Object Manager above the Attribute Manager on the right,
     the timeline under the viewport;
   - **Modeling** — a larger viewport, the Attribute and Coordinate Managers side
-    by side, the Material Manager as a tab beside the Object Manager and a short
-    timeline;
+    by side, the Material and Texture Managers as tabs beside the Object Manager
+    and a short timeline;
   - **Animate** — the F-Curve editor large under the viewport, with the
-    timeline and the Material Manager as its tabs.
+    timeline and the Material and Texture Managers as its tabs.
 - **Window ▸ Reset Layout** puts the current layout back the way it was before
   you moved anything.
 
@@ -2052,6 +2052,63 @@ their objects show their display colour again; undo brings everything back.
 
 Every change is one undo step. Materials are saved with the document, travel with
 glTF and OBJ files ([§9](#9-files)), and come along when you merge a document.
+
+### 19.1 Textures and the Texture Manager
+
+A **texture** is a picture a document uses — a photo of wood, a pattern, a
+sky. The **Texture Manager** (the **Textures** tab beside the Material
+Manager, or **Window ▸ Texture Manager**) lists every texture of the
+document. Grid4D reads **PNG, JPEG, TIFF, WebP, HDR** and **OpenEXR**
+pictures.
+
+> Materials use textures from Grid4D 1.1's next steps on; for now you can
+> collect, check and organise the pictures a project will use.
+
+![The Texture Manager: two linked pictures from the document's maps folder (one selected, its colour space Linear), an embedded sky, and a picture that is missing](images/manual/texture-manager.png)
+
+**Adding pictures**
+
+- **Add…** at the top of the Texture Manager chooses one or more pictures.
+- Or **drop** picture files anywhere on the window. (A dropped document is
+  opened and a dropped model merged first; pictures are added when neither is
+  in the drop.)
+- Each picture becomes a texture named after its file. A picture that is
+  already in the list is selected instead of being added twice.
+
+**The list** shows each texture's thumbnail, name, size in pixels and where it
+comes from. Pictures load in the background, so a large one never makes
+Grid4D wait. Click a texture to select it; its **Name** and **Colour Space**
+can then be changed at the bottom of the manager:
+
+| Colour space | Use it for |
+|--------------|------------|
+| sRGB | colour pictures: photos, paintings, patterns (the usual setting) |
+| Linear | data: roughness, metallic, height or normal maps; HDR and OpenEXR pictures are linear when added |
+
+**Linked or embedded.** A texture is normally **linked**: the document
+remembers where the file is, and changes to the file show up in Grid4D when
+you next work in it. Pictures inside the document's folder (or a folder
+below it, such as `maps`) are remembered relative to it, so you can move or
+send the whole folder. An **embedded** texture keeps a copy of the picture
+inside the `.g4d` file instead — handy for sending a single file.
+
+| Button (or right-click a texture) | What it does |
+|--------|--------------|
+| **Relink…** | chooses another picture for the selected texture |
+| **Relink Folder…** | looks in a folder you choose for every missing picture, by its file name, and links the ones it finds |
+| **Embed** | keeps a copy of the picture inside the document |
+| **Unembed…** | writes an embedded picture to a file you choose and links it |
+| **Reveal** | shows the picture's file in Explorer, Finder or your file manager |
+| **Delete** | removes the texture |
+| **Remove Unused** | removes every texture no material uses (today: all of them) |
+
+**Missing pictures.** A document whose pictures were moved or deleted still
+opens. Missing textures show a magenta and black checker and the path that
+was looked for, in orange, and the status bar says **Missing textures: n**.
+Put the files back, or use **Relink…** / **Relink Folder…**.
+
+Every change in the Texture Manager is one undo step; textures are saved with
+the document (Grid4D 1.1's file format, [§9](#9-files)).
 
 ## 20. Rendering
 

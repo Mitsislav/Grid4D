@@ -98,6 +98,9 @@ proptest = { version = "1.12", default-features = false, features = ["std"] }
 # Rendered pictures (grid4d-io): PNG; OpenEXR written by hand with zlib (the
 # backend zip already uses) and half floats. `exr` (dev only) reads them back in tests.
 png = "0.18"
+# Texture pictures (grid4d-io): only these decoders, all pure Rust with
+# permissive licences (D25). eframe already brings `image` with PNG and TIFF.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "tiff", "webp", "hdr", "exr"] }
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 half = "2.7"
 exr = "1.73"

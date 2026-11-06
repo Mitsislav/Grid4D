@@ -752,6 +752,10 @@ pub struct EditorState {
     pub curves: CurveSelection,
     /// The Material Manager's selection, focus and drag.
     pub materials: MaterialSelection,
+    /// The document's texture pictures, loaded in the background.
+    pub textures: crate::textures::TextureCache,
+    /// The texture selected in the Texture Manager.
+    pub texture_selection: Option<grid4d_scene::TextureId>,
     /// The object the viewport looks through (Cameras ▸ Use Camera); `None`: the
     /// view's own editor camera.
     pub view_camera: Option<NodeId>,
@@ -837,6 +841,8 @@ impl Default for EditorState {
             keys: KeySelection::default(),
             curves: CurveSelection::default(),
             materials: MaterialSelection::default(),
+            textures: crate::textures::TextureCache::default(),
+            texture_selection: None,
             view_camera: None,
             panes: crate::workspace::PaneState::default(),
             seen_frame: None,

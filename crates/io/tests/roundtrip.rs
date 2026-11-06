@@ -213,8 +213,24 @@ proptest! {
         objects in prop::collection::vec(object(), 0..24),
         materials in prop::collection::vec((colour(), 0.0f32..=1.0), 0..3),
         layers in prop::collection::vec(colour(), 0..3),
+        textures in prop::collection::vec(
+            ("[a-z]{1,8}", prop::option::of(prop::collection::vec(any::<u8>(), 0..32)), any::<bool>()),
+            0..4,
+        ),
     ) {
-        let doc = document(objects, materials, layers);
+        let mut doc = document(objects, materials, layers);
+        // Textures (version 4): linked by a relative path, or embedded.
+        for (name, embedded, linear) in textures {
+            let source = match embedded {
+                Some(bytes) => grid4d_scene::TextureSource::Embedded {
+                    file_name: format!("{name}.png"),
+                    bytes: bytes.into(),
+                },
+                None => grid4d_scene::TextureSource::Linked(format!("maps/{name}.jpg").into()),
+            };
+            let color_space = if linear { grid4d_scene::ColorSpace::Linear } else { grid4d_scene::ColorSpace::Srgb };
+            doc.scene.textures_mut().insert(grid4d_scene::Texture { name, source, color_space });
+        }
         let bytes = grid4d_io::to_bytes(&doc).unwrap();
         let loaded = grid4d_io::from_bytes(&bytes).unwrap();
         prop_assert_eq!(loaded.scene.len(), doc.scene.len());

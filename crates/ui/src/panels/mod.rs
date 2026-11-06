@@ -30,6 +30,7 @@ pub mod render_settings;
 pub mod script_manager;
 pub mod status_bar;
 pub mod takes;
+pub mod texture_manager;
 pub mod timeline;
 pub mod toolbar;
 pub mod unsaved_changes;
@@ -44,6 +45,7 @@ pub use outliner::OutlinerPanel;
 pub use picture_viewer::PictureViewerPanel;
 pub use render_settings::RenderSettingsPanel;
 pub use takes::TakesPanel;
+pub use texture_manager::TextureManagerPanel;
 pub use timeline::TimelinePanel;
 pub use viewport::ViewportPanel;
 
@@ -108,6 +110,41 @@ mod tests {
         let camera = doc.scene.iter().find(|(_, n)| n.data.name == "Camera").unwrap().0;
         editor.view_camera = Some(camera);
         editor.selection.set_single(camera);
+        assert_idle_frames_leave_the_document_alone(doc, editor);
+    }
+
+    /// The Texture Manager shows pictures, loading, missing and broken ones,
+    /// with one selected, without writing anything.
+    #[test]
+    fn idle_frames_with_textures_do_not_touch_the_document() {
+        use grid4d_scene::{ColorSpace, Texture, TextureSource};
+
+        let mut doc = Document::with_demo_scene();
+        let pixels = [255u8; 16];
+        let png = grid4d_io::png_bytes(2, 2, grid4d_io::Channels::Rgba, &pixels).unwrap();
+        let textures = doc.scene.textures_mut();
+        let logo = textures.insert(Texture {
+            name: "Logo".to_owned(),
+            source: TextureSource::Embedded {
+                file_name: "logo.png".to_owned(),
+                bytes: png.into(),
+            },
+            color_space: ColorSpace::Linear,
+        });
+        textures.insert(Texture::linked(std::env::temp_dir().join("grid4d-no-such-picture.png")));
+        textures.insert(Texture {
+            name: "Broken".to_owned(),
+            source: TextureSource::Embedded {
+                file_name: "broken.png".to_owned(),
+                bytes: b"not a picture".as_slice().into(),
+            },
+            color_space: ColorSpace::Srgb,
+        });
+        let mut editor = EditorState {
+            texture_selection: Some(logo),
+            ..EditorState::default()
+        };
+        editor.textures.wait(doc.scene.textures());
         assert_idle_frames_leave_the_document_alone(doc, editor);
     }
 
@@ -216,6 +253,7 @@ mod tests {
         let mut fcurve = FCurvePanel::default();
         let mut coordinates = CoordinatesPanel::default();
         let mut materials = MaterialsPanel;
+        let mut textures = TextureManagerPanel::default();
         let mut render_settings = RenderSettingsPanel::default();
         let mut picture_viewer = PictureViewerPanel::default();
         let mut viewport = ViewportPanel::new(None);
@@ -231,6 +269,7 @@ mod tests {
                 fcurve.show(ui, doc, editor);
                 coordinates.show(ui, doc, editor);
                 materials.show(ui, doc, editor);
+                textures.show(ui, doc, editor);
                 viewport.show(ui, doc, editor);
                 render_settings.show(ui.ctx(), doc, editor);
                 picture_viewer.show(ui.ctx(), editor);

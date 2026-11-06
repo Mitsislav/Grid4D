@@ -50,6 +50,26 @@ pub trait FileDialogs: std::fmt::Debug {
     fn pick_script(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
         self.pick_open(directory)
     }
+    /// Pictures to use as textures (Texture Manager ▸ Add…); empty if
+    /// cancelled.
+    fn pick_textures(&mut self, directory: Option<&Path>) -> Vec<PathBuf> {
+        self.pick_open(directory).into_iter().collect()
+    }
+    /// A picture to link a texture to (Relink…), or `None` if cancelled.
+    fn pick_texture(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
+        self.pick_open(directory)
+    }
+    /// A folder to look for missing pictures in (Relink Folder…), or `None`
+    /// if cancelled.
+    fn pick_folder(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
+        let _ = directory;
+        None
+    }
+    /// Where to write an embedded picture out (Unembed…), or `None` if
+    /// cancelled. `suggested` is its original file name.
+    fn pick_texture_save(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
+        self.pick_save(directory, suggested)
+    }
 }
 
 /// The platform dialogs (Win32, Cocoa, XDG desktop portal), via `rfd`.
@@ -102,6 +122,43 @@ impl FileDialogs for NativeDialogs {
             .add_filter(tr("Pictures (PNG, OpenEXR)"), &["png", "exr"])
             .set_file_name(suggested)
             .save_file()
+    }
+
+    fn pick_textures(&mut self, directory: Option<&Path>) -> Vec<PathBuf> {
+        with_directory(rfd::FileDialog::new(), directory)
+            .set_title(tr("Add Textures"))
+            .add_filter(tr("Pictures"), &grid4d_io::TEXTURE_EXTENSIONS)
+            .pick_files()
+            .unwrap_or_default()
+    }
+
+    fn pick_texture(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
+        with_directory(rfd::FileDialog::new(), directory)
+            .set_title(tr("Relink Texture"))
+            .add_filter(tr("Pictures"), &grid4d_io::TEXTURE_EXTENSIONS)
+            .pick_file()
+    }
+
+    fn pick_folder(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
+        with_directory(rfd::FileDialog::new(), directory)
+            .set_title(tr("Look for Missing Textures In"))
+            .pick_folder()
+    }
+
+    fn pick_texture_save(&mut self, directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
+        let extension = Path::new(suggested)
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let dialog = with_directory(rfd::FileDialog::new(), directory)
+            .set_title(tr("Unembed Texture"))
+            .set_file_name(suggested);
+        let dialog = if extension.is_empty() {
+            dialog
+        } else {
+            dialog.add_filter(tr("Pictures"), &[extension.as_str()])
+        };
+        dialog.save_file()
     }
 }
 
@@ -933,8 +990,16 @@ pub fn accept_dropped_files(ctx: &egui::Context, editor: &mut EditorState) {
         None => {}
         Some(Ok(DropAction::Open(path))) => editor.commands.push(EditorCommand::OpenFile(path)),
         Some(Ok(DropAction::Merge(path))) => editor.commands.push(EditorCommand::MergeFile(path)),
+        Some(Ok(DropAction::Textures(paths))) => editor.commands.push(EditorCommand::AddTextureFiles(paths)),
         Some(Err(alert)) => editor.file.alert = Some(alert),
     }
+}
+
+/// `true` for pictures Grid4D reads as textures (any letter case).
+#[must_use]
+pub fn is_picture(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| grid4d_io::is_texture_extension(&ext.to_string_lossy()))
 }
 
 /// What a drop does.
@@ -944,11 +1009,14 @@ enum DropAction {
     Open(PathBuf),
     /// A glTF file: merge it (the reference's "Merge on Drag & Drop").
     Merge(PathBuf),
+    /// Pictures: add them as textures.
+    Textures(Vec<PathBuf>),
 }
 
-/// The first `.g4d` among `paths` (opened), else the first glTF file (merged);
-/// `None` if nothing was dropped, an alert if none of them can be used. (One
-/// document is open at a time, so further files in the same drop are ignored.)
+/// The first `.g4d` among `paths` (opened), else the first glTF file (merged),
+/// else every picture (added as textures); `None` if nothing was dropped, an
+/// alert if none of them can be used. (One document is open at a time, so
+/// further files in the same drop are ignored.)
 fn choose_dropped(paths: &[&Path]) -> Option<Result<DropAction, Alert>> {
     if paths.is_empty() {
         return None;
@@ -956,11 +1024,17 @@ fn choose_dropped(paths: &[&Path]) -> Option<Result<DropAction, Alert>> {
     if let Some(path) = paths.iter().find(|path| is_document(path)) {
         return Some(Ok(DropAction::Open(path.to_path_buf())));
     }
+    let pictures: Vec<PathBuf> = paths
+        .iter()
+        .filter(|path| is_picture(path))
+        .map(|path| path.to_path_buf())
+        .collect();
     Some(match paths.iter().find(|path| grid4d_io::is_importable(path)) {
         Some(path) => Ok(DropAction::Merge(path.to_path_buf())),
+        None if !pictures.is_empty() => Ok(DropAction::Textures(pictures)),
         None => {
             let mut message = trf(
-                "None of the dropped files is a Grid4D document (.{0}) or a model (.gltf, .glb, .obj):",
+                "None of the dropped files is a Grid4D document (.{0}), a model (.gltf, .glb, .obj) or a picture:",
                 &[&grid4d_io::EXTENSION],
             );
             message.push('\n');
@@ -1094,6 +1168,11 @@ mod tests {
         fn pick_render_output(&mut self, _directory: Option<&Path>, suggested: &str) -> Option<PathBuf> {
             self.log.borrow_mut().save_suggestions.push(suggested.to_owned());
             self.render.clone()
+        }
+
+        /// The folder of the open dialog's answer.
+        fn pick_folder(&mut self, _directory: Option<&Path>) -> Option<PathBuf> {
+            self.open.as_deref().and_then(Path::parent).map(Path::to_path_buf)
         }
     }
 
@@ -1921,5 +2000,136 @@ mod tests {
         };
         let plain = grid4d_eval::editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap();
         assert_ne!(mesh.mesh().points(), plain.points(), "the bent shape is written");
+    }
+
+    /// A `width × 1` PNG.
+    fn png(width: u32) -> Vec<u8> {
+        let pixels = vec![120u8; usize::try_from(width).unwrap() * 4];
+        grid4d_io::png_bytes(width, 1, grid4d_io::Channels::Rgba, &pixels).unwrap()
+    }
+
+    fn only_texture(f: &Fixture) -> (grid4d_scene::TextureId, grid4d_scene::Texture) {
+        let textures = f.doc.scene.textures();
+        assert_eq!(textures.len(), 1);
+        let (id, texture) = textures.iter().next().unwrap();
+        (id, texture.clone())
+    }
+
+    #[test]
+    fn textures_are_added_embedded_unembedded_and_relinked_each_one_undo_step() {
+        use grid4d_scene::TextureSource;
+
+        let mut f = Fixture::new("textures", Some("maps/wood.png"), Some("out/logo.png"));
+        let wood = f.dir.join("maps").join("wood.png");
+        std::fs::create_dir_all(wood.parent().unwrap()).unwrap();
+        std::fs::write(&wood, png(4)).unwrap();
+
+        // Add…: linked, named after the file, selected and shown.
+        f.run(&[EditorCommand::AddTextures]);
+        let (id, texture) = only_texture(&f);
+        assert_eq!(texture.source, TextureSource::Linked(wood.clone()));
+        assert_eq!(texture.name, "wood");
+        assert_eq!(f.editor.texture_selection, Some(id));
+        assert_eq!(f.editor.panes.show, Some(crate::workspace::Pane::Textures));
+        // The same picture again (and a file that is no picture): nothing new.
+        f.run(&[EditorCommand::AddTextureFiles(vec![
+            wood.clone(),
+            f.dir.join("notes.txt"),
+        ])]);
+        assert_eq!(f.doc.scene.textures().len(), 1);
+        assert_eq!(f.editor.history.undo_len(), 1);
+
+        // Embed: the file's bytes in the document.
+        f.run(&[EditorCommand::EmbedTexture(id)]);
+        let TextureSource::Embedded { file_name, bytes } = only_texture(&f).1.source else {
+            panic!("embedded")
+        };
+        assert_eq!((file_name.as_str(), &bytes[..]), ("wood.png", &png(4)[..]));
+
+        // Unembed…: written where the user says, and linked there.
+        std::fs::create_dir_all(f.dir.join("out")).unwrap();
+        f.run(&[EditorCommand::UnembedTexture(id)]);
+        let logo = f.dir.join("out").join("logo.png");
+        assert_eq!(std::fs::read(&logo).unwrap(), png(4));
+        assert_eq!(only_texture(&f).1.source, TextureSource::Linked(logo));
+        assert_eq!(
+            f.log.borrow().save_suggestions.last().map(String::as_str),
+            Some("wood.png")
+        );
+
+        // Relink…: back to the first picture.
+        f.run(&[EditorCommand::RelinkTexture(id)]);
+        assert_eq!(only_texture(&f).1.source, TextureSource::Linked(wood.clone()));
+
+        // A missing file cannot be embedded: an alert, nothing changes.
+        std::fs::remove_file(&wood).unwrap();
+        f.run(&[EditorCommand::EmbedTexture(id)]);
+        assert_eq!(
+            f.editor.file.alert.take().map(|a| a.title),
+            Some("Cannot Embed Texture")
+        );
+        assert_eq!(f.editor.history.undo_len(), 4);
+
+        // Every step undoes, and redoes.
+        f.run(&[const { EditorCommand::Undo }; 4]);
+        assert!(f.doc.scene.textures().is_empty());
+        f.run(&[const { EditorCommand::Redo }; 4]);
+        assert_eq!(only_texture(&f).1.source, TextureSource::Linked(wood));
+
+        // Remove Unused: no material uses a texture yet.
+        f.run(&[EditorCommand::RemoveUnusedTextures]);
+        assert!(f.doc.scene.textures().is_empty());
+        assert_eq!(f.editor.texture_selection, None, "the selection goes with it");
+        f.run(&[EditorCommand::Undo]);
+        f.run(&[EditorCommand::DeleteTexture(id)]);
+        assert!(f.doc.scene.textures().is_empty());
+        let _ = std::fs::remove_dir_all(&f.dir);
+    }
+
+    #[test]
+    fn relink_folder_finds_missing_pictures_by_name() {
+        use grid4d_scene::{Texture, TextureSource};
+
+        // The fake folder dialog answers the open dialog's folder: `found`.
+        let mut f = Fixture::new("relink_folder", Some("found/any.png"), None);
+        let found = f.dir.join("found");
+        std::fs::create_dir_all(&found).unwrap();
+        std::fs::write(found.join("wood.png"), png(2)).unwrap();
+        let textures = f.doc.scene.textures_mut();
+        let wood = textures.insert(Texture::linked(f.dir.join("gone").join("wood.png")));
+        let other = textures.insert(Texture::linked(f.dir.join("gone").join("other.png")));
+        f.editor.textures.wait(f.doc.scene.textures());
+        assert_eq!(f.editor.textures.missing(f.doc.scene.textures()), 2);
+
+        f.run(&[EditorCommand::RelinkTextureFolder]);
+        let source = |f: &Fixture, id| f.doc.scene.textures().get(id).unwrap().source.clone();
+        assert_eq!(source(&f, wood), TextureSource::Linked(found.join("wood.png")));
+        assert_eq!(
+            source(&f, other),
+            TextureSource::Linked(f.dir.join("gone").join("other.png"))
+        );
+        assert_eq!(f.editor.history.undo_len(), 1);
+        f.editor.textures.wait(f.doc.scene.textures());
+        assert_eq!(f.editor.textures.missing(f.doc.scene.textures()), 1);
+
+        // Nothing more to find there: told, nothing changes.
+        f.run(&[EditorCommand::RelinkTextureFolder]);
+        assert_eq!(f.editor.file.alert.take().map(|a| a.title), Some("Relink Folder"));
+        assert_eq!(f.editor.history.undo_len(), 1);
+        let _ = std::fs::remove_dir_all(&f.dir);
+    }
+
+    #[test]
+    fn dropped_pictures_become_textures() {
+        let picture = PathBuf::from("maps/wood.JPG");
+        assert_eq!(
+            choose_dropped(&[Path::new("notes.txt"), &picture]),
+            Some(Ok(DropAction::Textures(vec![picture.clone()])))
+        );
+        // A model wins over pictures in the same drop.
+        assert_eq!(
+            choose_dropped(&[&picture, Path::new("car.glb")]),
+            Some(Ok(DropAction::Merge(PathBuf::from("car.glb"))))
+        );
     }
 }

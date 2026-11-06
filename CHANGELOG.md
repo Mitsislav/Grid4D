@@ -12,6 +12,11 @@ Toward 1.1: materials, UVs and textures.
 - **UVs** — every primitive and generator (Extrude, Lathe, Sweep, Loft,
   Subdivision Surface) has texture coordinates, kept by Make Editable and
   written by glTF and OBJ export.
+- **Textures** — a Texture Manager lists the pictures a document uses (PNG,
+  JPEG, TIFF, WebP, HDR, OpenEXR), loaded in the background: add them or drop
+  them on the window, link them (paths inside the document's folder stay
+  relative) or embed them in the document, relink missing ones, one by one
+  or by folder. Missing pictures never stop a document from opening.
 - **Files** — documents are saved in `.g4d` format version 4. Every file of
   Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
   files and says they come from a newer Grid4D.

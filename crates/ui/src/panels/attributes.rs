@@ -1656,8 +1656,16 @@ fn optional_length_row(
 
 fn bounded_count_row(ui: &mut Ui, label: &str, value: &mut u32, min: u32, max: u32) {
     attr_label(ui, label, LABEL_WIDTH);
-    ui.add_sized([FIELD_WIDTH, 19.0], DragValue::new(value).speed(0.1).range(min..=max));
+    let field = ui.add_sized([FIELD_WIDTH, 19.0], DragValue::new(value).speed(0.1).range(min..=max));
+    name_field(ui, &field, label);
     ui.end_row();
+}
+
+/// Names a field for screen readers (and the interface tests) after the
+/// label beside it, which `attr_label` draws as plain text.
+fn name_field(ui: &Ui, field: &egui::Response, label: &str) {
+    ui.ctx()
+        .accesskit_node_builder(field.id, |node| node.set_label(tr(label)));
 }
 
 /// A 0…1 value shown as 0…100 %.
@@ -2177,7 +2185,8 @@ fn cap_rows(ui: &mut Ui, start: &mut bool, end: &mut bool, cap_type: &mut CapTyp
 
 fn check_row(ui: &mut Ui, label: &str, value: &mut bool) {
     attr_label(ui, label, LABEL_WIDTH);
-    ui.checkbox(value, "");
+    let field = ui.checkbox(value, "");
+    name_field(ui, &field, label);
     ui.end_row();
 }
 
@@ -2200,37 +2209,35 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
         .spacing([6.0, 4.0])
         .show(ui, |ui| {
             attr_label(ui, "Name", LABEL_WIDTH);
-            ui.add(TextEdit::singleline(&mut doc.name).desired_width(f32::INFINITY));
+            let field = ui.add(TextEdit::singleline(&mut doc.name).desired_width(f32::INFINITY));
+            name_field(ui, &field, "Name");
             ui.end_row();
 
             attr_label(ui, "FPS", LABEL_WIDTH);
             let mut fps = time.fps();
-            if ui
-                .add_sized([FIELD_WIDTH, 19.0], DragValue::new(&mut fps).range(1..=240))
-                .changed()
-            {
+            let field = ui.add_sized([FIELD_WIDTH, 19.0], DragValue::new(&mut fps).range(1..=240));
+            name_field(ui, &field, "FPS");
+            if field.changed() {
                 time.set_fps(fps);
             }
             ui.end_row();
 
             let (mut start, mut end) = (time.start(), time.end());
             attr_label(ui, "Minimum Time", LABEL_WIDTH);
-            let changed_start = ui
-                .add_sized([FIELD_WIDTH, 19.0], DragValue::new(&mut start).suffix(" F"))
-                .changed();
+            let field = ui.add_sized([FIELD_WIDTH, 19.0], DragValue::new(&mut start).suffix(" F"));
+            name_field(ui, &field, "Minimum Time");
+            let changed_start = field.changed();
             ui.end_row();
             attr_label(ui, "Maximum Time", LABEL_WIDTH);
-            let changed_end = ui
-                .add_sized([FIELD_WIDTH, 19.0], DragValue::new(&mut end).suffix(" F"))
-                .changed();
+            let field = ui.add_sized([FIELD_WIDTH, 19.0], DragValue::new(&mut end).suffix(" F"));
+            name_field(ui, &field, "Maximum Time");
+            let changed_end = field.changed();
             ui.end_row();
             if changed_start || changed_end {
                 time.set_range(start, end);
             }
 
-            attr_label(ui, "Loop Playback", LABEL_WIDTH);
-            ui.checkbox(&mut time.looping, "");
-            ui.end_row();
+            check_row(ui, "Loop Playback", &mut time.looping);
 
             attr_label(ui, key("Objects"), LABEL_WIDTH);
             ui.label(doc.scene.len().to_string());
@@ -2248,10 +2255,11 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
                 .enumerate()
             {
                 attr_label(ui, label, LABEL_WIDTH);
-                ui.add_sized(
+                let field = ui.add_sized(
                     [FIELD_WIDTH, 19.0],
                     widgets::length_per(ui, &mut simulation.gravity[axis], "/s²").speed(1.0),
                 );
+                name_field(ui, &field, label);
                 ui.end_row();
             }
             bounded_count_row(
@@ -2269,21 +2277,23 @@ fn project_settings(ui: &mut Ui, doc: &mut Document) {
                 SimulationSettings::MAX_ITERATIONS,
             );
             attr_label(ui, "Time Scale", LABEL_WIDTH);
-            ui.add_sized(
+            let field = ui.add_sized(
                 [FIELD_WIDTH, 19.0],
                 DragValue::new(&mut simulation.time_scale)
                     .speed(0.01)
                     .range(SimulationSettings::MIN_TIME_SCALE..=SimulationSettings::MAX_TIME_SCALE),
             );
+            name_field(ui, &field, "Time Scale");
             ui.end_row();
             attr_label(ui, "Cache Memory", LABEL_WIDTH);
-            ui.add_sized(
+            let field = ui.add_sized(
                 [FIELD_WIDTH, 19.0],
                 DragValue::new(&mut simulation.memory_limit_mb)
                     .speed(1.0)
                     .range(1..=SimulationSettings::MAX_MEMORY_MB)
                     .suffix(" MB"),
             );
+            name_field(ui, &field, "Cache Memory");
             ui.end_row();
         });
     ui.add_space(8.0);

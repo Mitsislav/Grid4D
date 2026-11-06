@@ -356,6 +356,28 @@ pub enum EditorCommand {
         material: grid4d_scene::MaterialId,
         nodes: Vec<NodeId>,
     },
+    /// Asks for pictures and adds them as textures (Texture Manager ▸ Add…).
+    /// One undo step.
+    AddTextures,
+    /// Adds these pictures as textures (dropped on the window); a picture
+    /// already linked is selected, not added again. One undo step.
+    AddTextureFiles(Vec<std::path::PathBuf>),
+    /// Removes the texture. One undo step.
+    DeleteTexture(grid4d_scene::TextureId),
+    /// Asks for another picture for the texture. One undo step.
+    RelinkTexture(grid4d_scene::TextureId),
+    /// Asks for a folder and links every missing texture to the picture of
+    /// the same name in it. One undo step.
+    RelinkTextureFolder,
+    /// Keeps the linked picture's bytes in the document. One undo step.
+    EmbedTexture(grid4d_scene::TextureId),
+    /// Asks where, writes the embedded picture there and links it. One undo
+    /// step.
+    UnembedTexture(grid4d_scene::TextureId),
+    /// Shows a linked texture's file in the system's file browser.
+    RevealTexture(grid4d_scene::TextureId),
+    /// Removes the textures no material uses. One undo step.
+    RemoveUnusedTextures,
     /// Changes or deletes the keys selected in the F-Curve editor. One undo step.
     EditCurveKeys {
         op: crate::keys::CurveOp,
@@ -415,6 +437,8 @@ pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mu
         editor.seen_frame = Some(frame);
         changed = doc.scene.discard_unkeyed(f64::from(frame));
     }
+    // Texture pictures loading in the background.
+    changed |= editor.textures.update(doc.scene.textures());
     // News from renders in the background; finished frames are saved.
     let (rendered, finished) = editor.renders.poll();
     changed |= rendered;
@@ -1331,6 +1355,15 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 editor.materials.shown = false;
             }
         }
+        EditorCommand::AddTextures
+        | EditorCommand::AddTextureFiles(_)
+        | EditorCommand::DeleteTexture(_)
+        | EditorCommand::RelinkTexture(_)
+        | EditorCommand::RelinkTextureFolder
+        | EditorCommand::EmbedTexture(_)
+        | EditorCommand::UnembedTexture(_)
+        | EditorCommand::RevealTexture(_)
+        | EditorCommand::RemoveUnusedTextures => texture_command(command, doc, editor),
         EditorCommand::AssignMaterial { material, nodes } => {
             let edits: Vec<SceneEdit> = nodes
                 .iter()
@@ -1389,6 +1422,206 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
 ///
 /// `select` updates the selection from the inverses (e.g. to select a created
 /// object); the step remembers the selection before and after.
+/// The folder of the document's file, where dialogs start.
+fn document_folder(editor: &EditorState) -> Option<std::path::PathBuf> {
+    editor
+        .file
+        .path()
+        .and_then(std::path::Path::parent)
+        .map(std::path::Path::to_path_buf)
+}
+
+/// Commits `change` to a copy of the document's textures as one undo step
+/// `label`; nothing if it changed nothing.
+fn edit_textures(
+    doc: &mut Document,
+    editor: &mut EditorState,
+    label: &'static str,
+    change: impl FnOnce(&mut grid4d_scene::Textures),
+) {
+    let mut textures = doc.scene.textures().clone();
+    change(&mut textures);
+    if &textures != doc.scene.textures() {
+        commit(doc, editor, label, vec![SceneEdit::SetTextures(textures)], |_, _| {});
+    }
+}
+
+/// The textures some material uses. Materials gain texture channels in step
+/// 15.4; until then no texture is used.
+#[must_use]
+pub fn used_textures(doc: &Document) -> std::collections::HashSet<grid4d_scene::TextureId> {
+    let _ = doc;
+    std::collections::HashSet::new()
+}
+
+/// The Texture Manager's commands (see `docs/reference/material-textures.md`).
+#[allow(clippy::too_many_lines, reason = "one arm per command, each short")]
+fn texture_command(command: EditorCommand, doc: &mut Document, editor: &mut EditorState) {
+    use grid4d_scene::{Texture, TextureSource};
+
+    let folder = document_folder(editor);
+    let linked = |doc: &Document, id| match doc.scene.textures().get(id).map(|t| &t.source) {
+        Some(TextureSource::Linked(path)) => Some(path.clone()),
+        _ => None,
+    };
+    match command {
+        EditorCommand::AddTextures | EditorCommand::AddTextureFiles(_) => {
+            let paths = match command {
+                EditorCommand::AddTextureFiles(paths) => paths,
+                _ => editor.file.dialogs.pick_textures(folder.as_deref()),
+            };
+            let mut chosen = None;
+            edit_textures(doc, editor, "Add Textures", |textures| {
+                for path in paths {
+                    let known = path
+                        .extension()
+                        .is_some_and(|ext| grid4d_io::is_texture_extension(&ext.to_string_lossy()));
+                    if !known {
+                        continue;
+                    }
+                    chosen = Some(textures.linked_to(&path).unwrap_or_else(|| {
+                        let mut texture = Texture::linked(path);
+                        texture.name = textures.unique_name(&texture.name);
+                        textures.insert(texture)
+                    }));
+                }
+            });
+            if chosen.is_some() {
+                editor.texture_selection = chosen;
+                editor.panes.show = Some(crate::workspace::Pane::Textures);
+            }
+        }
+        EditorCommand::DeleteTexture(id) => {
+            edit_textures(doc, editor, "Delete Texture", |textures| {
+                textures.remove(id);
+            });
+        }
+        EditorCommand::RelinkTexture(id) => {
+            let Some(texture) = doc.scene.textures().get(id) else {
+                return;
+            };
+            let start = match &texture.source {
+                TextureSource::Linked(path) => path
+                    .parent()
+                    .filter(|dir| dir.is_dir())
+                    .map(std::path::Path::to_path_buf)
+                    .or(folder),
+                TextureSource::Embedded { .. } => folder,
+            };
+            if let Some(path) = editor.file.dialogs.pick_texture(start.as_deref()) {
+                edit_textures(doc, editor, "Relink Texture", |textures| {
+                    if let Some(texture) = textures.get_mut(id) {
+                        texture.source = TextureSource::Linked(path);
+                    }
+                });
+            }
+        }
+        EditorCommand::RelinkTextureFolder => {
+            let Some(dir) = editor.file.dialogs.pick_folder(folder.as_deref()) else {
+                return;
+            };
+            let found: Vec<(grid4d_scene::TextureId, std::path::PathBuf)> = doc
+                .scene
+                .textures()
+                .iter()
+                .filter(|&(id, t)| matches!(editor.textures.status(id, t), crate::textures::Status::Missing))
+                .filter_map(|(id, t)| {
+                    let TextureSource::Linked(path) = &t.source else {
+                        return None;
+                    };
+                    let candidate = dir.join(path.file_name()?);
+                    candidate.is_file().then_some((id, candidate))
+                })
+                .collect();
+            if found.is_empty() {
+                editor.file.alert = Some(file::Alert {
+                    title: "Relink Folder",
+                    message: crate::i18n::trf("None of the missing pictures is in {0}.", &[&dir.display().to_string()]),
+                });
+                return;
+            }
+            edit_textures(doc, editor, "Relink Textures", |textures| {
+                for (id, path) in found {
+                    if let Some(texture) = textures.get_mut(id) {
+                        texture.source = TextureSource::Linked(path);
+                    }
+                }
+            });
+        }
+        EditorCommand::EmbedTexture(id) => {
+            let Some(path) = linked(doc, id) else {
+                return;
+            };
+            match grid4d_io::read_file(&path) {
+                Ok(bytes) => {
+                    let file_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    edit_textures(doc, editor, "Embed Texture", |textures| {
+                        if let Some(texture) = textures.get_mut(id) {
+                            texture.source = TextureSource::Embedded {
+                                file_name,
+                                bytes: bytes.into(),
+                            };
+                        }
+                    });
+                }
+                Err(err) => {
+                    editor.file.alert = Some(file::Alert {
+                        title: "Cannot Embed Texture",
+                        message: format!("{}\n\n{err}", path.display()),
+                    });
+                }
+            }
+        }
+        EditorCommand::UnembedTexture(id) => {
+            let Some(TextureSource::Embedded { file_name, bytes }) =
+                doc.scene.textures().get(id).map(|t| t.source.clone())
+            else {
+                return;
+            };
+            let Some(path) = editor.file.dialogs.pick_texture_save(folder.as_deref(), &file_name) else {
+                return;
+            };
+            match std::fs::write(&path, &bytes) {
+                Ok(()) => edit_textures(doc, editor, "Unembed Texture", |textures| {
+                    if let Some(texture) = textures.get_mut(id) {
+                        texture.source = TextureSource::Linked(path);
+                    }
+                }),
+                Err(err) => {
+                    editor.file.alert = Some(file::Alert {
+                        title: "Cannot Unembed Texture",
+                        message: format!("{}\n\n{err}", path.display()),
+                    });
+                }
+            }
+        }
+        EditorCommand::RevealTexture(id) => {
+            if let Some(path) = linked(doc, id) {
+                file::reveal(&path);
+            }
+        }
+        EditorCommand::RemoveUnusedTextures => {
+            let used = used_textures(doc);
+            edit_textures(doc, editor, "Remove Unused Textures", |textures| {
+                let unused: Vec<_> = textures.ids().iter().copied().filter(|id| !used.contains(id)).collect();
+                for id in unused {
+                    textures.remove(id);
+                }
+            });
+        }
+        _ => {}
+    }
+    if editor
+        .texture_selection
+        .is_some_and(|id| !doc.scene.textures().contains(id))
+    {
+        editor.texture_selection = None;
+    }
+}
+
 fn commit(
     doc: &mut Document,
     editor: &mut EditorState,
@@ -2398,6 +2631,7 @@ fn is_current_state(doc: &Document, edit: &SceneEdit) -> bool {
         SceneEdit::SetTime(settings) => doc.time.settings() == *settings,
         SceneEdit::SetName(name) => doc.name == *name,
         SceneEdit::SetMaterials(materials) => doc.scene.materials() == materials,
+        SceneEdit::SetTextures(textures) => doc.scene.textures() == textures,
         SceneEdit::SetLayers(layers) => doc.scene.layers() == layers,
         SceneEdit::SetTakes(takes) => doc.takes == *takes,
         SceneEdit::SwitchTake(take) => doc.takes.active() == *take,

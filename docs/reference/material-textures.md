@@ -7,7 +7,8 @@
 > tools; we keep our own table and manager. Written in our own words,
 > 2026-11-06.
 >
-> Covers implementation-plan step **15.3**.
+> Covers implementation-plan step **15.3** (implemented 2026-11-06; materials
+> use textures from step 15.4).
 
 ## Purpose
 
@@ -66,14 +67,29 @@ Formats: **PNG, JPEG, TIFF, WebP, Radiance HDR, OpenEXR** (D25: the
 | File | `.g4d` v4: `document.textures`, entries `textures/<n>.<ext>` |
 | Pane | `panels/texture_manager.rs`, a `Pane` in every layout preset's tab set |
 
+## As built (15.3)
+
+- In memory a linked texture keeps the path as chosen (absolute from a
+  dialog); only the file stores it relative, written against the folder it
+  is saved in and read against the folder it is opened from — so Save As to
+  another folder needs no rewriting at all.
+- The Texture Manager shows paths inside the document's folder relative to
+  it (`maps/wood.png`), others in full.
+- Until materials have texture channels (15.4), no texture is "used":
+  Remove Unused removes them all.
+- Mip-maps are box-filtered, sRGB colour averaged in linear light; pictures
+  with more than 8 bits a channel (16-bit, HDR, OpenEXR) are kept as half
+  floats, the others as 8-bit RGBA.
+- Dropped pictures are added when the drop holds no document or model.
+
 ## Acceptance criteria
 
-- [ ] Each of the six formats decodes; a broken image is a warning, not a
+- [x] Each of the six formats decodes; a broken image is a warning, not a
       crash; sizes a file claims are never trusted for memory.
-- [ ] A document with a missing texture opens, shows the checker and the
-      warning, and Relink fixes it in one undo step.
-- [ ] Embed / Unembed round-trip the exact bytes; a saved, reopened
+- [x] A document with a missing texture opens, shows the checker and the
+      warning, and Relink (or Relink Folder) fixes it in one undo step.
+- [x] Embed / Unembed round-trip the exact bytes; a saved, reopened
       document is identical.
-- [ ] Save As to another folder keeps linked textures found.
-- [ ] Loading never blocks a frame (the interface keeps drawing while a
+- [x] Save As to another folder keeps linked textures found.
+- [x] Loading never blocks a frame (the interface keeps drawing while a
       large image decodes).

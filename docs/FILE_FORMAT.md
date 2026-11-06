@@ -21,6 +21,7 @@ these entries:
 | `document.json` | The document: UTF-8 JSON, described below. Always present |
 | `meshes/<n>.bin` | The mesh with index *n* (0, 1, 2, …) of `meshes`, little-endian binary, described below. One per mesh; meshes shared by several objects are stored once |
 | `simulation.bin` | The saved simulation frames, when `document.simulation_cache` is present |
+| `textures/<n>.<ext>` | The picture of texture *n* of `document.textures`, when it is embedded: the original file's bytes, unchanged; `<ext>` is the extension of its `embedded` name, lower case (`bin` when it has none or an unusual one) |
 
 Grid4D writes every entry with the zip format's earliest timestamp, so saving
 the same document twice gives identical bytes; readers must not rely on
@@ -77,6 +78,7 @@ The top level:
 | `render` | object | the defaults | Render settings (below) |
 | `simulation` | object | the defaults | `enabled`, `gravity` (cm/s²), `steps_per_frame`, `solver_iterations`, `time_scale`, `memory_limit_mb` |
 | `simulation_cache` | object | none | Saved simulation frames: `start` (frame), `frames` (count), `bodies` — each `object` (index), `clone` (a clone's number, for a Cloner's clones; optional) and `scale` |
+| `textures` | array | `[]` | The document's textures (below) |
 
 ### Objects
 
@@ -175,6 +177,22 @@ Each tag has a `type`:
 | `material` | `material` (index into `materials`; none) |
 | `dynamics` | `motion` (`dynamic`, `collider`), `bounce`, `friction`; `enabled` (true), `compound` (false), `shape`: `automatic` (default), `box`, `sphere`, `convex_hull`, `static_mesh`; `mass_mode`: `global_density` (default), `custom_density`, `custom_mass`; `density`, `mass`, `rotational_mass` (1); `linear_damping`, `angular_damping` (0); `initial_velocity` (cm/s), `initial_spin` (radians/s) ([0, 0, 0]) |
 
+### Textures
+
+Each entry of `textures` (version 4):
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `name` | string | — | Its name in the Texture Manager |
+| `file` | string | none | A **linked** picture: its path. A path inside the document's folder is stored **relative** to it, with `/` between folders (`maps/wood.jpg`); any other path as the system wrote it (absolute) |
+| `embedded` | string | none | An **embedded** picture: the original file's name (`logo.png`); its bytes are the entry `textures/<n>.<ext>` |
+| `color_space` | string | `srgb` | How its values are read: `srgb` (colour pictures) or `linear` (data maps, HDR / OpenEXR) |
+
+Exactly one of `file` and `embedded` is present. A reader resolves a
+relative `file` from the folder the `.g4d` file is in; a linked file that does
+not exist is not an error (Grid4D shows the texture as missing). Pictures are
+PNG, JPEG, TIFF, WebP, Radiance HDR or OpenEXR files, kept exactly as they were.
+
 ### Animation
 
 Each track of `tracks`:
@@ -243,9 +261,11 @@ and the rotation as a quaternion `x, y, z, w`. The entry's length is
 
 Grid4D never trusts a size a file states before allocating: `document.json`
 is read up to 256 MiB, mesh entries must have exactly the length their counts
-give, `simulation.bin` is read up to 2 GiB. Indices out of range, a parent
-index not smaller than the object's own, mesh faces pointing past their
-points, and numbers that are not finite make the file invalid.
+give, `simulation.bin` is read up to 2 GiB, an embedded texture up to 1 GiB
+(and its picture is decoded within 16 384 pixels a side and 1 GiB of
+memory). Indices out of range, a parent index not smaller than the object's
+own, mesh faces pointing past their points, and numbers that are not finite
+make the file invalid.
 
 ## Version 4 and version 3
 
@@ -254,7 +274,7 @@ its meaning — and only adds to it. What it adds, as of this writing:
 
 | Addition | Since |
 |----------|-------|
-| nothing but the version number | Grid4D 1.1 development (step 15.1) |
+| `document.textures` and the entries `textures/<n>.<ext>` | Grid4D 1.1 development (step 15.3) |
 
 A version 3 file is therefore read as a version 4 file with the version
 number changed, minus any field this table lists (version 3 readers ignore
