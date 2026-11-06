@@ -2087,6 +2087,67 @@ mod tests {
     }
 
     #[test]
+    fn a_picture_loaded_on_a_channel_is_one_undo_step_and_counts_as_used() {
+        use grid4d_scene::{Channel, ColorSpace, Material, TextureSource};
+
+        let mut f = Fixture::new("channel_texture", Some("maps/rough.png"), None);
+        let rough = f.dir.join("maps").join("rough.png");
+        std::fs::create_dir_all(rough.parent().unwrap()).unwrap();
+        std::fs::write(&rough, png(2)).unwrap();
+        let material = f.doc.scene.materials_mut().insert(Material::new("Floor"));
+        f.doc
+            .scene
+            .textures_mut()
+            .insert(grid4d_scene::Texture::linked(f.dir.join("other.png")));
+
+        f.run(&[EditorCommand::LoadChannelTexture {
+            material,
+            channel: Channel::Roughness,
+        }]);
+        let (texture, added) = f
+            .doc
+            .scene
+            .textures()
+            .iter()
+            .find(|(_, t)| t.source == TextureSource::Linked(rough.clone()))
+            .map(|(id, t)| (id, t.clone()))
+            .unwrap();
+        assert_eq!(
+            added.color_space,
+            ColorSpace::Linear,
+            "a data channel's picture is linear"
+        );
+        let slot = *f
+            .doc
+            .scene
+            .materials()
+            .get(material)
+            .unwrap()
+            .map(Channel::Roughness)
+            .unwrap();
+        assert_eq!(slot.texture, texture);
+        assert_eq!(f.editor.history.undo_len(), 1, "the texture and the material together");
+
+        // Remove Unused keeps it and removes the other.
+        f.run(&[EditorCommand::RemoveUnusedTextures]);
+        assert_eq!(f.doc.scene.textures().ids(), &[texture]);
+
+        // Loaded again on Base Color: the same texture, now on two channels.
+        f.run(&[EditorCommand::LoadChannelTexture {
+            material,
+            channel: Channel::BaseColor,
+        }]);
+        assert_eq!(f.doc.scene.textures().len(), 1);
+        let floor = f.doc.scene.materials().get(material).unwrap();
+        assert_eq!(floor.maps().count(), 2);
+
+        f.run(&[const { EditorCommand::Undo }; 3]);
+        assert_eq!(f.doc.scene.textures().len(), 1, "back to the one other picture");
+        assert_eq!(f.doc.scene.materials().get(material).unwrap().maps().count(), 0);
+        let _ = std::fs::remove_dir_all(&f.dir);
+    }
+
+    #[test]
     fn relink_folder_finds_missing_pictures_by_name() {
         use grid4d_scene::{Texture, TextureSource};
 

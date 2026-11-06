@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.3 — Images, the document's textures and the Texture Manager (2026-11-06) |
-| Next step | 15.4 — The material channels, the Material tag's projections, preview balls |
-| Tests | 804 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.4a — The material channels (2026-11-06) |
+| Next step | 15.4b — The Material tag's projections and layers; then 15.4c, preview balls |
+| Tests | 806 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2313,6 +2313,7 @@ risks R5 – R8 go with it.
 | 15.1 | Five specs: the format version 4, material channels, textures and the Texture Manager, the Material tag's projections and layers, the UV editor; `.g4d` version 4 written (version 3's module moved to `v4.rs`; `v3.rs` upgrades a version 3 `document.json` as JSON), `FILE_FORMAT.md` for version 4, golden `demo_v4.g4d` / `full_v4.g4d`, the version 3 fixtures frozen and checked to read exactly as before, a property test of documents labelled version 3, the fuzz corpus with both versions; the manual and changelog say what 1.1 files mean for 1.0 | 783 |
 | 15.2 | UVs everywhere: `grid4d_geom::uv` (conventions, planar and box projections, mirrored-face check); every primitive (size-independent, so the shared unit meshes stay correct); the walls and caps of Extrude, Lathe, Sweep and Loft; the Subdivision Surface's merged cage keeps its parts' UVs (a Box projection for parts without); plugin generators without UVs get a Box projection; Make Editable, Current State and glTF / OBJ export carry them; the layouts written in `tag-material.md`; the v4 golden files regenerated (the frozen v3 ones compared with UV-less meshes) | 792 |
 | 15.3 | Images and textures: the `image` crate (six decoders, no C; licences regenerated, `cargo deny` clean); `grid4d_io::decode_texture` under limits with mip-maps; the document's `Textures` table (`SceneEdit::SetTextures`), linked or embedded; `.g4d` v4 `textures` and `textures/<n>.<ext>` (paths inside the document's folder stored relative); `ui::textures::TextureCache` decoding on a worker thread and noticing changed files; the Texture Manager pane (Add, Relink, Relink Folder, Embed, Unembed, Reveal, Delete, Remove Unused, name and colour space); dropped pictures; the status bar's count of missing pictures; Greek; the manual's §19.1 with a picture rendered headless | 804 |
+| 15.4a | The material channels: `Material` gains Specular, Normal / Bump, Emission Strength, Opacity and its threshold, Transmission and IOR, Clearcoat and its roughness, Two-Sided, and a `TextureSlot` (tiling, offset, range, strength) per `Channel`; `.g4d` v4 writes them (each left out at its default) and `maps` by texture index, version 3 files drop them; the Attribute Manager's material page in groups with a texture row per channel and Load…; Remove Unused keeps textures materials use; emission strength reaches the viewport and the path tracer; Greek; the manual's §19 rewritten with a picture | 806 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2405,6 +2406,27 @@ risks R5 – R8 go with it.
   saves it, opens it in the headless interface (so paths show relative to
   its folder, not the temp folder's full path), waits for the loads and
   renders the Animate layout with the Textures tab in front.
+
+**15.4a — The material channels**
+
+*Problems and solutions:*
+- **A large step split in three.** 15.4 (channels, the Material tag's
+  projections and layers, preview balls) touches the scene, the file, the
+  evaluation and three panels; it is built and committed as 15.4a, b and c.
+- **New channels without touching every reader.** The four 1.0 fields stay
+  (`color`, `roughness`, `metallic`, `emission`) as the values of their
+  channels, so the viewport, the path tracer, glTF and OBJ keep reading them
+  unchanged; the new values and the texture slots are added beside them, and
+  the slots live in an array indexed by `Channel` (exhaustive matches show
+  every place a channel is named).
+- **Textures before materials when reading.** Materials refer to textures by
+  index, so a file's textures are now read into their own table first and
+  the table handed to the document whole (ids kept).
+- **Version 3 stays version 3.** Each material's added fields are listed in
+  `v3.rs` and dropped from a version 3 file, as the document's are.
+- **Load… is two changes** (a texture added, a material's slot set); they are
+  committed together, one undo step, and a picture already in the table is
+  reused rather than added twice.
 
 ---
 

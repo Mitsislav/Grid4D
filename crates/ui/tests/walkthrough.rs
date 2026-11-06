@@ -328,7 +328,39 @@ fn texture_manager_picture() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     save(&mut h, &dir, "texture-manager");
-    println!("picture in {}", dir.display());
+
+    // A material using two of them, in the Attribute Manager.
+    {
+        let shell = h.state_mut();
+        let named_texture = |name: &str| {
+            shell
+                .doc
+                .scene
+                .textures()
+                .iter()
+                .find(|(_, t)| t.name == name)
+                .map(|(id, _)| id)
+                .unwrap()
+        };
+        let (planks, checker) = (named_texture("oak planks"), named_texture("Roughness checker"));
+        let mut oak = grid4d_scene::Material::new("Oak Floor");
+        oak.roughness = 0.6;
+        *oak.map_mut(grid4d_scene::Channel::BaseColor) = Some(grid4d_scene::TextureSlot {
+            tiling: [2.0, 2.0],
+            ..grid4d_scene::TextureSlot::new(planks)
+        });
+        *oak.map_mut(grid4d_scene::Channel::Roughness) = Some(grid4d_scene::TextureSlot {
+            range: [0.3, 0.8],
+            ..grid4d_scene::TextureSlot::new(checker)
+        });
+        let id = shell.doc.scene.materials_mut().insert(oak);
+        shell.editor.materials.selected = Some(id);
+        shell.editor.materials.shown = true;
+        shell.editor.panes.layout = Some(grid4d_ui::workspace::Layout::Standard);
+    }
+    h.run_steps(3);
+    save(&mut h, &dir, "material-channels");
+    println!("pictures in {}", dir.display());
 }
 
 /// A scene that shows what Grid4D does at a glance: clones moved by an

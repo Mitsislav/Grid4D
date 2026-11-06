@@ -24,7 +24,7 @@ use grid4d_scene::{
     MeshHandle, Node, ObjectKind, ObjectKindTag, ObjectParam, Override, Param, PluginObject, PluginValue, SceneEdit,
     SimulationCache, Tag, Take, Tangents, Track,
 };
-use grid4d_scene::{ColorSpace, Texture, TextureSource};
+use grid4d_scene::{Channel, ColorSpace, Texture, TextureSlot, TextureSource};
 
 /// Written by the current format version (an archive).
 const GOLDEN: &str = "tests/fixtures/demo_v4.g4d";
@@ -127,6 +127,35 @@ fn full_document() -> (Document, SimulationCache) {
         unreachable!("the Mesh is a polygon object")
     };
     *mesh = MeshHandle::new(grid4d_geom::primitives::cube(Vec3::splat(80.0), [1, 2, 1]));
+
+    // A material with every channel away from its default and textures on
+    // two channels (15.4).
+    let (wood, checker) = {
+        let ids = doc.scene.textures().ids();
+        (ids[0], ids[1])
+    };
+    let mut glass = Material::new("Glass");
+    glass.specular = 0.7;
+    glass.normal_strength = 1.5;
+    glass.bump_height = 0.25;
+    glass.emission = [0.1, 0.2, 0.3];
+    glass.emission_strength = 4.0;
+    glass.opacity = 0.9;
+    glass.opacity_threshold = 0.25;
+    glass.transmission = 1.0;
+    glass.ior = 1.33;
+    glass.clearcoat = 0.5;
+    glass.clearcoat_roughness = 0.1;
+    glass.two_sided = true;
+    *glass.map_mut(Channel::BaseColor) = Some(TextureSlot::new(wood));
+    *glass.map_mut(Channel::Roughness) = Some(TextureSlot {
+        tiling: [4.0, 2.0],
+        offset: [0.5, 0.25],
+        range: [0.2, 0.8],
+        strength: 0.75,
+        ..TextureSlot::new(checker)
+    });
+    doc.scene.materials_mut().insert(glass);
     (doc, cache)
 }
 

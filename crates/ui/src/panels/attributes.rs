@@ -18,9 +18,9 @@ use grid4d_geom::spline::{
 };
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
-    Axis, Body, CollisionShape, Document, Falloff, Inherit, KeyState, LightDetails, LightShadow, LightType, MassMode,
-    Material, MaterialId, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, Scene, SceneEdit,
-    SimulationSettings, SplineHandle, Tag, TagKind, TimeSettings,
+    Axis, Body, Channel, CollisionShape, Document, Falloff, Inherit, KeyState, LightDetails, LightShadow, LightType,
+    MassMode, Material, MaterialId, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, Scene, SceneEdit,
+    SimulationSettings, SplineHandle, Tag, TagKind, TextureSlot, TimeSettings,
 };
 
 use crate::i18n::{key, tr, trf};
@@ -163,45 +163,115 @@ impl AttributesPanel {
                     .color(p().text_strong),
             );
         });
+        let textures = doc.scene.textures();
+        let mut load = None;
         section_heading(ui, "Material");
-        Grid::new("grid4d.attr.material")
-            .num_columns(2)
-            .spacing([6.0, 4.0])
-            .show(ui, |ui| {
-                attr_label(ui, "Name", LABEL_WIDTH);
-                ui.add(TextEdit::singleline(&mut material.name).desired_width(f32::INFINITY));
-                ui.end_row();
-                attr_label(ui, "Color", LABEL_WIDTH);
-                widgets::colour_button(ui, &mut material.color);
-                ui.end_row();
-                for (label, value) in [
-                    (key("Roughness"), &mut material.roughness),
-                    (key("Metallic"), &mut material.metallic),
-                ] {
-                    attr_label(ui, label, LABEL_WIDTH);
-                    let mut percent = *value * 100.0;
-                    if ui
-                        .add_sized(
-                            [FIELD_WIDTH, 19.0],
-                            DragValue::new(&mut percent).speed(0.5).range(0.0..=100.0).suffix(" %"),
-                        )
-                        .changed()
-                    {
-                        *value = percent / 100.0;
-                    }
-                    ui.end_row();
-                }
-                attr_label(ui, "Luminance", LABEL_WIDTH);
-                widgets::colour_button(ui, &mut material.emission);
-                ui.end_row();
-            });
+        material_grid(ui, "grid4d.attr.material", |ui| {
+            attr_label(ui, "Name", LABEL_WIDTH);
+            let field = ui.add(TextEdit::singleline(&mut material.name).desired_width(f32::INFINITY));
+            name_field(ui, &field, "Name");
+            ui.end_row();
+            check_row(ui, "Two-Sided", &mut material.two_sided);
+        });
+        section_heading(ui, "Base");
+        material_grid(ui, "grid4d.attr.material.base", |ui| {
+            attr_label(ui, "Base Color", LABEL_WIDTH);
+            let field = widgets::colour_button(ui, &mut material.color);
+            name_field(ui, &field, "Base Color");
+            ui.end_row();
+            load = load.or(texture_rows(ui, &mut material, Channel::BaseColor, textures));
+        });
+        section_heading(ui, "Reflection");
+        material_grid(ui, "grid4d.attr.material.reflection", |ui| {
+            for (channel, label) in [
+                (Channel::Metallic, key("Metallic")),
+                (Channel::Roughness, key("Roughness")),
+                (Channel::Specular, key("Specular")),
+            ] {
+                let value = match channel {
+                    Channel::Metallic => &mut material.metallic,
+                    Channel::Roughness => &mut material.roughness,
+                    _ => &mut material.specular,
+                };
+                fraction_row(ui, label, value);
+                load = load.or(texture_rows(ui, &mut material, channel, textures));
+            }
+        });
+        section_heading(ui, "Normal and Bump");
+        material_grid(ui, "grid4d.attr.material.relief", |ui| {
+            load = load.or(texture_rows(ui, &mut material, Channel::Normal, textures));
+            attr_label(ui, "Normal Strength", LABEL_WIDTH);
+            let field = ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut material.normal_strength)
+                    .speed(0.01)
+                    .range(0.0..=2.0),
+            );
+            name_field(ui, &field, "Normal Strength");
+            ui.end_row();
+            load = load.or(texture_rows(ui, &mut material, Channel::Bump, textures));
+            attr_label(ui, "Bump Height", LABEL_WIDTH);
+            let field = ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                widgets::length(ui, &mut material.bump_height)
+                    .speed(0.01)
+                    .range(0.0..=100.0),
+            );
+            name_field(ui, &field, "Bump Height");
+            ui.end_row();
+        });
+        section_heading(ui, "Emission");
+        material_grid(ui, "grid4d.attr.material.emission", |ui| {
+            attr_label(ui, "Emission", LABEL_WIDTH);
+            let field = widgets::colour_button(ui, &mut material.emission);
+            name_field(ui, &field, "Emission");
+            ui.end_row();
+            attr_label(ui, "Emission Strength", LABEL_WIDTH);
+            let field = ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut material.emission_strength)
+                    .speed(0.05)
+                    .range(0.0..=1000.0),
+            );
+            name_field(ui, &field, "Emission Strength");
+            ui.end_row();
+            load = load.or(texture_rows(ui, &mut material, Channel::Emission, textures));
+        });
+        section_heading(ui, "Opacity");
+        material_grid(ui, "grid4d.attr.material.opacity", |ui| {
+            fraction_row(ui, key("Opacity"), &mut material.opacity);
+            fraction_row(ui, key("Threshold"), &mut material.opacity_threshold);
+            load = load.or(texture_rows(ui, &mut material, Channel::Opacity, textures));
+        });
+        section_heading(ui, "Transmission");
+        material_grid(ui, "grid4d.attr.material.transmission", |ui| {
+            fraction_row(ui, key("Transmission"), &mut material.transmission);
+            attr_label(ui, "IOR", LABEL_WIDTH);
+            let (low, high) = Material::IOR_RANGE;
+            let field = ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut material.ior).speed(0.005).range(low..=high),
+            );
+            name_field(ui, &field, "IOR");
+            ui.end_row();
+            load = load.or(texture_rows(ui, &mut material, Channel::Transmission, textures));
+        });
+        section_heading(ui, "Coat");
+        material_grid(ui, "grid4d.attr.material.coat", |ui| {
+            fraction_row(ui, key("Clearcoat"), &mut material.clearcoat);
+            fraction_row(ui, key("Coat Roughness"), &mut material.clearcoat_roughness);
+            load = load.or(texture_rows(ui, &mut material, Channel::Clearcoat, textures));
+        });
         ui.add_space(4.0);
         ui.label(
             RichText::new(tr(
-                "The viewport shows the colour; roughness, metallic and luminance shade it from Phase 7",
+                "The viewport shows the base colour, roughness, metallic and emission; textures, opacity, transmission and the coat follow in the next steps of Grid4D 1.1.",
             ))
             .color(p().text_dim),
         );
+        if let Some(channel) = load {
+            commands.push(EditorCommand::LoadChannelTexture { material: id, channel });
+        }
         if doc.scene.materials().get(id).is_some_and(|m| *m != material)
             && let Some(m) = doc.scene.materials_mut().get_mut(id)
         {
@@ -1257,6 +1327,103 @@ fn amount_row(ui: &mut Ui, label: &str, value: &mut f32, unit: &str) {
         [FIELD_WIDTH, 19.0],
         DragValue::new(value).speed(0.01).range(0.0..=1_000_000.0).suffix(unit),
     );
+    ui.end_row();
+}
+
+/// A two-column grid of a material's settings.
+fn material_grid(ui: &mut Ui, id: &str, rows: impl FnOnce(&mut Ui)) {
+    Grid::new(id).num_columns(2).spacing([6.0, 4.0]).show(ui, rows);
+}
+
+/// A 0 – 1 value shown and typed as 0 – 100 %.
+fn fraction_row(ui: &mut Ui, label: &str, value: &mut f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let mut percent = *value * 100.0;
+    let field = ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        DragValue::new(&mut percent).speed(0.5).range(0.0..=100.0).suffix(" %"),
+    );
+    name_field(ui, &field, label);
+    if field.changed() {
+        *value = percent / 100.0;
+    }
+    ui.end_row();
+}
+
+/// A channel's texture: a list of the document's textures (`None` first) and
+/// Load… for a new picture; when one is set, its tiling, offset, range
+/// (scalar channels) and strength. Returns the channel when Load… was clicked.
+fn texture_rows(
+    ui: &mut Ui,
+    material: &mut Material,
+    channel: Channel,
+    textures: &grid4d_scene::Textures,
+) -> Option<Channel> {
+    let label = match channel {
+        Channel::BaseColor => key("Base Color Texture"),
+        Channel::Metallic => key("Metallic Texture"),
+        Channel::Roughness => key("Roughness Texture"),
+        Channel::Specular => key("Specular Texture"),
+        Channel::Normal => key("Normal Texture"),
+        Channel::Bump => key("Bump Texture"),
+        Channel::Emission => key("Emission Texture"),
+        Channel::Opacity => key("Opacity Texture"),
+        Channel::Transmission => key("Transmission Texture"),
+        Channel::Clearcoat => key("Clearcoat Texture"),
+    };
+    attr_label(ui, label, LABEL_WIDTH);
+    let slot = material.map_mut(channel);
+    let mut chosen = slot.map(|s| s.texture).filter(|&t| textures.contains(t));
+    let shown = chosen
+        .and_then(|t| textures.get(t))
+        .map_or_else(|| tr("None").to_owned(), |t| t.name.clone());
+    let mut load = false;
+    ui.horizontal(|ui| {
+        let combo = egui::ComboBox::from_id_salt(("grid4d.attr.material.texture", channel))
+            .selected_text(shown)
+            .width(FIELD_WIDTH + 40.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut chosen, None, tr("None"));
+                for (id, texture) in textures.iter() {
+                    ui.selectable_value(&mut chosen, Some(id), &texture.name);
+                }
+            })
+            .response;
+        ui.ctx()
+            .accesskit_node_builder(combo.id, |node| node.set_label(tr(label)));
+        load = ui
+            .small_button(tr("Load…"))
+            .on_hover_text(tr("Choose a picture for this channel"))
+            .clicked();
+    });
+    ui.end_row();
+    let before = slot.map(|s| s.texture).filter(|&t| textures.contains(t));
+    if chosen != before {
+        *slot = chosen.map(|texture| match slot {
+            Some(old) => TextureSlot { texture, ..*old },
+            None => TextureSlot::new(texture),
+        });
+    }
+    if let Some(slot) = slot.as_mut().filter(|s| textures.contains(s.texture)) {
+        pair_row(ui, key("Tiling"), &mut slot.tiling, 0.01, 0.01..=1000.0);
+        pair_row(ui, key("Offset"), &mut slot.offset, 0.01, -1000.0..=1000.0);
+        if !matches!(channel, Channel::BaseColor | Channel::Emission | Channel::Normal) {
+            pair_row(ui, key("Range"), &mut slot.range, 0.01, -10.0..=10.0);
+        }
+        fraction_row(ui, key("Texture Strength"), &mut slot.strength);
+    }
+    load.then_some(channel)
+}
+
+/// Two numbers side by side (U and V, or from and to).
+fn pair_row(ui: &mut Ui, label: &str, value: &mut [f32; 2], speed: f64, range: std::ops::RangeInclusive<f32>) {
+    attr_label(ui, label, LABEL_WIDTH);
+    ui.horizontal(|ui| {
+        for v in value.iter_mut() {
+            let field = ui.add_sized([56.0, 19.0], DragValue::new(v).speed(speed).range(range.clone()));
+            name_field(ui, &field, label);
+        }
+    });
     ui.end_row();
 }
 

@@ -55,7 +55,7 @@ impl Surface {
         Self {
             roughness: material.roughness,
             metallic: material.metallic,
-            emission: material.emission,
+            emission: material.emitted(),
         }
     }
 }

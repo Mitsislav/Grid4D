@@ -10,6 +10,8 @@
 > Covers implementation-plan step **15.4** (scene model, Material Manager and
 > Attribute Manager pages, preview balls); used by 15.5 (viewport), 15.6 (path
 > tracer) and 15.8 (glTF / OBJ). Extends [`manager-material.md`](manager-material.md).
+> Step 15.4a (2026-11-06) built the model, the file format and the
+> Attribute Manager's page; preview balls follow in 15.4c.
 
 ## Purpose
 
@@ -90,11 +92,22 @@ Deliberate differences from the reference: one fixed principled set instead
 of switchable channels and reflectance layers; no procedural textures (Phase
 22's nodes will compile into this set); no displacement (Phase 16).
 
+## As built (15.4a)
+
+- `Material` keeps its four 1.0 fields as the Base Color, Roughness,
+  Metallic and Emission values (so everything that read them still does)
+  and gains the others; textures are `TextureSlot`s per `Channel`.
+- Load… beside a channel picks a file, adds it to the texture table (Linear
+  for data channels) or reuses the texture already linked to it, and sets
+  the slot — one undo step for both.
+- Emission's Strength multiplies its colour in the viewport and the path
+  tracer already.
+
 ## Acceptance criteria
 
-- [ ] A 1.0 document's materials open with the same four values and render
+- [x] A 1.0 document's materials open with the same four values and render
       the same.
-- [ ] Each channel's value and texture settings save, load and undo.
+- [x] Each channel's value and texture settings save, load and undo.
 - [ ] Glass (Transmission 1, IOR 1.5) and brushed metal (Metallic 1, a
       Normal texture) render as expected in the path tracer; the viewport
       shows the normal map and opacity cut-out.

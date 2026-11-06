@@ -2018,19 +2018,46 @@ Manager**, the **Materials** tab at the bottom (beside Timeline and F-Curve;
 
 **Settings** (Attribute Manager)
 
+![A material in the Attribute Manager: a picture of oak planks on its Base Color, repeated twice each way, and the Reflection group below](images/manual/material-channels.png)
+
+A material is one set of **channels**, the same everywhere in Grid4D. Each
+channel has a value and can take a **texture** (a picture, [§19.1](#191-textures-and-the-texture-manager))
+that replaces the value across the surface.
+
+| Group | Setting | Meaning |
+|-------|---------|---------|
+| Material | Name | shown under the preview |
+| | Two-Sided | both sides of each polygon look alike |
+| Base | Base Color | the surface colour (a metal's reflection colour); the viewport shows it |
+| Reflection | Metallic | 0 % plastic, stone, wood … 100 % metal |
+| | Roughness | 0 % mirror-like … 100 % matte |
+| | Specular | how strongly a non-metal reflects (50 % is the usual) |
+| Normal and Bump | Normal Texture, Strength | a normal map: fine relief without more polygons |
+| | Bump Texture, Height | a height map, used when there is no normal map |
+| Emission | Emission, Strength | light the surface gives off, and how much |
+| Opacity | Opacity, Threshold | cut-out: where opacity is below the threshold the surface is not there (leaves, fences) |
+| Transmission | Transmission, IOR | light passing through (glass, water); IOR bends it (1.5 for glass, 1.33 for water) |
+| Coat | Clearcoat, Coat Roughness | a thin varnish over the base (car paint, lacquered wood) |
+
+**A channel's texture.** Under each channel, choose a texture of the
+document in the list, or click **Load…** to pick a picture file (it is added
+to the Texture Manager; pictures for data channels — everything but Base
+Color and Emission — are read as Linear). With a texture set:
+
 | Setting | Meaning |
 |---------|---------|
-| Name | shown under the preview |
-| Color | the surface colour; the viewport shows it |
-| Roughness | 0 % mirror-like … 100 % matte |
-| Metallic | 0 % plastic, stone, wood … 100 % metal |
-| Luminance | light the surface gives off |
+| Tiling | how many times the picture repeats across the surface (U, V) |
+| Offset | shifts the picture (U, V), in picture widths |
+| Range | the picture's black and white become these values (number channels only) |
+| Texture Strength | 0 % shows the channel's value, 100 % the texture |
 
 In the viewport ([§4.1](#41-lights)) the colour is the surface's colour,
 **Roughness** the size of its highlights (sharp and bright near 0 %, wide and faint
 near 100 %), **Metallic** makes highlights and reflections take the colour (a metal
-has no colour of its own otherwise) and **Luminance** adds glow that no light
-needs. Constant Shading shows the colour and the luminance only.
+has no colour of its own otherwise) and **Emission** adds glow that no light
+needs. Constant Shading shows the colour and the emission only. Textures,
+opacity, transmission and the coat are kept with the material and shown in
+the viewport and renders from Grid4D 1.1's next steps on.
 
 **Giving an object a material**
 
@@ -2061,8 +2088,8 @@ Manager, or **Window ▸ Texture Manager**) lists every texture of the
 document. Grid4D reads **PNG, JPEG, TIFF, WebP, HDR** and **OpenEXR**
 pictures.
 
-> Materials use textures from Grid4D 1.1's next steps on; for now you can
-> collect, check and organise the pictures a project will use.
+> A material's channels take textures (§19 above); the viewport and renders
+> show them from Grid4D 1.1's next steps on.
 
 ![The Texture Manager: two linked pictures from the document's maps folder (one selected, its colour space Linear), an embedded sky, and a picture that is missing](images/manual/texture-manager.png)
 
@@ -2100,7 +2127,7 @@ inside the `.g4d` file instead — handy for sending a single file.
 | **Unembed…** | writes an embedded picture to a file you choose and links it |
 | **Reveal** | shows the picture's file in Explorer, Finder or your file manager |
 | **Delete** | removes the texture |
-| **Remove Unused** | removes every texture no material uses (today: all of them) |
+| **Remove Unused** | removes every texture no material uses |
 
 **Missing pictures.** A document whose pictures were moved or deleted still
 opens. Missing textures show a magenta and black checker and the path that

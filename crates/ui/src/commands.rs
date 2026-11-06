@@ -378,6 +378,13 @@ pub enum EditorCommand {
     RevealTexture(grid4d_scene::TextureId),
     /// Removes the textures no material uses. One undo step.
     RemoveUnusedTextures,
+    /// Asks for a picture and puts it on `channel` of `material` (added as a
+    /// texture, linear for data channels, unless it is one already). One undo
+    /// step.
+    LoadChannelTexture {
+        material: grid4d_scene::MaterialId,
+        channel: grid4d_scene::Channel,
+    },
     /// Changes or deletes the keys selected in the F-Curve editor. One undo step.
     EditCurveKeys {
         op: crate::keys::CurveOp,
@@ -1363,7 +1370,8 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         | EditorCommand::EmbedTexture(_)
         | EditorCommand::UnembedTexture(_)
         | EditorCommand::RevealTexture(_)
-        | EditorCommand::RemoveUnusedTextures => texture_command(command, doc, editor),
+        | EditorCommand::RemoveUnusedTextures
+        | EditorCommand::LoadChannelTexture { .. } => texture_command(command, doc, editor),
         EditorCommand::AssignMaterial { material, nodes } => {
             let edits: Vec<SceneEdit> = nodes
                 .iter()
@@ -1446,12 +1454,14 @@ fn edit_textures(
     }
 }
 
-/// The textures some material uses. Materials gain texture channels in step
-/// 15.4; until then no texture is used.
+/// The textures some material's channels use.
 #[must_use]
 pub fn used_textures(doc: &Document) -> std::collections::HashSet<grid4d_scene::TextureId> {
-    let _ = doc;
-    std::collections::HashSet::new()
+    doc.scene
+        .materials()
+        .iter()
+        .flat_map(|(_, material)| material.maps().map(|(_, slot)| slot.texture))
+        .collect()
 }
 
 /// The Texture Manager's commands (see `docs/reference/material-textures.md`).
@@ -1602,6 +1612,38 @@ fn texture_command(command: EditorCommand, doc: &mut Document, editor: &mut Edit
             if let Some(path) = linked(doc, id) {
                 file::reveal(&path);
             }
+        }
+        EditorCommand::LoadChannelTexture { material, channel } => {
+            if !doc.scene.materials().contains(material) {
+                return;
+            }
+            let Some(path) = editor.file.dialogs.pick_texture(folder.as_deref()) else {
+                return;
+            };
+            let mut textures = doc.scene.textures().clone();
+            let texture = textures.linked_to(&path).unwrap_or_else(|| {
+                let mut texture = Texture::linked(path);
+                texture.name = textures.unique_name(&texture.name);
+                if !channel.is_colour() {
+                    texture.color_space = grid4d_scene::ColorSpace::Linear;
+                }
+                textures.insert(texture)
+            });
+            let mut materials = doc.scene.materials().clone();
+            if let Some(m) = materials.get_mut(material) {
+                let slot = m.map_mut(channel);
+                *slot = Some(match *slot {
+                    Some(old) => grid4d_scene::TextureSlot { texture, ..old },
+                    None => grid4d_scene::TextureSlot::new(texture),
+                });
+            }
+            commit(
+                doc,
+                editor,
+                "Load Texture",
+                vec![SceneEdit::SetTextures(textures), SceneEdit::SetMaterials(materials)],
+                |_, _| {},
+            );
         }
         EditorCommand::RemoveUnusedTextures => {
             let used = used_textures(doc);

@@ -31,6 +31,23 @@ const V4_DOCUMENT_FIELDS: &[&str] = &[
     "textures",
 ];
 
+/// Fields of each material that version 4 adds (step 15.4: the channels
+/// beyond colour, roughness, metallic and emission, and their textures).
+const V4_MATERIAL_FIELDS: &[&str] = &[
+    "specular",
+    "normal_strength",
+    "bump_height",
+    "emission_strength",
+    "opacity",
+    "opacity_threshold",
+    "transmission",
+    "ior",
+    "clearcoat",
+    "clearcoat_roughness",
+    "two_sided",
+    "maps",
+];
+
 /// A version 3 `document.json`, already parsed, as version 4 (see the module
 /// documentation).
 pub(crate) fn upgrade(mut json: Value) -> Result<Value, IoError> {
@@ -41,6 +58,17 @@ pub(crate) fn upgrade(mut json: Value) -> Result<Value, IoError> {
     if let Some(document) = file.get_mut("document").and_then(Value::as_object_mut) {
         for field in V4_DOCUMENT_FIELDS {
             document.remove(*field);
+        }
+        for material in document
+            .get_mut("materials")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object_mut)
+        {
+            for field in V4_MATERIAL_FIELDS {
+                material.remove(*field);
+            }
         }
     }
     Ok(json)
@@ -72,10 +100,17 @@ mod tests {
     fn what_version_4_adds_is_dropped_from_a_version_3_file() {
         let v3 = json!({
             "version": 3,
-            "document": { "name": "Shot", "textures": [{ "name": "Wood", "file": "wood.png" }] }
+            "document": {
+                "name": "Shot",
+                "textures": [{ "name": "Wood", "file": "wood.png" }],
+                "materials": [{ "name": "Glass", "color": [1, 1, 1], "transmission": 1, "maps": {} }]
+            }
         });
         let v4 = upgrade(v3).unwrap();
-        assert_eq!(v4["document"], json!({ "name": "Shot" }));
+        assert_eq!(
+            v4["document"],
+            json!({ "name": "Shot", "materials": [{ "name": "Glass", "color": [1, 1, 1] }] })
+        );
     }
 
     #[test]

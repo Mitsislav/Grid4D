@@ -29,7 +29,7 @@ with a clear message rather than losing what it does not understand.
 | 15.1 | nothing yet but the version number | — |
 | 15.2 | UVs made by primitives and generators are evaluated, not stored (polygon objects already store theirs) | — |
 | 15.3 ✅ | the document's **textures**: each linked by a path (relative to the document's folder when inside it) or embedded | `document.textures`; embedded images as `textures/<n>.<ext>` entries |
-| 15.4 | **material channels** (see [`material-channels.md`](material-channels.md)); **projections** on Material tags, several Material tags per object (see [`tag-material.md`](tag-material.md)) | `document.materials`, tags |
+| 15.4 | **material channels** ✅ (15.4a; see [`material-channels.md`](material-channels.md)); **projections** on Material tags, several Material tags per object (see [`tag-material.md`](tag-material.md)) | `document.materials`, tags |
 | 15.7 | **seams** marked in the UV editor, kept with a polygon object's components (its UVs are already stored) | the `polygon` kind |
 
 - **Additive until 1.1 ships.** During Phase 15 version 4 grows only by

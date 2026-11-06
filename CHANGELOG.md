@@ -17,6 +17,11 @@ Toward 1.1: materials, UVs and textures.
   them on the window, link them (paths inside the document's folder stay
   relative) or embed them in the document, relink missing ones, one by one
   or by folder. Missing pictures never stop a document from opening.
+- **Material channels** — a material is now one set of channels: Base
+  Color, Metallic, Roughness, Specular, Normal and Bump, Emission (with a
+  strength), Opacity, Transmission and IOR, Clearcoat, Two-Sided; each can
+  take a texture with its tiling, offset, range and strength, or Load… a
+  picture straight onto it.
 - **Files** — documents are saved in `.g4d` format version 4. Every file of
   Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
   files and says they come from a newer Grid4D.

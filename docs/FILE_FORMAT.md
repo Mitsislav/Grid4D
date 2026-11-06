@@ -72,7 +72,7 @@ The top level:
 | `name` | string | — | The document's name |
 | `time` | object | — | `fps` (integer), `start` and `end` (frames, integers), `looping` (bool) |
 | `objects` | array | — | Every object, parents before their children (below) |
-| `materials` | array | `[]` | Materials: `name`, `color`, `roughness` (0 – 1), `metallic` (0 – 1), `emission` (linear RGB, may exceed 1) |
+| `materials` | array | `[]` | Materials (below) |
 | `layers` | array | `[]` | Layers: `name`, `color`, and the switches `solo`, `view`, `render`, `manager`, `locked`, `animation`, `generators`, `deformers` (bools) |
 | `takes` | object | none | Takes (below) |
 | `render` | object | the defaults | Render settings (below) |
@@ -177,6 +177,34 @@ Each tag has a `type`:
 | `material` | `material` (index into `materials`; none) |
 | `dynamics` | `motion` (`dynamic`, `collider`), `bounce`, `friction`; `enabled` (true), `compound` (false), `shape`: `automatic` (default), `box`, `sphere`, `convex_hull`, `static_mesh`; `mass_mode`: `global_density` (default), `custom_density`, `custom_mass`; `density`, `mass`, `rotational_mass` (1); `linear_damping`, `angular_damping` (0); `initial_velocity` (cm/s), `initial_spin` (radians/s) ([0, 0, 0]) |
 
+### Materials
+
+Each entry of `materials`: `name`, `color` (the base colour), `roughness`
+(0 – 1), `metallic` (0 – 1) and `emission` (linear RGB, may exceed 1) —
+version 3 has only these — and, in version 4, the other channels, each left
+out while it has its default:
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `specular` | 0.5 | a dielectric's reflection strength (0 – 1; 0.5 is 4 %) |
+| `normal_strength` | 1 | how strongly a normal texture bends the shading (0 – 2) |
+| `bump_height` | 0.1 | how high a bump texture's white lies (cm) |
+| `emission_strength` | 1 | multiplies `emission` |
+| `opacity` | 1 | 0 – 1; below `opacity_threshold` the surface is cut out |
+| `opacity_threshold` | 0.5 | 0 – 1 |
+| `transmission` | 0 | light passing through (0 – 1) |
+| `ior` | 1.5 | refractive index (1 – 3) |
+| `clearcoat` | 0 | a varnish over the base (0 – 1) |
+| `clearcoat_roughness` | 0.03 | 0 – 1 |
+| `two_sided` | false | both sides of each polygon shaded alike |
+| `maps` | `{}` | the channels' textures, by channel: `base_color`, `metallic`, `roughness`, `specular`, `normal`, `bump`, `emission`, `opacity`, `transmission`, `clearcoat` |
+
+A channel's texture: `texture` (an index into `textures`), `tiling`
+([u, v] repeats; [1, 1]), `offset` ([u, v] in picture widths; [0, 0]),
+`range` (the picture's 0 – 1 mapped onto [from, to]; [0, 1]) and `strength`
+(0 – 1, from the channel's value to the texture; 1). Values out of range are
+clamped when read; a `texture` index that names no texture is ignored.
+
 ### Textures
 
 Each entry of `textures` (version 4):
@@ -275,9 +303,11 @@ its meaning — and only adds to it. What it adds, as of this writing:
 | Addition | Since |
 |----------|-------|
 | `document.textures` and the entries `textures/<n>.<ext>` | Grid4D 1.1 development (step 15.3) |
+| the materials' channels beyond colour, roughness, metallic and emission, and `maps` | Grid4D 1.1 development (step 15.4) |
 
 A version 3 file is therefore read as a version 4 file with the version
-number changed, minus any field this table lists (version 3 readers ignore
+number changed, minus any field this table lists (a material's added fields
+included) (version 3 readers ignore
 unknown fields, so such a field in a version 3 file means nothing). A
 version 4 file that uses none of the additions is a valid version 3 file once
 its `version` says `3`.

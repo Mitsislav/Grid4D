@@ -40,7 +40,7 @@ use grid4d_scene::{
     ObjectOverrides, ObjectParam, Override, Param, PluginObject, PluginValue, RenderSettings, SimulationCache,
     SimulationSettings, SplineHandle, Tag, Take, TakeId, Takes, Tangents, TimeSettings, Track, Transform,
 };
-use grid4d_scene::{ColorSpace, Texture, TextureSource};
+use grid4d_scene::{Channel, ColorSpace, Texture, TextureId, TextureSlot, TextureSource};
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
 
@@ -444,27 +444,265 @@ struct MaterialDto {
     roughness: f32,
     metallic: f32,
     emission: [f32; 3],
+    /// Added in version 4 (step 15.4): the other channels, each left out
+    /// while it has its default.
+    #[serde(default = "half", skip_serializing_if = "is_half")]
+    specular: f32,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    normal_strength: f32,
+    #[serde(default = "default_bump", skip_serializing_if = "is_default_bump")]
+    bump_height: f32,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    emission_strength: f32,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    opacity: f32,
+    #[serde(default = "half", skip_serializing_if = "is_half")]
+    opacity_threshold: f32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    transmission: f32,
+    #[serde(default = "default_ior", skip_serializing_if = "is_default_ior")]
+    ior: f32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    clearcoat: f32,
+    #[serde(default = "default_coat", skip_serializing_if = "is_default_coat")]
+    clearcoat_roughness: f32,
+    #[serde(default, skip_serializing_if = "is_false")]
+    two_sided: bool,
+    /// The channels' textures, by channel name; absent when there are none.
+    #[serde(default, skip_serializing_if = "MapsDto::is_empty")]
+    maps: MapsDto,
+}
+
+const fn half() -> f32 {
+    0.5
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_half(value: &f32) -> bool {
+    *value == 0.5
+}
+
+const fn default_bump() -> f32 {
+    0.1
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_default_bump(value: &f32) -> bool {
+    *value == 0.1
+}
+
+const fn default_ior() -> f32 {
+    1.5
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_default_ior(value: &f32) -> bool {
+    *value == 1.5
+}
+
+const fn default_coat() -> f32 {
+    0.03
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_default_coat(value: &f32) -> bool {
+    *value == 0.03
+}
+
+/// The textures of a material's channels.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct MapsDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base_color: Option<SlotDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    metallic: Option<SlotDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    roughness: Option<SlotDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    specular: Option<SlotDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    normal: Option<SlotDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bump: Option<SlotDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    emission: Option<SlotDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opacity: Option<SlotDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transmission: Option<SlotDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    clearcoat: Option<SlotDto>,
+}
+
+impl MapsDto {
+    fn is_empty(&self) -> bool {
+        Channel::ALL.into_iter().all(|channel| self.get(channel).is_none())
+    }
+
+    fn get(&self, channel: Channel) -> Option<&SlotDto> {
+        self.slot(channel).as_ref()
+    }
+
+    const fn slot(&self, channel: Channel) -> &Option<SlotDto> {
+        match channel {
+            Channel::BaseColor => &self.base_color,
+            Channel::Metallic => &self.metallic,
+            Channel::Roughness => &self.roughness,
+            Channel::Specular => &self.specular,
+            Channel::Normal => &self.normal,
+            Channel::Bump => &self.bump,
+            Channel::Emission => &self.emission,
+            Channel::Opacity => &self.opacity,
+            Channel::Transmission => &self.transmission,
+            Channel::Clearcoat => &self.clearcoat,
+        }
+    }
+
+    const fn slot_mut(&mut self, channel: Channel) -> &mut Option<SlotDto> {
+        match channel {
+            Channel::BaseColor => &mut self.base_color,
+            Channel::Metallic => &mut self.metallic,
+            Channel::Roughness => &mut self.roughness,
+            Channel::Specular => &mut self.specular,
+            Channel::Normal => &mut self.normal,
+            Channel::Bump => &mut self.bump,
+            Channel::Emission => &mut self.emission,
+            Channel::Opacity => &mut self.opacity,
+            Channel::Transmission => &mut self.transmission,
+            Channel::Clearcoat => &mut self.clearcoat,
+        }
+    }
+}
+
+/// A channel's texture: `texture` is an index into `document.textures`.
+#[derive(Debug, Serialize, Deserialize)]
+struct SlotDto {
+    texture: usize,
+    #[serde(default = "unit_pair", skip_serializing_if = "is_unit_pair")]
+    tiling: [f32; 2],
+    #[serde(default, skip_serializing_if = "is_zero_pair")]
+    offset: [f32; 2],
+    #[serde(default = "unit_range", skip_serializing_if = "is_unit_range")]
+    range: [f32; 2],
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    strength: f32,
+}
+
+const fn unit_pair() -> [f32; 2] {
+    [1.0, 1.0]
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_unit_pair(value: &[f32; 2]) -> bool {
+    *value == [1.0, 1.0]
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_zero_pair(value: &[f32; 2]) -> bool {
+    *value == [0.0, 0.0]
+}
+
+const fn unit_range() -> [f32; 2] {
+    [0.0, 1.0]
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_unit_range(value: &[f32; 2]) -> bool {
+    *value == [0.0, 1.0]
 }
 
 impl MaterialDto {
-    fn new(material: &Material) -> Self {
+    fn new(material: &Material, refs: &Refs) -> Self {
+        let mut maps = MapsDto::default();
+        for (channel, slot) in material.maps() {
+            // A link to a removed texture is not written (it did nothing).
+            if let Some(&texture) = refs.textures.get(&slot.texture) {
+                *maps.slot_mut(channel) = Some(SlotDto {
+                    texture,
+                    tiling: slot.tiling,
+                    offset: slot.offset,
+                    range: slot.range,
+                    strength: slot.strength,
+                });
+            }
+        }
         Self {
             name: material.name.clone(),
             color: material.color,
             roughness: material.roughness,
             metallic: material.metallic,
             emission: material.emission,
+            specular: material.specular,
+            normal_strength: material.normal_strength,
+            bump_height: material.bump_height,
+            emission_strength: material.emission_strength,
+            opacity: material.opacity,
+            opacity_threshold: material.opacity_threshold,
+            transmission: material.transmission,
+            ior: material.ior,
+            clearcoat: material.clearcoat,
+            clearcoat_roughness: material.clearcoat_roughness,
+            two_sided: material.two_sided,
+            maps,
         }
     }
 
-    fn into_material(self) -> Result<Material, IoError> {
-        let material = Material {
-            name: self.name,
-            color: self.color.map(|c| c.max(0.0)),
-            roughness: self.roughness.clamp(0.0, 1.0),
-            metallic: self.metallic.clamp(0.0, 1.0),
-            emission: self.emission.map(|c| c.max(0.0)),
-        };
+    /// The material; values out of range are clamped, texture indices that
+    /// name no texture are dropped.
+    fn into_material(self, textures: &[TextureId]) -> Result<Material, IoError> {
+        let unit = |v: f32| v.clamp(0.0, 1.0);
+        let mut material = Material::new(self.name);
+        material.color = self.color.map(|c| c.max(0.0));
+        material.roughness = unit(self.roughness);
+        material.metallic = unit(self.metallic);
+        material.emission = self.emission.map(|c| c.max(0.0));
+        material.specular = unit(self.specular);
+        material.normal_strength = self.normal_strength.clamp(0.0, 2.0);
+        material.bump_height = self.bump_height.max(0.0);
+        material.emission_strength = self.emission_strength.max(0.0);
+        material.opacity = unit(self.opacity);
+        material.opacity_threshold = unit(self.opacity_threshold);
+        material.transmission = unit(self.transmission);
+        material.ior = self.ior.clamp(Material::IOR_RANGE.0, Material::IOR_RANGE.1);
+        material.clearcoat = unit(self.clearcoat);
+        material.clearcoat_roughness = unit(self.clearcoat_roughness);
+        material.two_sided = self.two_sided;
+        for channel in Channel::ALL {
+            let Some(slot) = self.maps.get(channel) else {
+                continue;
+            };
+            let Some(&texture) = textures.get(slot.texture) else {
+                continue;
+            };
+            *material.map_mut(channel) = Some(TextureSlot {
+                texture,
+                tiling: slot.tiling.map(|t| if t.abs() < 1e-6 { 1.0 } else { t }),
+                offset: slot.offset,
+                range: slot.range,
+                strength: unit(slot.strength),
+            });
+        }
         check_material_finite(&material)?;
         Ok(material)
     }
@@ -486,6 +724,7 @@ struct Refs {
     objects: HashMap<NodeId, usize>,
     materials: HashMap<MaterialId, usize>,
     layers: HashMap<LayerId, usize>,
+    textures: HashMap<TextureId, usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -3019,6 +3258,14 @@ pub(crate) fn write(
             .enumerate()
             .map(|(i, &id)| (id, i))
             .collect(),
+        textures: doc
+            .scene
+            .textures()
+            .ids()
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| (id, i))
+            .collect(),
     };
     let mut objects = Vec::with_capacity(order.len());
     let mut table = MeshTable::default();
@@ -3060,7 +3307,12 @@ pub(crate) fn write(
                 looping: settings.looping,
             },
             objects,
-            materials: doc.scene.materials().iter().map(|(_, m)| MaterialDto::new(m)).collect(),
+            materials: doc
+                .scene
+                .materials()
+                .iter()
+                .map(|(_, m)| MaterialDto::new(m, &refs))
+                .collect(),
             layers: doc.scene.layers().iter().map(|(_, l)| LayerDto::new(l)).collect(),
             takes,
             render: RenderDto::new(&doc.render),
@@ -3156,14 +3408,15 @@ impl File {
             simulation_cache,
             textures,
         } = self.document;
-        let textures = textures
-            .into_iter()
-            .enumerate()
-            .map(|(index, dto)| dto.into_texture(index, archive, folder))
-            .collect::<Result<Vec<_>, IoError>>()?;
+        // Textures first: materials refer to them.
+        let mut texture_table = grid4d_scene::Textures::default();
+        let mut texture_ids = Vec::with_capacity(textures.len());
+        for (index, dto) in textures.into_iter().enumerate() {
+            texture_ids.push(texture_table.insert(dto.into_texture(index, archive, folder)?));
+        }
         let materials = materials
             .into_iter()
-            .map(MaterialDto::into_material)
+            .map(|dto| dto.into_material(&texture_ids))
             .collect::<Result<Vec<_>, IoError>>()?;
         let layers = layers
             .into_iter()
@@ -3240,9 +3493,7 @@ impl File {
         if let Some(takes) = takes {
             read_takes(&mut doc, takes, &ids, &material_ids, &meshes)?;
         }
-        for texture in textures {
-            doc.scene.textures_mut().insert(texture);
-        }
+        *doc.scene.textures_mut() = texture_table;
         let cache = simulation_cache.map(|dto| dto.into_cache(archive, &ids)).transpose()?;
         Ok((doc, cache))
     }
@@ -5140,6 +5391,7 @@ mod tests {
             objects: HashMap::new(),
             materials: HashMap::new(),
             layers: HashMap::new(),
+            textures: HashMap::new(),
         };
         let json = serde_json::to_string(&TagDto::new(&rigid, &refs)).unwrap();
         assert_eq!(

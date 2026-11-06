@@ -231,6 +231,24 @@ proptest! {
             let color_space = if linear { grid4d_scene::ColorSpace::Linear } else { grid4d_scene::ColorSpace::Srgb };
             doc.scene.textures_mut().insert(grid4d_scene::Texture { name, source, color_space });
         }
+        // Material channels (version 4): values away from the defaults, and a
+        // texture on a channel when there is one.
+        let textures: Vec<grid4d_scene::TextureId> = doc.scene.textures().ids().to_vec();
+        let ids: Vec<grid4d_scene::MaterialId> = doc.scene.materials().ids().to_vec();
+        for (k, id) in ids.into_iter().enumerate() {
+            let material = doc.scene.materials_mut().get_mut(id).unwrap();
+            let f = f32::from(u8::try_from(k % 10).unwrap()) / 10.0;
+            (material.specular, material.transmission, material.clearcoat) = (f, 1.0 - f, f * 0.5);
+            material.ior = 1.0 + f;
+            material.two_sided = k % 2 == 0;
+            if let Some(&texture) = textures.get(k % textures.len().max(1)) {
+                let channel = grid4d_scene::Channel::ALL[k % grid4d_scene::Channel::ALL.len()];
+                *material.map_mut(channel) = Some(grid4d_scene::TextureSlot {
+                    tiling: [1.0 + f, 2.0],
+                    ..grid4d_scene::TextureSlot::new(texture)
+                });
+            }
+        }
         let bytes = grid4d_io::to_bytes(&doc).unwrap();
         let loaded = grid4d_io::from_bytes(&bytes).unwrap();
         prop_assert_eq!(loaded.scene.len(), doc.scene.len());
