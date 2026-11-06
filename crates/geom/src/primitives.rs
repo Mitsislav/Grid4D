@@ -8,12 +8,18 @@
 //! modelling tools) with their own ring of points, not shared with the side —
 //! as in the reference application, so a rim stays hard under smoothing and
 //! subdivision (see `docs/reference/modeling-modes.md` §2).
+//!
+//! Every primitive has UVs (see [`crate::uv`] for the conventions): round
+//! bodies around their axis (`u`, from +Z towards +X) and along their profile
+//! (`v`, top to bottom, by length); a cube the whole picture on each side;
+//! flat shapes and caps a plan seen from their front. UVs do not depend on
+//! the size, so a primitive's unit mesh scaled stays correctly textured.
 
 use std::{collections::HashMap, f32::consts::PI};
 
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 
-use crate::{PolyMesh, u32_index, us};
+use crate::{PolyMesh, u32_index, us, uv};
 
 /// Upper limit for any segment count.
 pub const MAX_SEGMENTS: u32 = 1000;
@@ -29,11 +35,12 @@ fn fraction(i: u32, n: u32) -> f32 {
     f32::from(u16::try_from(i).unwrap_or(u16::MAX)) / f32::from(u16::try_from(n.max(1)).unwrap_or(u16::MAX))
 }
 
-/// Collects points and faces, then builds a validated mesh.
+/// Collects points and faces with their UVs, then builds a validated mesh.
 #[derive(Default)]
 struct Builder {
     points: Vec<Vec3>,
     corners: Vec<u32>,
+    uvs: Vec<Vec2>,
     sizes: Vec<usize>,
 }
 
@@ -43,13 +50,30 @@ impl Builder {
         u32_index(self.points.len() - 1)
     }
 
-    fn face(&mut self, corners: &[u32]) {
+    /// A face and one UV per corner.
+    fn face(&mut self, corners: &[u32], uvs: &[Vec2]) {
+        debug_assert_eq!(corners.len(), uvs.len());
         self.corners.extend_from_slice(corners);
+        self.uvs.extend_from_slice(uvs);
         self.sizes.push(corners.len());
     }
 
+    /// Flat `polygons` facing along `normal`, with planar UVs over their
+    /// common bounds.
+    fn planar_faces(&mut self, polygons: &[Vec<u32>], normal: Vec3) {
+        let uvs = uv::planar(&self.points, polygons, normal);
+        for (polygon, uvs) in polygons.iter().zip(&uvs) {
+            self.face(polygon, uvs);
+        }
+    }
+
     fn build(self) -> PolyMesh {
-        let Self { points, corners, sizes } = self;
+        let Self {
+            points,
+            corners,
+            uvs,
+            sizes,
+        } = self;
         let mut start = 0;
         let faces = sizes.iter().map(|&n| {
             let face = &corners[start..start + n];
@@ -58,7 +82,31 @@ impl Builder {
         });
         // Generators only emit valid faces (covered by the tests); an empty mesh
         // is the safe answer should that ever break.
-        PolyMesh::from_faces(points, faces).unwrap_or_default()
+        let mut mesh = PolyMesh::from_faces(points, faces).unwrap_or_default();
+        if mesh.corner_count() == uvs.len() && !uvs.is_empty() {
+            let _ = mesh.set_uvs(Some(uvs));
+        }
+        mesh
+    }
+}
+
+/// Where along a profile each of its stations lies, 0 – 1 by length in the
+/// `(radius, y)` half-plane (by count if the profile has no length).
+fn along(stations: &[(f32, f32)]) -> Vec<f32> {
+    let mut lengths = Vec::with_capacity(stations.len());
+    let mut total = 0.0;
+    for (i, &(r, y)) in stations.iter().enumerate() {
+        if i > 0 {
+            let (r0, y0) = stations[i - 1];
+            total += (r - r0).hypot(y - y0);
+        }
+        lengths.push(total);
+    }
+    let last = u32_index(stations.len().saturating_sub(1));
+    if total > f32::EPSILON {
+        lengths.iter().map(|l| l / total).collect()
+    } else {
+        (0..u32_index(stations.len())).map(|i| fraction(i, last)).collect()
     }
 }
 
@@ -89,16 +137,41 @@ fn lathe(profile: &[(f32, f32)], around: u32, top: End, bottom: End) -> PolyMesh
         })
         .collect();
     let at = |ring: u32, j: u32| ring + j % n;
+    // v of each ring (poles included), and u of each step around.
+    let mut stations = Vec::with_capacity(profile.len() + 2);
+    if let End::Pole(y) = top {
+        stations.push((0.0, y));
+    }
+    stations.extend_from_slice(profile);
+    if let End::Pole(y) = bottom {
+        stations.push((0.0, y));
+    }
+    let v = along(&stations);
+    let first_v = usize::from(matches!(top, End::Pole(_)));
+    let ring_v = |k: usize| v.get(first_v + k).copied().unwrap_or(0.0);
+    let u = |j: u32| fraction(j, n);
 
-    for pair in rings.windows(2) {
+    for (k, pair) in rings.windows(2).enumerate() {
         let (upper, lower) = (pair[0], pair[1]);
+        let (vu, vl) = (ring_v(k), ring_v(k + 1));
         for j in 0..n {
-            b.face(&[at(lower, j), at(lower, j + 1), at(upper, j + 1), at(upper, j)]);
+            b.face(
+                &[at(lower, j), at(lower, j + 1), at(upper, j + 1), at(upper, j)],
+                &[
+                    Vec2::new(u(j), vl),
+                    Vec2::new(u(j + 1), vl),
+                    Vec2::new(u(j + 1), vu),
+                    Vec2::new(u(j), vu),
+                ],
+            );
         }
     }
     let (Some(&first), Some(&last)) = (rings.first(), rings.last()) else {
         return b.build();
     };
+    let (v_first, v_last) = (ring_v(0), ring_v(rings.len() - 1));
+    // A pole's corner sits half way between its neighbours around.
+    let middle = |j: u32| (u(j) + u(j + 1)) * 0.5;
     // A cap's points: a copy of the ring, so the cap is separate from the side.
     let cap_ring = |b: &mut Builder, ring: u32| {
         let copy = u32_index(b.points.len());
@@ -112,26 +185,40 @@ fn lathe(profile: &[(f32, f32)], around: u32, top: End, bottom: End) -> PolyMesh
         End::Pole(y) => {
             let pole = b.point(Vec3::new(0.0, y, 0.0));
             for j in 0..n {
-                b.face(&[at(first, j), at(first, j + 1), pole]);
+                b.face(
+                    &[at(first, j), at(first, j + 1), pole],
+                    &[
+                        Vec2::new(u(j), v_first),
+                        Vec2::new(u(j + 1), v_first),
+                        Vec2::new(middle(j), 0.0),
+                    ],
+                );
             }
         }
         End::Cap => {
             let ring = cap_ring(&mut b, first);
             let cap: Vec<u32> = (0..n).map(|j| at(ring, j)).collect();
-            b.face(&cap);
+            b.planar_faces(&[cap], Vec3::Y);
         }
     }
     match bottom {
         End::Pole(y) => {
             let pole = b.point(Vec3::new(0.0, y, 0.0));
             for j in 0..n {
-                b.face(&[at(last, j), pole, at(last, j + 1)]);
+                b.face(
+                    &[at(last, j), pole, at(last, j + 1)],
+                    &[
+                        Vec2::new(u(j), v_last),
+                        Vec2::new(middle(j), 1.0),
+                        Vec2::new(u(j + 1), v_last),
+                    ],
+                );
             }
         }
         End::Cap => {
             let ring = cap_ring(&mut b, last);
             let cap: Vec<u32> = (0..n).rev().map(|j| at(ring, j)).collect();
-            b.face(&cap);
+            b.planar_faces(&[cap], Vec3::NEG_Y);
         }
     }
     b.build()
@@ -165,6 +252,14 @@ pub fn cube(size: Vec3, segments_xyz: [u32; 3]) -> PolyMesh {
         (2, false, 1, 0), // −Z: Y × X
     ];
     for (axis, max_side, u, v) in FACES {
+        let mut outward = Vec3::ZERO;
+        outward[axis] = if max_side { 1.0 } else { -1.0 };
+        let (right, up) = uv::planar_axes(outward).unwrap_or((Vec3::X, Vec3::Y));
+        // The whole picture on the side, from the lattice (size-independent).
+        let uv_of = |c: [u32; 3]| {
+            let q = Vec3::new(fraction(c[0], n[0]), fraction(c[1], n[1]), fraction(c[2], n[2])) - Vec3::splat(0.5);
+            Vec2::new(0.5 + q.dot(right), 0.5 - q.dot(up))
+        };
         for i in 0..n[u] {
             for j in 0..n[v] {
                 let corner = |du: u32, dv: u32| {
@@ -174,8 +269,9 @@ pub fn cube(size: Vec3, segments_xyz: [u32; 3]) -> PolyMesh {
                     c[v] = j + dv;
                     c
                 };
-                let quad = [corner(0, 0), corner(1, 0), corner(1, 1), corner(0, 1)].map(|c| point(&mut b, c));
-                b.face(&quad);
+                let lattice = [corner(0, 0), corner(1, 0), corner(1, 1), corner(0, 1)];
+                let quad = lattice.map(|c| point(&mut b, c));
+                b.face(&quad, &lattice.map(uv_of));
             }
         }
     }
@@ -248,10 +344,15 @@ pub fn plane(width: f32, depth: f32, width_segments: u32, depth_segments: u32) -
         }
     }
     let p = |i: u32, j: u32| j * (nx + 1) + i;
+    // A plan seen from above: u along +X, v along +Z (−Z at the top).
+    let t = |i: u32, j: u32| Vec2::new(fraction(i, nx), fraction(j, nz));
     for j in 0..nz {
         for i in 0..nx {
             // +Z then +X: Z × X = +Y.
-            b.face(&[p(i, j), p(i, j + 1), p(i + 1, j + 1), p(i + 1, j)]);
+            b.face(
+                &[p(i, j), p(i, j + 1), p(i + 1, j + 1), p(i + 1, j)],
+                &[t(i, j), t(i, j + 1), t(i + 1, j + 1), t(i + 1, j)],
+            );
         }
     }
     b.build()
@@ -271,10 +372,15 @@ pub fn torus(ring_radius: f32, pipe_radius: f32, ring_segments: u32, pipe_segmen
         }
     }
     let p = |i: u32, j: u32| (i % n) * m + j % m;
+    // u around the axis, v around the tube (seams where each wraps).
+    let t = |i: u32, j: u32| Vec2::new(fraction(i, n), fraction(j, m));
     for i in 0..n {
         for j in 0..m {
             // Around the tube, then around the axis: outward.
-            b.face(&[p(i, j), p(i, j + 1), p(i + 1, j + 1), p(i + 1, j)]);
+            b.face(
+                &[p(i, j), p(i, j + 1), p(i + 1, j + 1), p(i + 1, j)],
+                &[t(i, j), t(i, j + 1), t(i + 1, j + 1), t(i + 1, j)],
+            );
         }
     }
     b.build()
@@ -301,18 +407,21 @@ pub fn disc(inner_radius: f32, outer_radius: f32, rotation_segments: u32, disc_s
         })
         .collect();
     let at = |ring: u32, j: u32| ring + j % n;
+    let mut faces: Vec<Vec<u32>> = Vec::new();
     if let (Some(c), Some(&first)) = (center, rings.first()) {
         for j in 0..n {
-            b.face(&[c, at(first, j), at(first, j + 1)]);
+            faces.push(vec![c, at(first, j), at(first, j + 1)]);
         }
     }
     for pair in rings.windows(2) {
         let (inner, outer) = (pair[0], pair[1]);
         for j in 0..n {
             // Outwards (+Z at angle 0), then around (+X): Z × X = +Y.
-            b.face(&[at(inner, j), at(outer, j), at(outer, j + 1), at(inner, j + 1)]);
+            faces.push(vec![at(inner, j), at(outer, j), at(outer, j + 1), at(inner, j + 1)]);
         }
     }
+    // A plan of the whole disc seen from above.
+    b.planar_faces(&faces, Vec3::Y);
     b.build()
 }
 
@@ -494,6 +603,78 @@ mod tests {
             plane(1.0, 1.0, 5000, 1).face_count(),
             usize::try_from(MAX_SEGMENTS).unwrap()
         );
+    }
+
+    /// Every corner has a finite UV in 0 – 1, no face shows the picture
+    /// mirrored, and the UVs reach every side of the square.
+    pub(crate) fn assert_uvs_cover_the_square(name: &str, mesh: &PolyMesh) {
+        let uvs = mesh.uvs().unwrap_or_else(|| panic!("{name}: no UVs"));
+        assert_eq!(uvs.len(), mesh.corner_count(), "{name}");
+        for uv in uvs {
+            assert!(uv.is_finite(), "{name}: {uv}");
+            assert!(
+                uv.cmpge(Vec2::splat(-1e-6)).all() && uv.cmple(Vec2::splat(1.0 + 1e-6)).all(),
+                "{name}: {uv}"
+            );
+        }
+        let (min, max) = uvs.iter().fold((Vec2::INFINITY, Vec2::NEG_INFINITY), |(a, b), &uv| {
+            (a.min(uv), b.max(uv))
+        });
+        assert!(
+            min.abs_diff_eq(Vec2::ZERO, 1e-4) && max.abs_diff_eq(Vec2::ONE, 1e-4),
+            "{name}: {min} – {max}"
+        );
+        assert_eq!(uv::flipped_faces(mesh), 0, "{name}: mirrored faces");
+    }
+
+    #[test]
+    fn every_primitive_has_uvs_over_the_whole_square() {
+        for (name, mesh) in [
+            ("cube", cube(Vec3::new(200.0, 100.0, 50.0), [2, 3, 4])),
+            ("flat cube", cube(Vec3::new(200.0, 0.0, 50.0), [1, 1, 1])),
+            ("sphere", sphere(100.0, 24)),
+            ("cylinder", cylinder(50.0, 200.0, 36, 4)),
+            ("cone", cone(100.0, 0.0, 200.0, 36, 8)),
+            ("inverted cone", cone(0.0, 40.0, 100.0, 12, 3)),
+            ("frustum", cone(100.0, 30.0, 80.0, 16, 2)),
+            ("plane", plane(400.0, 300.0, 20, 10)),
+            ("torus", torus(200.0, 50.0, 36, 18)),
+            ("disc", disc(0.0, 100.0, 36, 2)),
+            ("ring", disc(40.0, 100.0, 36, 3)),
+            ("capsule", capsule(50.0, 200.0, 36, 4, 8)),
+            ("short capsule", capsule(50.0, 40.0, 12, 4, 3)),
+            ("tiny sphere", sphere(1.0, 0)),
+        ] {
+            assert_uvs_cover_the_square(name, &mesh);
+        }
+    }
+
+    #[test]
+    fn uvs_follow_the_shapes() {
+        // A cube side carries the whole picture, upright: the +Z side's top
+        // left corner (−X, +Y) is UV (0, 0).
+        let c = cube(Vec3::splat(2.0), [1, 1, 1]);
+        let uvs = c.uvs().unwrap();
+        let front = (0..c.face_count())
+            .find(|&f| c.face_normal(f).abs_diff_eq(Vec3::Z, 1e-6))
+            .unwrap();
+        for (&p, &uv) in c.face(front).iter().zip(&uvs[c.corner_range(front)]) {
+            let point = c.points()[us(p)];
+            assert_eq!(uv, Vec2::new((point.x + 1.0) * 0.5, (1.0 - point.y) * 0.5));
+        }
+        // A sphere's v follows the latitude; its seam has u 0 on one side and
+        // 1 on the other.
+        let s = sphere(1.0, 8);
+        let uvs = s.uvs().unwrap();
+        for (corner, &p) in s.corner_points().iter().enumerate() {
+            let y = s.points()[us(p)].y;
+            assert!(
+                (uvs[corner].y - (y.acos() / PI)).abs() < 1e-5,
+                "{y} → {}",
+                uvs[corner].y
+            );
+        }
+        assert!(uvs.iter().any(|uv| uv.x == 0.0) && uvs.iter().any(|uv| uv.x == 1.0));
     }
 
     #[test]

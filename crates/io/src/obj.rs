@@ -646,7 +646,7 @@ l 5 6
             6 + 1,
             "a hard cube needs six normals, the flat pentagon one"
         );
-        assert_eq!(count("vt "), 5);
+        assert_eq!(count("vt "), 4 + 5, "the cube's picture corners, the pentagon's own");
         let (plain, no_mtl) = obj_text(&scene(), None).unwrap();
         assert!(!plain.contains("mtllib") && !plain.contains("usemtl") && no_mtl.is_empty());
         assert!(obj_text(&Objects::default(), Some("x.mtl")).unwrap().1.is_empty());

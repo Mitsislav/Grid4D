@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.1 — Specs and the `.g4d` format version 4 (2026-11-06) |
-| Next step | 15.2 — UVs from every primitive and generator |
-| Tests | 783 (and 4 ignored, run by hand: two timings, the walkthrough and the README pictures), all passing; clippy and rustfmt clean |
+| Last step done | 15.2 — UVs from every primitive and generator (2026-11-06) |
+| Next step | 15.3 — Images: decoding, background loading, the document's textures, the Texture Manager |
+| Tests | 792 (and 4 ignored, run by hand: two timings, the walkthrough and the README pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2311,6 +2311,7 @@ risks R5 – R8 go with it.
 | Step | What was built | Tests |
 |------|----------------|-------|
 | 15.1 | Five specs: the format version 4, material channels, textures and the Texture Manager, the Material tag's projections and layers, the UV editor; `.g4d` version 4 written (version 3's module moved to `v4.rs`; `v3.rs` upgrades a version 3 `document.json` as JSON), `FILE_FORMAT.md` for version 4, golden `demo_v4.g4d` / `full_v4.g4d`, the version 3 fixtures frozen and checked to read exactly as before, a property test of documents labelled version 3, the fuzz corpus with both versions; the manual and changelog say what 1.1 files mean for 1.0 | 783 |
+| 15.2 | UVs everywhere: `grid4d_geom::uv` (conventions, planar and box projections, mirrored-face check); every primitive (size-independent, so the shared unit meshes stay correct); the walls and caps of Extrude, Lathe, Sweep and Loft; the Subdivision Surface's merged cage keeps its parts' UVs (a Box projection for parts without); plugin generators without UVs get a Box projection; Make Editable, Current State and glTF / OBJ export carry them; the layouts written in `tag-material.md`; the v4 golden files regenerated (the frozen v3 ones compared with UV-less meshes) | 792 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2338,6 +2339,34 @@ risks R5 – R8 go with it.
   projections 15.4, seams 15.7), each adding to version 4 while it is open
   and listing the addition in `v3.rs` and `FILE_FORMAT.md`. Version 4 is
   frozen when 1.1 ships.
+
+**15.2 — UVs from every primitive and generator**
+
+*Problems and solutions:*
+- **One rule for "the right way round".** UVs can be valid numbers and still
+  show the picture mirrored. The convention is written once in
+  `grid4d_geom::uv` (`u` right, `v` down the picture, as glTF and image files
+  store rows) with `winding` and `flipped_faces`, and every test of every
+  kind asserts no face is mirrored — which caught nothing in the primitives
+  but decided each generator's `v` direction (and its flip with Reverse
+  Normals) before the code was written.
+- **Primitives are drawn from shared unit meshes, scaled per instance.** So
+  their UVs must not depend on size: round bodies use fractions around and
+  arc length along the profile; the cube takes its UVs from its lattice, so
+  a cube flattened to zero height still gets a whole picture per side.
+- **Seams.** Points are shared where a body closes (sphere, torus, a closed
+  spline's wall, a full Lathe); UVs are per corner, so the closing step
+  gets `u = 1` while its point is the first one again.
+- **A merged cage lost its UVs.** The Subdivision Surface merges its cage's
+  parts into one mesh, and the merge kept only points and faces. It now
+  keeps UVs; a part without (an imported mesh) gets a Box projection of its
+  own, so the result always has them. A part under a mirroring transform
+  shows its picture mirrored, as a mirror would — the test counts exactly
+  those faces.
+- **The frozen version 3 files have meshes without UVs.** The demo's cube
+  now has UVs, so the v4 golden files were regenerated (v4 is still open)
+  and the v3 comparisons build their reference documents with UV-less
+  meshes, as Grid4D 1.0 made them.
 
 ---
 

@@ -5,7 +5,7 @@
 
 use glam::{Vec2, Vec3};
 
-use crate::{PolyMesh, spline::Polyline, triangulate_outlines, u32_index};
+use crate::{PolyMesh, spline::Polyline, triangulate_outlines, u32_index, uv};
 
 /// How an extrusion finds its movement.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -209,24 +209,78 @@ fn caps(runs: &[Run<'_>], cap_type: CapType) -> Vec<Vec<(usize, u32)>> {
     polygons
 }
 
-/// A mesh from `points` and `faces`; repeated corners are dropped from a face
-/// (welded points, a triangle across a bridge) and faces left with fewer than
-/// three are skipped.
-fn assemble(points: Vec<Vec3>, faces: &[Vec<u32>]) -> PolyMesh {
+/// A face as (point, UV) corners.
+type Face = Vec<(u32, Vec2)>;
+
+/// A mesh from `points` and `faces` with their UVs; repeated corners are
+/// dropped from a face (welded points, a triangle across a bridge) with their
+/// UVs, and faces left with fewer than three are skipped.
+fn assemble(points: Vec<Vec3>, faces: &[Face]) -> PolyMesh {
     let mut mesh = PolyMesh::from_faces(points, Vec::<Vec<u32>>::new()).unwrap_or_default();
     let mut corners = Vec::new();
+    let mut uvs = Vec::new();
+    let mut face_uvs = Vec::new();
     for face in faces {
         corners.clear();
-        for &c in face {
+        face_uvs.clear();
+        for &(c, uv) in face {
             if !corners.contains(&c) {
                 corners.push(c);
+                face_uvs.push(uv);
             }
         }
-        if corners.len() >= 3 {
-            let _ = mesh.add_face(&corners);
+        if corners.len() >= 3 && mesh.add_face(&corners).is_ok() {
+            uvs.extend_from_slice(&face_uvs);
         }
     }
+    if uvs.len() == mesh.corner_count() && !uvs.is_empty() {
+        let _ = mesh.set_uvs(Some(uvs));
+    }
     mesh
+}
+
+/// Flat cap `polygons` with planar UVs (see [`uv::planar`]), all facing the
+/// way their corners wind.
+fn planar_caps(points: &[Vec3], polygons: &[Vec<u32>]) -> Vec<Face> {
+    let normal: Vec3 = polygons
+        .iter()
+        .map(|polygon| crate::mesh::newell(polygon.iter().map(|&i| points[crate::us(i)])))
+        .sum();
+    let uvs = uv::planar(points, polygons, normal);
+    polygons
+        .iter()
+        .zip(uvs)
+        .map(|(polygon, uvs)| polygon.iter().copied().zip(uvs).collect())
+        .collect()
+}
+
+/// Where each point of `run` lies along it, 0 – 1 by length, in the run's
+/// order (outwards); a closed run gets one more entry, 1, for its first point
+/// at the end of the closing edge.
+fn along(run: &Run<'_>) -> Vec<f32> {
+    let n = run.order.len();
+    let edges = if run.closed { n } else { n.saturating_sub(1) };
+    let mut lengths = Vec::with_capacity(edges + 1);
+    lengths.push(0.0f32);
+    for e in 0..edges {
+        let (a, b) = (run.order[e], run.order[(e + 1) % n]);
+        let step = run.points[crate::us(a)].distance(run.points[crate::us(b)]);
+        lengths.push(lengths[e] + step);
+    }
+    let total = lengths[edges];
+    if total > f32::EPSILON {
+        lengths.iter().map(|l| l / total).collect()
+    } else {
+        let edges = f32::from(u16::try_from(edges.max(1)).unwrap_or(u16::MAX));
+        (0..lengths.len())
+            .map(|i| f32::from(u16::try_from(i).unwrap_or(u16::MAX)) / edges)
+            .collect()
+    }
+}
+
+/// `k` of `count` as a fraction.
+fn fraction(k: u32, count: u32) -> f32 {
+    f32::from(u16::try_from(k).unwrap_or(u16::MAX)) / f32::from(u16::try_from(count.max(1)).unwrap_or(u16::MAX))
 }
 
 /// The solid `polyline` makes when it is pushed along `extrusion`'s movement:
@@ -256,15 +310,27 @@ pub fn extrude(polyline: &Polyline, extrusion: &Extrusion) -> PolyMesh {
         }
     }
     let at = |run: usize, ring: u32, local: u32| bases[run] + ring * u32_index(runs[run].points.len()) + local;
-    let mut faces: Vec<Vec<u32>> = Vec::new();
-    // The shell: each edge of each run swept ring by ring.
+    let mut faces: Vec<Face> = Vec::new();
+    // The shell: each edge of each run swept ring by ring; u along the run,
+    // v along the movement (its end at the top of the picture).
     for (r, run) in runs.iter().enumerate() {
         let n = run.order.len();
         let edges = if run.closed { n } else { n - 1 };
+        let t = along(run);
         for e in 0..edges {
             let (a, b) = (run.order[e], run.order[(e + 1) % n]);
             for k in 0..rings {
-                let mut quad = vec![at(r, k, a), at(r, k, b), at(r, k + 1, b), at(r, k + 1, a)];
+                let (v0, v1) = if extrusion.reverse_normals {
+                    (fraction(k, rings), fraction(k + 1, rings))
+                } else {
+                    (1.0 - fraction(k, rings), 1.0 - fraction(k + 1, rings))
+                };
+                let mut quad = vec![
+                    (at(r, k, a), Vec2::new(t[e], v0)),
+                    (at(r, k, b), Vec2::new(t[e + 1], v0)),
+                    (at(r, k + 1, b), Vec2::new(t[e + 1], v1)),
+                    (at(r, k + 1, a), Vec2::new(t[e], v1)),
+                ];
                 if extrusion.reverse_normals {
                     quad.reverse();
                 }
@@ -273,14 +339,17 @@ pub fn extrude(polyline: &Polyline, extrusion: &Extrusion) -> PolyMesh {
         }
     }
     // The caps: counter-clockwise around dir faces forward (the end).
+    let (mut ends, mut starts) = (Vec::new(), Vec::new());
     for polygon in caps(&runs, extrusion.cap_type) {
         if extrusion.end_cap {
-            faces.push(polygon.iter().map(|&(run, p)| at(run, rings, p)).collect());
+            ends.push(polygon.iter().map(|&(run, p)| at(run, rings, p)).collect());
         }
         if extrusion.start_cap {
-            faces.push(polygon.iter().rev().map(|&(run, p)| at(run, 0, p)).collect());
+            starts.push(polygon.iter().rev().map(|&(run, p)| at(run, 0, p)).collect());
         }
     }
+    faces.extend(planar_caps(&points, &ends));
+    faces.extend(planar_caps(&points, &starts));
     assemble(points, &faces)
 }
 
@@ -392,14 +461,27 @@ pub fn lathe(polyline: &Polyline, lathe: &Lathe) -> PolyMesh {
     };
     // Counter-clockwise profiles turning the positive way face the axis: flip.
     let flip = (angle > 0.0) != lathe.reverse_normals;
-    let mut faces: Vec<Vec<u32>> = Vec::new();
+    let mut faces: Vec<Face> = Vec::new();
+    // u along the turn, v along the profile.
     for (r, run) in runs.iter().enumerate() {
         let n = run.order.len();
         let edges = if run.closed { n } else { n - 1 };
+        let t = along(run);
         for e in 0..edges {
             let (a, b) = (run.order[e], run.order[(e + 1) % n]);
+            let (ta, tb) = if flip {
+                (1.0 - t[e], 1.0 - t[e + 1])
+            } else {
+                (t[e], t[e + 1])
+            };
             for k in 0..steps {
-                let mut quad = vec![at(r, k, a), at(r, k, b), at(r, k + 1, b), at(r, k + 1, a)];
+                let (u0, u1) = (fraction(k, steps), fraction(k + 1, steps));
+                let mut quad = vec![
+                    (at(r, k, a), Vec2::new(u0, ta)),
+                    (at(r, k, b), Vec2::new(u0, tb)),
+                    (at(r, k + 1, b), Vec2::new(u1, tb)),
+                    (at(r, k + 1, a), Vec2::new(u1, ta)),
+                ];
                 if flip {
                     quad.reverse();
                 }
@@ -410,22 +492,24 @@ pub fn lathe(polyline: &Polyline, lathe: &Lathe) -> PolyMesh {
     if !full {
         // Counter-clockwise in the half-plane faces back against a positive turn.
         let backwards = angle >= 0.0;
+        let (mut starts, mut ends) = (Vec::new(), Vec::new());
         for polygon in caps(&runs, lathe.cap_type) {
-            let start: Vec<u32> = polygon.iter().map(|&(run, p)| at(run, 0, p)).collect();
-            let end: Vec<u32> = polygon.iter().map(|&(run, p)| at(run, steps, p)).collect();
-            let (mut start, mut end) = (start, end);
+            let mut start: Vec<u32> = polygon.iter().map(|&(run, p)| at(run, 0, p)).collect();
+            let mut end: Vec<u32> = polygon.iter().map(|&(run, p)| at(run, steps, p)).collect();
             if backwards {
                 end.reverse();
             } else {
                 start.reverse();
             }
             if lathe.start_cap {
-                faces.push(start);
+                starts.push(start);
             }
             if lathe.end_cap {
-                faces.push(end);
+                ends.push(end);
             }
         }
+        faces.extend(planar_caps(&points, &starts));
+        faces.extend(planar_caps(&points, &ends));
     }
     assemble(points, &faces)
 }
@@ -500,7 +584,8 @@ pub fn sweep(profile_line: &Polyline, path: &Polyline, sweep: &Sweep) -> PolyMes
         return PolyMesh::new();
     }
     let mut points = Vec::new();
-    let mut faces: Vec<Vec<u32>> = Vec::new();
+    let mut faces: Vec<Face> = Vec::new();
+    let along_runs: Vec<Vec<f32>> = runs.iter().map(along).collect();
     for (rail, closed) in path.runs() {
         let Some((stations, closed)) = stations(rail, closed, sweep) else {
             continue;
@@ -531,13 +616,35 @@ pub fn sweep(profile_line: &Polyline, path: &Polyline, sweep: &Sweep) -> PolyMes
         let count = u32_index(stations.len());
         let at = |station: u32, run: usize, local: u32| base + (station % count) * ring + first_of[run] + local;
         let steps = if closed { count } else { count - 1 };
+        // v along the swept part of the path (its end at the top), by length.
+        let (t0, t1) = (
+            stations.first().map_or(0.0, |s| s.t),
+            if closed {
+                1.0
+            } else {
+                stations.last().map_or(1.0, |s| s.t)
+            },
+        );
+        let span = (t1 - t0).max(f32::EPSILON);
+        let along_path = |k: u32| {
+            let t = stations.get(crate::us(k)).map_or(t1, |s| s.t);
+            let s = ((t - t0) / span).clamp(0.0, 1.0);
+            if sweep.reverse_normals { s } else { 1.0 - s }
+        };
         for (r, run) in runs.iter().enumerate() {
             let n = run.order.len();
             let edges = if run.closed { n } else { n - 1 };
+            let t = &along_runs[r];
             for e in 0..edges {
                 let (a, b) = (run.order[e], run.order[(e + 1) % n]);
                 for k in 0..steps {
-                    let mut quad = vec![at(k, r, a), at(k, r, b), at(k + 1, r, b), at(k + 1, r, a)];
+                    let (v0, v1) = (along_path(k), along_path(k + 1));
+                    let mut quad = vec![
+                        (at(k, r, a), Vec2::new(t[e], v0)),
+                        (at(k, r, b), Vec2::new(t[e + 1], v0)),
+                        (at(k + 1, r, b), Vec2::new(t[e + 1], v1)),
+                        (at(k + 1, r, a), Vec2::new(t[e], v1)),
+                    ];
                     if sweep.reverse_normals {
                         quad.reverse();
                     }
@@ -547,14 +654,17 @@ pub fn sweep(profile_line: &Polyline, path: &Polyline, sweep: &Sweep) -> PolyMes
         }
         if !closed {
             // Counter-clockwise in the profile's plane faces along the path.
+            let (mut ends, mut starts) = (Vec::new(), Vec::new());
             for polygon in caps(&runs, sweep.cap_type) {
                 if sweep.end_cap {
-                    faces.push(polygon.iter().map(|&(run, p)| at(count - 1, run, p)).collect());
+                    ends.push(polygon.iter().map(|&(run, p)| at(count - 1, run, p)).collect());
                 }
                 if sweep.start_cap {
-                    faces.push(polygon.iter().rev().map(|&(run, p)| at(0, run, p)).collect());
+                    starts.push(polygon.iter().rev().map(|&(run, p)| at(0, run, p)).collect());
                 }
             }
+            faces.extend(planar_caps(&points, &ends));
+            faces.extend(planar_caps(&points, &starts));
         }
     }
     assemble(points, &faces)
@@ -828,7 +938,7 @@ pub fn loft(sections: &[Polyline], loft: &Loft) -> PolyMesh {
         }
         let ring = &rings[0];
         let axis = crate::mesh::newell(ring.iter().copied());
-        let faces = cap_faces(ring, axis, 0, loft.cap_type);
+        let faces = planar_caps(ring, &cap_faces(ring, axis, 0, loft.cap_type));
         return assemble(ring.clone(), &faces);
     }
 
@@ -893,12 +1003,24 @@ pub fn loft(sections: &[Polyline], loft: &Loft) -> PolyMesh {
     let rows = u32_index(stations.len());
     let width = u32_index(ring_len);
     let at = |row: u32, j: u32| (row % rows) * width + (j % width);
-    let mut faces: Vec<Vec<u32>> = Vec::new();
+    let mut faces: Vec<Face> = Vec::new();
     let row_steps = if looped { rows } else { rows - 1 };
     let col_steps = if closed { width } else { width - 1 };
+    // u around the sections (resampled evenly), v across them (the last at
+    // the top).
+    let v = |k: u32| {
+        let s = fraction(k, row_steps);
+        if loft.reverse_normals { s } else { 1.0 - s }
+    };
     for k in 0..row_steps {
         for j in 0..col_steps {
-            let mut quad = vec![at(k, j), at(k, j + 1), at(k + 1, j + 1), at(k + 1, j)];
+            let (u0, u1) = (fraction(j, col_steps), fraction(j + 1, col_steps));
+            let mut quad = vec![
+                (at(k, j), Vec2::new(u0, v(k))),
+                (at(k, j + 1), Vec2::new(u1, v(k))),
+                (at(k + 1, j + 1), Vec2::new(u1, v(k + 1))),
+                (at(k + 1, j), Vec2::new(u0, v(k + 1))),
+            ];
             if loft.reverse_normals {
                 quad.reverse();
             }
@@ -910,10 +1032,12 @@ pub fn loft(sections: &[Polyline], loft: &Loft) -> PolyMesh {
         let end_row = crate::us(rows - 1) * ring_len;
         let end = &points[end_row..end_row + ring_len];
         if loft.start_cap {
-            faces.extend(cap_faces(start, -along(0), 0, loft.cap_type));
+            let polygons = cap_faces(start, -along(0), 0, loft.cap_type);
+            faces.extend(planar_caps(&points, &polygons));
         }
         if loft.end_cap {
-            faces.extend(cap_faces(end, along(n - 1), u32_index(end_row), loft.cap_type));
+            let polygons = cap_faces(end, along(n - 1), u32_index(end_row), loft.cap_type);
+            faces.extend(planar_caps(&points, &polygons));
         }
     }
     assemble(points, &faces)
@@ -1690,5 +1814,153 @@ mod tests {
         let lid = loft(&[closed_circle(50.0, 12)], &Loft::default());
         assert_eq!(lid.face_count(), 1, "one section: a cap");
         assert_eq!(loft(&[], &Loft::default()).face_count(), 0);
+    }
+
+    /// Every corner has a finite UV in 0 – 1 and no face shows the picture
+    /// mirrored.
+    fn assert_good_uvs(name: &str, mesh: &PolyMesh) {
+        assert!(mesh.face_count() > 0, "{name}: empty");
+        let uvs = mesh.uvs().unwrap_or_else(|| panic!("{name}: no UVs"));
+        assert_eq!(uvs.len(), mesh.corner_count(), "{name}");
+        for uv in uvs {
+            assert!(uv.is_finite(), "{name}: {uv}");
+            assert!(
+                uv.cmpge(Vec2::splat(-1e-5)).all() && uv.cmple(Vec2::splat(1.0 + 1e-5)).all(),
+                "{name}: {uv}"
+            );
+        }
+        assert_eq!(uv::flipped_faces(mesh), 0, "{name}: mirrored faces");
+    }
+
+    #[test]
+    fn every_surface_has_uvs_in_the_square_unmirrored() {
+        let outline = circle(50.0, 16);
+        let hole = square(20.0, true);
+        let with_hole = polyline(&[(&outline, true), (&hole, true)]);
+        let open = polyline(&[(
+            &[Vec3::ZERO, Vec3::new(30.0, 10.0, 0.0), Vec3::new(60.0, 0.0, 0.0)],
+            false,
+        )]);
+        let profile = polyline(&[(
+            &[
+                Vec3::new(0.0, 50.0, 0.0),
+                Vec3::new(40.0, 30.0, 0.0),
+                Vec3::new(30.0, -40.0, 0.0),
+                Vec3::new(0.0, -50.0, 0.0),
+            ],
+            false,
+        )]);
+        let off_axis = polyline(&[(
+            &square(20.0, false)
+                .iter()
+                .map(|p| *p + Vec3::X * 60.0)
+                .collect::<Vec<_>>(),
+            true,
+        )]);
+        for reverse_normals in [false, true] {
+            for cap_type in [CapType::NGons, CapType::Triangles] {
+                let extrusion = Extrusion {
+                    reverse_normals,
+                    cap_type,
+                    subdivision: 3,
+                    ..Extrusion::default()
+                };
+                assert_good_uvs("extruded circle with a hole", &extrude(&with_hole, &extrusion));
+                let lathe_options = Lathe {
+                    reverse_normals,
+                    cap_type,
+                    ..Lathe::default()
+                };
+                assert_good_uvs("full lathe", &lathe(&profile, &lathe_options));
+                for angle in [1.5, -2.0] {
+                    let part = Lathe { angle, ..lathe_options };
+                    assert_good_uvs("partial lathe", &lathe(&off_axis, &part));
+                }
+                let sweep_options = Sweep {
+                    reverse_normals,
+                    cap_type,
+                    ..Sweep::default()
+                };
+                assert_good_uvs(
+                    "swept circle",
+                    &sweep(&closed_circle(10.0, 12), &straight(200.0), &sweep_options),
+                );
+                assert_good_uvs(
+                    "circle around a circle",
+                    &sweep(&closed_circle(10.0, 12), &closed_circle(100.0, 24), &sweep_options),
+                );
+                let grown = Sweep {
+                    start_growth: 0.25,
+                    end_growth: 0.75,
+                    ..sweep_options
+                };
+                assert_good_uvs(
+                    "part of a ring",
+                    &sweep(&closed_circle(10.0, 12), &closed_circle(100.0, 24), &grown),
+                );
+                let loft_options = Loft {
+                    reverse_normals,
+                    cap_type,
+                    ..Loft::default()
+                };
+                let sections: Vec<Polyline> = [(0.0, 50.0), (100.0, 30.0), (200.0, 60.0)]
+                    .iter()
+                    .map(|&(z, r)| {
+                        polyline(&[(
+                            &circle(r, 12).iter().map(|p| *p + Vec3::Z * z).collect::<Vec<_>>(),
+                            true,
+                        )])
+                    })
+                    .collect();
+                assert_good_uvs("loft", &loft(&sections, &loft_options));
+                assert_good_uvs(
+                    "looped loft",
+                    &loft(
+                        &sections,
+                        &Loft {
+                            looped: true,
+                            ..loft_options
+                        },
+                    ),
+                );
+                assert_good_uvs("lid", &loft(&sections[..1], &loft_options));
+            }
+            let extrusion = Extrusion {
+                reverse_normals,
+                ..Extrusion::default()
+            };
+            assert_good_uvs("extruded open line", &extrude(&open, &extrusion));
+            assert_good_uvs(
+                "swept open line",
+                &sweep(
+                    &open,
+                    &straight(100.0),
+                    &Sweep {
+                        reverse_normals,
+                        ..Sweep::default()
+                    },
+                ),
+            );
+        }
+    }
+
+    #[test]
+    fn a_shell_runs_u_along_the_spline_and_v_along_the_movement() {
+        // A square extruded 100 along Z: the four walls share u from 0 to 1
+        // round the square, v from 1 (start) to 0 (end).
+        let mesh = extrude(&polyline(&[(&square(10.0, true), true)]), &Extrusion::default());
+        let uvs = mesh.uvs().unwrap();
+        for (corner, &p) in mesh.corner_points().iter().enumerate() {
+            let face = (0..mesh.face_count())
+                .find(|&f| mesh.corner_range(f).contains(&corner))
+                .unwrap();
+            if mesh.face(face).len() == 4 && mesh.face_normal(face).z.abs() < 0.5 {
+                let z = mesh.points()[crate::us(p)].z;
+                let expected = 1.0 - z / Extrusion::default().offset;
+                assert!((uvs[corner].y - expected).abs() < 1e-5, "{z}: {}", uvs[corner].y);
+            }
+        }
+        let us: Vec<f32> = uvs.iter().map(|uv| uv.x).collect();
+        assert!(us.contains(&0.0) && us.contains(&1.0) && us.contains(&0.5), "{us:?}");
     }
 }

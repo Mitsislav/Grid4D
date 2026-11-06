@@ -9,6 +9,9 @@ may grow in a minor version and change only in a major one.
 
 Toward 1.1: materials, UVs and textures.
 
+- **UVs** — every primitive and generator (Extrude, Lathe, Sweep, Loft,
+  Subdivision Surface) has texture coordinates, kept by Make Editable and
+  written by glTF and OBJ export.
 - **Files** — documents are saved in `.g4d` format version 4. Every file of
   Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
   files and says they come from a newer Grid4D.

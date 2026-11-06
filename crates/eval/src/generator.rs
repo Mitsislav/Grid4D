@@ -12,6 +12,7 @@ use grid4d_geom::{
     spline::{Interpolation, Polyline, SplinePrimitive, Text},
     subdivision::{self, SubdivisionOptions},
     surface::{self, Extrusion, Lathe, Loft, Sweep},
+    uv,
 };
 use grid4d_scene::{MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
 
@@ -317,11 +318,13 @@ pub(crate) fn build(inputs: &[Input], options: &Options) -> PolyMesh {
     }
 }
 
-/// Meshes merged into one.
+/// Meshes merged into one, with their UVs (a part without UVs gets a box
+/// projection of its own, so the result always has them).
 #[derive(Default)]
 struct Merged {
     points: Vec<glam::Vec3>,
     faces: Vec<Vec<u32>>,
+    uvs: Vec<glam::Vec2>,
 }
 
 impl Merged {
@@ -330,21 +333,37 @@ impl Merged {
         let Ok(offset) = u32::try_from(self.points.len()) else {
             return;
         };
+        let projected;
+        let uvs = match mesh.uvs() {
+            Some(uvs) => uvs,
+            None => {
+                projected = uv::box_uvs(mesh);
+                &projected
+            }
+        };
         self.points
             .extend(mesh.points().iter().map(|&p| matrix.transform_point3(p)));
-        // A mirroring transform turns the faces inside out: wind them back.
+        // A mirroring transform turns the faces inside out: wind them back,
+        // their UVs with them (the picture shows mirrored, as in a mirror).
         let mirrored = matrix.determinant() < 0.0;
-        self.faces.extend(mesh.faces().map(|face| {
-            let mut corners: Vec<u32> = face.iter().map(|&p| p + offset).collect();
+        for f in 0..mesh.face_count() {
+            let mut corners: Vec<u32> = mesh.face(f).iter().map(|&p| p + offset).collect();
+            let start = self.uvs.len();
+            self.uvs.extend(uvs.get(mesh.corner_range(f)).unwrap_or_default());
             if mirrored {
                 corners.reverse();
+                self.uvs[start..].reverse();
             }
-            corners
-        }));
+            self.faces.push(corners);
+        }
     }
 
     fn finish(self) -> PolyMesh {
-        PolyMesh::from_faces(self.points, self.faces).unwrap_or_default()
+        let mut mesh = PolyMesh::from_faces(self.points, self.faces).unwrap_or_default();
+        if mesh.corner_count() == self.uvs.len() && !self.uvs.is_empty() {
+            let _ = mesh.set_uvs(Some(self.uvs));
+        }
+        mesh
     }
 }
 

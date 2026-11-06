@@ -1077,11 +1077,15 @@ fn plugin_mesh(
     entry.mesh.clone()
 }
 
+/// A plugin generator's mesh; a box projection when the plugin made no UVs.
 fn build_plugin(object: &grid4d_scene::PluginObject) -> Option<MeshHandle> {
     grid4d_plugin::registry()
         .build(object)
         .filter(|mesh| mesh.face_count() > 0)
-        .map(MeshHandle::new)
+        .map(|mut mesh| {
+            grid4d_geom::uv::ensure_uvs(&mut mesh);
+            MeshHandle::new(mesh)
+        })
 }
 
 /// A generator's result and what it was built from.
@@ -2339,6 +2343,116 @@ mod tests {
             registry.add_deformer(grid4d_plugin_wave::Wave);
             grid4d_plugin::install(registry);
         });
+    }
+
+    /// Every corner has a finite UV in 0 – 1 and no face shows the picture
+    /// mirrored.
+    fn assert_good_uvs(name: &str, mesh: &grid4d_geom::PolyMesh) {
+        assert!(mesh.face_count() > 0, "{name}: empty");
+        let uvs = mesh.uvs().unwrap_or_else(|| panic!("{name}: no UVs"));
+        assert_eq!(uvs.len(), mesh.corner_count(), "{name}");
+        for uv in uvs {
+            assert!(uv.is_finite(), "{name}: {uv}");
+            assert!(
+                uv.cmpge(glam::Vec2::splat(-1e-5)).all() && uv.cmple(glam::Vec2::splat(1.0 + 1e-5)).all(),
+                "{name}: {uv}"
+            );
+        }
+        assert_eq!(grid4d_geom::uv::flipped_faces(mesh), 0, "{name}: mirrored faces");
+    }
+
+    #[test]
+    fn every_kind_that_makes_a_surface_makes_uvs() {
+        use grid4d_scene::ObjectKindTag as K;
+        plugins();
+        let at = |tag: K, position: Vec3| {
+            let mut node = Node::new(tag.label(), tag.default_kind());
+            node.data.transform.position = position;
+            node
+        };
+        for tag in K::ALL {
+            let kind = tag.default_kind();
+            match tag {
+                K::Cube | K::Sphere | K::Cylinder | K::Plane | K::Cone | K::Torus | K::Disc | K::Capsule => {
+                    assert_good_uvs(tag.label(), &crate::editable_mesh(&kind).unwrap());
+                }
+                K::SubdivisionSurface | K::Extrude | K::Lathe | K::Sweep | K::Loft => {
+                    let mut doc = Document::new("uvs");
+                    let id = doc.scene.insert(Node::new(tag.label(), kind));
+                    let children = match tag {
+                        K::SubdivisionSurface => vec![at(K::Cube, Vec3::ZERO)],
+                        K::Extrude => vec![at(K::Rectangle, Vec3::ZERO)],
+                        K::Lathe => vec![at(K::Rectangle, Vec3::new(300.0, 0.0, 0.0))],
+                        K::Sweep => vec![at(K::Circle, Vec3::ZERO), at(K::Helix, Vec3::ZERO)],
+                        _ => vec![at(K::Circle, Vec3::ZERO), at(K::Circle, Vec3::new(0.0, 0.0, 300.0))],
+                    };
+                    for child in children {
+                        doc.scene.insert_child(id, child).unwrap();
+                    }
+                    let mesh = crate::generator_mesh(&doc.scene, id, 0.0).unwrap();
+                    assert_good_uvs(tag.label(), &mesh);
+                }
+                // No surface of their own: groups, cameras, lights, curves,
+                // deformers and effectors; a polygon object keeps the UVs it
+                // has; a Cloner's clones are its children's meshes.
+                K::Null
+                | K::Camera
+                | K::Light
+                | K::Polygon
+                | K::Cloner
+                | K::PlainEffector
+                | K::RandomEffector
+                | K::Bend
+                | K::Twist
+                | K::Taper
+                | K::Bulge
+                | K::Ffd
+                | K::Circle
+                | K::Rectangle
+                | K::Arc
+                | K::NSide
+                | K::Star
+                | K::Helix
+                | K::Flower
+                | K::Text
+                | K::Spline
+                | K::Plugin => {}
+            }
+        }
+        // A plugin's mesh without UVs gets a box projection.
+        let gear = grid4d_plugin::registry().generator("grid4d.gear").unwrap();
+        let kind = ObjectKind::Plugin(grid4d_plugin::Registry::new_object(gear));
+        assert_good_uvs("Gear", &crate::editable_mesh(&kind).unwrap());
+
+        // A cage of parts with and without UVs: the result has them all.
+        let mut doc = Document::new("mixed");
+        let sds = doc.scene.insert(Node::new("SDS", K::SubdivisionSurface.default_kind()));
+        let group = doc
+            .scene
+            .insert_child(sds, Node::new("Group", ObjectKind::Null))
+            .unwrap();
+        let mut bare = crate::editable_mesh(&K::Cube.default_kind()).unwrap();
+        bare.set_uvs(None).unwrap();
+        doc.scene
+            .insert_child(group, Node::new("Bare", ObjectKind::polygon(MeshHandle::new(bare))))
+            .unwrap();
+        doc.scene
+            .insert_child(group, at(K::Sphere, Vec3::new(400.0, 0.0, 0.0)))
+            .unwrap();
+        let unmirrored = crate::generator_mesh(&doc.scene, sds, 0.0).unwrap();
+        assert_good_uvs("mixed cage", &unmirrored);
+
+        // A mirrored part shows its picture mirrored, as a mirror would.
+        let mut mirrored = at(K::Sphere, Vec3::new(-400.0, 0.0, 0.0));
+        mirrored.data.transform.scale = Vec3::new(-1.0, 1.0, 1.0);
+        doc.scene.insert_child(group, mirrored).unwrap();
+        let mesh = crate::generator_mesh(&doc.scene, sds, 0.0).unwrap();
+        let added = mesh.face_count() - unmirrored.face_count();
+        assert_eq!(
+            grid4d_geom::uv::flipped_faces(&mesh),
+            added,
+            "the mirrored sphere's faces"
+        );
     }
 
     #[test]

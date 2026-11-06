@@ -1737,11 +1737,15 @@ mod tests {
             cage_colour,
             "in the colour the viewport shows it in"
         );
-        for name in ["Sphere", "Cylinder", "Box"] {
+        for name in ["Sphere", "Cylinder", "Box", "Subdivision Surface"] {
+            let ObjectKind::Polygon { mesh, .. } = &entry(name).unwrap().data.kind else {
+                panic!("{name} baked");
+            };
+            // With the UVs the viewport's mesh has (step 15.2).
             assert_eq!(
-                entry(name).unwrap().data.kind.tag(),
-                ObjectKindTag::Polygon,
-                "{name} baked"
+                mesh.mesh().uvs().map(<[_]>::len),
+                Some(mesh.mesh().corner_count()),
+                "{name}"
             );
         }
         assert_eq!(entry("Group").unwrap().data.kind, ObjectKind::Null);

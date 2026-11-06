@@ -283,10 +283,15 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
             }
             Some(mesh)
         }
-        // The mesh its plugin builds (none when the plugin is missing).
+        // The mesh its plugin builds (none when the plugin is missing), with
+        // a box projection when the plugin made no UVs.
         ObjectKind::Plugin(object) => grid4d_plugin::registry()
             .build(object)
-            .filter(|mesh| mesh.face_count() > 0),
+            .filter(|mesh| mesh.face_count() > 0)
+            .map(|mut mesh| {
+                grid4d_geom::uv::ensure_uvs(&mut mesh);
+                mesh
+            }),
         ObjectKind::Null
         | ObjectKind::Camera { .. }
         | ObjectKind::Light { .. }

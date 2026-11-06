@@ -4,7 +4,7 @@
 //! for the GPU ([`Triangulator`] → [`TriMesh`]), vertex normals ([`Smoothing`]),
 //! adjacency ([`Topology`]), ray casting ([`Bvh`]) and component selections
 //! ([`ComponentSet`], [`selection::convert`]), modelling operations ([`ops`]) and
-//! Catmull-Clark subdivision ([`subdivision`]).
+//! Catmull-Clark subdivision ([`subdivision`]), and texture coordinates ([`uv`]).
 //!
 //! ## Architecture rule
 //!
@@ -35,6 +35,7 @@ pub mod subdivision;
 pub mod surface;
 mod topology;
 mod triangulate;
+pub mod uv;
 
 #[cfg(test)]
 mod shapes;

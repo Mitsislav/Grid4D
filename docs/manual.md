@@ -761,6 +761,11 @@ What goes out:
   metres).
 - Polygon objects as meshes, split into triangles, with the smoothing you see in
   the viewport and their UVs. **Primitives** are written in their current shape.
+  Primitives and generators always have UVs (texture coordinates), so a model
+  exported from Grid4D can be textured in another program straight away: round
+  shapes are unrolled around their axis, a cube carries the whole picture on
+  each side, flat shapes and caps are laid out as seen from the front, and
+  the walls of an Extrude, Lathe, Sweep or Loft run along their splines.
   A **Subdivision Surface** is written as its smooth result at the viewport level,
   without its cage; an **Extrude**, **Lathe**, **Sweep** or **Loft** as its
   solid at the current frame, without the splines it is made from. Objects
@@ -2442,11 +2447,12 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   undeformed points; no handles for size and angle (only strength has one);
   an FFD's lattice cannot be animated.
 - **Generators**: the Subdivision Surface has one type (Catmull-Clark) and no
-  edge weights (creases) or UV options. The Extrude has no bevels (fillets),
-  Delaunay or grid caps, UVs or selections for its caps; neither have the Lathe
-  and the Sweep (no Isoparm display either). The Sweep has no rail spline, no
-  Scale and Rotation graphs and no Keep Segments. The Loft has no Adapt UV
-  (no UVs) and uses only the first segment of each section (no holes).
+  edge weights (creases) or UV options (its UVs are smoothed with the
+  surface). The Extrude has no bevels (fillets), Delaunay or grid caps, or
+  selections for its caps; neither have the Lathe and the Sweep (no Isoparm
+  display either). The Sweep has no rail spline, no Scale and Rotation graphs
+  and no Keep Segments. The Loft has no Adapt UV (its UVs follow its
+  subdivision) and uses only the first segment of each section (no holes).
 - **Cloner**: Honeycomb, Blend and Sort, Step Rotation, Amount, Offset
   Variation, grid forms and Fill, Object mode on edges, along splines or by
   surface area, and the Up Vector.

@@ -47,6 +47,29 @@ Projections:
 - **Camera:** the image as the camera sees it (screen position), for
   matching a backplate.
 
+## The UVs objects make (step 15.2)
+
+`u` runs to the right of the picture, `v` down it; seen from the front, no
+face shows the picture mirrored (a mirrored copy, scale −1, does — as a
+mirror would). UVs never depend on an object's size.
+
+| Object | Layout |
+|--------|--------|
+| Sphere, Cylinder, Cone, Capsule | `u` once around the axis (starting at +Z, towards +X), `v` from top to bottom along the profile, by length; poles take the middle of their step; caps a plan of the disc seen from outside |
+| Cube | the whole picture on each side, upright (top and bottom read as a plan, −Z at the top of the picture) |
+| Plane, Disc | a plan seen from above (−Z at the top of the picture) |
+| Torus | `u` around the axis, `v` around the tube |
+| Extrude | walls: `u` along each spline segment (by length, all the way round), `v` along the movement (its end at the top); caps: a plan of each end, unstretched |
+| Lathe | `u` along the turn, `v` along the profile (by length); caps as for the Extrude |
+| Sweep | `u` along the profile, `v` along the swept part of the path (its end at the top); caps as for the Extrude |
+| Loft | `u` around the sections, `v` across them (the last at the top); caps as for the Extrude |
+| Subdivision Surface | its cage's UVs, smoothed with it; a cage part without UVs gets a Box projection first |
+| Cloner | each clone shows its source's UVs |
+| Plugin generators | the plugin's UVs, else a Box projection |
+
+Make Editable and Current State to Object keep these UVs; glTF and OBJ
+export them.
+
 ## Behaviour
 
 - **Several tags:** an object may carry any number of Material tags; they

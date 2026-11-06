@@ -17,7 +17,7 @@ grid4d-geom ◀── grid4d-scene ◀── grid4d-eval ◀── grid4d-render
 
 | Crate | What it does | Uses (Grid4D crates) |
 |-------|--------------|----------------------|
-| `grid4d-geom` | Geometry: polygon meshes (n-gons), topology, normals, triangulation, BVH, primitives, splines, the maths of deformers, Cloner layouts, surfaces from splines, mesh operations (extrude, bevel, cuts, …) | — |
+| `grid4d-geom` | Geometry: polygon meshes (n-gons), topology, normals, triangulation, BVH, primitives, splines, the maths of deformers, Cloner layouts, surfaces from splines, mesh operations (extrude, bevel, cuts, …), UVs (projections, checks) | — |
 | `grid4d-text` | Glyph outlines of the built-in font, for Text splines | geom |
 | `grid4d-scene` | The document — the single source of truth: the scene graph, object kinds and parameters, tags, animation tracks, materials, layers, takes, render and simulation settings, and `SceneEdit` (every undoable change). No GPU, no interface, no file formats | geom |
 | `grid4d-plugin` | The plugin API: parameter descriptions, generator / deformer / command traits, the registry | geom, scene |

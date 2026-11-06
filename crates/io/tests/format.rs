@@ -72,12 +72,25 @@ const DEMO_OUTLINE: [(u32, &str); 7] = [
     (0, "Camera"),
 ];
 
-/// The demo scene with its "Box" made editable — every kind of object, a mesh —
-/// and some of its components selected and hidden.
+/// The demo scene with its "Box" made editable — every kind of object, a mesh
+/// with UVs — and some of its components selected and hidden.
 fn golden_document() -> Document {
+    golden_with(grid4d_geom::primitives::cube(Vec3::splat(80.0), [1, 2, 1]))
+}
+
+/// `golden_document` as Grid4D 1.0 made it: its cube had no UVs.
+fn golden_v3_document() -> Document {
+    golden_with(without_uvs(grid4d_geom::primitives::cube(Vec3::splat(80.0), [1, 2, 1])))
+}
+
+fn without_uvs(mut mesh: grid4d_geom::PolyMesh) -> grid4d_geom::PolyMesh {
+    mesh.set_uvs(None).unwrap();
+    mesh
+}
+
+fn golden_with(mesh: grid4d_geom::PolyMesh) -> Document {
     let mut doc = Document::with_demo_scene();
     let id = doc.scene.iter().find(|(_, n)| n.data.name == "Box").unwrap().0;
-    let mesh = grid4d_geom::primitives::cube(Vec3::splat(80.0), [1, 2, 1]);
     let mut state = ComponentState::default();
     state.selected.points.extend([0, 1, 2]);
     state.selected.edges.insert_range(0..4);
@@ -91,9 +104,16 @@ fn golden_document() -> Document {
 }
 
 /// Everything a version 4 file can hold (see `docs/FILE_FORMAT.md`): version
-/// 3's, and what Phase 15 adds as it arrives.
+/// 3's, and what Phase 15 adds as it arrives — its mesh has UVs (15.2).
 fn full_document() -> (Document, SimulationCache) {
-    full_v3_document()
+    let (mut doc, cache) = full_v3_document();
+    let id = doc.scene.iter().find(|(_, n)| n.data.name == "Mesh").unwrap().0;
+    let node = doc.scene.get_mut(id).unwrap();
+    let ObjectKind::Polygon { mesh, .. } = &mut node.data.kind else {
+        unreachable!("the Mesh is a polygon object")
+    };
+    *mesh = MeshHandle::new(grid4d_geom::primitives::cube(Vec3::splat(80.0), [1, 2, 1]));
+    (doc, cache)
 }
 
 /// Everything a version 3 file can hold, which 1.0 froze (`full_v3.g4d`; never
@@ -134,7 +154,7 @@ fn full_v3_document() -> (Document, SimulationCache) {
     doc.scene.insert(Node::new(
         "Mesh",
         ObjectKind::Polygon {
-            mesh: MeshHandle::new(grid4d_geom::primitives::cube(Vec3::splat(80.0), [1, 2, 1])),
+            mesh: MeshHandle::new(without_uvs(grid4d_geom::primitives::cube(Vec3::splat(80.0), [1, 2, 1]))),
             components: Components::new(state),
         },
     ));
@@ -365,7 +385,7 @@ fn the_version_3_golden_file_still_loads_the_same() {
     assert_eq!(outline(&doc), DEMO_OUTLINE.map(|(d, n)| (d, n.to_owned())));
     assert_same_entries(
         &grid4d_io::to_bytes(&doc).unwrap(),
-        &grid4d_io::to_bytes(&golden_document()).unwrap(),
+        &grid4d_io::to_bytes(&golden_v3_document()).unwrap(),
     );
 }
 
