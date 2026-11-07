@@ -54,6 +54,36 @@ Nothing missed the budget, so nothing is accepted as an exception.
   showing the file, against starting without one (the difference is the
   opening), and the time `file::open_path` took, measured in a local build.
 
+## Textured scenes (Grid4D 1.1, step 15.9)
+
+Measured on 2026-11-07 on the same machine, at the commit after `7bd87a2`.
+The 1.0 numbers above were read from the running app; this time there was
+no access to the screen, so the viewport's own work was timed without a
+window: `crates/ui/tests/budget.rs` (ignored by default) loads the stress
+scenes, uploads their pictures as the app does, and for each frame evaluates
+the scene, extracts it with its materials and draws it into a viewport
+target of 1290 × 900 pixels with 4× MSAA on the RTX 3050 (Vulkan), **waiting
+for the GPU to finish every frame** — CPU and GPU never overlap, so these are
+upper bounds of the viewport's part of a frame (what View ▸ Frame Time calls
+Evaluation, Extraction and Drawing), and they are not comparable one to one
+with the on-screen numbers above.
+
+```text
+cargo run --release --example stress -- target/stress
+cargo test --release -p grid4d-ui --test budget -- --ignored --nocapture
+```
+
+| Scene | Plain | Textured (8 materials, 1024-pixel colour and normal pictures) | Budget |
+|-------|-------|--------------------------------------------------------------|--------|
+| 10 000 primitives, playing (`stress-10k`, Box projections) | 11.7 ms (86 fps), worst 12.7 ms | 13.7 ms (73 fps), worst 16.9 ms | ≥ 60 fps: met |
+| One mesh of 1 000 000 triangles (`stress-1m`, its UVs) | 2.6 ms (383 fps), worst 2.9 ms | 2.9 ms (350 fps), worst 3.1 ms | ≥ 60 fps: met |
+
+Textures cost about 2 ms a frame on 10 000 objects (more batches: one per
+mesh shape, projection and material) and a tenth of a millisecond on the big
+mesh (tangents are made once, with the mesh). The harness's own way to find a
+GPU prefers a software rasteriser; the measurement picks the discrete GPU
+itself, as the app does.
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.8b — OBJ `.mtl` pictures in and out (2026-11-07) |
-| Next step | 15.9 — the manual's materials chapter in both languages, the walkthrough, the budget re-measured with textures; release v1.1 |
-| Tests | 864 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.9a — The materials chapter, the review in two languages, the acceptance test, the textured budget (2026-11-07) |
+| Next step | 15.9b — release v1.1.0 |
+| Tests | 865 (and 6 ignored, run by hand: three timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2324,6 +2324,7 @@ risks R5 – R8 go with it.
 | 15.7c | The UV Editor pane (`panels/uv_editor.rs`, `Pane::UvEditor` in every layout, beside the viewport in Modeling): the material's Base Color picture at its tiling and offset, dimmed; the unit grid; stretch colours; edges, seams, selection; read-only UVs of primitives; wheel zoom, middle / Alt pan, H / S framing (`EditorState::uv_frame`, the shortcut table); click / frame / double-click (island) selection shared with the viewport; a 2D Move / Scale / Rotate handle moving the selection's UV vertices live (`MeshHandle::with_uvs`), one undo step, Esc restores; the UV and Options menus (the UV menu shared with Mesh ▸ UV through `widgets::uv_menu`); unwrapped parts turned upright before packing; an interface test; Greek; the manual's §19.4 with a picture | 857 |
 | 15.8a | glTF materials and pictures: images as textures (embedded from buffer views and `data:` URIs, linked when relative; one per colour space), every core channel, alpha Mask / Blend as a cut-out from the base colour's alpha, `KHR_texture_transform` offset / scale, `KHR_materials_transmission` / `_ior` / `_emissive_strength` / `_specular`, clear coat from the raw extension, `doubleSided`; export writes them back with the pictures inside the buffer (PNG / JPEG) and lists the extensions; `PictureChannel` on texture slots (`.g4d` v4 `channel`; viewport, path tracer, Attribute Manager); `Objects::textures` and Merge bringing pictures; tests with a hand-written sample | 861 |
 | 15.8b | OBJ `.mtl` materials and pictures: `Kd` / `Ke` / `Ni`, the PBR extension's `Pr` / `Pm` / `Pc` / `Pcr` (roughness from `Ns` without `Pr`), pictures `map_Kd` / `map_Ke` / `map_d` / `bump` / `norm` / `map_Pr` / `map_Pm` with `-s`, `-o` (V turned round), `-bm`, `-imfchan` (`MapLine`), linked next to the OBJ; export writes the same and puts embedded pictures next to the OBJ; tests | 864 |
+| 15.9a | The manual's §19 as "Materials and textures" with an overview and a walk-through from a model to a render (§19.5); the review walkthrough (EN / EL × Dark / Light) with the UV Editor, a material page with a texture, a Material tag and the UV Editor's menus (one Greek label shortened); Phase 15's acceptance as an integration test (glTF in, Box photo, seam unwrap and pack, glass and brushed metal, a render with pictures, v4 save and reopen, glTF out and back, a 1.0 file); textured stress scenes and a GPU timing of the viewport, plain and textured (`docs/performance.md`) | 865 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2695,6 +2696,25 @@ risks R5 – R8 go with it.
 - **Roughness from older files.** Without `Pr`, Phong's shininess `Ns` gives
   a roughness of √(2 / (Ns + 2)).
 - clippy asked for a name for the type of the pictures to write.
+
+**15.9a — The chapter, the review, the acceptance test, the budget**
+
+*Problems and solutions:*
+- **No screen to read Frame Time from.** The 1.0 budget was read from the
+  running app; this session has no access to the screen, so the viewport's
+  work is timed without a window, waiting for the GPU each frame (an upper
+  bound), plain and textured side by side.
+- **A software GPU.** The first timing ran at a second and a half a frame:
+  `egui_kittest`'s own setup prefers a CPU rasteriser (its pictures must be
+  the same everywhere). The measurement chooses the discrete GPU itself.
+- **The whole interface is not a fair stopwatch.** Drawing every panel in the
+  test harness also builds the accessibility tree of 10 000 Object Manager
+  rows each frame; the timing covers the viewport's own parts instead.
+- **A cut Greek label.** The review pictures showed "Υφή βασικού χρώματος"
+  clipped by its column; it is now "Υφή χρώματος βάσης".
+- **The acceptance in one test.** Phase 15's acceptance runs through the
+  editor's commands (Merge, Make Editable, selections, Mark Seams, Unwrap,
+  Pack) plus a render and file round trips; it passed at the first run.
 
 ---
 

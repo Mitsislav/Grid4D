@@ -201,6 +201,7 @@ fn pass(dir: &Path, language: Language, theme: ColorTheme) {
         Pane::FCurve,
         Pane::Materials,
         Pane::Textures,
+        Pane::UvEditor,
     ]
     .into_iter()
     .enumerate()
@@ -208,6 +209,64 @@ fn pass(dir: &Path, language: Language, theme: ColorTheme) {
         h.state_mut().editor.panes.show = Some(pane);
         h.run_steps(3);
         save(&mut h, dir, &format!("{tag}-03-pane-{k}"));
+    }
+
+    // Materials and UVs (Grid4D 1.1): a material's page with a texture on a
+    // number channel, its Material tag, the UV Editor on an unwrapped
+    // sphere and its menus.
+    {
+        use grid4d_scene::{Channel, Material, MaterialTag, Tag, Texture, TextureSlot};
+        let shell = h.state_mut();
+        let picture = shell
+            .doc
+            .scene
+            .textures_mut()
+            .insert(Texture::linked(PathBuf::from("maps/rough.png")));
+        let mut rough = Material::new("Rough");
+        *rough.map_mut(Channel::Roughness) = Some(TextureSlot::new(picture));
+        let rough = shell.doc.scene.materials_mut().insert(rough);
+        let sphere = named(shell, "Sphere");
+        shell.doc.scene.get_mut(sphere).unwrap().data.tags = vec![Tag::Material(MaterialTag::new(Some(rough)))];
+        shell.editor.materials.selected = Some(rough);
+        shell.editor.materials.shown = true;
+        shell.editor.panes.show = Some(Pane::Attributes);
+    }
+    h.run_steps(3);
+    save(&mut h, dir, &format!("{tag}-06-material"));
+    {
+        let shell = h.state_mut();
+        shell.editor.materials.selected = None;
+        shell.editor.materials.shown = false;
+        let sphere = named(shell, "Sphere");
+        shell.editor.selection.set_single(sphere);
+        let tags = &shell.doc.scene.get(sphere).unwrap().data.tags;
+        shell.editor.tag_selection = grid4d_ui::TagRef::at(sphere, tags, 0);
+    }
+    h.run_steps(3);
+    save(&mut h, dir, &format!("{tag}-07-material-tag"));
+    {
+        let shell = h.state_mut();
+        shell.editor.tag_selection = None;
+        shell.editor.commands.push(grid4d_ui::EditorCommand::MakeEditable);
+        shell
+            .editor
+            .commands
+            .push(grid4d_ui::EditorCommand::UvCommand(grid4d_ui::uv_tools::UvOp::Unwrap));
+        shell.panels.uv_editor.stretch = true;
+        shell.editor.panes.show = Some(Pane::UvEditor);
+    }
+    h.run_steps(4);
+    save(&mut h, dir, &format!("{tag}-08-uv-editor"));
+    // The UV Editor's header menus: its pane is in the bottom tab group.
+    for (k, label) in ["UV", "View", "Options"].into_iter().enumerate() {
+        let text = grid4d_ui::i18n::tr(label);
+        let buttons: Vec<egui::Pos2> = h.get_all_by_label(text).map(|node| node.rect().center()).collect();
+        // The pane's own menu: the lowest one of that name on screen.
+        if let Some(&at) = buttons.iter().max_by(|a, b| a.y.total_cmp(&b.y)) {
+            click(&mut h, at);
+            save(&mut h, dir, &format!("{tag}-09-uv-menu-{k}"));
+            close_popups(&mut h);
+        }
     }
 
     // The Attribute Manager on a few kinds of object.

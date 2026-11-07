@@ -29,7 +29,7 @@ screenshots come from the application itself.
 16. [Simulation](#16-simulation)
 17. [Snapping](#17-snapping)
 18. [Tags](#18-tags)
-19. [Materials](#19-materials)
+19. [Materials and textures](#19-materials-and-textures)
 20. [Rendering](#20-rendering)
 21. [Plugins](#21-plugins)
 22. [Scripts](#22-scripts)
@@ -478,7 +478,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
   light the viewport.
 - Sides that no light reaches keep a little soft light, so shapes stay readable.
 
-**Materials** show in the lit viewport too ([§19](#19-materials)): roughness sets
+**Materials** show in the lit viewport too ([§19](#19-materials-and-textures)): roughness sets
 how sharp the highlights are, metals reflect in their own colour, and luminance
 makes a surface glow whatever the light.
 
@@ -2012,13 +2012,22 @@ Turns the object to face another object.
 ### 18.4 Material
 
 Links a material to the object and says how it lies on the surface; see
-[§19](#19-materials) and [§19.2](#192-placing-a-material-projections-and-layers).
+[§19](#19-materials-and-textures) and [§19.2](#192-placing-a-material-projections-and-layers).
 
 ### 18.5 Rigid Body and Collider Body
 
 Make an object part of the simulation; see [§16](#16-simulation).
 
-## 19. Materials
+## 19. Materials and textures
+
+A **material** gives objects their surface; **textures** (pictures) vary it
+across the surface; **UVs** say where each point of a surface lies on a
+picture. This chapter covers them in order: materials and their channels
+(below), textures and the Texture Manager ([§19.1](#191-textures-and-the-texture-manager)),
+placing a material with projections and layers
+([§19.2](#192-placing-a-material-projections-and-layers)), the UV tools
+([§19.3](#193-uv-tools)) and the UV Editor ([§19.4](#194-the-uv-editor)), and a
+walk through from a model to a render ([§19.5](#195-a-walk-through-from-a-model-to-a-render)).
 
 A **material** gives objects their surface. Materials live in the **Material
 Manager**, the **Materials** tab at the bottom (beside Timeline and F-Curve;
@@ -2290,6 +2299,36 @@ Relax Iterations and Pin Borders.
 Primitives show their UVs read only: make the object editable (**C**) to
 change them.
 
+### 19.5 A walk through: from a model to a render
+
+A short tour of everything above, in the order a project usually goes.
+
+1. **Bring a model in.** File ▸ Merge… (or drop the file on the window) a
+   glTF or OBJ model with pictures: its materials arrive in the Material
+   Manager, its pictures in the Texture Manager, and its objects carry
+   Material tags. Pictures inside the file are embedded; pictures next to it
+   are linked ([§9](#9-files)).
+2. **A photo on a box.** Create a Cube, make a material, and click
+   **Load…** beside **Base Color Texture** to pick a photo. Drag the material
+   onto the cube; in the Material tag choose **Box**: each side shows the
+   whole photo.
+3. **Unwrap a figure.** Make a Capsule editable (**C**), go to Edges mode
+   and select a line of edges from pole to pole along its back, then
+   **Mesh ▸ UV ▸ Mark Seams**. Back in Polygons mode, **Mesh ▸ UV ▸ Unwrap**
+   lays it out flat in one piece; open the **UV Editor** to see it, turn on
+   **View ▸ Show Stretch**, and move or scale islands with the Move and Scale
+   tools. **Pack Islands** tidies them into the square.
+4. **Glass and metal.** Give a sphere a material with **Transmission** 100 %
+   and a low Roughness: it renders as glass, bending what is behind it. Give
+   a plane a material with **Metallic** 100 % and a fine stripe picture on
+   **Normal Texture** (tiled many times one way): brushed metal.
+5. **Render.** Ctrl+R shows the Render View; Shift+R renders to the Picture
+   Viewer ([§20](#20-rendering)). The pictures, cut-outs, normal maps, glass
+   and clear coats all show.
+6. **Save and share.** Save as `.g4d` (version 4: older Grid4D 1.0 cannot
+   open it, but Grid4D 1.1 opens every 1.0 file unchanged), or File ▸
+   Export… as glTF — materials and pictures go with it.
+
 ## 20. Rendering
 
 A **render** is the finished picture of the scene: materials and lights as
@@ -2299,7 +2338,7 @@ document is rendered; the **Picture Viewer** renders it and shows the result;
 the **Render View** renders the view you work in, in place.
 
 **Materials in renders.** Renders read every channel of a material
-([§19](#19-materials)), through its Material tags and their projections:
+([§19](#19-materials-and-textures)), through its Material tags and their projections:
 
 - the **pictures** on each channel, at full size and smoothly blended between
   their pixels;

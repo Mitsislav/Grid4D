@@ -246,7 +246,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Banking", "Κλίση"),
     ("Base", "Βάση"),
     ("Base Color", "Βασικό χρώμα"),
-    ("Base Color Texture", "Υφή βασικού χρώματος"),
+    ("Base Color Texture", "Υφή χρώματος βάσης"),
     ("Basic", "Βασικά"),
     ("Basic Properties", "Βασικές ιδιότητες"),
     ("Bend", "Κάμψη"),
