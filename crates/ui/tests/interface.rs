@@ -268,3 +268,84 @@ fn a_menu_command_creates_an_object() {
     );
     assert_eq!(shell.editor.history.undo_label(), Some("Create Object"));
 }
+
+/// The middle of polygon `face`'s UVs on the active object `id`, on screen.
+fn uv_polygon_middle(shell: &Shell, id: NodeId, face: usize) -> Pos2 {
+    let ObjectKind::Polygon { mesh, .. } = &shell.doc.scene.get(id).unwrap().data.kind else {
+        panic!("a polygon object");
+    };
+    let uvs = mesh.mesh().uvs().unwrap();
+    let range = mesh.mesh().corner_range(face);
+    let n = range.len() as f32;
+    let middle = range.map(|c| uvs[c]).fold(glam::Vec2::ZERO, |a, b| a + b) / n;
+    shell.panels.uv_editor.screen_position(middle).expect("drawn")
+}
+
+fn selected_polygons(shell: &Shell, id: NodeId) -> Vec<usize> {
+    let ObjectKind::Polygon { components, .. } = &shell.doc.scene.get(id).unwrap().data.kind else {
+        panic!("a polygon object");
+    };
+    components.selected().polygons.iter().collect()
+}
+
+#[test]
+fn the_uv_editor_selects_with_the_viewport_and_moves_uvs_in_one_undo_step() {
+    let mut harness = harness();
+    let sphere = id_of(harness.state(), "Sphere");
+    {
+        let shell = harness.state_mut();
+        shell.editor.selection.set_single(sphere);
+        shell.editor.commands.push(EditorCommand::MakeEditable);
+        shell.editor.mode = grid4d_ui::EditMode::Polygons;
+        shell.editor.panes.show = Some(grid4d_ui::workspace::Pane::UvEditor);
+    }
+    harness.run_steps(4);
+
+    // A click on a polygon selects it: the object's own selection.
+    let face = 40;
+    let at = uv_polygon_middle(harness.state(), sphere, face);
+    click_at(&mut harness, at, Modifiers::NONE, 1);
+    assert_eq!(selected_polygons(harness.state(), sphere), [face]);
+
+    // A double-click selects its whole island (after a pause: the click
+    // above must not count as the first of it).
+    harness.run_steps(40);
+    click_at(&mut harness, at, Modifiers::NONE, 2);
+    let island = selected_polygons(harness.state(), sphere);
+    assert!(island.len() > 100, "the sphere's one island: {}", island.len());
+
+    // Back to one polygon, then the Move tool's U handle moves its UVs right.
+    harness.run_steps(40);
+    click_at(&mut harness, at, Modifiers::NONE, 1);
+    harness.state_mut().editor.tool = grid4d_ui::Tool::Move;
+    harness.run_steps(2);
+    let uvs = |harness: &Harness<'_, Shell>| {
+        let ObjectKind::Polygon { mesh, .. } = &harness.state().doc.scene.get(sphere).unwrap().data.kind else {
+            panic!();
+        };
+        mesh.mesh().uvs().unwrap().to_vec()
+    };
+    let before = uvs(&harness);
+    let pivot = uv_polygon_middle(harness.state(), sphere, face);
+    let grab = pivot + egui::vec2(35.0, 0.0);
+    drag(&mut harness, grab, grab + egui::vec2(60.0, 0.0), Modifiers::NONE);
+    let after = uvs(&harness);
+    let range = {
+        let ObjectKind::Polygon { mesh, .. } = &harness.state().doc.scene.get(sphere).unwrap().data.kind else {
+            panic!();
+        };
+        mesh.mesh().corner_range(face)
+    };
+    for c in range {
+        assert!(
+            after[c].x > before[c].x + 0.01,
+            "moved along U: {} → {}",
+            before[c],
+            after[c]
+        );
+        assert!((after[c].y - before[c].y).abs() < 1e-5, "not along V");
+    }
+    assert_eq!(harness.state().editor.history.undo_label(), Some("Move UVs"));
+    undo(&mut harness);
+    assert_eq!(uvs(&harness), before);
+}

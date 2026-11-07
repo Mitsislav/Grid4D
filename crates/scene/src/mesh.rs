@@ -105,6 +105,20 @@ impl MeshHandle {
         }
         moved
     }
+
+    /// The same mesh with the corner UVs `uvs` (one per corner, else `None`):
+    /// a new handle sharing the topology, which UVs cannot change. What a UV
+    /// drag produces.
+    #[must_use]
+    pub fn with_uvs(&self, uvs: Vec<glam::Vec2>) -> Option<Self> {
+        let mut mesh = self.0.mesh.clone();
+        mesh.set_uvs(Some(uvs)).ok()?;
+        let changed = Self::new(mesh);
+        if let Some(topology) = self.0.topology.get() {
+            let _ = changed.0.topology.set(Arc::clone(topology));
+        }
+        Some(changed)
+    }
 }
 
 /// Equal when they share geometry or describe the same geometry. Comparing a

@@ -259,6 +259,38 @@ pub fn plugin_value(
     }
 }
 
+/// The UV tools on the active polygon object (Mesh ▸ UV and the UV
+/// Editor's UV menu).
+pub(crate) fn uv_menu(ui: &mut Ui, editor: &mut crate::EditorState, enabled: bool) {
+    use crate::uv_tools::{PROJECTIONS, UvOp};
+    use grid4d_geom::uv::FlipAxis;
+
+    let mut item = |ui: &mut Ui, op: UvOp, label: &str| {
+        if ui
+            .add_enabled(enabled, egui::Button::new(tr(label)))
+            .on_disabled_hover_text(tr("Select a polygon object"))
+            .clicked()
+        {
+            editor.commands.push(crate::EditorCommand::UvCommand(op));
+            ui.close();
+        }
+    };
+    item(ui, UvOp::Unwrap, crate::i18n::key("Unwrap"));
+    item(ui, UvOp::Relax, crate::i18n::key("Relax"));
+    item(ui, UvOp::Pack, crate::i18n::key("Pack Islands"));
+    ui.menu_button(tr("Project"), |ui| {
+        for (projection, label) in PROJECTIONS {
+            item(ui, UvOp::Project(projection), label);
+        }
+    });
+    ui.separator();
+    item(ui, UvOp::Flip(FlipAxis::U), crate::i18n::key("Flip U"));
+    item(ui, UvOp::Flip(FlipAxis::V), crate::i18n::key("Flip V"));
+    ui.separator();
+    item(ui, UvOp::MarkSeams, crate::i18n::key("Mark Seams"));
+    item(ui, UvOp::ClearSeams, crate::i18n::key("Clear Seams"));
+}
+
 #[cfg(test)]
 mod tests {
     use egui::{Event, Key, Modifiers, PointerButton, RawInput, Shape};

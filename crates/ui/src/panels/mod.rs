@@ -34,6 +34,7 @@ pub mod texture_manager;
 pub mod timeline;
 pub mod toolbar;
 pub mod unsaved_changes;
+pub mod uv_editor;
 pub mod viewport;
 
 pub use attributes::AttributesPanel;
@@ -47,6 +48,7 @@ pub use render_settings::RenderSettingsPanel;
 pub use takes::TakesPanel;
 pub use texture_manager::TextureManagerPanel;
 pub use timeline::TimelinePanel;
+pub use uv_editor::UvEditorPanel;
 pub use viewport::ViewportPanel;
 
 #[cfg(test)]

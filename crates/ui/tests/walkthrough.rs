@@ -623,6 +623,48 @@ fn texture_manager_picture() {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     save(&mut h, &dir, "render-textures");
+
+    // The UV Editor beside the viewport (Modeling): the sphere unwrapped
+    // (cut by the way its polygons face), its stretch shown, one island
+    // selected, over the checker picture of its material.
+    {
+        let shell = h.state_mut();
+        shell.editor.renders.clear_view();
+        let sphere = named(shell, "Sphere");
+        shell.editor.selection.set_single(sphere);
+        shell.editor.commands.push(grid4d_ui::EditorCommand::MakeEditable);
+        shell
+            .editor
+            .commands
+            .push(grid4d_ui::EditorCommand::UvCommand(grid4d_ui::uv_tools::UvOp::Unwrap));
+        shell.editor.mode = grid4d_ui::EditMode::Polygons;
+        shell.panels.uv_editor.stretch = true;
+        shell.editor.panes.layout = Some(grid4d_ui::workspace::Layout::Modeling);
+        shell.editor.panes.show = Some(Pane::UvEditor);
+    }
+    h.run_steps(4);
+    {
+        let shell = h.state_mut();
+        let sphere = named(shell, "Sphere");
+        let grid4d_scene::ObjectKind::Polygon { mesh, .. } = &shell.doc.scene.get(sphere).unwrap().data.kind else {
+            panic!("editable");
+        };
+        let layout = grid4d_geom::uv::layout(mesh.mesh(), mesh.topology());
+        let hits = (0..mesh.mesh().face_count())
+            .filter(|&f| layout.island_of[f] == layout.island_of[0])
+            .map(|f| u32::try_from(f).unwrap())
+            .collect();
+        shell.editor.tool = grid4d_ui::Tool::Move;
+        shell.editor.commands.push(grid4d_ui::EditorCommand::SelectComponents {
+            node: sphere,
+            component: grid4d_geom::Component::Polygon,
+            hits,
+            mode: grid4d_ui::SelectMode::Replace,
+        });
+    }
+    h.run_steps(3);
+    wait_for_textures(&mut h);
+    save(&mut h, &dir, "uv-editor");
     println!("pictures in {}", dir.display());
 }
 

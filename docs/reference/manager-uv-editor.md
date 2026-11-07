@@ -148,6 +148,30 @@ All in `grid4d_geom::uv`, pure functions that return new corner UVs:
 - Mesh ▸ UV holds the commands until the pane (15.7c) has its own menus;
   the random-command test applies them.
 
+## As built (15.7c, the pane)
+
+- `panels/uv_editor.rs` (`UvEditorPanel`, `Pane::UvEditor`; Window ▸ UV
+  Editor; a tab beside the viewport in Modeling, in the bottom group of
+  Standard and Animate). Drawn with egui shapes: the Base Color picture of
+  the object's effective material (uploaded once per texture version, with
+  repeat, at its slot's tiling and offset, dimmed), the unit grid, stretch
+  colours (`uv::face_stretch`), polygon selection, edges, seams (red),
+  points in Points mode, the handle.
+- Primitives are shown read only from `grid4d_eval::editable_mesh`
+  (generators: nothing to show).
+- Selection pushes `SelectComponents` (click, frame, double-click island)
+  in the mode's component (Polygons outside the component modes).
+- Move / Scale / Rotate: a 2D handle at the middle of the moved corners —
+  the selected components' corners and every corner joined to them in UV
+  (UV vertices); drags write `MeshHandle::with_uvs` live (topology shared)
+  and push one `CommitLive` ("Move UVs", "Scale UVs", "Rotate UVs"); Esc
+  restores.
+- H / S over the pane (`EditorState::uv_frame`, `shortcuts::TABLE`).
+- Unwrap now turns each flattened part to its smallest box before packing
+  (whole degrees), so parts lie upright.
+- Not yet: seams in the viewport; numeric UV fields; the reference's
+  separate UV point selection, pins and tiles.
+
 ## Acceptance criteria
 
 - [x] Unwrap of a cube cut along seven edges gives one island with no
@@ -155,6 +179,6 @@ All in `grid4d_geom::uv`, pure functions that return new corner UVs:
       distortion under 5 %.
 - [x] Pack Islands never overlaps islands; everything lies in 0 – 1.
 - [x] Relax lowers the stretch measure and never flips a face.
-- [ ] Selecting in the UV editor selects the same components in the
+- [x] Selecting in the UV editor selects the same components in the
       viewport, and back.
-- [ ] Every tool is one undo step; save and load keep UVs and seams.
+- [x] Every tool is one undo step; save and load keep UVs and seams.

@@ -354,7 +354,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 editor.show_optimize = true;
                 ui.close();
             }
-            ui.menu_button(tr("UV"), |ui| uv_menu(ui, editor, active_polygon));
+            ui.menu_button(tr("UV"), |ui| crate::widgets::uv_menu(ui, editor, active_polygon));
             ui.separator();
             planned(ui, "Subdivide", "");
         });
@@ -688,35 +688,4 @@ fn tool_item(ui: &mut Ui, editor: &mut EditorState, tool: Tool) {
 fn planned(ui: &mut Ui, label: &str, shortcut: &str) {
     ui.add_enabled(false, Button::new(tr(label)).shortcut_text(shortcut))
         .on_disabled_hover_text(tr("Planned — not implemented yet"));
-}
-
-/// Mesh ▸ UV: the UV tools on the active polygon object.
-fn uv_menu(ui: &mut Ui, editor: &mut EditorState, enabled: bool) {
-    use crate::uv_tools::{PROJECTIONS, UvOp};
-    use grid4d_geom::uv::FlipAxis;
-
-    let mut item = |ui: &mut Ui, op: UvOp, label: &str| {
-        if ui
-            .add_enabled(enabled, Button::new(tr(label)))
-            .on_disabled_hover_text(tr("Select a polygon object"))
-            .clicked()
-        {
-            editor.commands.push(EditorCommand::UvCommand(op));
-            ui.close();
-        }
-    };
-    item(ui, UvOp::Unwrap, key("Unwrap"));
-    item(ui, UvOp::Relax, key("Relax"));
-    item(ui, UvOp::Pack, key("Pack Islands"));
-    ui.menu_button(tr("Project"), |ui| {
-        for (projection, label) in PROJECTIONS {
-            item(ui, UvOp::Project(projection), label);
-        }
-    });
-    ui.separator();
-    item(ui, UvOp::Flip(FlipAxis::U), key("Flip U"));
-    item(ui, UvOp::Flip(FlipAxis::V), key("Flip V"));
-    ui.separator();
-    item(ui, UvOp::MarkSeams, key("Mark Seams"));
-    item(ui, UvOp::ClearSeams, key("Clear Seams"));
 }

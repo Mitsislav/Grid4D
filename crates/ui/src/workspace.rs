@@ -33,10 +33,11 @@ pub enum Pane {
     FCurve,
     Materials,
     Textures,
+    UvEditor,
 }
 
 impl Pane {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Viewport,
         Self::Objects,
         Self::Takes,
@@ -47,6 +48,7 @@ impl Pane {
         Self::FCurve,
         Self::Materials,
         Self::Textures,
+        Self::UvEditor,
     ];
 
     /// Its tab's title.
@@ -63,6 +65,7 @@ impl Pane {
             Self::FCurve => "F-Curve",
             Self::Materials => "Materials",
             Self::Textures => "Textures",
+            Self::UvEditor => "UV Editor",
         }
     }
 
@@ -80,6 +83,7 @@ impl Pane {
             Self::FCurve => "F-Curve Editor",
             Self::Materials => "Material Manager",
             Self::Textures => "Texture Manager",
+            Self::UvEditor => "UV Editor",
         }
     }
 
@@ -96,6 +100,7 @@ impl Pane {
             Self::FCurve => &[Self::Timeline, Self::Materials],
             Self::Materials => &[Self::Timeline, Self::FCurve, Self::Objects],
             Self::Textures => &[Self::Materials, Self::Timeline, Self::Objects],
+            Self::UvEditor => &[Self::Viewport, Self::Timeline, Self::Materials],
         }
     }
 
@@ -183,6 +188,7 @@ pub struct Panels {
     pub textures: crate::panels::TextureManagerPanel,
     pub layers: crate::panels::LayersPanel,
     pub takes: crate::panels::TakesPanel,
+    pub uv_editor: crate::panels::UvEditorPanel,
 }
 
 impl Panels {
@@ -199,6 +205,7 @@ impl Panels {
             textures: crate::panels::TextureManagerPanel::default(),
             layers: crate::panels::LayersPanel::default(),
             takes: crate::panels::TakesPanel::default(),
+            uv_editor: crate::panels::UvEditorPanel::default(),
         }
     }
 }
@@ -366,6 +373,7 @@ impl Behavior<Pane> for Dispatch<'_> {
                         Pane::Textures => panels.textures.show(ui, doc, editor),
                         Pane::Takes => panels.takes.show(ui, doc, editor),
                         Pane::Layers => panels.layers.show(ui, doc, editor),
+                        Pane::UvEditor => panels.uv_editor.show(ui, doc, editor),
                         Pane::Viewport => {}
                     }
                 });
@@ -467,13 +475,15 @@ fn linear(tiles: &mut Tiles<Pane>, horizontal: bool, children: &[(TileId, f32)])
 
 /// The tree of a preset layout.
 fn preset(layout: Layout) -> Tree<Pane> {
-    use Pane::{Attributes, Coordinates, FCurve, Layers, Materials, Objects, Takes, Textures, Timeline, Viewport};
+    use Pane::{
+        Attributes, Coordinates, FCurve, Layers, Materials, Objects, Takes, Textures, Timeline, UvEditor, Viewport,
+    };
     let mut tiles = Tiles::default();
     let t = &mut tiles;
     let root = match layout {
         Layout::Standard => {
             let viewport = tabs(t, &[Viewport]);
-            let bottom = tabs(t, &[Timeline, FCurve, Materials, Textures]);
+            let bottom = tabs(t, &[Timeline, FCurve, Materials, Textures, UvEditor]);
             let left = linear(t, false, &[(viewport, 0.8), (bottom, 0.2)]);
             let objects = tabs(t, &[Objects, Takes]);
             let attributes = tabs(t, &[Attributes, Coordinates, Layers]);
@@ -481,7 +491,7 @@ fn preset(layout: Layout) -> Tree<Pane> {
             linear(t, true, &[(left, 0.64), (right, 0.36)])
         }
         Layout::Modeling => {
-            let viewport = tabs(t, &[Viewport]);
+            let viewport = tabs(t, &[Viewport, UvEditor]);
             let bottom = tabs(t, &[Timeline, FCurve]);
             let left = linear(t, false, &[(viewport, 0.86), (bottom, 0.14)]);
             let objects = tabs(t, &[Objects, Takes, Layers, Materials, Textures]);
@@ -493,7 +503,7 @@ fn preset(layout: Layout) -> Tree<Pane> {
         }
         Layout::Animate => {
             let viewport = tabs(t, &[Viewport]);
-            let bottom = tabs(t, &[FCurve, Timeline, Materials, Textures]);
+            let bottom = tabs(t, &[FCurve, Timeline, Materials, Textures, UvEditor]);
             let left = linear(t, false, &[(viewport, 0.55), (bottom, 0.45)]);
             let objects = tabs(t, &[Objects, Takes, Layers]);
             let attributes = tabs(t, &[Attributes, Coordinates]);

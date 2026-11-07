@@ -35,6 +35,11 @@ Toward 1.1: materials, UVs and textures.
   Emission, Normal and Bump pictures and Opacity cut-outs show in the
   viewport through each object's Material tags and their projections, one
   layer over another; missing pictures show as a magenta checker.
+- **UV Editor** — a pane (Window ▸ UV Editor; beside the viewport in the
+  Modeling layout) that shows the active object's UVs over its picture,
+  coloured by stretch if asked, with seams; selection is shared with the
+  viewport (double-click selects an island); Move, Scale and Rotate drag
+  UVs; H / S frame.
 - **UV tools** — Mesh ▸ UV unwraps a polygon object's selected polygons
   (cutting along seams, flattening each piece with little stretching and
   packing the pieces), relaxes, packs islands, projects, flips and marks or

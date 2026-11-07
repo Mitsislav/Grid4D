@@ -93,6 +93,10 @@ pub const TABLE: &[(&str, &str)] = &[
         "H / S",
         key("Frame all curves / the selected keys (pointer over the F-Curve graph)"),
     ),
+    (
+        "H / S",
+        key("Frame all UVs / the selection (pointer over the UV Editor)"),
+    ),
     ("Double-click", key("Rename (a name in the Object Manager)")),
     ("Drag", key("Re-parent (a row onto another in the Object Manager)")),
 ];
@@ -281,17 +285,24 @@ pub fn handle(ctx: &egui::Context, doc: &mut Document, editor: &mut EditorState)
                     editor.tool = tool;
                 }
             }
-            // Over the F-Curve graph, H and S frame the curves.
+            // Over the F-Curve graph, H and S frame the curves; over the UV
+            // Editor, the UVs.
             let curves = editor.panes.is_shown(Pane::FCurve) && editor.curves.hovered;
+            let uvs = editor.panes.is_shown(Pane::UvEditor) && editor.panes.hovered == Some(Pane::UvEditor);
             if i.key_pressed(Key::H) {
                 if curves {
                     editor.curves.frame = Some(FrameCurves::All);
+                } else if uvs {
+                    editor.uv_frame = Some(FrameCurves::All);
                 } else {
                     editor.commands.push(EditorCommand::FrameScene);
                 }
             }
             if curves && i.key_pressed(Key::S) {
                 editor.curves.frame = Some(FrameCurves::Selected);
+            }
+            if uvs && i.key_pressed(Key::S) {
+                editor.uv_frame = Some(FrameCurves::Selected);
             }
             if i.key_pressed(Key::O) {
                 editor.commands.push(EditorCommand::FrameSelected);

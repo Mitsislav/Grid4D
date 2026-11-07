@@ -112,6 +112,7 @@ pub fn unwrap(
                 uvs[c] *= scale;
             }
         }
+        upright(&mut uvs, &corners);
         for &c in &corners {
             local[us(parts.vertex_of[c])] = usize::MAX;
         }
@@ -119,6 +120,35 @@ pub fn unwrap(
     }
     pack(&mut uvs, &islands, &options.pack);
     uvs
+}
+
+/// Turns the corners `corners` about their middle so the box around them is
+/// as small as it gets (whole degrees from 0 to 89; turning never mirrors),
+/// so packed parts waste little room.
+fn upright(uvs: &mut [Vec2], corners: &[usize]) {
+    let area = |angle: f32| {
+        let turn = Vec2::from_angle(angle);
+        let mut min = Vec2::splat(f32::INFINITY);
+        let mut max = Vec2::splat(f32::NEG_INFINITY);
+        for &c in corners {
+            let at = turn.rotate(uvs[c]);
+            min = min.min(at);
+            max = max.max(at);
+        }
+        let size = max - min;
+        size.x * size.y
+    };
+    let best = (0u8..90)
+        .map(|degrees| f32::from(degrees).to_radians())
+        .min_by(|&a, &b| area(a).total_cmp(&area(b)))
+        .unwrap_or(0.0);
+    if best == 0.0 || area(best) >= area(0.0) * 0.999 {
+        return;
+    }
+    let turn = Vec2::from_angle(best);
+    for &c in corners {
+        uvs[c] = turn.rotate(uvs[c]);
+    }
 }
 
 /// Which way a face mostly faces: ±X, ±Y or ±Z (0 – 5).

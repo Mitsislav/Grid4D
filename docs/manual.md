@@ -2229,8 +2229,48 @@ inner corner), **Mark Seams**, then **Unwrap**. A sphere or a closed shape
 with no seams at all is cut by the directions its polygons face, so it
 always lies flat.
 
-> A UV Editor that shows and edits the UVs over the picture follows in
-> Grid4D 1.1's next step.
+### 19.4 The UV Editor
+
+The **UV Editor** shows the active object's UVs as a flat mesh over its
+material's Base Color picture. Open it with **Window ▸ UV Editor**; in the
+**Modeling** layout it is a tab beside the viewport, in the others a tab
+beside the Timeline.
+
+![The UV Editor beside the viewport: a sphere unwrapped into six pieces over a checker picture, coloured by stretch, its round top piece selected with the Move handle on it](images/manual/uv-editor.png)
+
+- The square is the picture (0 to 1 each way), shown with the tiling and
+  offset of the material's Base Color texture; the lines around it mark the
+  repeats. **View ▸ Show Texture** hides the picture.
+- **View ▸ Show Stretch** colours each polygon by how its picture is
+  stretched: **blue** where it is squeezed, **red** where it is stretched,
+  clear where it is even.
+- **Seams** are drawn in red.
+- **Navigate**: the mouse wheel zooms about the pointer; drag with the
+  middle button (or Alt + drag) to pan; **H** shows everything, **S** the
+  selection (with the pointer over the editor; also in the View menu).
+
+**Selecting** works in the current mode (Points, Edges or Polygons; Polygons
+in Model mode) and is the object's own selection: what you select here is
+selected in the viewport, and the other way round. Click a component; Shift
+adds, Ctrl removes; drag a frame around components; **double-click** a
+polygon to select its whole **island** (the polygons joined to it in UV).
+Hidden polygons are not shown.
+
+**Moving UVs**: with the **Move**, **Scale** or **Rotate** tool, a handle
+sits at the middle of the selection. Drag its centre to move freely (or to
+scale evenly), its red arrow along U, its green arrow along V; with Rotate,
+drag the ring. Every drag is one undo step; Esc during a drag puts the UVs
+back. UVs joined to the selection move with it, so an island stretches
+rather than tears; a selected point moves at every place it has on the
+picture.
+
+The **UV** menu holds the UV tools of [§19.3](#193-uv-tools); **Options**
+sets them: Seam Angle (Unwrap without seams), Margin and Texture Size (the
+gap Pack Islands leaves, in pixels of a picture that size), Rotate Islands,
+Relax Iterations and Pin Borders.
+
+Primitives show their UVs read only: make the object editable (**C**) to
+change them.
 
 ## 20. Rendering
 
@@ -2613,6 +2653,7 @@ Esc cancels a chord.
 | Ctrl+Enter | Run the script (in the Script Manager's editor) |
 | Tab | Timeline / F-Curve tab (pointer over the timeline) |
 | H / S | Frame all curves / the selected keys (pointer over the F-Curve graph) |
+| H / S | Frame all UVs / the selection (pointer over the UV Editor) |
 | Double-click | Rename (a name in the Object Manager) |
 | Drag | Re-parent (a row onto another in the Object Manager) |
 
@@ -2675,6 +2716,10 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   shadows ignore cut-outs; renders have no environment for glass and metals
   to reflect, and light through glass is tinted but not focused (no
   caustics); no per-polygon-selection limit on a tag.
+- **UVs**: no separate UV point selection, pins, soft selection, UV tiles
+  past the first, or Align / Straighten tools; seams show in the UV Editor,
+  not yet in the viewport; unwrapping one very large curved piece takes
+  seconds (mark seams to keep pieces smaller).
 - **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's
   angle or length while dragging it (Ctrl / Alt), normalised curves, copying and
   pasting keys, animating counts (segments, sides) and choices, Frame

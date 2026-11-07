@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.7b — Seams in the document and the UV commands (2026-11-07) |
-| Next step | 15.7c — The UV Editor pane |
-| Tests | 854 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.7c — The UV Editor pane (2026-11-07) |
+| Next step | 15.8 — glTF and OBJ materials in and out |
+| Tests | 857 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2321,6 +2321,7 @@ risks R5 – R8 go with it.
 | 15.6 | Textures in the path tracer: `RenderScene::textured` with a `Texturing` (materials, `Pictures` — the cache's full-size levels shared, `Pixels` now `Arc` — the render's camera and aspect, camera objects); every Material tag a layer read per hit from the top (`channels.rs` reads channels like the shader); coordinates per triangle corner (shape projections, UVs, the tag's transform) or through a camera; bilinear repeating pictures (8-bit sRGB / linear, half float); normal pictures in the tangent frame, bump by the height's slope; cut-outs for rays and shadows; glass (exact Fresnel, refraction about a microfacet normal, total internal reflection, tinted lighter shadows), a clear coat, Specular; renders and the Render View get the pictures, preview balls too (made again when a picture arrives); the render example decodes a document's textures; a second reference picture; the manual's §20 with a render | 838 |
 | 15.7a | The UV algorithms in `grid4d_geom::uv` (now a folder): `layout` (UV vertices and islands by a union-find over corners), `sharp_edges`; `unwrap` (parts across uncut edges, non-discs split by facing, LSCM per part solved by CGLS from a planar guess, scaled to surface area, packed); `relax` (edge springs at the island's scale, steps halved rather than flipping, borders pinned); `pack` (rows, quarter turns, margin after scaling, all in 0 – 1); `flip`; `face_stretch`, `stretch_measure`; the spec corrected after reading the reference (one shared selection, seams of their own, H / S framing) and the step split in three; an unwrap bench | 849 |
 | 15.7b | Seams: `ComponentState::seams` (edges by corner), carried through rebuilding operations like the edge selection, written by `.g4d` v4 on polygon kinds (`seams`; dropped from version 3 files; `FILE_FORMAT.md`, the golden `full_v4.g4d` and the property test updated); `EditorCommand::UvCommand(UvOp)` in `ui/src/uv_tools.rs` (Unwrap with seams / selected edges / sharp edges, Relax, Pack, Project, Flip U / V, Mark / Clear Seams; selected visible polygons or all; one undo step); `UvSettings` in the editor; Mesh ▸ UV; the random-command test; Greek; the manual's §19.3 | 854 |
+| 15.7c | The UV Editor pane (`panels/uv_editor.rs`, `Pane::UvEditor` in every layout, beside the viewport in Modeling): the material's Base Color picture at its tiling and offset, dimmed; the unit grid; stretch colours; edges, seams, selection; read-only UVs of primitives; wheel zoom, middle / Alt pan, H / S framing (`EditorState::uv_frame`, the shortcut table); click / frame / double-click (island) selection shared with the viewport; a 2D Move / Scale / Rotate handle moving the selection's UV vertices live (`MeshHandle::with_uvs`), one undo step, Esc restores; the UV and Options menus (the UV menu shared with Mesh ▸ UV through `widgets::uv_menu`); unwrapped parts turned upright before packing; an interface test; Greek; the manual's §19.4 with a picture | 857 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2629,6 +2630,25 @@ risks R5 – R8 go with it.
   order; it now reads both forms.
 - The test of seams through an Extrude first undid too few steps: selecting
   polygons is a step of its own.
+
+**15.7c — The UV Editor pane**
+
+*Problems and solutions:*
+- **Panels never call panels.** The UV menu is needed in Mesh ▸ UV and in
+  the pane: it moved to `widgets::uv_menu`. Placed after the widgets' test
+  module at first, its texts went unseen by the translation test (which
+  stops reading at the tests); it now sits above them.
+- **Moving a polygon must not tear its island.** A drag moves the UV
+  vertices of the selection (every corner joined to a selected one in UV),
+  so the neighbouring polygons stretch with it.
+- **A new mesh every frame of a drag.** `MeshHandle::with_uvs` keeps the
+  topology (UVs cannot change it), as `with_points` does for the gizmo.
+- **Parts lay crooked.** LSCM pins the two farthest points along U, so
+  square-ish parts came out turned 45° and packed loosely. Each part is
+  now turned (whole degrees) to its smallest box first.
+- **The picture drowned the lines.** It is drawn dimmed under the UVs.
+- **A triple click.** The interface test's double-click came too soon after
+  a single click and counted as a triple; the test waits between them.
 
 ---
 

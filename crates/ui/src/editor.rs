@@ -756,6 +756,8 @@ pub struct EditorState {
     pub modeling_settings: ModelingSettings,
     /// The UV tools' options.
     pub uv_settings: crate::uv_tools::UvSettings,
+    /// Fit the UV Editor's view to everything or the selection (H / S).
+    pub uv_frame: Option<FrameCurves>,
     pub pen: PenSettings,
     /// The spline the Pen finished (Esc, Enter, closing it): the next Pen click
     /// starts a new spline even while it is active.
@@ -857,6 +859,7 @@ impl Default for EditorState {
             transform_settings: TransformSettings::default(),
             modeling_settings: ModelingSettings::default(),
             uv_settings: crate::uv_tools::UvSettings::default(),
+            uv_frame: None,
             pen: PenSettings::default(),
             pen_finished: None,
             chord: None,

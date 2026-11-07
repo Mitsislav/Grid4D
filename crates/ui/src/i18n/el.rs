@@ -641,6 +641,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Frame Step", "Βήμα καρέ"),
     ("Frame Time", "Χρόνος καρέ"),
     (
+        "Frame all UVs / the selection (pointer over the UV Editor)",
+        "Πλαισίωση όλων των UV / της επιλογής (δείκτης πάνω στον Επεξεργαστή UV)",
+    ),
+    (
         "Frame all curves / the selected keys (pointer over the F-Curve graph)",
         "Πλαισίωση όλων των καμπυλών / των επιλεγμένων κλειδιών (δείκτης πάνω από το γράφημα F-Curve)",
     ),
@@ -922,6 +926,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Διαχείριση: εμφανίζεται στη Διαχείριση Αντικειμένων",
     ),
     ("Manual", "Χειροκίνητα"),
+    ("Margin", "Περιθώριο"),
     ("Mark Seams", "Σήμανση ραφών"),
     ("Mass", "Μάζα"),
     ("Material", "Υλικό"),
@@ -986,6 +991,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Move Points", "Μετακίνηση σημείων"),
     ("Move Polygons", "Μετακίνηση πολυγώνων"),
     ("Move Tangent", "Μετακίνηση εφαπτομένης"),
+    ("Move UVs", "Μετακίνηση UV"),
     ("Move to Top Level", "Μετακίνηση στο ανώτερο επίπεδο"),
     (
         "Move: drag an axis handle to move along it · Alt+drag to navigate",
@@ -1157,6 +1163,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Picture Viewer", "Προβολή Εικόνων"),
     ("Pictures", "Εικόνες"),
     ("Pictures (PNG, OpenEXR)", "Εικόνες (PNG, OpenEXR)"),
+    ("Pin Borders", "Σταθερά όρια"),
     ("Pipe Radius", "Ακτίνα σωλήνα"),
     ("Pipe Segments", "Τμήματα σωλήνα"),
     ("Pitch", "Κλίση"),
@@ -1258,6 +1265,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Re-parent (a row onto another in the Object Manager)",
         "Αλλαγή γονέα (μια γραμμή πάνω σε άλλη στη Διαχείριση Αντικειμένων)",
     ),
+    (
+        "Read only: make the object editable (C) to change its UVs",
+        "Μόνο για ανάγνωση: κάντε το αντικείμενο επεξεργάσιμο (C) για να αλλάξετε τα UV του",
+    ),
     ("Record", "Καταγραφή"),
     ("Record Active Objects", "Καταγραφή ενεργών αντικειμένων"),
     (
@@ -1290,6 +1301,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Σχετικό με τον φάκελο του εγγράφου: οι αποδόσεις αποθηκεύονται μόλις αποθηκευτεί το έγγραφο.",
     ),
     ("Relax", "Χαλάρωση"),
+    ("Relax Iterations", "Επαναλήψεις χαλάρωσης"),
     ("Relax UVs", "Χαλάρωση UV"),
     (
         "Release over an object to give it this material",
@@ -1402,8 +1414,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Rotate", "Περιστροφή"),
     ("Rotate (R)", "Περιστροφή (R)"),
     ("Rotate Edges", "Περιστροφή ακμών"),
+    ("Rotate Islands", "Περιστροφή νησιών"),
     ("Rotate Points", "Περιστροφή σημείων"),
     ("Rotate Polygons", "Περιστροφή πολυγώνων"),
+    ("Rotate UVs", "Περιστροφή UV"),
     (
         "Rotate: drag a ring to rotate around its axis · Alt+drag to navigate",
         "Περιστροφή: σύρετε έναν δακτύλιο για περιστροφή γύρω από τον άξονά του · Alt+σύρσιμο για πλοήγηση",
@@ -1475,6 +1489,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Scale Edges", "Κλιμάκωση ακμών"),
     ("Scale Points", "Κλιμάκωση σημείων"),
     ("Scale Polygons", "Κλιμάκωση πολυγώνων"),
+    ("Scale UVs", "Κλιμάκωση UV"),
     ("Scale Variation", "Διακύμανση κλίμακας"),
     (
         "Scale: drag an axis handle to scale along it · Alt+drag to navigate",
@@ -1487,6 +1502,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Script Manager", "Διαχείριση scripts"),
     ("Script Manager…", "Διαχείριση scripts…"),
     ("Script Output", "Έξοδος script"),
+    ("Seam Angle", "Γωνία ραφών"),
     ("Search objects", "Αναζήτηση αντικειμένων"),
     ("Sector", "Τομέας"),
     ("Seed", "Σπόρος"),
@@ -1512,6 +1528,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Επιλέξτε πρώτα ένα υλικό και αντικείμενα",
     ),
     ("Select a polygon object", "Επιλέξτε ένα πολυγωνικό αντικείμενο"),
+    (
+        "Select a polygon object to see its UVs",
+        "Επιλέξτε ένα αντικείμενο πολυγώνων για να δείτε τα UV του",
+    ),
     (
         "Select a primitive to turn it into a polygon object",
         "Επιλέξτε ένα πρωτογενές για να γίνει πολυγωνικό αντικείμενο",
@@ -1573,6 +1593,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Μετατοπίζει το κύμα· βάλτε της κλειδιά για να ταξιδεύει",
     ),
     ("Show Report", "Εμφάνιση αναφοράς"),
+    ("Show Stretch", "Εμφάνιση παραμόρφωσης"),
+    ("Show Texture", "Εμφάνιση υφής"),
     (
         "Show the picture's file in the file browser",
         "Εμφανίζει το αρχείο της εικόνας στην εξερεύνηση αρχείων",
@@ -1690,6 +1712,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Text", "Κείμενο"),
     ("Texture Colour Space", "Χρωματικός χώρος υφής"),
     ("Texture Manager", "Διαχείριση Υφών"),
+    ("Texture Size", "Μέγεθος υφής"),
     ("Texture Strength", "Ισχύς υφής"),
     ("Textures", "Υφές"),
     ("The Render View is not saved.", "Η Προβολή απόδοσης δεν αποθηκεύεται."),
@@ -1845,6 +1868,11 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Γράψτε πρώτα ένα όνομα για το script (χωρίς \\ / : * ? \" < > |).",
     ),
     ("UV", "UV"),
+    ("UV Editor", "Επεξεργαστής UV"),
+    (
+        "UV Editor: click or drag a frame to select · Shift adds · Ctrl removes · double-click an island · Move / Scale / Rotate drag the handle · wheel zooms · middle drag pans · H / S frame",
+        "Επεξεργαστής UV: κλικ ή πλαίσιο για επιλογή · Shift προσθέτει · Ctrl αφαιρεί · διπλό κλικ σε νησί · Μετακίνηση / Κλιμάκωση / Περιστροφή σύροντας τη λαβή · ροδέλα για ζουμ · μεσαίο κουμπί για μετατόπιση · H / S πλαισίωση",
+    ),
     ("Undo", "Αναίρεση"),
     (
         "Undo (Ctrl+Z) — nothing to undo",
