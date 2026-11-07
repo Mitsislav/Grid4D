@@ -448,6 +448,8 @@ pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mu
     }
     // Texture pictures loading in the background.
     changed |= editor.textures.update(doc.scene.textures());
+    // Material previews rendered in the background.
+    changed |= editor.previews.update(doc.scene.materials());
     // News from renders in the background; finished frames are saved.
     let (rendered, finished) = editor.renders.poll();
     changed |= rendered;

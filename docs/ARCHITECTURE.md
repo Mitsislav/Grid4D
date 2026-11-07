@@ -27,7 +27,7 @@ grid4d-geom ◀── grid4d-scene ◀── grid4d-eval ◀── grid4d-render
 | `grid4d-sim` | Rigid-body simulation, cached per frame; the only crate that sees `rapier3d` | geom, scene, eval |
 | `grid4d-io` | `.g4d` files (a versioned zip: JSON, binary meshes, embedded pictures), glTF and OBJ import / export, PNG and OpenEXR out, texture pictures in (decoded with mip-maps) | geom, scene |
 | `grid4d-script` | Rhai scripts working on a copy of the document | geom, scene, plugin |
-| `grid4d-ui` | The egui interface: panels, theme, icons, shortcuts, commands, undo history, translations, autosave, crash reports, texture pictures loaded in the background | all of the above |
+| `grid4d-ui` | The egui interface: panels, theme, icons, shortcuts, commands, undo history, translations, autosave, crash reports, texture pictures loaded and material previews rendered in the background | all of the above |
 | `grid4d` | The binary: the window, start-up (the logger and the panic hook first), settings kept between sessions, the list of built-in plugins — the interface itself is `grid4d_ui::shell::Shell` | ui, scene, plugin, plugins |
 | `plugins/*` | The example plugins: Gear, Wave, Scatter | plugin, geom, scene |
 

@@ -2018,6 +2018,14 @@ Manager**, the **Materials** tab at the bottom (beside Timeline and F-Curve;
 - **Click** a material to select it: the Attribute Manager shows its settings.
   Selecting an object shows the object again.
 
+**Previews.** Each material shows as a small ball rendered with Grid4D's own
+renderer, in the Material Manager and at the top of its settings. The balls
+are made in the background, one after the other, and made again a moment
+after you change a material — Grid4D never waits for them. Until a ball is
+ready, a plain ball in the material's colour stands in.
+
+![The Material Manager: a preview ball for each material — plain, glossy plastic, gold, rubber and a glowing one](images/manual/material-previews.png)
+
 **Settings** (Attribute Manager)
 
 ![A material in the Attribute Manager: a picture of oak planks on its Base Color, repeated twice each way, and the Reflection group below](images/manual/material-channels.png)
@@ -2602,7 +2610,7 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   without building it); scripts cannot set keys, create materials or layers,
   or run every frame; the Script Manager's editor has no syntax colouring or
   completion, and the library no sub-folders.
-- **Materials**: rendered previews; the viewport and renders show only the
+- **Materials**: the viewport, renders and preview balls show only the
   colour of an object's top Material tag (textures, projections and layers
   follow in 1.1's next steps); no per-polygon-selection limit on a tag.
 - **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's

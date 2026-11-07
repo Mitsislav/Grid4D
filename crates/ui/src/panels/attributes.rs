@@ -129,7 +129,7 @@ impl AttributesPanel {
                     if editor.materials.shown
                         && let Some(id) = editor.materials.selected.filter(|&m| doc.scene.materials().contains(m))
                     {
-                        self.material_ui(ui, doc, id, &mut editor.commands);
+                        self.material_ui(ui, doc, id, &mut editor.previews, &mut editor.commands);
                         return;
                     }
                     match (self.view, editor.selection.active()) {
@@ -149,14 +149,21 @@ impl AttributesPanel {
     }
 
     /// A material's settings, edited live; one undo step per interaction.
-    fn material_ui(&mut self, ui: &mut Ui, doc: &mut Document, id: MaterialId, commands: &mut CommandQueue) {
+    fn material_ui(
+        &mut self,
+        ui: &mut Ui,
+        doc: &mut Document,
+        id: MaterialId,
+        previews: &mut crate::previews::MaterialPreviews,
+        commands: &mut CommandQueue,
+    ) {
         let Some(mut material) = doc.scene.materials().get(id).cloned() else {
             return;
         };
         self.material_edit.begin(id, &material);
         ui.horizontal(|ui| {
-            let (rect, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());
-            icons::paint_material_ball(ui.painter(), rect, material.color);
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(48.0), Sense::hover());
+            previews.paint(ui.painter(), rect, id, &material);
             ui.label(
                 RichText::new(trf("Material [{0}]", &[&material.name]))
                     .strong()

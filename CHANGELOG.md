@@ -28,6 +28,9 @@ Toward 1.1: materials, UVs and textures.
   An object can carry several Material tags, one over the other (Shift +
   drop adds one); Bake to UVs writes a projection into a polygon object's
   UVs.
+- **Material previews** — every material shows as a ball rendered by the
+  path tracer, in the Material Manager and the Attribute Manager, made in
+  the background and again after each change.
 - **Files** — documents are saved in `.g4d` format version 4. Every file of
   Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
   files and says they come from a newer Grid4D.

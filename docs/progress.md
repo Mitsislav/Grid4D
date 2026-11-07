@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.4b — The Material tag's projections and layers (2026-11-07) |
-| Next step | 15.4c — Preview balls in the Material Manager; then 15.5, textures in the viewport |
-| Tests | 814 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.4c — Preview balls (2026-11-07) |
+| Next step | 15.5 — Textures, projections and the material channels in the viewport |
+| Tests | 816 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2315,6 +2315,7 @@ risks R5 – R8 go with it.
 | 15.3 | Images and textures: the `image` crate (six decoders, no C; licences regenerated, `cargo deny` clean); `grid4d_io::decode_texture` under limits with mip-maps; the document's `Textures` table (`SceneEdit::SetTextures`), linked or embedded; `.g4d` v4 `textures` and `textures/<n>.<ext>` (paths inside the document's folder stored relative); `ui::textures::TextureCache` decoding on a worker thread and noticing changed files; the Texture Manager pane (Add, Relink, Relink Folder, Embed, Unembed, Reveal, Delete, Remove Unused, name and colour space); dropped pictures; the status bar's count of missing pictures; Greek; the manual's §19.1 with a picture rendered headless | 804 |
 | 15.4a | The material channels: `Material` gains Specular, Normal / Bump, Emission Strength, Opacity and its threshold, Transmission and IOR, Clearcoat and its roughness, Two-Sided, and a `TextureSlot` (tiling, offset, range, strength) per `Channel`; `.g4d` v4 writes them (each left out at its default) and `maps` by texture index, version 3 files drop them; the Attribute Manager's material page in groups with a texture row per channel and Load…; Remove Unused keeps textures materials use; emission strength reaches the viewport and the path tracer; Greek; the manual's §19 rewritten with a picture | 806 |
 | 15.4b | The Material tag's projections and layers: `Tag::Material(MaterialTag)` with a `Projection` (UV, Box, Spherical, Cylindrical, Flat, Camera; `grid4d_geom::uv::project`, `fit`), offset, tiling, rotation, a `Placement` or Fit to Object, and a camera; several Material tags per object, the selected tag a `TagRef` with its `nth`; `MaterialLayer`s per evaluated node and clone (own tags, else inherited, else a generator's cage's); `.g4d` v4 writes the new fields (version 3 drops them, also in takes); Shift + drop adds a layer, a drop on a tag icon changes that tag; Bake to UVs; the script `material` property keeps projections; Greek; manual §19.2 with a picture | 814 |
+| 15.4c | Preview balls: `ui::previews::MaterialPreviews` renders each material on a ball with the path tracer (96 px, two lights, a dim grey surrounding for reflections, the ball's coverage from a second render so the background stays transparent) on a worker thread, one at a time, again after each change (the old picture shown meanwhile, a painted ball before the first); the Material Manager, the dragged material and the Attribute Manager's material page show them; the manual's §19 with a picture | 816 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2460,6 +2461,24 @@ risks R5 – R8 go with it.
 - **A pattern rewritten by a search-and-replace** (`let [Tag::Material { material:
   Some(m) }]`) became an invalid call in a pattern; written back as a struct
   pattern with `..`.
+
+**15.4c — Preview balls**
+
+*Problems and solutions:*
+- **Metals looked black.** The path tracer has no surroundings yet, so a
+  metal ball only showed the lights' highlights. The preview scene puts the
+  ball inside a large, dimly glowing grey sphere; to keep the thumbnails
+  round on the panel's own background, a second render without it gives
+  the ball's coverage, which becomes the picture's alpha.
+- **Edits during a drag.** Rendering every intermediate value would queue
+  dozens of pictures; only one is ever in flight, and when it comes back the
+  first material whose picture shows another state is rendered next — a
+  drag ends with a picture of its last value.
+- **GPU pictures outside the panels.** The previews keep their own egui
+  texture handles (uploaded on first draw after each new picture), so the
+  Material Manager and the Attribute Manager share one upload.
+- **Manual pictures waited for nothing.** The walkthrough now runs frames
+  until every preview is current before it saves the material pictures.
 
 ---
 

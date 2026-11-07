@@ -11,7 +11,7 @@
 > Attribute Manager pages, preview balls); used by 15.5 (viewport), 15.6 (path
 > tracer) and 15.8 (glTF / OBJ). Extends [`manager-material.md`](manager-material.md).
 > Step 15.4a (2026-11-06) built the model, the file format and the
-> Attribute Manager's page; preview balls follow in 15.4c.
+> Attribute Manager's page; 15.4c (2026-11-07) the preview balls.
 
 ## Purpose
 
@@ -103,6 +103,26 @@ of switchable channels and reflectance layers; no procedural textures (Phase
 - Emission's Strength multiplies its colour in the viewport and the path
   tracer already.
 
+## As built (15.4c)
+
+- `ui::previews::MaterialPreviews` (editor state): one worker thread renders
+  `render_preview(material)` — a 96-pixel ball (radius 50 cm, seen from the
+  front, a key light upper left and a fill lower right, 16 samples, 2
+  bounces) inside a dim grey surrounding sphere that gives metals something
+  to reflect; a second render without the surrounding gives the ball's
+  coverage, so the background stays transparent.
+- One picture at a time: `update` (each frame, from `apply_pending`) starts
+  the first material whose picture shows another state of it; an edit during
+  a render is rendered afterwards, so a drag ends with its last value. The
+  old picture stays until the new one arrives; a painted ball stands in
+  before the first.
+- The picture is keyed by the whole `Material` (its texture slots
+  included); the texture pictures themselves reach previews when the path
+  tracer reads textures (15.6).
+- Shown in the Material Manager, while dragging a material, and at the top
+  of the material's Attribute Manager page (48 points); Material tag icons
+  in the Object Manager stay painted (16 points).
+
 ## Acceptance criteria
 
 - [x] A 1.0 document's materials open with the same four values and render
@@ -111,4 +131,4 @@ of switchable channels and reflectance layers; no procedural textures (Phase
 - [ ] Glass (Transmission 1, IOR 1.5) and brushed metal (Metallic 1, a
       Normal texture) render as expected in the path tracer; the viewport
       shows the normal map and opacity cut-out.
-- [ ] Preview balls update after an edit without stalling the interface.
+- [x] Preview balls update after an edit without stalling the interface.

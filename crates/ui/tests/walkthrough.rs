@@ -73,6 +73,19 @@ fn git(args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+/// Runs frames until every material's preview ball is rendered.
+fn wait_for_previews(harness: &mut Harness<'_, Shell>) {
+    for _ in 0..2000 {
+        harness.run_steps(1);
+        let shell = harness.state();
+        if !shell.editor.previews.pending(shell.doc.scene.materials()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    harness.run_steps(1);
+}
+
 fn save(harness: &mut Harness<'_, Shell>, dir: &Path, name: &str) {
     harness.run_steps(2);
     let image = harness.render().unwrap();
@@ -359,6 +372,7 @@ fn texture_manager_picture() {
         shell.editor.panes.layout = Some(grid4d_ui::workspace::Layout::Standard);
     }
     h.run_steps(3);
+    wait_for_previews(&mut h);
     save(&mut h, &dir, "material-channels");
 
     // A label projected as a box over the floor material, on an editable cube.
@@ -396,7 +410,31 @@ fn texture_manager_picture() {
         shell.editor.tag_selection = grid4d_ui::TagRef::at(cube, tags, last);
     }
     h.run_steps(3);
+    wait_for_previews(&mut h);
     save(&mut h, &dir, "material-tag");
+
+    // Preview balls in the Material Manager and the Attribute Manager.
+    {
+        let shell = h.state_mut();
+        let mut make = |name: &str, change: &dyn Fn(&mut grid4d_scene::Material)| {
+            let mut material = grid4d_scene::Material::new(name);
+            change(&mut material);
+            shell.doc.scene.materials_mut().insert(material)
+        };
+        make("Red Plastic", &|m| (m.color, m.roughness) = ([0.7, 0.04, 0.03], 0.3));
+        let gold = make("Gold", &|m| {
+            (m.color, m.metallic, m.roughness) = ([1.0, 0.71, 0.29], 1.0, 0.3);
+        });
+        make("Rubber", &|m| (m.color, m.roughness) = ([0.03, 0.03, 0.035], 1.0));
+        make("Glow", &|m| {
+            (m.color, m.emission, m.emission_strength) = ([0.0; 3], [0.2, 0.8, 1.0], 1.5);
+        });
+        shell.editor.materials.selected = Some(gold);
+        shell.editor.materials.shown = true;
+        shell.editor.panes.show = Some(Pane::Materials);
+    }
+    wait_for_previews(&mut h);
+    save(&mut h, &dir, "material-previews");
     println!("pictures in {}", dir.display());
 }
 

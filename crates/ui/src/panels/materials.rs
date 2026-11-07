@@ -12,7 +12,7 @@ use egui::{
 use grid4d_scene::{Document, MaterialId};
 
 use crate::i18n::{tr, trf};
-use crate::{EditorCommand, EditorState, MaterialDrag, icons, theme::palette as p};
+use crate::{EditorCommand, EditorState, MaterialDrag, theme::palette as p};
 
 /// Default height of the panel.
 pub const DEFAULT_HEIGHT: f32 = 150.0;
@@ -161,7 +161,7 @@ fn cell(ui: &mut Ui, doc: &Document, editor: &mut EditorState, id: MaterialId) -
         painter.rect_filled(rect, CornerRadius::same(3), p().bg_hover);
     }
     let ball = Rect::from_center_size(pos2(rect.center().x, rect.top() + 4.0 + BALL * 0.5), vec2(BALL, BALL));
-    icons::paint_material_ball(painter, ball, material.color);
+    editor.previews.paint(painter, ball, id, material);
     let name = painter.layout(
         material.name.clone(),
         FontId::proportional(11.5),
@@ -203,7 +203,7 @@ fn cell(ui: &mut Ui, doc: &Document, editor: &mut EditorState, id: MaterialId) -
 }
 
 /// The dragged material following the pointer, above everything.
-fn paint_drag(ui: &Ui, doc: &Document, editor: &EditorState) {
+fn paint_drag(ui: &Ui, doc: &Document, editor: &mut EditorState) {
     let (Some(drag), Some(pointer)) = (editor.materials.drag, ui.ctx().pointer_latest_pos()) else {
         return;
     };
@@ -213,10 +213,11 @@ fn paint_drag(ui: &Ui, doc: &Document, editor: &EditorState) {
     let painter = ui
         .ctx()
         .layer_painter(LayerId::new(Order::Tooltip, Id::unique("grid4d.materials.drag")));
-    icons::paint_material_ball(
+    editor.previews.paint(
         &painter,
         Rect::from_center_size(pointer + vec2(16.0, 16.0), vec2(24.0, 24.0)),
-        material.color,
+        drag.material,
+        material,
     );
     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
 }

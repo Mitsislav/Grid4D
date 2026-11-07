@@ -776,6 +776,8 @@ pub struct EditorState {
     pub materials: MaterialSelection,
     /// The document's texture pictures, loaded in the background.
     pub textures: crate::textures::TextureCache,
+    /// The materials' preview pictures, rendered in the background.
+    pub previews: crate::previews::MaterialPreviews,
     /// The texture selected in the Texture Manager.
     pub texture_selection: Option<grid4d_scene::TextureId>,
     /// The object the viewport looks through (Cameras ▸ Use Camera); `None`: the
@@ -864,6 +866,7 @@ impl Default for EditorState {
             curves: CurveSelection::default(),
             materials: MaterialSelection::default(),
             textures: crate::textures::TextureCache::default(),
+            previews: crate::previews::MaterialPreviews::default(),
             texture_selection: None,
             view_camera: None,
             panes: crate::workspace::PaneState::default(),

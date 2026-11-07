@@ -108,6 +108,6 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 14.6 | [`app-packaging.md`](app-packaging.md) — the downloads for Windows, macOS and Linux, file associations, the release workflow | implemented 2026-11-02 (every package built in a dry run; installs on each system to try) |
 | 15.1 | [`app-format-v4.md`](app-format-v4.md) — `.g4d` version 4: what it adds by step, reading version 3, compatibility with 1.0 | implemented 2026-11-06 (the container; each later step adds its data) |
 | 15.3 | [`material-textures.md`](material-textures.md) — the document's textures (linked, embedded), colour spaces, missing files, the Texture Manager | implemented 2026-11-06 |
-| 15.4 | [`material-channels.md`](material-channels.md) — the principled channels, a channel's texture, preview balls | channels implemented 2026-11-06 (15.4a); preview balls to come |
+| 15.4 | [`material-channels.md`](material-channels.md) — the principled channels, a channel's texture, preview balls | channels implemented 2026-11-06 (15.4a); preview balls 2026-11-07 (15.4c) |
 | 15.2, 15.4 | [`tag-material.md`](tag-material.md) — the UVs every object makes (15.2, implemented 2026-11-06); the Material tag's projections (UV, Box, Spherical, Cylindrical, Flat, Camera) and layers | UVs implemented 2026-11-06 (15.2); projections and layers 2026-11-07 (15.4b), shown by the viewport and renders from 15.5 – 15.6 |
 | 15.7 | [`manager-uv-editor.md`](manager-uv-editor.md) — the UV editor: modes, transforms, Unwrap (LSCM), seams, Project, Relax, Pack | draft 2026-11-06 |

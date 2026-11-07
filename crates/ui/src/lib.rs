@@ -29,6 +29,7 @@ mod live_edit;
 mod modeling;
 pub mod panels;
 pub mod preferences;
+pub mod previews;
 #[cfg(test)]
 mod random_commands;
 pub mod recent;

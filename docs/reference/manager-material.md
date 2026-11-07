@@ -39,8 +39,9 @@ reference's channel-based Standard material.
 ## Behaviour
 
 - **Material Manager**: a tab **Materials** beside Timeline and F-Curve at the
-  bottom (Shift+F2 shows it). Each material is a round preview in its colour with
-  its name under it.
+  bottom (Shift+F2 shows it). Each material is a round preview with its name under
+  it (rendered by the path tracer since 1.1, see
+  [`material-channels.md`](material-channels.md)).
   - **Create ▸ New Material**, **Ctrl+N** over the manager, or a **double-click on
     empty space** creates a material and selects it.
   - **Click** selects a material; the Attribute Manager shows its settings (name,
