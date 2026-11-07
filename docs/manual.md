@@ -736,13 +736,15 @@ What comes in:
 |------|--------|
 | Node hierarchy, names, position / rotation / scale | The same hierarchy of objects. Metres become centimetres (× 100). |
 | Meshes | Polygon objects, ready for modelling. Points that the file repeats at seams are merged, so the mesh is connected. Texture coordinates are kept. |
-| Materials | Materials in the Material Manager (name, colour, roughness, metallic, emission), linked to the meshes by Material tags; the base colour also becomes the display colour. |
+| Materials | Materials in the Material Manager, linked to the meshes by Material tags: colour, roughness, metallic, emission, and the extensions for transmission, refraction index (IOR), emission strength, specular and clear coat; the base colour also becomes the display colour. |
+| Pictures | Textures in the Texture Manager, on the material's channels: base colour, metallic and roughness (glTF keeps them in one picture: roughness in its green, metallic in its blue), normal, emission, and a cut-out from the base colour's alpha (Mask, and Blend, which Grid4D cuts at half). Pictures inside the file are **embedded**; pictures next to it are **linked**. A picture's offset and scale (`KHR_texture_transform`) become the channel's Offset and Tiling. |
 | Cameras | Camera objects (field of view). |
 | Lights (`KHR_lights_punctual`) | Light objects (colour, intensity): point → Omni, spot → Spot (with its cone), directional → Infinite. |
 | Empty nodes | Nulls. |
 
-Not yet: textures, animation, skinning, morph targets and compressed
-meshes (Draco). Shading comes from Grid4D's own smoothing, not from the file's
+Not yet: animation, skinning, morph targets and compressed meshes (Draco);
+a picture's turn (`KHR_texture_transform` rotation), ambient occlusion
+pictures and pictures linked by an absolute path are left out. Shading comes from Grid4D's own smoothing, not from the file's
 normals. Points the file has at *almost* the same place (not exactly) stay separate;
 run **Optimize** (U~O) on such an object to merge them.
 
@@ -772,9 +774,15 @@ What goes out:
   changed by **deformers** are written in their deformed shape. A
   switched-off generator is written as an empty object with its children as
   they are. Splines themselves are written as empty objects.
-- Materials (name, colour, roughness, metallic, emission; one a mesh inherits from a
-  parent included); objects without one get a simple material in their display
-  colour. Cameras and lights.
+- Materials (one a mesh inherits from a parent included) with every channel glTF
+  has a place for: colour, roughness, metallic, emission and its strength, the
+  normal picture, a cut-out from the base colour's alpha, transmission, IOR,
+  specular, clear coat and Two-Sided. Their **pictures go inside the file**
+  (PNG and JPEG; glTF has no place for the other formats, so those are left
+  out), with each channel's Tiling and Offset. Roughness and metallic
+  pictures are written when both read one picture's green and blue (as
+  pictures from glTF do). Objects without a material get a simple material in
+  their display colour. Cameras and lights.
 
 Exporting does not change the document: there is nothing to undo, and the title's
 `*` stays as it was.
@@ -2061,6 +2069,7 @@ Color and Emission — are read as Linear). With a texture set:
 | Offset | shifts the picture (U, V), in picture widths |
 | Range | the picture's black and white become these values (number channels only) |
 | Texture Strength | 0 % shows the channel's value, 100 % the texture |
+| Picture Channel | which of the picture's channels a number reads: Red (the usual), Green, Blue or Alpha (number channels only; pictures from glTF keep roughness in green, metallic in blue, cut-outs in alpha) |
 
 In the viewport ([§4.1](#41-lights)) the colour is the surface's colour,
 **Roughness** the size of its highlights (sharp and bright near 0 %, wide and faint
@@ -2740,7 +2749,7 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   document.
 - **Lights**: the Square Spot, Area, Parallel and IES types, visible light, and
   the per-light switches (no illumination, ambient, diffuse or specular only).
-- **Interchange and rendering**: textures, animation in glTF, import
+- **Interchange and rendering**: animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only); the
   Render Region (Alt+R) and a Render View that updates while you edit; several
   render settings per document, Preview Range, a render frame rate of its own,

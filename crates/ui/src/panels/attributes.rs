@@ -1434,6 +1434,20 @@ fn texture_rows(
         pair_row(ui, key("Offset"), &mut slot.offset, 0.01, -1000.0..=1000.0);
         if !matches!(channel, Channel::BaseColor | Channel::Emission | Channel::Normal) {
             pair_row(ui, key("Range"), &mut slot.range, 0.01, -10.0..=10.0);
+            // Which of the picture's channels this number reads.
+            attr_label(ui, key("Picture Channel"), LABEL_WIDTH);
+            let combo = egui::ComboBox::from_id_salt(("grid4d.attr.material.source", channel))
+                .selected_text(tr(slot.source.label()))
+                .width(FIELD_WIDTH)
+                .show_ui(ui, |ui| {
+                    for source in grid4d_scene::PictureChannel::ALL {
+                        ui.selectable_value(&mut slot.source, source, tr(source.label()));
+                    }
+                })
+                .response;
+            ui.ctx()
+                .accesskit_node_builder(combo.id, |node| node.set_label(tr("Picture Channel")));
+            ui.end_row();
         }
         fraction_row(ui, key("Texture Strength"), &mut slot.strength);
     }

@@ -548,6 +548,32 @@ pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, v
     let mut ids: Vec<NodeId> = Vec::with_capacity(imported.nodes.len());
     let mut roots: Vec<NodeId> = Vec::new();
     let mut inverses = Vec::with_capacity(imported.nodes.len() + 2);
+    // The file's textures join the document's (a picture it already links is
+    // reused); its materials' channels are pointed at them.
+    let mut imported = imported;
+    if !imported.textures.is_empty() {
+        let mut textures = doc.scene.textures().clone();
+        let mut texture_of: HashMap<grid4d_scene::TextureId, grid4d_scene::TextureId> = HashMap::new();
+        for (old, texture) in imported.textures.iter() {
+            let same = match &texture.source {
+                grid4d_scene::TextureSource::Linked(path) => textures.linked_to(path),
+                grid4d_scene::TextureSource::Embedded { .. } => None,
+            };
+            let id = same.unwrap_or_else(|| {
+                let mut texture = texture.clone();
+                texture.name = textures.unique_name(&texture.name);
+                textures.insert(texture)
+            });
+            texture_of.insert(old, id);
+        }
+        grid4d_io::remap_textures(&mut imported.materials, |t| texture_of.get(&t).copied());
+        if textures != *doc.scene.textures() {
+            match doc.apply(SceneEdit::SetTextures(textures)) {
+                Ok(inverse) => inverses.push(inverse),
+                Err(err) => return failed(editor, err.to_string()),
+            }
+        }
+    }
     // The file's materials join the document's (with unique names); its Material
     // tags are pointed at them.
     let mut material_of: HashMap<grid4d_scene::MaterialId, grid4d_scene::MaterialId> = HashMap::new();
@@ -907,6 +933,7 @@ pub fn exportable_at(doc: &Document, simulated: &grid4d_eval::Overrides) -> Obje
     Objects {
         nodes,
         materials: doc.scene.materials().clone(),
+        textures: doc.scene.textures().clone(),
         layers: doc.scene.layers().clone(),
         sources: Vec::new(),
     }
@@ -1676,6 +1703,16 @@ mod tests {
         let mut other = Document::with_demo_scene();
         let mut red = Material::new("Red");
         red.color = [1.0, 0.0, 0.0];
+        // With a picture on its Base Color (an embedded one).
+        let picture = other.scene.textures_mut().insert(grid4d_scene::Texture {
+            name: "Paint".to_owned(),
+            source: grid4d_scene::TextureSource::Embedded {
+                file_name: "paint.png".to_owned(),
+                bytes: png(2).into(),
+            },
+            color_space: grid4d_scene::ColorSpace::Srgb,
+        });
+        *red.map_mut(grid4d_scene::Channel::BaseColor) = Some(grid4d_scene::TextureSlot::new(picture));
         let red = other.scene.materials_mut().insert(red);
         let find = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
         let (cube, boxed) = (find(&other, "Cube"), find(&other, "Box"));
@@ -1697,6 +1734,9 @@ mod tests {
         let (merged, material) = materials.iter().find(|&(id, _)| id != mine).unwrap();
         assert_eq!(material.name, "Red.1", "a unique name");
         assert_eq!(material.color, [1.0, 0.0, 0.0]);
+        // Its picture came along, and the channel points at it.
+        let slot = *material.map(grid4d_scene::Channel::BaseColor).unwrap();
+        assert_eq!(f.doc.scene.textures().get(slot.texture).unwrap().name, "Paint");
         // The merged objects are the selected roots; the merged Cube is one of them.
         let new_cube = *f
             .editor
@@ -1717,6 +1757,7 @@ mod tests {
 
         f.run(&[EditorCommand::Undo]);
         assert_eq!(f.doc.scene.materials().len(), 1, "undo takes the material back too");
+        assert!(f.doc.scene.textures().is_empty(), "and the picture");
         assert_eq!(f.doc.scene.len(), before);
         f.run(&[EditorCommand::Redo]);
         assert_eq!(f.doc.scene.materials().len(), 2);

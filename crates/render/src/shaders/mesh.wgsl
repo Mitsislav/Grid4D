@@ -186,10 +186,17 @@ fn channel_uv(index: u32, uv: vec2<f32>) -> vec2<f32> {
     return uv * place.xy + place.zw;
 }
 
-// A number channel: its value, or towards the picture's red mapped onto its range.
+// The picture's channel a number channel reads (red, green, blue or alpha).
+fn picked(index: u32, picture: vec4<f32>) -> f32 {
+    let k = (u32(material.channels[index].range.w + 0.5) >> 2u) & 3u;
+    return picture[k];
+}
+
+// A number channel: its value, or towards the picture's chosen channel mapped
+// onto its range.
 fn scalar_channel(index: u32, value: f32, picture: vec4<f32>) -> f32 {
     let r = material.channels[index].range;
-    return mix(value, mix(r.x, r.y, picture.r), r.z);
+    return mix(value, mix(r.x, r.y, picked(index, picture)), r.z);
 }
 
 // A colour channel: its value, or towards the picture (a grey picture
@@ -320,7 +327,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let bump_picture = textureSample(map_bump, material_sampler, channel_uv(BUMP, uv));
     // A bump picture's height (cm) and how it changes across the pixel.
     let bump = material.channels[BUMP].range;
-    let height = mix(bump.x, bump.y, bump_picture.r) * material.shape.y * bump.z;
+    let height = mix(bump.x, bump.y, picked(BUMP, bump_picture)) * material.shape.y * bump.z;
     let height_dx = dpdx(height);
     let height_dy = dpdy(height);
     let position_dx = dpdx(in.world_position);

@@ -314,7 +314,11 @@ impl Textures {
                 continue;
             };
             views[index] = &picture.view;
-            let flags = 1.0 + if picture.grey && channel.is_colour() { 2.0 } else { 0.0 };
+            // 1: a picture; 2: a grey one on a colour channel; 4 × the
+            // picture's channel a number channel reads (0 – 3).
+            let grey = if picture.grey && channel.is_colour() { 2.0 } else { 0.0 };
+            let source = f32::from(u8::try_from(slot.source.index()).unwrap_or(0)) * 4.0;
+            let flags = 1.0 + grey + source;
             uniform.channels[index] = [
                 slot.tiling[0],
                 slot.tiling[1],

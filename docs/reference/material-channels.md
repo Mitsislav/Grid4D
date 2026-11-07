@@ -174,6 +174,14 @@ of switchable channels and reflectance layers; no procedural textures (Phase
   made again when one arrives or changes (the cache's version per slot is
   part of what a preview shows).
 
+## As built (15.8a)
+
+- A channel texture's **Picture Channel** (`TextureSlot::source`: Red,
+  Green, Blue, Alpha) says which channel of the picture a number channel
+  reads — glTF keeps roughness in green and metallic in blue, cut-outs in
+  alpha. The Attribute Manager shows it under Range; the viewport and the
+  path tracer read it (also for Bump heights).
+
 ## Acceptance criteria
 
 - [x] A 1.0 document's materials open with the same four values and render

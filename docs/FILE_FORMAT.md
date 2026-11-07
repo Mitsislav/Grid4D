@@ -201,8 +201,10 @@ out while it has its default:
 
 A channel's texture: `texture` (an index into `textures`), `tiling`
 ([u, v] repeats; [1, 1]), `offset` ([u, v] in picture widths; [0, 0]),
-`range` (the picture's 0 – 1 mapped onto [from, to]; [0, 1]) and `strength`
-(0 – 1, from the channel's value to the texture; 1). Values out of range are
+`range` (the picture's 0 – 1 mapped onto [from, to]; [0, 1]), `strength`
+(0 – 1, from the channel's value to the texture; 1) and `channel` (the
+picture's channel a number channel reads: `red`, `green`, `blue` or `alpha`;
+`red`). Values out of range are
 clamped when read; a `texture` index that names no texture is ignored.
 
 ### Textures
@@ -306,6 +308,7 @@ its meaning — and only adds to it. What it adds, as of this writing:
 | the materials' channels beyond colour, roughness, metallic and emission, and `maps` | Grid4D 1.1 development (step 15.4) |
 | a Material tag's `projection`, `offset`, `tiling`, `rotation`, `placement` and `camera` (on objects and in takes' overrides) | Grid4D 1.1 development (step 15.4) |
 | a polygon object's `seams` (on objects and in takes' overrides) | Grid4D 1.1 development (step 15.7b) |
+| a channel texture's `channel` (inside `maps`) | Grid4D 1.1 development (step 15.8) |
 
 A version 3 file is therefore read as a version 4 file with the version
 number changed, minus any field this table lists (a material's and a Material

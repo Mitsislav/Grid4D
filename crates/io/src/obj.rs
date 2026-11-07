@@ -94,6 +94,7 @@ pub fn import_obj(bytes: &[u8], base: Option<&Path>, fallback: &str) -> Result<O
     Ok(Objects {
         nodes,
         materials,
+        textures: grid4d_scene::Textures::default(),
         layers: grid4d_scene::Layers::default(),
         sources: Vec::new(),
     })

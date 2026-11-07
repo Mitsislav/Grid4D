@@ -41,7 +41,8 @@ use grid4d_scene::{
     SimulationSettings, SplineHandle, Tag, Take, TakeId, Takes, Tangents, TimeSettings, Track, Transform,
 };
 use grid4d_scene::{
-    Channel, ColorSpace, MaterialTag, Placement, Projection, Texture, TextureId, TextureSlot, TextureSource,
+    Channel, ColorSpace, MaterialTag, PictureChannel, Placement, Projection, Texture, TextureId, TextureSlot,
+    TextureSource,
 };
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
@@ -600,6 +601,53 @@ struct SlotDto {
     range: [f32; 2],
     #[serde(default = "one", skip_serializing_if = "is_one")]
     strength: f32,
+    /// The picture's channel a number channel reads (added in step 15.8;
+    /// red when absent).
+    #[serde(default, skip_serializing_if = "PictureChannelDto::is_red")]
+    channel: PictureChannelDto,
+}
+
+/// [`PictureChannel`] in the file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PictureChannelDto {
+    #[default]
+    Red,
+    Green,
+    Blue,
+    Alpha,
+}
+
+impl PictureChannelDto {
+    #[allow(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_red(&self) -> bool {
+        *self == Self::Red
+    }
+}
+
+impl From<PictureChannel> for PictureChannelDto {
+    fn from(channel: PictureChannel) -> Self {
+        match channel {
+            PictureChannel::Red => Self::Red,
+            PictureChannel::Green => Self::Green,
+            PictureChannel::Blue => Self::Blue,
+            PictureChannel::Alpha => Self::Alpha,
+        }
+    }
+}
+
+impl From<PictureChannelDto> for PictureChannel {
+    fn from(channel: PictureChannelDto) -> Self {
+        match channel {
+            PictureChannelDto::Red => Self::Red,
+            PictureChannelDto::Green => Self::Green,
+            PictureChannelDto::Blue => Self::Blue,
+            PictureChannelDto::Alpha => Self::Alpha,
+        }
+    }
 }
 
 const fn unit_pair() -> [f32; 2] {
@@ -646,6 +694,7 @@ impl MaterialDto {
                     offset: slot.offset,
                     range: slot.range,
                     strength: slot.strength,
+                    channel: slot.source.into(),
                 });
             }
         }
@@ -703,6 +752,7 @@ impl MaterialDto {
                 offset: slot.offset,
                 range: slot.range,
                 strength: unit(slot.strength),
+                source: slot.channel.into(),
             });
         }
         check_material_finite(&material)?;

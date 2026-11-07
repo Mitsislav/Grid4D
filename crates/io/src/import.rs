@@ -5,7 +5,9 @@
 
 use std::{collections::HashMap, path::Path};
 
-use grid4d_scene::{Document, Layers, MaterialId, Materials, Node, NodeData, NodeId, ObjectKind, Tag};
+use grid4d_scene::{
+    Channel, Document, Layers, MaterialId, Materials, Node, NodeData, NodeId, ObjectKind, Tag, TextureId, Textures,
+};
 
 use crate::{IoError, OPEN_EXTENSIONS, gltf_export, gltf_import, load, obj};
 
@@ -22,6 +24,9 @@ pub struct Objects {
     /// The materials the nodes' Material tags refer to (their ids are this
     /// table's, not a document's).
     pub materials: Materials,
+    /// The textures the materials' channels refer to (their ids are this
+    /// table's).
+    pub textures: Textures,
     /// The layers the nodes are on (their ids are this table's).
     pub layers: Layers,
     /// For objects taken from a document: each node's id there (parallel to
@@ -61,6 +66,7 @@ impl Objects {
         Self {
             nodes,
             materials: doc.scene.materials().clone(),
+            textures: doc.scene.textures().clone(),
             layers: doc.scene.layers().clone(),
             sources,
         }
@@ -70,8 +76,10 @@ impl Objects {
     #[must_use]
     pub fn into_document(self, name: &str) -> Document {
         let mut doc = Document::new(name);
-        // A new document: the table moves over with its ids, so tags stay valid.
+        // A new document: the tables move over with their ids, so tags and
+        // channels stay valid.
         *doc.scene.materials_mut() = self.materials;
+        *doc.scene.textures_mut() = self.textures;
         *doc.scene.layers_mut() = self.layers;
         let mut ids: Vec<NodeId> = Vec::with_capacity(self.nodes.len());
         for node in self.nodes {
@@ -142,6 +150,21 @@ pub fn remap_materials(data: &mut NodeData, map: impl Fn(MaterialId) -> Option<M
     for tag in &mut data.tags {
         if let Tag::Material(tag) = tag {
             tag.material = tag.material.and_then(&map);
+        }
+    }
+}
+
+/// Rewrites the texture references of `materials`' channels through `map` (a
+/// reference `map` does not know is dropped).
+pub fn remap_textures(materials: &mut Materials, map: impl Fn(TextureId) -> Option<TextureId>) {
+    let ids: Vec<MaterialId> = materials.ids().to_vec();
+    for id in ids {
+        let Some(material) = materials.get_mut(id) else {
+            continue;
+        };
+        for channel in Channel::ALL {
+            let slot = material.map_mut(channel);
+            *slot = slot.and_then(|s| map(s.texture).map(|texture| grid4d_scene::TextureSlot { texture, ..s }));
         }
     }
 }

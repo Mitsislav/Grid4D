@@ -49,6 +49,12 @@ Toward 1.1: materials, UVs and textures.
   cut-outs (shadows pass through them too), glass that bends light by its
   IOR and casts lighter, tinted shadows, and a clear coat; Camera
   projections look through their camera object.
+- **glTF materials and pictures** — glTF files bring their pictures (inside
+  the file or next to it) on every channel glTF has, with their offset and
+  scale, transmission, IOR, specular, clear coat and emission strength;
+  export writes them all, the pictures inside the file. A channel texture
+  can read a picture's red, green, blue or alpha (glTF packs roughness and
+  metallic in one picture). Merging a document brings its pictures too.
 - **Files** — documents are saved in `.g4d` format version 4. Every file of
   Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
   files and says they come from a newer Grid4D.

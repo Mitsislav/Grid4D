@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.7c — The UV Editor pane (2026-11-07) |
-| Next step | 15.8 — glTF and OBJ materials in and out |
-| Tests | 857 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.8a — glTF materials and pictures in and out (2026-11-07) |
+| Next step | 15.8b — OBJ `.mtl` pictures in and out |
+| Tests | 861 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2322,6 +2322,7 @@ risks R5 – R8 go with it.
 | 15.7a | The UV algorithms in `grid4d_geom::uv` (now a folder): `layout` (UV vertices and islands by a union-find over corners), `sharp_edges`; `unwrap` (parts across uncut edges, non-discs split by facing, LSCM per part solved by CGLS from a planar guess, scaled to surface area, packed); `relax` (edge springs at the island's scale, steps halved rather than flipping, borders pinned); `pack` (rows, quarter turns, margin after scaling, all in 0 – 1); `flip`; `face_stretch`, `stretch_measure`; the spec corrected after reading the reference (one shared selection, seams of their own, H / S framing) and the step split in three; an unwrap bench | 849 |
 | 15.7b | Seams: `ComponentState::seams` (edges by corner), carried through rebuilding operations like the edge selection, written by `.g4d` v4 on polygon kinds (`seams`; dropped from version 3 files; `FILE_FORMAT.md`, the golden `full_v4.g4d` and the property test updated); `EditorCommand::UvCommand(UvOp)` in `ui/src/uv_tools.rs` (Unwrap with seams / selected edges / sharp edges, Relax, Pack, Project, Flip U / V, Mark / Clear Seams; selected visible polygons or all; one undo step); `UvSettings` in the editor; Mesh ▸ UV; the random-command test; Greek; the manual's §19.3 | 854 |
 | 15.7c | The UV Editor pane (`panels/uv_editor.rs`, `Pane::UvEditor` in every layout, beside the viewport in Modeling): the material's Base Color picture at its tiling and offset, dimmed; the unit grid; stretch colours; edges, seams, selection; read-only UVs of primitives; wheel zoom, middle / Alt pan, H / S framing (`EditorState::uv_frame`, the shortcut table); click / frame / double-click (island) selection shared with the viewport; a 2D Move / Scale / Rotate handle moving the selection's UV vertices live (`MeshHandle::with_uvs`), one undo step, Esc restores; the UV and Options menus (the UV menu shared with Mesh ▸ UV through `widgets::uv_menu`); unwrapped parts turned upright before packing; an interface test; Greek; the manual's §19.4 with a picture | 857 |
+| 15.8a | glTF materials and pictures: images as textures (embedded from buffer views and `data:` URIs, linked when relative; one per colour space), every core channel, alpha Mask / Blend as a cut-out from the base colour's alpha, `KHR_texture_transform` offset / scale, `KHR_materials_transmission` / `_ior` / `_emissive_strength` / `_specular`, clear coat from the raw extension, `doubleSided`; export writes them back with the pictures inside the buffer (PNG / JPEG) and lists the extensions; `PictureChannel` on texture slots (`.g4d` v4 `channel`; viewport, path tracer, Attribute Manager); `Objects::textures` and Merge bringing pictures; tests with a hand-written sample | 861 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2649,6 +2650,32 @@ risks R5 – R8 go with it.
 - **The picture drowned the lines.** It is drawn dimmed under the UVs.
 - **A triple click.** The interface test's double-click came too soon after
   a single click and counted as a triple; the test waits between them.
+
+**15.8a — glTF materials and pictures**
+
+*Problems and solutions:*
+- **glTF packs two numbers in one picture.** Roughness lives in a picture's
+  green and metallic in its blue, while Grid4D's number channels read red.
+  Rather than splitting pictures on import (which would mean re-encoding
+  them), a texture slot now says which picture channel it reads; cut-outs
+  read the base colour picture's alpha the same way.
+- **Factors times pictures.** glTF multiplies a factor by its picture;
+  Grid4D maps a picture onto a range: a factor becomes the range's top
+  (0 … factor). Colour pictures replace a colour value, so a base colour or
+  emissive factor other than white is approximated.
+- **One picture, two colour spaces.** A colour space belongs to the texture,
+  so an image used for colour and for data becomes two textures.
+- **Where exported pictures go.** Pictures are put in the binary buffer as
+  views with a MIME type — valid in `.glb` and `.gltf` alike — so a `.gltf`
+  export still writes one `.bin` and nothing else. Only PNG and JPEG (by
+  their first bytes) can go; other pictures are left out and the material
+  keeps its values.
+- **Clear coat has no feature in the glTF crate.** It is read from the raw
+  extension JSON (the `extensions` feature); the other extensions come from
+  the crate's features, which add no dependencies.
+- **Merging a document lost its pictures.** `Objects` had no texture table,
+  so merged materials pointed at nothing; now the textures join the
+  document's in the same undo step and the slots are remapped.
 
 ---
 

@@ -62,8 +62,10 @@ None yet (an import dialog with Scale and toggles is *later*). Fixed choices:
   - a node with a mesh *and* a camera or light keeps the mesh; the other becomes a
     child at the same place;
   - a node without content → a Null; empty names → the kind's label.
-- **Not read (later):** materials and textures, animation, skins, morph targets,
-  Draco/meshopt compression, sparse accessors beyond what the reader supports.
+- **Not read (later):** animation, skins, morph targets, Draco/meshopt
+  compression, sparse accessors beyond what the reader supports; occlusion
+  pictures, `KHR_texture_transform` rotation, second UV sets (materials and
+  textures: 15.8, below).
 - **Errors** leave the document untouched and show an alert: unreadable JSON or
   binary, a buffer shorter than declared, a missing external `.bin`, non-finite
   numbers, an external URI that is absolute or not a file.
@@ -96,8 +98,45 @@ None yet (an import dialog with Scale and toggles is *later*). Fixed choices:
 - **Round trip:** importing an exported file gives back the hierarchy, names,
   transforms, cameras and lights, and every mesh as a polygon object with the same
   points (triangulated, welded).
-- **Not written (later):** animation, textures and other material channels, an
-  export dialog (scale, visible objects only, selection only).
+- **Not written (later):** animation, an export dialog (scale, visible objects
+  only, selection only); pictures in formats other than PNG and JPEG
+  (materials and textures: 15.8, below).
+
+## As built (15.8a, materials and textures)
+
+- **In**: each image becomes a texture once per colour space (sRGB for base
+  colour and emission, linear for data), embedded when it is in the file (a
+  buffer view or a `data:` URI; named after the image, else `image<n>.png`)
+  and linked when it is a relative path next to the file (absolute paths are
+  not followed). Base colour → Base Color; metallic-roughness → Roughness
+  (green) and Metallic (blue), the factors becoming the ranges' tops;
+  normal (its scale → Normal Strength); emissive → Emission; alpha Mask
+  (cutoff → Threshold) or Blend (cut at 0.5) → an Opacity slot reading the
+  base colour picture's alpha, the alpha factor → Opacity;
+  `KHR_texture_transform` offset and scale → Offset and Tiling;
+  `KHR_materials_transmission` (and its picture), `_ior`,
+  `_emissive_strength`, `_specular` (factor × 0.5 → Specular) and
+  `_clearcoat` (read from the raw extension); `doubleSided` → Two-Sided.
+- **Out**: pictures go into the binary buffer (PNG and JPEG, by their first
+  bytes; one image and texture per document texture), so `.gltf` files need
+  no extra files. Base Color, Normal (scale = Normal Strength) and Emission
+  pictures; Roughness and Metallic as one metallic-roughness picture when
+  both read one texture's green and blue (the ranges' tops as factors); an
+  Opacity slot on the base colour picture's alpha → `MASK` with the
+  threshold as cutoff; Tiling / Offset → `KHR_texture_transform`;
+  transmission, IOR, specular, clear coat and emission strength → their
+  `KHR_materials_*` extensions; Two-Sided → `doubleSided`. Every extension
+  used is listed in `extensionsUsed`.
+- `TextureSlot::source` (`PictureChannel`: Red, Green, Blue, Alpha) says
+  which channel a number channel reads; the viewport's shader and the path
+  tracer read it; `.g4d` v4 stores it as `channel`.
+- `Objects` carry the textures; File ▸ Merge adds them to the document's
+  (a picture already linked is reused) and points the merged materials at
+  them, in the same undo step.
+- Tests: every channel and picture through `.glb` and back; pictures glTF
+  cannot hold left out; a hand-written sample with a data-URI picture,
+  `KHR_texture_transform`, a picture next to the file, an absolute one,
+  alpha Mask and a clear coat.
 
 ## Grid4D mapping
 

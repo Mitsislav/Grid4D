@@ -10,7 +10,10 @@ use std::{collections::HashMap, path::Path};
 
 use glam::{Quat, Vec3};
 use grid4d_geom::{Smoothing, TriMesh, Triangulator};
-use grid4d_scene::{LightType, Materials, MeshHandle, MeshId, ObjectKind, Tags};
+use grid4d_scene::{
+    Channel, LightType, Material, MeshHandle, MeshId, ObjectKind, PictureChannel, Tags, TextureId, TextureSlot,
+    TextureSource,
+};
 use serde_json::{Map, Value, json};
 
 use crate::{
@@ -140,7 +143,7 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
                     Some(material) => Look::Material(material),
                     None => Look::Colour(data.display_color.map(f32::to_bits)),
                 };
-                if let Some(index) = writer.mesh(mesh, look, angle, &data.name, &objects.materials)? {
+                if let Some(index) = writer.mesh(mesh, look, angle, &data.name, objects)? {
                     node.insert("mesh".into(), json!(index));
                 }
             }
@@ -253,6 +256,8 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
     list("nodes", nodes.into_iter().map(Value::Object).collect());
     list("meshes", writer.meshes);
     list("materials", writer.materials);
+    list("textures", writer.textures);
+    list("images", writer.images);
     list("cameras", cameras);
     list("accessors", writer.accessors);
     list("bufferViews", writer.views);
@@ -263,12 +268,17 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
         }
         root.insert("buffers".into(), json!([buffer]));
     }
+    let mut used: Vec<&str> = writer.extensions.iter().copied().collect();
     if !lights.is_empty() {
-        root.insert("extensionsUsed".into(), json!(["KHR_lights_punctual"]));
+        used.push("KHR_lights_punctual");
         root.insert(
             "extensions".into(),
             json!({ "KHR_lights_punctual": { "lights": lights } }),
         );
+    }
+    if !used.is_empty() {
+        used.sort_unstable();
+        root.insert("extensionsUsed".into(), json!(used));
     }
     let json = serde_json::to_vec(&Value::Object(root)).map_err(|err| invalid(err.to_string()))?;
     Ok((json, writer.bin))
@@ -284,6 +294,13 @@ struct Writer {
     materials: Vec<Value>,
     /// One glTF material per document material or display colour.
     material_of: HashMap<Look, usize>,
+    images: Vec<Value>,
+    textures: Vec<Value>,
+    /// One glTF texture per document texture (`None`: its picture cannot be
+    /// written: missing, or not PNG or JPEG).
+    texture_of: HashMap<TextureId, Option<usize>>,
+    /// The extensions the materials use.
+    extensions: std::collections::BTreeSet<&'static str>,
     /// One glTF mesh per (mesh, look, Phong angle): objects sharing all three
     /// share the mesh.
     mesh_of: HashMap<(MeshId, Look, u32), Option<usize>>,
@@ -292,14 +309,17 @@ struct Writer {
 }
 
 impl Writer {
-    /// Appends `bytes` as a buffer view (4-byte aligned) and returns its index.
+    /// Appends `bytes` as a buffer view (4-byte aligned) and returns its index;
+    /// `target` 0 writes none (pictures).
     fn view(&mut self, bytes: &[u8], target: u32) -> usize {
         while !self.bin.len().is_multiple_of(4) {
             self.bin.push(0);
         }
-        self.views.push(json!({
-            "buffer": 0, "byteOffset": self.bin.len(), "byteLength": bytes.len(), "target": target
-        }));
+        let mut view = json!({ "buffer": 0, "byteOffset": self.bin.len(), "byteLength": bytes.len() });
+        if target != 0 {
+            view["target"] = json!(target);
+        }
+        self.views.push(view);
         self.bin.extend_from_slice(bytes);
         self.views.len() - 1
     }
@@ -309,33 +329,173 @@ impl Writer {
         self.accessors.len() - 1
     }
 
+    /// The glTF texture of document texture `id` (its picture in the buffer,
+    /// written on first use); `None` if the picture cannot be read or is
+    /// neither PNG nor JPEG (glTF's own two formats).
+    fn texture(&mut self, id: TextureId, objects: &Objects) -> Option<usize> {
+        if let Some(&made) = self.texture_of.get(&id) {
+            return made;
+        }
+        let made = objects.textures.get(id).and_then(|texture| {
+            let bytes: std::borrow::Cow<'_, [u8]> = match &texture.source {
+                TextureSource::Embedded { bytes, .. } => std::borrow::Cow::Borrowed(bytes),
+                TextureSource::Linked(path) => std::borrow::Cow::Owned(crate::read_file(path).ok()?),
+            };
+            let mime = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+                "image/png"
+            } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+                "image/jpeg"
+            } else {
+                return None;
+            };
+            let view = self.view(&bytes, 0);
+            self.images
+                .push(json!({ "name": texture.name, "bufferView": view, "mimeType": mime }));
+            self.textures.push(json!({ "source": self.images.len() - 1 }));
+            Some(self.textures.len() - 1)
+        });
+        self.texture_of.insert(id, made);
+        made
+    }
+
+    /// The texture info of `slot` (`None` without a writable picture), with
+    /// its tiling and offset as `KHR_texture_transform`.
+    fn info(&mut self, slot: Option<&TextureSlot>, objects: &Objects) -> Option<Value> {
+        let slot = slot?;
+        let index = self.texture(slot.texture, objects)?;
+        let mut info = json!({ "index": index });
+        if slot.tiling != [1.0, 1.0] || slot.offset != [0.0, 0.0] {
+            self.extensions.insert("KHR_texture_transform");
+            info["extensions"] = json!({
+                "KHR_texture_transform": { "offset": slot.offset, "scale": slot.tiling }
+            });
+        }
+        Some(info)
+    }
+
+    /// `material` in glTF's model: factors, pictures and the extensions for
+    /// what the core leaves out.
+    fn material_value(&mut self, material: &Material, objects: &Objects) -> Value {
+        let [r, g, b] = material.color;
+        let mut value = json!({
+            "name": material.name,
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [r, g, b, 1.0],
+                "metallicFactor": material.metallic,
+                "roughnessFactor": material.roughness
+            }
+        });
+        let base = material.map(Channel::BaseColor).copied();
+        if let Some(info) = self.info(base.as_ref(), objects) {
+            value["pbrMetallicRoughness"]["baseColorTexture"] = info;
+        }
+        // Roughness and metallic from one picture, in green and blue (as
+        // glTF packs them); the ranges' tops become the factors.
+        let (rough, metal) = (material.map(Channel::Roughness), material.map(Channel::Metallic));
+        if let (Some(rough), Some(metal)) = (rough, metal)
+            && rough.texture == metal.texture
+            && rough.source == PictureChannel::Green
+            && metal.source == PictureChannel::Blue
+            && let Some(info) = self.info(Some(rough), objects)
+        {
+            value["pbrMetallicRoughness"]["metallicRoughnessTexture"] = info;
+            value["pbrMetallicRoughness"]["roughnessFactor"] = json!(rough.range[1].clamp(0.0, 1.0));
+            value["pbrMetallicRoughness"]["metallicFactor"] = json!(metal.range[1].clamp(0.0, 1.0));
+        }
+        if let Some(mut info) = self.info(material.map(Channel::Normal), objects) {
+            info["scale"] = json!(material.normal_strength);
+            value["normalTexture"] = info;
+        }
+        let emissive = self.info(material.map(Channel::Emission), objects);
+        if material.emission != [0.0; 3] || emissive.is_some() {
+            let colour = if emissive.is_some() {
+                [1.0; 3]
+            } else {
+                material.emission
+            };
+            value["emissiveFactor"] = json!(colour.map(|c| c.clamp(0.0, 1.0)));
+            if let Some(info) = emissive {
+                value["emissiveTexture"] = info;
+            }
+            if (material.emission_strength - 1.0).abs() > 1e-6 {
+                self.extension(
+                    &mut value,
+                    "KHR_materials_emissive_strength",
+                    json!({
+                        "emissiveStrength": material.emission_strength.max(0.0)
+                    }),
+                );
+            }
+        }
+        // A cut-out from the base colour picture's alpha.
+        if let (Some(opacity), Some(base)) = (material.map(Channel::Opacity), base)
+            && opacity.texture == base.texture
+            && opacity.source == PictureChannel::Alpha
+        {
+            value["alphaMode"] = json!("MASK");
+            value["alphaCutoff"] = json!(material.opacity_threshold);
+        }
+        if material.transmission > 0.0 {
+            self.extension(
+                &mut value,
+                "KHR_materials_transmission",
+                json!({
+                    "transmissionFactor": material.transmission
+                }),
+            );
+        }
+        if (material.ior - 1.5).abs() > 1e-6 {
+            self.extension(&mut value, "KHR_materials_ior", json!({ "ior": material.ior }));
+        }
+        if (material.specular - 0.5).abs() > 1e-6 {
+            self.extension(
+                &mut value,
+                "KHR_materials_specular",
+                json!({
+                    "specularFactor": (material.specular * 2.0).clamp(0.0, 1.0)
+                }),
+            );
+        }
+        if material.clearcoat > 0.0 {
+            self.extension(
+                &mut value,
+                "KHR_materials_clearcoat",
+                json!({
+                    "clearcoatFactor": material.clearcoat,
+                    "clearcoatRoughnessFactor": material.clearcoat_roughness
+                }),
+            );
+        }
+        if material.two_sided {
+            value["doubleSided"] = json!(true);
+        }
+        value
+    }
+
+    /// Adds extension `name` to a material and to the file's list.
+    fn extension(&mut self, value: &mut Value, name: &'static str, body: Value) {
+        self.extensions.insert(name);
+        if value.get("extensions").is_none() {
+            value["extensions"] = json!({});
+        }
+        value["extensions"][name] = body;
+    }
+
     /// The glTF material for `look` (written on first use).
-    fn material(&mut self, look: Look, materials: &Materials) -> Result<usize, IoError> {
+    fn material(&mut self, look: Look, objects: &Objects) -> Result<usize, IoError> {
         if let Some(&index) = self.material_of.get(&look) {
             return Ok(index);
         }
         let value = match look {
             Look::Material(id) => {
-                let material = materials
+                let material = objects
+                    .materials
                     .get(id)
                     .ok_or_else(|| invalid("a Material tag refers to a missing material"))?;
                 if !finite(&material.numbers()) {
                     return Err(invalid(format!("material \"{}\" is not finite", material.name)));
                 }
-                let [r, g, b] = material.color;
-                let mut value = json!({
-                    "name": material.name,
-                    "pbrMetallicRoughness": {
-                        "baseColorFactor": [r, g, b, 1.0],
-                        "metallicFactor": material.metallic,
-                        "roughnessFactor": material.roughness
-                    }
-                });
-                if material.emission != [0.0; 3] {
-                    // glTF's core emissive factor stops at 1.
-                    value["emissiveFactor"] = json!(material.emission.map(|c| c.clamp(0.0, 1.0)));
-                }
-                value
+                self.material_value(material, objects)
             }
             Look::Colour(bits) => {
                 let colour = bits.map(f32::from_bits);
@@ -365,13 +525,13 @@ impl Writer {
         look: Look,
         angle: f32,
         name: &str,
-        materials: &Materials,
+        objects: &Objects,
     ) -> Result<Option<usize>, IoError> {
         let key = (handle.id(), look, angle.to_bits());
         if let Some(&index) = self.mesh_of.get(&key) {
             return Ok(index);
         }
-        let index = self.write_mesh(handle, look, angle, name, materials)?;
+        let index = self.write_mesh(handle, look, angle, name, objects)?;
         self.mesh_of.insert(key, index);
         Ok(index)
     }
@@ -382,7 +542,7 @@ impl Writer {
         look: Look,
         angle: f32,
         name: &str,
-        materials: &Materials,
+        objects: &Objects,
     ) -> Result<Option<usize>, IoError> {
         let mesh = handle.mesh();
         if mesh.face_count() == 0 {
@@ -467,7 +627,7 @@ impl Writer {
         let index_accessor = self.accessor(json!({
             "bufferView": view, "componentType": component, "count": indices.len(), "type": "SCALAR"
         }));
-        let material = self.material(look, materials)?;
+        let material = self.material(look, objects)?;
         self.meshes.push(json!({
             "name": name,
             "primitives": [ {
@@ -538,6 +698,135 @@ mod tests {
         assert_eq!(found.emission, [0.1, 0.0, 0.0]);
         let tagged = back.nodes.iter().filter(|n| n.data.tags.material().is_some()).count();
         assert!(tagged >= 1, "meshes come back with Material tags");
+    }
+
+    /// A 2 × 2 PNG of RGBA `pixel`.
+    fn png(pixel: [u8; 4]) -> Vec<u8> {
+        crate::png_bytes(2, 2, crate::Channels::Rgba, &pixel.repeat(4)).unwrap()
+    }
+
+    #[test]
+    fn every_channel_and_its_pictures_round_trip_through_gltf() {
+        use grid4d_scene::{ColorSpace, Material, Tag, Texture, TextureSlot, TextureSource};
+        let mut objects = scene();
+        let mut texture = |name: &str, pixel: [u8; 4], space: ColorSpace| {
+            objects.textures.insert(Texture {
+                name: name.to_owned(),
+                source: TextureSource::Embedded {
+                    file_name: format!("{name}.png"),
+                    bytes: png(pixel).into(),
+                },
+                color_space: space,
+            })
+        };
+        let (wood, packed, bumps, glow) = (
+            texture("Wood", [200, 120, 60, 128], ColorSpace::Srgb),
+            texture("Packed", [0, 200, 40, 255], ColorSpace::Linear),
+            texture("Bumps", [128, 128, 255, 255], ColorSpace::Linear),
+            texture("Glow", [255, 200, 0, 255], ColorSpace::Srgb),
+        );
+        let mut all = Material::new("All");
+        (all.color, all.roughness, all.metallic) = ([1.0; 3], 0.8, 0.5);
+        (all.normal_strength, all.emission, all.emission_strength) = (1.5, [1.0; 3], 3.0);
+        (all.opacity_threshold, all.transmission, all.ior) = (0.4, 0.25, 1.33);
+        (all.specular, all.clearcoat, all.clearcoat_roughness, all.two_sided) = (0.3, 0.6, 0.2, true);
+        *all.map_mut(Channel::BaseColor) = Some(TextureSlot {
+            tiling: [2.0, 3.0],
+            offset: [0.5, 0.25],
+            ..TextureSlot::new(wood)
+        });
+        let packed_slot = |source, top| TextureSlot {
+            range: [0.0, top],
+            source,
+            ..TextureSlot::new(packed)
+        };
+        *all.map_mut(Channel::Roughness) = Some(packed_slot(PictureChannel::Green, 0.8));
+        *all.map_mut(Channel::Metallic) = Some(packed_slot(PictureChannel::Blue, 0.5));
+        *all.map_mut(Channel::Normal) = Some(TextureSlot::new(bumps));
+        *all.map_mut(Channel::Emission) = Some(TextureSlot::new(glow));
+        *all.map_mut(Channel::Opacity) = Some(TextureSlot {
+            source: PictureChannel::Alpha,
+            ..TextureSlot::new(wood)
+        });
+        let all = objects.materials.insert(all);
+        objects.nodes[0]
+            .data
+            .tags
+            .push(Tag::Material(grid4d_scene::MaterialTag::new(Some(all))));
+
+        let bytes = glb_bytes(&objects).unwrap();
+        let json = String::from_utf8_lossy(&bytes);
+        for extension in [
+            "KHR_texture_transform",
+            "KHR_materials_emissive_strength",
+            "KHR_materials_transmission",
+            "KHR_materials_ior",
+            "KHR_materials_specular",
+            "KHR_materials_clearcoat",
+        ] {
+            assert!(json.contains(extension), "{extension} written");
+        }
+        let back = import_gltf(&bytes, None).unwrap();
+        let (_, found) = back.materials.iter().find(|(_, m)| m.name == "All").unwrap();
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-5;
+        assert!(close(found.roughness, 0.8) && close(found.metallic, 0.5));
+        assert!(close(found.normal_strength, 1.5) && close(found.emission_strength, 3.0));
+        assert!(close(found.opacity_threshold, 0.4) && close(found.transmission, 0.25));
+        assert!(close(found.ior, 1.33) && close(found.specular, 0.3));
+        assert!(close(found.clearcoat, 0.6) && close(found.clearcoat_roughness, 0.2) && found.two_sided);
+        let slot = |channel| {
+            *found
+                .map(channel)
+                .unwrap_or_else(|| panic!("{channel:?} has a texture"))
+        };
+        let base = slot(Channel::BaseColor);
+        assert_eq!((base.tiling, base.offset), ([2.0, 3.0], [0.5, 0.25]));
+        let (rough, metal) = (slot(Channel::Roughness), slot(Channel::Metallic));
+        assert_eq!(
+            (rough.source, metal.source),
+            (PictureChannel::Green, PictureChannel::Blue)
+        );
+        assert_eq!(rough.texture, metal.texture, "one packed picture");
+        assert!(close(rough.range[1], 0.8) && close(metal.range[1], 0.5));
+        assert_eq!(slot(Channel::Opacity).source, PictureChannel::Alpha);
+        let _ = slot(Channel::Normal);
+        let _ = slot(Channel::Emission);
+        // The pictures come back embedded, byte for byte, in their colour spaces.
+        let picture = |slot: TextureSlot| back.textures.get(slot.texture).unwrap().clone();
+        let wood_back = picture(base);
+        assert_eq!(wood_back.color_space, ColorSpace::Srgb);
+        let TextureSource::Embedded { bytes: wood_bytes, .. } = &wood_back.source else {
+            panic!("embedded")
+        };
+        assert_eq!(&wood_bytes[..], &png([200, 120, 60, 128])[..]);
+        assert_eq!(picture(rough).color_space, ColorSpace::Linear);
+    }
+
+    #[test]
+    fn pictures_gltf_cannot_hold_are_left_out_and_the_material_stays() {
+        use grid4d_scene::{Material, Tag, Texture, TextureSlot, TextureSource};
+        let mut objects = scene();
+        let tiff = objects.textures.insert(Texture {
+            name: "Scan".to_owned(),
+            source: TextureSource::Embedded {
+                file_name: "scan.tif".to_owned(),
+                bytes: b"II*\0 not really".to_vec().into(),
+            },
+            color_space: grid4d_scene::ColorSpace::Srgb,
+        });
+        let missing = objects.textures.insert(Texture::linked("/nowhere/at/all.png".into()));
+        let mut plain = Material::new("Plain");
+        *plain.map_mut(Channel::BaseColor) = Some(TextureSlot::new(tiff));
+        *plain.map_mut(Channel::Normal) = Some(TextureSlot::new(missing));
+        let plain = objects.materials.insert(plain);
+        objects.nodes[0]
+            .data
+            .tags
+            .push(Tag::Material(grid4d_scene::MaterialTag::new(Some(plain))));
+        let back = import_gltf(&glb_bytes(&objects).unwrap(), None).unwrap();
+        let (_, found) = back.materials.iter().find(|(_, m)| m.name == "Plain").unwrap();
+        assert_eq!(found.maps().count(), 0);
+        assert!(back.textures.is_empty());
     }
 
     fn scene() -> Objects {

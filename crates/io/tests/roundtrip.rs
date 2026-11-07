@@ -258,6 +258,7 @@ proptest! {
                 let channel = grid4d_scene::Channel::ALL[k % grid4d_scene::Channel::ALL.len()];
                 *material.map_mut(channel) = Some(grid4d_scene::TextureSlot {
                     tiling: [1.0 + f, 2.0],
+                    source: grid4d_scene::PictureChannel::ALL[k % 4],
                     ..grid4d_scene::TextureSlot::new(texture)
                 });
             }

@@ -8,7 +8,8 @@ use glam::{Quat, Vec2, Vec3};
 use gltf::{buffer::Source, camera::Projection, mesh::Mode};
 use grid4d_geom::PolyMesh;
 use grid4d_scene::{
-    LightDetails, LightType, Material, MaterialId, Materials, MeshHandle, NodeData, ObjectKind, Tag, Transform,
+    Channel, ColorSpace, LightDetails, LightType, Material, MaterialId, Materials, MeshHandle, NodeData, ObjectKind,
+    PictureChannel, Tag, Texture, TextureId, TextureSlot, TextureSource, Textures, Transform,
 };
 
 use crate::{
@@ -38,14 +39,22 @@ pub fn import_gltf(bytes: &[u8], base: Option<&Path>) -> Result<Objects, IoError
     let gltf = gltf::Gltf::from_slice(bytes).map_err(|err| invalid(format!("not a valid glTF file: {err}")))?;
     let buffers = load_buffers(&gltf, base)?;
     // Every material of the file, in its order; meshes refer to them by index.
+    // Their pictures become textures, one per image and colour space.
     let mut materials = Materials::default();
+    let mut pictures = Pictures {
+        buffers: &buffers,
+        base,
+        textures: Textures::default(),
+        made: HashMap::new(),
+    };
     let material_ids: Vec<MaterialId> = gltf
         .materials()
         .map(|m| {
-            let material = read_material(&m, &materials);
+            let material = read_material(&m, &materials, &mut pictures);
             materials.insert(material)
         })
         .collect();
+    let textures = pictures.textures;
     let mut meshes: Vec<Option<ReadMesh>> = vec![None; gltf.meshes().count()];
     let mut visited = vec![false; gltf.nodes().count()];
     let mut nodes = Vec::new();
@@ -100,13 +109,119 @@ pub fn import_gltf(bytes: &[u8], base: Option<&Path>) -> Result<Objects, IoError
     Ok(Objects {
         nodes,
         materials,
+        textures,
         layers: grid4d_scene::Layers::default(),
         sources: Vec::new(),
     })
 }
 
+/// The file's images as the textures materials use, made on first use.
+struct Pictures<'a> {
+    buffers: &'a [Vec<u8>],
+    base: Option<&'a Path>,
+    textures: Textures,
+    /// By image index and colour space: an image used for colour and for data
+    /// is two textures (the colour space belongs to the texture).
+    made: HashMap<(usize, bool), Option<TextureId>>,
+}
+
+impl Pictures<'_> {
+    /// The texture of glTF texture `texture` read as `space`; `None` when its
+    /// picture cannot be found (an absolute path, a broken view).
+    fn texture(&mut self, texture: &gltf::Texture<'_>, space: ColorSpace) -> Option<TextureId> {
+        let image = texture.source();
+        let key = (image.index(), space == ColorSpace::Srgb);
+        if let Some(&made) = self.made.get(&key) {
+            return made;
+        }
+        let made = self.read(&image, space);
+        self.made.insert(key, made);
+        made
+    }
+
+    fn read(&mut self, image: &gltf::Image<'_>, space: ColorSpace) -> Option<TextureId> {
+        let extension = |mime: Option<&str>| match mime {
+            Some("image/jpeg") => "jpg",
+            _ => "png",
+        };
+        let fallback = |mime: Option<&str>| format!("image{}.{}", image.index(), extension(mime));
+        let source = match image.source() {
+            gltf::image::Source::View { view, mime_type } => {
+                let bytes = self.buffers.get(view.buffer().index())?;
+                let start = view.offset();
+                let data = bytes.get(start..start.checked_add(view.length())?)?;
+                TextureSource::Embedded {
+                    file_name: image
+                        .name()
+                        .map_or_else(|| fallback(Some(mime_type)), |n| named(n, mime_type)),
+                    bytes: data.into(),
+                }
+            }
+            gltf::image::Source::Uri { uri, mime_type } => {
+                if uri.starts_with("data:") {
+                    let bytes = load_uri(uri, None).ok()?;
+                    TextureSource::Embedded {
+                        file_name: image
+                            .name()
+                            .map_or_else(|| fallback(mime_type), |n| named(n, mime_type.unwrap_or("image/png"))),
+                        bytes: bytes.into(),
+                    }
+                } else {
+                    let relative = percent_decode(uri);
+                    let path = Path::new(&relative);
+                    if relative.contains(':') || path.is_absolute() || relative.starts_with(['/', '\\']) {
+                        return None;
+                    }
+                    TextureSource::Linked(self.base.map_or_else(|| path.to_path_buf(), |base| base.join(path)))
+                }
+            }
+        };
+        let name = image.name().map_or_else(
+            || {
+                let file = source.file_name();
+                Path::new(&file)
+                    .file_stem()
+                    .map_or_else(|| "Texture".to_owned(), |s| s.to_string_lossy().into_owned())
+            },
+            str::to_owned,
+        );
+        let texture = Texture {
+            name: self.textures.unique_name(&name),
+            source,
+            color_space: space,
+        };
+        Some(self.textures.insert(texture))
+    }
+}
+
+/// An embedded picture's file name: `name` with the extension its MIME type
+/// says, unless it has one.
+fn named(name: &str, mime: &str) -> String {
+    if Path::new(name).extension().is_some() {
+        return name.to_owned();
+    }
+    let extension = if mime == "image/jpeg" { "jpg" } else { "png" };
+    format!("{name}.{extension}")
+}
+
+/// A channel's slot for `info` (its texture as `space`, its
+/// `KHR_texture_transform` offset and scale; turning is not kept).
+fn slot(info: &gltf::texture::Info<'_>, space: ColorSpace, pictures: &mut Pictures<'_>) -> Option<TextureSlot> {
+    let texture = pictures.texture(&info.texture(), space)?;
+    let mut slot = TextureSlot::new(texture);
+    if let Some(transform) = info.texture_transform() {
+        let [su, sv] = transform.scale();
+        let [ou, ov] = transform.offset();
+        if [su, sv, ou, ov].iter().all(|v| v.is_finite()) && su.abs() > 1e-6 && sv.abs() > 1e-6 {
+            slot.tiling = [su, sv];
+            slot.offset = [ou, ov];
+        }
+    }
+    Some(slot)
+}
+
 /// A glTF material as a Grid4D one (non-finite factors fall back to the defaults).
-fn read_material(material: &gltf::Material<'_>, taken: &Materials) -> Material {
+fn read_material(material: &gltf::Material<'_>, taken: &Materials, pictures: &mut Pictures<'_>) -> Material {
     let name = material
         .name()
         .filter(|n| !n.trim().is_empty())
@@ -127,7 +242,106 @@ fn read_material(material: &gltf::Material<'_>, taken: &Materials) -> Material {
     if emissive.iter().all(|c| c.is_finite()) {
         out.emission = emissive.map(|c| c.max(0.0));
     }
+    out.two_sided = material.double_sided();
+    read_textures(material, &mut out, pictures);
+    read_extensions(material, &mut out, pictures);
     out
+}
+
+/// A glTF material's pictures as channel textures.
+fn read_textures(material: &gltf::Material<'_>, out: &mut Material, pictures: &mut Pictures<'_>) {
+    let pbr = material.pbr_metallic_roughness();
+    let base = pbr
+        .base_color_texture()
+        .and_then(|info| slot(&info, ColorSpace::Srgb, pictures));
+    *out.map_mut(Channel::BaseColor) = base;
+    // Roughness in green, metallic in blue; the factors scale the picture.
+    if let Some(info) = pbr.metallic_roughness_texture()
+        && let Some(packed) = slot(&info, ColorSpace::Linear, pictures)
+    {
+        *out.map_mut(Channel::Roughness) = Some(TextureSlot {
+            range: [0.0, out.roughness],
+            source: PictureChannel::Green,
+            ..packed
+        });
+        *out.map_mut(Channel::Metallic) = Some(TextureSlot {
+            range: [0.0, out.metallic],
+            source: PictureChannel::Blue,
+            ..packed
+        });
+    }
+    if let Some(normal) = material.normal_texture()
+        && let Some(texture) = pictures.texture(&normal.texture(), ColorSpace::Linear)
+    {
+        *out.map_mut(Channel::Normal) = Some(TextureSlot::new(texture));
+        if normal.scale().is_finite() {
+            out.normal_strength = normal.scale().clamp(0.0, 2.0);
+        }
+    }
+    if let Some(info) = material.emissive_texture() {
+        *out.map_mut(Channel::Emission) = slot(&info, ColorSpace::Srgb, pictures);
+    }
+    // Alpha: Mask cuts out below its cutoff; Blend is kept as a cut-out at
+    // half (Grid4D has no partial see-through).
+    let alpha = pbr.base_color_factor()[3];
+    let cutoff = match material.alpha_mode() {
+        gltf::material::AlphaMode::Opaque => None,
+        gltf::material::AlphaMode::Mask => Some(material.alpha_cutoff().unwrap_or(0.5)),
+        gltf::material::AlphaMode::Blend => Some(0.5),
+    };
+    if let Some(cutoff) = cutoff.filter(|c| c.is_finite()) {
+        out.opacity_threshold = cutoff.clamp(0.0, 1.0);
+        if alpha.is_finite() {
+            out.opacity = alpha.clamp(0.0, 1.0);
+        }
+        if let Some(base) = base {
+            *out.map_mut(Channel::Opacity) = Some(TextureSlot {
+                range: [0.0, out.opacity],
+                source: PictureChannel::Alpha,
+                ..base
+            });
+        }
+    }
+}
+
+/// The material extensions Grid4D has channels for: transmission, IOR,
+/// emission strength, specular and the clear coat.
+fn read_extensions(material: &gltf::Material<'_>, out: &mut Material, pictures: &mut Pictures<'_>) {
+    if let Some(transmission) = material.transmission() {
+        let factor = transmission.transmission_factor();
+        if factor.is_finite() {
+            out.transmission = factor.clamp(0.0, 1.0);
+        }
+        if let Some(info) = transmission.transmission_texture() {
+            *out.map_mut(Channel::Transmission) = slot(&info, ColorSpace::Linear, pictures).map(|s| TextureSlot {
+                range: [0.0, out.transmission],
+                ..s
+            });
+        }
+    }
+    if let Some(ior) = material.ior().filter(|i| i.is_finite()) {
+        out.ior = ior.clamp(Material::IOR_RANGE.0, Material::IOR_RANGE.1);
+    }
+    if let Some(strength) = material.emissive_strength().filter(|s| s.is_finite()) {
+        out.emission_strength = strength.max(0.0);
+    }
+    if let Some(specular) = material.specular() {
+        // glTF's factor scales the usual 4 %, Grid4D's Specular 0.5 is 4 %.
+        let factor = specular.specular_factor();
+        if factor.is_finite() {
+            out.specular = (factor * 0.5).clamp(0.0, 1.0);
+        }
+    }
+    let coat = material.extensions().and_then(|e| e.get("KHR_materials_clearcoat"));
+    if let Some(coat) = coat {
+        let number = |key: &str| coat.get(key).and_then(serde_json::Value::as_f64).map(|v| v as f32);
+        if let Some(factor) = number("clearcoatFactor").filter(|v| v.is_finite()) {
+            out.clearcoat = factor.clamp(0.0, 1.0);
+        }
+        if let Some(roughness) = number("clearcoatRoughnessFactor").filter(|v| v.is_finite()) {
+            out.clearcoat_roughness = roughness.clamp(0.0, 1.0);
+        }
+    }
 }
 
 /// Each buffer's bytes: the `.glb` binary chunk, a `data:` URI or a file next to the glTF.
@@ -808,5 +1022,69 @@ mod tests {
         assert_eq!(decode_base64("TW!u"), None);
         assert_eq!(percent_decode("my%20cube%2Bv2.bin"), "my cube+v2.bin");
         assert_eq!(percent_decode("100%"), "100%");
+    }
+
+    #[test]
+    fn a_sample_with_pictures_and_extensions_brings_its_textures() {
+        use grid4d_scene::{Channel, ColorSpace, PictureChannel, TextureSource};
+        let dir = std::env::temp_dir().join(format!("grid4d-gltf-pictures-{}", std::process::id()));
+        fs::create_dir_all(dir.join("maps")).unwrap();
+        let png = crate::png_bytes(1, 1, crate::Channels::Rgba, &[10, 20, 30, 255]).unwrap();
+        fs::write(dir.join("maps").join("wood grain.png"), &png).unwrap();
+        let data = cube_buffer();
+        let uri = format!("data:application/octet-stream;base64,{}", b64(&data));
+        let mut sample = document(json!({ "byteLength": data.len(), "uri": uri }));
+        sample["images"] = json!([
+            { "name": "Checker", "uri": format!("data:image/png;base64,{}", b64(&png)) },
+            { "uri": "maps/wood%20grain.png" },
+            { "uri": "/elsewhere/normal.png" }
+        ]);
+        sample["textures"] = json!([{ "source": 0 }, { "source": 1 }, { "source": 2 }]);
+        sample["extensionsUsed"] = json!([
+            "KHR_lights_punctual",
+            "KHR_texture_transform",
+            "KHR_materials_clearcoat"
+        ]);
+        sample["materials"] = json!([{
+            "name": "Painted",
+            "alphaMode": "MASK",
+            "alphaCutoff": 0.3,
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [1.0, 1.0, 1.0, 0.9],
+                "baseColorTexture": { "index": 0, "extensions": {
+                    "KHR_texture_transform": { "offset": [0.5, 0.0], "scale": [4.0, 4.0] }
+                } },
+                "metallicRoughnessTexture": { "index": 1 },
+                "roughnessFactor": 0.6
+            },
+            "normalTexture": { "index": 2 },
+            "extensions": { "KHR_materials_clearcoat": { "clearcoatFactor": 0.7 } }
+        }]);
+        let imported = import_gltf(&serde_json::to_vec(&sample).unwrap(), Some(&dir)).unwrap();
+        let (_, painted) = imported.materials.iter().find(|(_, m)| m.name == "Painted").unwrap();
+        let base = *painted.map(Channel::BaseColor).unwrap();
+        assert_eq!((base.tiling, base.offset), ([4.0, 4.0], [0.5, 0.0]));
+        let checker = imported.textures.get(base.texture).unwrap();
+        assert_eq!(checker.name, "Checker");
+        assert!(matches!(&checker.source, TextureSource::Embedded { file_name, .. } if file_name == "Checker.png"));
+        // The cut-out reads the base colour's alpha.
+        let opacity = *painted.map(Channel::Opacity).unwrap();
+        assert_eq!((opacity.texture, opacity.source), (base.texture, PictureChannel::Alpha));
+        assert!((painted.opacity - 0.9).abs() < 1e-6 && (painted.opacity_threshold - 0.3).abs() < 1e-6);
+        // Roughness from the picture next to the file, in green, as data.
+        let rough = *painted.map(Channel::Roughness).unwrap();
+        assert_eq!(rough.source, PictureChannel::Green);
+        assert!((rough.range[1] - 0.6).abs() < 1e-6);
+        let wood = imported.textures.get(rough.texture).unwrap();
+        assert_eq!(
+            wood.source,
+            TextureSource::Linked(dir.join("maps").join("wood grain.png"))
+        );
+        assert_eq!(wood.color_space, ColorSpace::Linear);
+        // An absolute path is not followed.
+        assert!(painted.map(Channel::Normal).is_none());
+        assert!((painted.clearcoat - 0.7).abs() < 1e-6);
+        assert_eq!(imported.textures.len(), 2);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

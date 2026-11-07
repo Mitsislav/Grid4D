@@ -82,7 +82,7 @@ impl Channels {
     fn scalar(&self, channel: Channel, value: f32, uv: Option<Vec2>) -> f32 {
         self.read(channel, uv).map_or(value, |read| {
             let [from, to] = read.slot.range;
-            let pictured = from + (to - from) * read.value.x;
+            let pictured = from + (to - from) * read.value[read.slot.source.index()];
             value + (pictured - value) * read.slot.strength
         })
     }
@@ -144,7 +144,9 @@ impl Channels {
     pub(crate) fn height(&self, uv: Vec2) -> Option<(f32, Vec2)> {
         let read = self.read(Channel::Bump, Some(uv))?;
         let [from, to] = read.slot.range;
-        let height = (from + (to - from) * read.value.x) * self.material.bump_height * read.slot.strength;
+        let height = (from + (to - from) * read.value[read.slot.source.index()])
+            * self.material.bump_height
+            * read.slot.strength;
         let (w, h) = self.picture(Channel::Bump)?.size();
         let side =
             |n: u32, tiling: f32| 1.0 / (f32::from(u16::try_from(n).unwrap_or(u16::MAX)) * tiling.abs().max(1e-3));
@@ -209,6 +211,26 @@ mod tests {
             slot.tiling = [2.0, 1.0]
         });
         assert!(!tiled.is_solid(Some(Vec2::new(0.375, 0.5))));
+    }
+
+    #[test]
+    fn number_channels_read_the_picture_s_chosen_channel() {
+        // Roughness in green, metallic in blue, as glTF packs them.
+        let packed = [0, 255, 0, 255, 0, 0, 255, 0];
+        let left = Some(Vec2::new(0.25, 0.5));
+        let rough = with(Channel::Roughness, packed, |_, slot| {
+            slot.source = grid4d_scene::PictureChannel::Green
+        });
+        assert!((rough.surface(left).roughness - 1.0).abs() < 1e-5);
+        let metal = with(Channel::Metallic, packed, |_, slot| {
+            slot.source = grid4d_scene::PictureChannel::Blue
+        });
+        assert!(metal.surface(left).metallic.abs() < 1e-5);
+        // A cut-out from alpha: the right texel is transparent.
+        let cut = with(Channel::Opacity, packed, |_, slot| {
+            slot.source = grid4d_scene::PictureChannel::Alpha
+        });
+        assert!(cut.is_solid(left) && !cut.is_solid(Some(Vec2::new(0.75, 0.5))));
     }
 
     #[test]

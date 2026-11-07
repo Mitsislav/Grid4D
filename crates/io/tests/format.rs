@@ -155,6 +155,8 @@ fn full_document() -> (Document, SimulationCache) {
         offset: [0.5, 0.25],
         range: [0.2, 0.8],
         strength: 0.75,
+        // Its green channel, as glTF packs roughness (15.8).
+        source: grid4d_scene::PictureChannel::Green,
         ..TextureSlot::new(checker)
     });
     doc.scene.materials_mut().insert(glass);

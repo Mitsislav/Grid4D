@@ -86,6 +86,43 @@ impl Channel {
     }
 }
 
+/// Which channel of a picture a number channel reads (colour channels read
+/// all three colours). glTF packs roughness in green and metallic in blue,
+/// and cut-outs read alpha.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PictureChannel {
+    #[default]
+    Red,
+    Green,
+    Blue,
+    Alpha,
+}
+
+impl PictureChannel {
+    pub const ALL: [Self; 4] = [Self::Red, Self::Green, Self::Blue, Self::Alpha];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Red => "Red",
+            Self::Green => "Green",
+            Self::Blue => "Blue",
+            Self::Alpha => "Alpha",
+        }
+    }
+
+    /// Its place in an RGBA texel (0 – 3).
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Red => 0,
+            Self::Green => 1,
+            Self::Blue => 2,
+            Self::Alpha => 3,
+        }
+    }
+}
+
 /// A texture on a channel and how it lies on the surface.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextureSlot {
@@ -99,6 +136,8 @@ pub struct TextureSlot {
     pub range: [f32; 2],
     /// From the channel's value (0) to the texture (1).
     pub strength: f32,
+    /// The picture's channel a number channel reads.
+    pub source: PictureChannel,
 }
 
 impl TextureSlot {
@@ -111,6 +150,7 @@ impl TextureSlot {
             offset: [0.0; 2],
             range: [0.0, 1.0],
             strength: 1.0,
+            source: PictureChannel::Red,
         }
     }
 
