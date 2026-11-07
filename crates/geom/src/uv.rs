@@ -15,7 +15,9 @@
 
 use std::f32::consts::TAU;
 
-use glam::{Mat4, Vec2, Vec3};
+use std::collections::HashMap;
+
+use glam::{Mat4, Vec2, Vec3, Vec4};
 
 use crate::PolyMesh;
 
@@ -328,6 +330,71 @@ pub fn flipped_faces(mesh: &PolyMesh) -> usize {
         .count()
 }
 
+/// Tangents for normal maps: one per vertex of a triangulated mesh
+/// (`positions`, `normals`, `uvs` per vertex, `indices` three per triangle),
+/// into `out` (cleared first). `xyz` runs along increasing `u` in the
+/// surface, perpendicular to the vertex normal; `w` (±1) makes
+/// `cross(normal, xyz) * w` point up the picture (decreasing `v`), the way
+/// glTF's normal maps read. Vertices at the same place with the same normal
+/// and UV share theirs (summed over their triangles, by area), so smooth
+/// surfaces show no seams; without UVs, or on faces whose UVs have no area,
+/// any perpendicular direction with `w` = 1.
+pub fn tangents(positions: &[Vec3], normals: &[Vec3], uvs: &[Vec2], indices: &[u32], out: &mut Vec<Vec4>) {
+    out.clear();
+    let count = positions.len();
+    if uvs.len() != count || normals.len() != count {
+        out.extend(normals.iter().map(|&n| any_perpendicular(n).extend(1.0)));
+        out.resize(count, Vec4::new(1.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    // Vertices that are one point of a smooth surface share a group.
+    let mut groups: HashMap<[u32; 8], usize> = HashMap::new();
+    let group_of: Vec<usize> = (0..count)
+        .map(|i| {
+            let (p, n, uv) = (positions[i], normals[i], uvs[i]);
+            let key = [p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y].map(f32::to_bits);
+            let next = groups.len();
+            *groups.entry(key).or_insert(next)
+        })
+        .collect();
+    let mut along_u = vec![Vec3::ZERO; groups.len()];
+    let mut up = vec![Vec3::ZERO; groups.len()];
+    for triangle in indices.as_chunks::<3>().0 {
+        let [a, b, c] = triangle.map(crate::us);
+        if a >= count || b >= count || c >= count {
+            continue;
+        }
+        let (e1, e2) = (positions[b] - positions[a], positions[c] - positions[a]);
+        let (d1, d2) = (uvs[b] - uvs[a], uvs[c] - uvs[a]);
+        let det = d1.x * d2.y - d2.x * d1.y;
+        if det.abs() < 1e-12 {
+            continue;
+        }
+        // dP/du and dP/dv, times the triangle's UV area (an area weight).
+        let t = (e1 * d2.y - e2 * d1.y) * det.signum();
+        let v = (e2 * d1.x - e1 * d2.x) * det.signum();
+        for i in [a, b, c] {
+            along_u[group_of[i]] += t;
+            up[group_of[i]] -= v;
+        }
+    }
+    out.extend((0..count).map(|i| {
+        let n = normals[i];
+        let g = group_of[i];
+        let t = along_u[g] - n * n.dot(along_u[g]);
+        let Some(t) = t.try_normalize() else {
+            return any_perpendicular(n).extend(1.0);
+        };
+        let w = if n.cross(t).dot(up[g]) < 0.0 { -1.0 } else { 1.0 };
+        t.extend(w)
+    }));
+}
+
+/// A unit direction perpendicular to `n` (X for a zero normal).
+fn any_perpendicular(n: Vec3) -> Vec3 {
+    n.try_normalize().map_or(Vec3::X, Vec3::any_orthonormal_vector)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,12 +545,8 @@ mod tests {
         let flat = project(Projection::Flat, &quad, Mat4::IDENTITY);
         assert_eq!(flat, [Vec2::new(0.0, 1.0), Vec2::ONE, Vec2::new(1.0, 0.0), Vec2::ZERO]);
         // A camera 2 units in front, 90 degrees wide: the square fills half the picture.
-        let camera = Mat4::from_cols(
-            glam::Vec4::X,
-            glam::Vec4::Y,
-            glam::Vec4::new(0.0, 0.0, 1.0, -1.0),
-            glam::Vec4::ZERO,
-        ) * Mat4::from_translation(Vec3::NEG_Z * 2.0);
+        let camera = Mat4::from_cols(Vec4::X, Vec4::Y, Vec4::new(0.0, 0.0, 1.0, -1.0), Vec4::ZERO)
+            * Mat4::from_translation(Vec3::NEG_Z * 2.0);
         let seen = project(Projection::Camera, &quad, camera);
         assert!(seen[0].abs_diff_eq(Vec2::new(0.25, 0.75), 1e-5), "{seen:?}");
         assert!(seen[2].abs_diff_eq(Vec2::new(0.75, 0.25), 1e-5));
@@ -492,6 +555,43 @@ mod tests {
         let own = with(&quad, vec![Vec2::splat(0.3); 4]);
         assert_eq!(project(Projection::Uv, &own, Mat4::IDENTITY), [Vec2::splat(0.3); 4]);
         assert!(Projection::Box.has_shape() && !Projection::Camera.has_shape());
+    }
+
+    #[test]
+    fn tangents_follow_u_and_say_which_way_is_up_the_picture() {
+        // A quad facing +Z, its UVs the usual way (u right, v down): the
+        // tangent is +X and up the picture is +Y, so w = 1.
+        let positions = [Vec3::ZERO, Vec3::X, Vec3::new(1.0, 1.0, 0.0), Vec3::Y];
+        let normals = [Vec3::Z; 4];
+        let uvs = [Vec2::new(0.0, 1.0), Vec2::ONE, Vec2::new(1.0, 0.0), Vec2::ZERO];
+        let indices = [0, 1, 2, 0, 2, 3];
+        let mut out = Vec::new();
+        tangents(&positions, &normals, &uvs, &indices, &mut out);
+        assert!(
+            out.iter().all(|t| t.abs_diff_eq(Vec4::new(1.0, 0.0, 0.0, 1.0), 1e-6)),
+            "{out:?}"
+        );
+        // A mirrored picture (u to the left) flips both.
+        let mirrored = uvs.map(|uv| Vec2::new(1.0 - uv.x, uv.y));
+        tangents(&positions, &normals, &mirrored, &indices, &mut out);
+        assert!(out.iter().all(|t| t.abs_diff_eq(Vec4::new(-1.0, 0.0, 0.0, -1.0), 1e-6)));
+        // Without UVs: perpendicular to the normal.
+        tangents(&positions, &normals, &[], &indices, &mut out);
+        assert!(out.iter().all(|t| t.truncate().dot(Vec3::Z).abs() < 1e-6 && t.w == 1.0));
+
+        // A smooth sphere: every tangent is perpendicular to its normal and
+        // unit length; vertices at one point with one normal and UV agree.
+        let mut tri = crate::TriMesh::default();
+        crate::Triangulator::default().triangulate(
+            &crate::primitives::sphere(1.0, 16),
+            crate::Smoothing::default(),
+            &mut tri,
+        );
+        tangents(&tri.positions, &tri.normals, &tri.uvs, &tri.indices, &mut out);
+        assert_eq!(out.len(), tri.vertex_count());
+        for (t, n) in out.iter().zip(&tri.normals) {
+            assert!((t.truncate().length() - 1.0).abs() < 1e-4 && t.truncate().dot(*n).abs() < 1e-4);
+        }
     }
 
     #[test]

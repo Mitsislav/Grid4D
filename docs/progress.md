@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.5a — Textures in the viewport (2026-11-07) |
-| Next step | 15.5b — Normal and bump maps, layers of Material tags, the GPU memory budget |
-| Tests | 819 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.5b — Normal and bump maps, layers, the texture budget (2026-11-07) |
+| Next step | 15.6 — Textures, normal and bump, opacity, transmission and IOR in the path tracer |
+| Tests | 822 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2317,6 +2317,7 @@ risks R5 – R8 go with it.
 | 15.4b | The Material tag's projections and layers: `Tag::Material(MaterialTag)` with a `Projection` (UV, Box, Spherical, Cylindrical, Flat, Camera; `grid4d_geom::uv::project`, `fit`), offset, tiling, rotation, a `Placement` or Fit to Object, and a camera; several Material tags per object, the selected tag a `TagRef` with its `nth`; `MaterialLayer`s per evaluated node and clone (own tags, else inherited, else a generator's cage's); `.g4d` v4 writes the new fields (version 3 drops them, also in takes); Shift + drop adds a layer, a drop on a tag icon changes that tag; Bake to UVs; the script `material` property keeps projections; Greek; manual §19.2 with a picture | 814 |
 | 15.4c | Preview balls: `ui::previews::MaterialPreviews` renders each material on a ball with the path tracer (96 px, two lights, a dim grey surrounding for reflections, the ball's coverage from a second render so the background stays transparent) on a worker thread, one at a time, again after each change (the old picture shown meanwhile, a painted ball before the first); the Material Manager, the dragged material and the Attribute Manager's material page show them; the manual's §19 with a picture | 816 |
 | 15.5a | Textures in the viewport: GPU vertices carry UVs; a Material tag's shape projection makes per-corner coordinates once per GPU mesh (`UvKey`: projection + matrix), its turn / tiling / offset ride per instance (`InstanceRaw` 192 bytes), Camera projects through the view; the interface hands decoded pictures to the renderer when they arrive (`upload_texture`, sRGB / linear / half float, mip chains; a magenta checker for missing ones); one bind group per textured material (group 2: a uniform of channel settings, a trilinear anisotropic sampler, a picture per channel); Base Color, Metallic, Roughness, Specular and Emission pictures and Opacity cut-out in `mesh.wgsl`; untextured objects batch as before; the allocation test includes textured and projected materials; manual §19 with a picture | 819 |
+| 15.5b | Normal and bump maps in the viewport: `grid4d_geom::uv::tangents` (along `u`, shared by vertices at one place with one normal and UV, `w` the side of up the picture), tangents in the vertices of meshes whose material bends normals (`DrawKey::tangents`), tangent-space normal pictures (+Y up) and bump pictures by screen-space derivatives in `mesh.wgsl`; layers: Material tags above the lowest covering one drawn as levels over the surface on its depth (`layer_pipeline`, `@invariant` position), their values from their own material; the picture budget (1 GiB, the device's largest side; smaller mips first); the manual's picture with a label layer and studs | 822 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2508,6 +2509,35 @@ risks R5 – R8 go with it.
   the cut-out's `discard`.
 - **Sixteen vertex attributes.** Three per vertex and twelve per instance:
   one left for 15.5b's tangents.
+
+**15.5b — Normal and bump maps, layers, the texture budget**
+
+*Problems and solutions:*
+- **Tangents cost time on big meshes.** Grouping vertices by place, normal
+  and UV needs a hash map; a component drag on a million-triangle mesh
+  rebuilds its GPU mesh every frame. Only meshes drawn with a material that
+  has a Normal or Bump picture get tangents (part of the GPU mesh's key).
+- **Which way is up in a normal picture.** Our `v` runs down the picture
+  (glTF's way) and glTF's normal pictures point +Y up the picture, so the
+  bitangent is "towards smaller `v`"; a test checks the sign on a plain and a
+  mirrored quad, and the studs in the manual's picture are lit from above.
+  Mirrored objects flip it again in the shader (negative determinant).
+- **Drawing a layer on exactly the surface's depth.** The layer is the same
+  mesh drawn again; the clip position is `@invariant`, the layer pipeline
+  tests less-or-equal and writes no depth, so it lands where the surface is
+  and nowhere else; lowest levels are drawn first.
+- **Layers nobody sees.** Tags below the last one that covers the whole
+  surface (no Opacity picture, opacity at its threshold or above) are not
+  drawn: the usual one-tag object draws once, as before.
+- **Bump without tangents.** Height pictures use the pixel's derivatives of
+  height and position (Mikkelsen's method), computed before the cut-out's
+  `discard` so they stay in uniform control flow.
+- **A Flat projection repeats.** In the manual's first try the label's Flat
+  projection tiled across the cube's other sides (the sampler repeats, as
+  the tiling setting says); the picture uses the cube's UVs instead. A
+  "decal" switch that limits a projection to its shape is noted as later.
+- clippy asked for `as_chunks::<3>()` and for the batch's material to pass
+  by reference (392 bytes).
 
 ---
 

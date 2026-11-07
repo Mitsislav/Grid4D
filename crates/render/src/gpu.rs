@@ -189,6 +189,8 @@ struct DrawKey {
     shading: Shading,
     boxed: bool,
     uvs: UvKey,
+    /// Its vertices carry tangents (a material with Normal or Bump pictures).
+    tangents: bool,
 }
 
 /// One instanced draw: a cached mesh and its instances in the instance buffer.
@@ -200,6 +202,9 @@ struct Draw {
     curve: bool,
     /// Its textured material (bind group 2), if any.
     material: Option<MaterialId>,
+    /// 0: a surface; 1, 2, …: a Material tag over the ones below, drawn after
+    /// them on their depth.
+    level: u8,
 }
 
 const INSTANCE_STRIDE: u64 = size_of::<InstanceRaw>() as u64;
@@ -212,8 +217,8 @@ const POLYGON_TTL_FRAMES: u64 = 8;
 /// How often (in frames) the cache looks for meshes to free.
 const EVICTION_INTERVAL: u64 = 120;
 
-const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
-    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 12 => Float32x2];
+const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 12 => Float32x2, 15 => Float32x4];
 /// Line vertices: a position.
 const LINE_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x3];
 /// `PointInstance` and `FaceVertex`: position, flags.
@@ -246,6 +251,10 @@ pub(crate) const INSTANCE_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::Vert
 #[derive(Debug)]
 pub struct ViewportRenderer {
     mesh_pipeline: wgpu::RenderPipeline,
+    /// Material tags over others: on the surfaces' depth, not writing it.
+    layer_pipeline: wgpu::RenderPipeline,
+    /// The highest layer level this frame draws.
+    top_level: u8,
     /// The surfaces of Hidden Line: depth only.
     depth_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
@@ -417,6 +426,13 @@ impl ViewportRenderer {
 
         Self {
             mesh_pipeline: object(&surfaces),
+            layer_pipeline: object(&ObjectPass {
+                label: "grid4d.layer.pipeline",
+                depth_write: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                ..surfaces
+            }),
+            top_level: 0,
             depth_pipeline: object(&ObjectPass {
                 label: "grid4d.depth.pipeline",
                 writes: wgpu::ColorWrites::empty(),
@@ -571,6 +587,7 @@ impl ViewportRenderer {
         }
 
         self.draws.clear();
+        self.top_level = 0;
         let mut offset = 0usize;
         let boxed = display.style == DisplayStyle::Box;
         let (faces, lines) = (self.fill != Fill::None, self.draw_lines);
@@ -582,6 +599,7 @@ impl ViewportRenderer {
                 // A curve is a curve in every style.
                 boxed: boxed && !curve,
                 uvs: geometry.uvs,
+                tangents: geometry.material.is_some_and(crate::frame::MaterialData::bends_normals),
             };
             let ready = if curve {
                 self.ensure_curve(device, key, geometry.curve)
@@ -605,7 +623,9 @@ impl ViewportRenderer {
                 instances: to_u32(offset)..to_u32(end),
                 curve,
                 material: geometry.material.map(|m| m.id),
+                level: geometry.level,
             });
+            self.top_level = self.top_level.max(geometry.level);
             offset = end;
         }
         // Polygon meshes get a new key on every edit (each frame of a component
@@ -685,6 +705,7 @@ impl ViewportRenderer {
                             geometry,
                             key.shading.smoothing(),
                             projected.as_deref(),
+                            key.tangents,
                             &mut self.tessellation,
                             &mut self.vertex_scratch,
                             &mut self.index_scratch,
@@ -728,13 +749,13 @@ impl ViewportRenderer {
         for face in 0..self.shadow_faces {
             let mut pass = self.shadows.begin_face(&mut encoder, face);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            self.draw_parts(&mut pass, false, |mesh| mesh.faces.get());
+            self.draw_parts_where(&mut pass, |d| d.level == 0, false, |mesh| mesh.faces.get());
         }
         let ao = match target.ssao_textures() {
             Some(textures) if self.ssao_on => {
                 self.ssao.record(&mut encoder, textures, |pass| {
                     pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-                    self.draw_parts(pass, false, |mesh| mesh.faces.get());
+                    self.draw_parts_where(pass, |d| d.level == 0, false, |mesh| mesh.faces.get());
                 });
                 &textures.ao
             }
@@ -768,7 +789,15 @@ impl ViewportRenderer {
         if let Some(pipeline) = surfaces {
             pass.set_pipeline(pipeline);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            self.draw_parts(pass, true, |mesh| mesh.faces.get());
+            self.draw_parts_where(pass, |d| d.level == 0, true, |mesh| mesh.faces.get());
+            // Material tags over others, lowest first, where their cut-outs
+            // leave them.
+            if matches!(self.fill, Fill::Lit | Fill::Quick | Fill::Constant) {
+                pass.set_pipeline(&self.layer_pipeline);
+                for level in 1..=self.top_level {
+                    self.draw_parts_where(pass, |d| d.level == level, true, |mesh| mesh.faces.get());
+                }
+            }
             pass.set_bind_group(2, self.textures.group(None), &[]);
         }
 
@@ -784,7 +813,12 @@ impl ViewportRenderer {
             pass.set_pipeline(&self.line_pipeline);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             let all = self.draw_lines;
-            self.draw_parts_where(pass, |draw| all || draw.curve, false, |mesh| mesh.lines.get());
+            self.draw_parts_where(
+                pass,
+                |draw| draw.level == 0 && (all || draw.curve),
+                false,
+                |mesh| mesh.lines.get(),
+            );
         }
 
         // Component overlay on top: tinted polygons, edges, points, then the
@@ -814,18 +848,9 @@ impl ViewportRenderer {
 }
 
 impl ViewportRenderer {
-    /// One instanced draw per batch, of the part of its mesh that `part` picks;
-    /// with `materials` each batch's material is bound first (group 2).
-    fn draw_parts(
-        &self,
-        pass: &mut wgpu::RenderPass<'_>,
-        materials: bool,
-        part: impl Fn(&GpuMesh) -> Option<&GpuGeometry>,
-    ) {
-        self.draw_parts_where(pass, |_| true, materials, part);
-    }
-
-    /// [`draw_parts`](Self::draw_parts) for the batches `which` picks.
+    /// One instanced draw per batch that `which` picks, of the part of its
+    /// mesh that `part` picks; with `materials` each batch's material is
+    /// bound first (group 2).
     fn draw_parts_where(
         &self,
         pass: &mut wgpu::RenderPass<'_>,

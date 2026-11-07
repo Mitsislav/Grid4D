@@ -2068,17 +2068,17 @@ has no colour of its own otherwise) and **Emission** adds glow that no light
 needs. Constant Shading shows the colour and the emission only.
 
 **Textures in the viewport.** The viewport shows the pictures on Base Color,
-Metallic, Roughness, Specular and Emission, and cuts out what Opacity says,
-through the object's Material tag (its projection, tiling, offset and
-rotation; [§19.2](#192-placing-a-material-projections-and-layers)). A
-picture that is still loading shows the channel's value meanwhile; a missing
-one shows as a magenta and black checker.
+Metallic, Roughness, Specular, Emission, Normal and Bump, and cuts out what
+Opacity says, through the object's Material tags (their projections, tiling,
+offset and rotation, one over the other;
+[§19.2](#192-placing-a-material-projections-and-layers)). A picture that is
+still loading shows the channel's value meanwhile; a missing one shows as a
+magenta and black checker.
 
-![Textures in the viewport: planks tiled on a floor, on a cube through a Box projection, a checker wrapped round a sphere, and a missing picture on a cylinder](images/manual/viewport-textures.png)
+![Textures in the viewport: planks tiled on a floor and on a cube through a Box projection, a red label with a round cut-out over the cube's planks, a checker wrapped round a sphere, a missing picture on a cylinder and a normal picture of round studs on a small box](images/manual/viewport-textures.png)
 
-Normal and Bump pictures, Transmission and the coat are kept with the
-material and shown from Grid4D 1.1's next steps on, as are textures in
-renders.
+Transmission and the coat are kept with the material and shown from Grid4D
+1.1's next steps on, as are textures in renders.
 
 **Giving an object a material**
 
@@ -2199,8 +2199,8 @@ or Flat projection) writes the projection into the object's UVs and switches
 the tag to UV — one undo step. The picture stays where it was, and later
 edits to the object keep it in place.
 
-> The viewport shows the top Material tag of each object (the last one) with
-> its projection; layers below it and renders follow in Grid4D 1.1's next
+> The viewport shows every Material tag of an object, each over the ones
+> before it where its Opacity lets it; renders follow in Grid4D 1.1's next
 > steps.
 
 ## 20. Rendering
@@ -2622,10 +2622,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   without building it); scripts cannot set keys, create materials or layers,
   or run every frame; the Script Manager's editor has no syntax colouring or
   completion, and the library no sub-folders.
-- **Materials**: the viewport shows only an object's top Material tag (no
-  layers yet), without Normal and Bump pictures; renders and preview balls
-  show only the colours (textures follow in 1.1's next steps); no
-  per-polygon-selection limit on a tag.
+- **Materials**: the viewport shows no Transmission or coat; cut-outs cast
+  full shadows; renders and preview balls show only the colours (textures
+  follow in 1.1's next steps); no per-polygon-selection limit on a tag.
 - **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's
   angle or length while dragging it (Ctrl / Alt), normalised curves, copying and
   pasting keys, animating counts (segments, sides) and choices, Frame

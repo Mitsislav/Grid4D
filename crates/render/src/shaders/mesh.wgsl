@@ -74,6 +74,8 @@ struct ChannelSettings {
 struct MaterialUniform {
     // x: emission strength, y: opacity, z: opacity threshold, w: specular.
     header: vec4<f32>,
+    // x: normal strength, y: bump height (cm).
+    shape: vec4<f32>,
     // In `Channel::ALL` order.
     channels: array<ChannelSettings, 10>,
 };
@@ -95,6 +97,8 @@ const BASE_COLOR: u32 = 0u;
 const METALLIC: u32 = 1u;
 const ROUGHNESS: u32 = 2u;
 const SPECULAR: u32 = 3u;
+const NORMAL: u32 = 4u;
+const BUMP: u32 = 5u;
 const EMISSION: u32 = 6u;
 const OPACITY: u32 = 7u;
 
@@ -102,6 +106,8 @@ struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(12) uv: vec2<f32>,
+    // xyz: along increasing u, w: the side of up the picture.
+    @location(15) tangent: vec4<f32>,
 };
 
 // Must match `InstanceRaw` in frame.rs.
@@ -125,7 +131,8 @@ struct InstanceIn {
 };
 
 struct VertexOut {
-    @builtin(position) clip_position: vec4<f32>,
+    // Invariant: a layer drawn over another lands on exactly its depth.
+    @builtin(position) @invariant clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) world_normal: vec3<f32>,
     @location(2) color: vec4<f32>,
@@ -136,6 +143,7 @@ struct VertexOut {
     @location(5) uv: vec2<f32>,
     @location(6) @interpolate(flat) uv_matrix: vec4<f32>,
     @location(7) @interpolate(flat) uv_offset: vec4<f32>,
+    @location(8) world_tangent: vec4<f32>,
 };
 
 @vertex
@@ -154,7 +162,16 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     out.uv = tag_uv(vertex.uv, instance.uv_matrix, instance.uv_offset);
     out.uv_matrix = instance.uv_matrix;
     out.uv_offset = instance.uv_offset;
+    // A mirrored instance (negative scale) turns the picture's up around.
+    let model3 = mat3x3<f32>(model[0].xyz, model[1].xyz, model[2].xyz);
+    let side = select(1.0, -1.0, determinant(model3) < 0.0);
+    out.world_tangent = vec4<f32>(model3 * vertex.tangent.xyz, vertex.tangent.w * side);
     return out;
+}
+
+// Whether channel `index` has a picture.
+fn has_picture(index: u32) -> bool {
+    return (u32(material.channels[index].range.w + 0.5) & 1u) != 0u;
 }
 
 // A Material tag's change to coordinates `uv`.
@@ -299,6 +316,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let specular_picture = textureSample(map_specular, material_sampler, channel_uv(SPECULAR, uv));
     let emission_picture = textureSample(map_emission, material_sampler, channel_uv(EMISSION, uv));
     let opacity_picture = textureSample(map_opacity, material_sampler, channel_uv(OPACITY, uv));
+    let normal_picture = textureSample(map_normal, material_sampler, channel_uv(NORMAL, uv));
+    let bump_picture = textureSample(map_bump, material_sampler, channel_uv(BUMP, uv));
+    // A bump picture's height (cm) and how it changes across the pixel.
+    let bump = material.channels[BUMP].range;
+    let height = mix(bump.x, bump.y, bump_picture.r) * material.shape.y * bump.z;
+    let height_dx = dpdx(height);
+    let height_dy = dpdy(height);
+    let position_dx = dpdx(in.world_position);
+    let position_dy = dpdy(in.world_position);
     // Cut-out: below the threshold the surface is not there.
     if (scalar_channel(OPACITY, material.header.y, opacity_picture) < material.header.z) {
         discard;
@@ -309,6 +335,25 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // Two-sided lighting that does not depend on winding (planes seen from below).
     if (dot(n, view_dir) < 0.0) {
         n = -n;
+    }
+    if (has_picture(NORMAL)) {
+        // A tangent-space normal picture (glTF's way: +Y up the picture).
+        let t = normalize(in.world_tangent.xyz - n * dot(n, in.world_tangent.xyz));
+        let b = cross(n, t) * in.world_tangent.w;
+        var bent = normal_picture.xyz * 2.0 - vec3<f32>(1.0);
+        bent = vec3<f32>(bent.xy * material.shape.x * material.channels[NORMAL].range.z, bent.z);
+        n = normalize(t * bent.x + b * bent.y + n * max(bent.z, 0.001));
+    } else if (has_picture(BUMP)) {
+        // A height picture: the normal tilts against the height's slope
+        // (from the pixel's derivatives, no tangents needed).
+        let r1 = cross(position_dy, n);
+        let r2 = cross(n, position_dx);
+        let det = dot(position_dx, r1);
+        let gradient = sign(det) * (height_dx * r1 + height_dy * r2);
+        let tilted = abs(det) * n - gradient;
+        if (dot(tilted, tilted) > 0.0) {
+            n = normalize(tilted);
+        }
     }
 
     // The material: metals reflect their colour and have no diffuse part; a

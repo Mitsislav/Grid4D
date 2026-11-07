@@ -73,6 +73,25 @@ fn git(args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+/// Runs frames until every texture's picture has loaded (or is known missing).
+fn wait_for_textures(harness: &mut Harness<'_, Shell>) {
+    for _ in 0..2000 {
+        harness.run_steps(1);
+        let shell = harness.state();
+        let loading = shell.doc.scene.textures().iter().any(|(id, t)| {
+            matches!(
+                shell.editor.textures.status(id, t),
+                grid4d_ui::textures::Status::Loading
+            )
+        });
+        if !loading {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    harness.run_steps(1);
+}
+
 /// Runs frames until every material's preview ball is rendered.
 fn wait_for_previews(harness: &mut Harness<'_, Shell>) {
     for _ in 0..2000 {
@@ -494,16 +513,72 @@ fn texture_manager_picture() {
         let mut plane = Node::new("Floor", ObjectKindTag::Plane.default_kind());
         plane.data.tags = tag(floor, Projection::Uv);
         scene.insert(plane);
+
+        // A label over the crate: a red disc on each side, cut out by an
+        // Opacity picture.
+        let maps = dir.join("maps");
+        let mut picture = |name: &str, texel: &dyn Fn(f32, f32) -> [u8; 3]| {
+            let side = 128u32;
+            let mut pixels = Vec::new();
+            for y in 0..side {
+                for x in 0..side {
+                    let at = |v: u32| f32::from(u16::try_from(v).unwrap()) / 128.0;
+                    pixels.extend(texel(at(x), at(y)));
+                }
+            }
+            let path = maps.join(name);
+            grid4d_io::save_png(&path, side, side, grid4d_io::Channels::Rgb, &pixels).unwrap();
+            scene.textures_mut().insert(Texture {
+                color_space: ColorSpace::Linear,
+                ..Texture::linked(path)
+            })
+        };
+        let disc = picture("label mask.png", &|x, y| {
+            let inside = (x - 0.5).hypot(y - 0.5) < 0.42;
+            if inside { [255; 3] } else { [0; 3] }
+        });
+        // Round studs, as a normal picture (+Y up the picture).
+        let studs = picture("studs normal.png", &|x, y| {
+            let (cx, cy) = ((x * 4.0).fract() * 2.0 - 1.0, (y * 4.0).fract() * 2.0 - 1.0);
+            let r = cx.hypot(cy);
+            let n = if r < 0.75 {
+                let (nx, ny) = (cx / 0.75, -cy / 0.75);
+                let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
+                glam::Vec3::new(nx, ny, nz).normalize()
+            } else {
+                glam::Vec3::Z
+            };
+            let byte = |c: f32| u8::try_from(((c * 0.5 + 0.5) * 255.0).round() as u32).unwrap();
+            [byte(n.x), byte(n.y), byte(n.z)]
+        });
+        let mut label = Material::new("Label Disc");
+        label.color = [0.75, 0.05, 0.03];
+        *label.map_mut(Channel::Opacity) = Some(TextureSlot::new(disc));
+        let label = scene.materials_mut().insert(label);
+        let mut studded = Material::new("Studs");
+        (studded.color, studded.roughness) = ([0.1, 0.25, 0.8], 0.35);
+        *studded.map_mut(Channel::Normal) = Some(TextureSlot::new(studs));
+        let studded = scene.materials_mut().insert(studded);
+        let cube = named(scene, "Cube");
+        scene
+            .get_mut(cube)
+            .unwrap()
+            .data
+            .tags
+            .push(Tag::Material(MaterialTag::new(Some(label))));
+        let boxed = named(scene, "Box");
+        scene.get_mut(boxed).unwrap().data.tags = tag(studded, Projection::Box);
         shell.editor.materials.shown = false;
         shell.editor.tag_selection = None;
-        let cube = named(scene, "Cube");
         let sphere = named(scene, "Sphere");
         shell.editor.selection.set_single(cube);
         shell.editor.selection.toggle(sphere);
+        shell.editor.selection.toggle(boxed);
         shell.editor.commands.push(grid4d_ui::EditorCommand::FrameSelected);
     }
     h.run_steps(3);
     h.state_mut().editor.selection.clear();
+    wait_for_textures(&mut h);
     wait_for_previews(&mut h);
     save(&mut h, &dir, "viewport-textures");
     println!("pictures in {}", dir.display());

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Affine2, Mat3, Mat4, Vec3};
-use grid4d_eval::{CurveHandle, EvaluatedLight, EvaluatedScene, MaterialLayers, MeshKey, Shading};
+use grid4d_eval::{CurveHandle, EvaluatedLight, EvaluatedScene, MeshKey, Shading};
 use grid4d_geom::Component;
 use grid4d_scene::{
     Channel, Falloff, LightType, Material, MaterialId, Materials, MeshHandle, NodeId, ObjectKindTag, Projection,
@@ -75,9 +75,17 @@ pub(crate) struct MaterialData {
     pub opacity: f32,
     pub opacity_threshold: f32,
     pub specular: f32,
+    pub normal_strength: f32,
+    pub bump_height: f32,
 }
 
 impl MaterialData {
+    /// Whether its pictures bend the shading (Normal, Bump): its meshes need
+    /// tangents.
+    pub(crate) fn bends_normals(&self) -> bool {
+        self.maps[4].is_some() || self.maps[5].is_some()
+    }
+
     /// `None` for a material the shader draws from the instance alone (no
     /// texture, nothing cut out).
     fn of(id: MaterialId, material: &Material) -> Option<Self> {
@@ -89,6 +97,8 @@ impl MaterialData {
             opacity: material.opacity,
             opacity_threshold: material.opacity_threshold,
             specular: material.specular,
+            normal_strength: material.normal_strength,
+            bump_height: material.bump_height,
         })
     }
 }
@@ -167,6 +177,9 @@ struct Batch {
     uvs: UvKey,
     /// The textured material its instances share (refreshed every frame).
     material: Option<MaterialData>,
+    /// 0: the surface as usual; 1, 2, …: a Material tag drawn over the ones
+    /// below it, in that order.
+    level: u8,
     /// The geometry of a [`MeshKey::Polygon`], for the renderer to upload.
     mesh: Option<MeshHandle>,
     /// The curve of a [`MeshKey::Curve`].
@@ -183,6 +196,7 @@ pub(crate) struct Geometry<'a> {
     pub curve: Option<&'a CurveHandle>,
     pub uvs: UvKey,
     pub material: Option<&'a MaterialData>,
+    pub level: u8,
 }
 
 /// The plane the grid lies in: the ground in perspective views and looking down
@@ -275,9 +289,9 @@ pub struct FrameData {
     frame: u64,
 }
 
-/// What separates batches: the mesh, its smoothing, its texture coordinates
-/// and its textured material.
-type BatchKey = (MeshKey, Shading, UvKey, Option<MaterialId>);
+/// What separates batches: the mesh, its smoothing, its texture coordinates,
+/// its textured material and the layer level it draws.
+type BatchKey = (MeshKey, Shading, UvKey, Option<MaterialId>, u8);
 
 impl Default for FrameData {
     fn default() -> Self {
@@ -330,6 +344,7 @@ impl FrameData {
                 curve: b.curve.as_ref(),
                 uvs: b.uvs,
                 material: b.material.as_ref(),
+                level: b.level,
             };
             (b.key, b.shading, geometry, b.instances.as_slice())
         })
@@ -432,44 +447,14 @@ impl FrameData {
             if draw.marker && model.inverse().transform_point3(self.eye).length() <= 1.0 {
                 continue;
             }
-            let (uvs, material, transform, camera) = textured(scene, materials, layers, object_bounds, draw.scale);
-            let material = material.filter(|_| !draw.marker);
-            let batches = &mut self.batches;
-            let index_key = (draw.key, draw.shading, uvs, material.map(|m| m.id));
-            let slot = *self.batch_index.entry(index_key).or_insert_with(|| {
-                // A key's mesh never changes (an edited mesh has a new id), so the
-                // handle is looked up once, when its batch is created.
-                let mesh = match draw.key {
-                    MeshKey::Polygon(id) => scene.mesh(id).cloned(),
-                    _ => None,
-                };
-                let curve = match draw.key {
-                    MeshKey::Curve(id) => scene.curve(id).cloned(),
-                    _ => None,
-                };
-                batches.push(Batch {
-                    key: draw.key,
-                    shading: draw.shading,
-                    uvs,
-                    material,
-                    mesh,
-                    curve,
-                    instances: Vec::new(),
-                    last_used: frame,
-                });
-                batches.len() - 1
-            });
-            let batch = &mut self.batches[slot];
-            batch.last_used = frame;
-            batch.material = material;
+            let selected = f32::from(u8::from(is_selected(id)));
             let surface = &draw.surface;
-            let (uv, uv_offset) = uv_fields(transform, camera);
-            batch.instances.push(InstanceRaw {
+            let plain = InstanceRaw {
                 model: model.to_cols_array_2d(),
                 normal: normal_matrix(&model),
                 color: [draw.color[0], draw.color[1], draw.color[2], 1.0],
                 params: [
-                    f32::from(u8::from(is_selected(id))),
+                    selected,
                     f32::from(u8::from(draw.unlit)),
                     surface.roughness,
                     surface.metallic,
@@ -480,9 +465,43 @@ impl FrameData {
                     surface.emission[2],
                     f32::from(u8::from(draw.marker)),
                 ],
-                uv,
-                uv_offset,
-            });
+                uv: [1.0, 0.0, 0.0, 1.0],
+                uv_offset: [0.0; 4],
+            };
+            // Its Material tags from the lowest one that covers the whole
+            // surface up: the first drawn as usual, each later one over it
+            // (level 1, 2, …) wherever its own cut-out leaves it.
+            let layers = match materials {
+                Some(table) if !draw.marker => {
+                    let all = scene.material_layers(layers);
+                    let base = all
+                        .iter()
+                        .rposition(|l| table.get(l.material).is_some_and(covers))
+                        .unwrap_or(0);
+                    all.get(base..).unwrap_or(&[])
+                }
+                _ => &[],
+            };
+            if layers.is_empty() {
+                let key = (draw.key, draw.shading, UvKey::Own, None, 0);
+                self.push(scene, key, None, plain);
+            }
+            for (level, layer) in (0u8..).zip(layers) {
+                let found = materials.and_then(|table| table.get(layer.material));
+                let (uvs, material, transform, camera) = texturing(layer, found, object_bounds, draw.scale);
+                let (uv, uv_offset) = uv_fields(transform, camera);
+                let mut instance = InstanceRaw { uv, uv_offset, ..plain };
+                if let Some(m) = found {
+                    let [r, g, b] = m.color;
+                    instance.color = [r, g, b, 1.0];
+                    instance.params[2] = m.roughness;
+                    instance.params[3] = m.metallic;
+                    let [er, eg, eb] = m.emitted();
+                    instance.emission = [er, eg, eb, 0.0];
+                }
+                let key = (draw.key, draw.shading, uvs, material.map(|m| m.id), level);
+                self.push(scene, key, material.as_ref(), instance);
+            }
         }
         self.bounds = bounds;
         // A polygon object's mesh changes id on every edit (each frame of a
@@ -519,7 +538,13 @@ impl FrameData {
         });
         self.batch_index.clear();
         for (slot, batch) in self.batches.iter().enumerate() {
-            let key = (batch.key, batch.shading, batch.uvs, batch.material.map(|m| m.id));
+            let key = (
+                batch.key,
+                batch.shading,
+                batch.uvs,
+                batch.material.map(|m| m.id),
+                batch.level,
+            );
             self.batch_index.insert(key, slot);
         }
     }
@@ -534,29 +559,24 @@ impl Batch {
     }
 }
 
-/// How an object with `layers` (its Material tags) is textured: its texture
-/// coordinates, its material if it has textures, the tag's change to the
+/// Whether a Material tag of `material` hides everything below it: nothing
+/// of it is cut out.
+fn covers(material: &Material) -> bool {
+    material.map(Channel::Opacity).is_none() && material.opacity >= material.opacity_threshold
+}
+
+/// How a Material tag (`layer`, its material `found`) lies on an object with
+/// object-space `bounds` drawn at `scale`: its texture coordinates, its
+/// material if it has textures or a cut-out, the tag's change to the
 /// coordinates and whether they come from the view (Camera projection).
-/// Untextured objects keep their own coordinates and batch as before.
-fn textured(
-    scene: &EvaluatedScene,
-    materials: Option<&Materials>,
-    layers: MaterialLayers,
+fn texturing(
+    layer: &grid4d_eval::MaterialLayer,
+    found: Option<&Material>,
     bounds: Option<grid4d_scene::Aabb>,
     scale: Vec3,
 ) -> (UvKey, Option<MaterialData>, Affine2, bool) {
-    let untextured = (UvKey::Own, None, Affine2::IDENTITY, false);
-    let Some(materials) = materials else {
-        return untextured;
-    };
-    let Some(layer) = scene.material_layers(layers).last() else {
-        return untextured;
-    };
-    let Some(material) = materials
-        .get(layer.material)
-        .and_then(|m| MaterialData::of(layer.material, m))
-    else {
-        return untextured;
+    let Some(material) = found.and_then(|m| MaterialData::of(layer.material, m)) else {
+        return (UvKey::Own, None, Affine2::IDENTITY, false);
     };
     let mut uvs = UvKey::Own;
     let mut camera = false;
@@ -571,6 +591,43 @@ fn textured(
         }
     }
     (uvs, Some(material), layer.uv_transform, camera)
+}
+
+impl FrameData {
+    /// Adds `instance` to the batch of `key` (made the first time it is seen).
+    fn push(&mut self, scene: &EvaluatedScene, key: BatchKey, material: Option<&MaterialData>, instance: InstanceRaw) {
+        let frame = self.frame;
+        let batches = &mut self.batches;
+        let slot = *self.batch_index.entry(key).or_insert_with(|| {
+            let (mesh_key, shading, uvs, _, level) = key;
+            // A key's mesh never changes (an edited mesh has a new id), so the
+            // handle is looked up once, when its batch is created.
+            let mesh = match mesh_key {
+                MeshKey::Polygon(id) => scene.mesh(id).cloned(),
+                _ => None,
+            };
+            let curve = match mesh_key {
+                MeshKey::Curve(id) => scene.curve(id).cloned(),
+                _ => None,
+            };
+            batches.push(Batch {
+                key: mesh_key,
+                shading,
+                uvs,
+                material: material.copied(),
+                level,
+                mesh,
+                curve,
+                instances: Vec::new(),
+                last_used: frame,
+            });
+            batches.len() - 1
+        });
+        let batch = &mut self.batches[slot];
+        batch.last_used = frame;
+        batch.material = material.copied();
+        batch.instances.push(instance);
+    }
 }
 
 fn normal_matrix(model: &Mat4) -> [[f32; 4]; 3] {
@@ -662,6 +719,51 @@ mod tests {
     #[test]
     fn instance_layout_is_192_bytes() {
         assert_eq!(size_of::<InstanceRaw>(), 192);
+    }
+
+    #[test]
+    fn material_tags_over_others_draw_as_higher_levels_from_the_lowest_that_covers() {
+        use grid4d_scene::{MaterialTag, Tag, Texture};
+        let mut doc = Document::new("Layers");
+        let mask = doc.scene.textures_mut().insert(Texture::linked("label.png".into()));
+        let paint = doc.scene.materials_mut().insert(Material::new("Paint"));
+        let mut red = Material::new("Red");
+        red.color = [1.0, 0.0, 0.0];
+        let red = doc.scene.materials_mut().insert(red);
+        let mut label = Material::new("Label");
+        label.color = [0.0, 0.0, 1.0];
+        *label.map_mut(Channel::Opacity) = Some(TextureSlot::new(mask));
+        let label = doc.scene.materials_mut().insert(label);
+        let with = |doc: &mut Document, tags: &[MaterialId]| {
+            let mut node = Node::new("Cube", ObjectKindTag::Cube.default_kind());
+            node.data.tags = tags.iter().map(|&m| Tag::Material(MaterialTag::new(Some(m)))).collect();
+            doc.scene.insert(node);
+        };
+        // Paint with a label over it; a label hidden under red paint.
+        with(&mut doc, &[paint, label]);
+        with(&mut doc, &[label, red]);
+        let eval = evaluated(&doc);
+        let mut frame = FrameData::new();
+        frame.extract_with_materials(&eval, Some(doc.scene.materials()), |_| false);
+        let mut drawn: Vec<(u8, Option<MaterialId>, [f32; 4])> = frame
+            .draw_batches()
+            .flat_map(|(_, _, g, instances)| {
+                instances
+                    .iter()
+                    .map(move |i| (g.level, g.material.map(|m| m.id), i.color))
+            })
+            .collect();
+        drawn.sort_by(|a, b| a.0.cmp(&b.0).then(a.2[0].total_cmp(&b.2[0])));
+        let grey = Material::new("").color;
+        assert_eq!(
+            drawn,
+            [
+                (0, None, [grey[0], grey[1], grey[2], 1.0]),
+                (0, None, [1.0, 0.0, 0.0, 1.0]),
+                (1, Some(label), [0.0, 0.0, 1.0, 1.0]),
+            ],
+            "the label over the paint, nothing under the red"
+        );
     }
 
     #[test]

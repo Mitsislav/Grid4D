@@ -56,6 +56,10 @@ pub struct TextureLevel<'a> {
 /// The version the renderer records for a missing picture (a checker).
 pub const MISSING_VERSION: u64 = u64::MAX;
 
+/// The GPU memory all pictures together may take; a picture that would pass
+/// it goes up from a smaller mip level.
+pub const TEXTURE_BUDGET: u64 = 1 << 30;
+
 #[derive(Debug)]
 struct GpuTexture {
     /// Kept alive with its view.
@@ -64,6 +68,8 @@ struct GpuTexture {
     version: u64,
     /// Every texel grey: colour channels multiply their value by it.
     grey: bool,
+    /// The GPU memory it takes.
+    bytes: u64,
 }
 
 /// Layout must match `MaterialUniform` in `shaders/mesh.wgsl`.
@@ -72,6 +78,8 @@ struct GpuTexture {
 pub(crate) struct MaterialUniform {
     /// Emission strength, opacity, opacity threshold, specular.
     header: [f32; 4],
+    /// Normal strength, bump height (cm), unused, unused.
+    shape: [f32; 4],
     /// Per channel: tiling (u, v), offset (u, v); range (from, to),
     /// strength, flags (1: a picture, 2: a grey one).
     channels: [[f32; 8]; 10],
@@ -82,6 +90,7 @@ impl MaterialUniform {
     fn empty() -> Self {
         Self {
             header: [1.0, 1.0, 0.0, 0.5],
+            shape: [1.0, 0.1, 0.0, 0.0],
             channels: [[1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]; 10],
         }
     }
@@ -176,6 +185,7 @@ impl Textures {
             texture: white_texture,
             version: 0,
             grey: true,
+            bytes: 4,
         };
         let default_buffer = uniform_buffer(device, &MaterialUniform::empty());
         let views = [&white.view; 10];
@@ -228,6 +238,16 @@ impl Textures {
         if levels.is_empty() {
             return;
         }
+        // Within the device's largest side and what the budget leaves.
+        let others: u64 = self
+            .pictures
+            .iter()
+            .filter(|&(&other, _)| other != id)
+            .map(|(_, t)| t.bytes)
+            .sum();
+        let max_side = device.limits().max_texture_dimension_2d;
+        let first = first_fitting(format, levels, max_side, TEXTURE_BUDGET.saturating_sub(others));
+        let levels = levels.get(first..).unwrap_or(levels);
         let texture = make_texture(device, queue, "grid4d.texture", format, levels, version);
         self.pictures.insert(id, texture);
     }
@@ -286,6 +306,7 @@ impl Textures {
             material.opacity_threshold,
             material.specular,
         ];
+        uniform.shape = [material.normal_strength, material.bump_height, 0.0, 0.0];
         let mut views = [&self.white.view; 10];
         for (index, channel) in Channel::ALL.into_iter().enumerate() {
             let Some(slot) = material.maps[index] else { continue };
@@ -380,6 +401,26 @@ fn bind_group(
     })
 }
 
+/// The bytes the levels `levels` take on the GPU.
+fn chain_bytes(format: TexelFormat, levels: &[TextureLevel<'_>]) -> u64 {
+    levels
+        .iter()
+        .map(|l| u64::from(l.width) * u64::from(l.height) * u64::from(format.texel_bytes()))
+        .sum()
+}
+
+/// The first level of `levels` whose sides are at most `max_side` and whose
+/// chain from there takes at most `budget` bytes (the last level if none).
+fn first_fitting(format: TexelFormat, levels: &[TextureLevel<'_>], max_side: u32, budget: u64) -> usize {
+    let last = levels.len().saturating_sub(1);
+    (0..levels.len())
+        .find(|&i| {
+            let fits = |level: &TextureLevel<'_>| level.width.max(level.height) <= max_side;
+            levels.get(i).is_some_and(fits) && chain_bytes(format, levels.get(i..).unwrap_or(&[])) <= budget
+        })
+        .unwrap_or(last)
+}
+
 /// The levels of `levels` that make a valid mip chain: each half the one
 /// before (rounded down, at least 1) and holding all its texels.
 fn valid_levels(format: TexelFormat, levels: &[TextureLevel<'_>]) -> usize {
@@ -448,6 +489,7 @@ fn make_texture(
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     GpuTexture {
         grey: is_grey(format, &first),
+        bytes: chain_bytes(format, levels),
         texture,
         view,
         version,
@@ -512,8 +554,33 @@ mod tests {
 
     #[test]
     fn material_uniform_is_16_byte_aligned() {
-        assert_eq!(size_of::<MaterialUniform>(), 336);
+        assert_eq!(size_of::<MaterialUniform>(), 352);
         assert_eq!(size_of::<MaterialUniform>() % 16, 0);
+    }
+
+    #[test]
+    fn pictures_too_large_go_up_from_a_smaller_level() {
+        let bytes = [0u8; 256];
+        let level = |side| TextureLevel {
+            width: side,
+            height: side,
+            bytes: &bytes,
+        };
+        let chain = [level(8), level(4), level(2), level(1)];
+        // 8×8 + 4×4 + 2×2 + 1 texels of 4 bytes.
+        assert_eq!(chain_bytes(TexelFormat::Srgb8, &chain), 340);
+        assert_eq!(first_fitting(TexelFormat::Srgb8, &chain, 16, 1000), 0);
+        assert_eq!(
+            first_fitting(TexelFormat::Srgb8, &chain, 4, 1000),
+            1,
+            "the device's largest side"
+        );
+        assert_eq!(first_fitting(TexelFormat::Srgb8, &chain, 16, 84), 1, "the budget");
+        assert_eq!(
+            first_fitting(TexelFormat::Srgb8, &chain, 16, 0),
+            3,
+            "at least the smallest"
+        );
     }
 
     #[test]

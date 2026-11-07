@@ -137,13 +137,24 @@ object's, or an inheriting child's), not always the tag's object's.
   shader, so they cost no new mesh.
 - Camera projects through the view's camera (a linked camera object is used
   by the path tracer, 15.6, and by the viewport later).
-- Only the top tag is drawn; layering in the viewport follows in 15.5b.
+
+## As built (15.5b, layers in the viewport)
+
+- An object's Material tags are drawn from the last one that covers the
+  whole surface (no Opacity picture, opacity at or above its threshold) up:
+  that one as the surface, each later one as a layer — the same mesh drawn
+  again on its own depth (an invariant position, depth test less-or-equal,
+  no depth writes), lowest layer first, its cut-out leaving what is below.
+  Tags under a covering one are not drawn at all.
+- Layers are batched like surfaces (by mesh, coordinates, material and
+  level); shadows, ambient occlusion and edge lines use the surface only.
 
 ## Acceptance criteria
 
 - [ ] A cube with a photo on a Box projection shows it on all six sides,
       undistorted, in the viewport and the render.
-- [ ] Two tags on one object: the later one's opaque parts cover the earlier.
+- [x] Two tags on one object: the later one's opaque parts cover the earlier
+      (viewport; the render follows in 15.6).
 - [x] A 1.0 document's Material tags read as UV projection, tiling 1 —
       unchanged rendering.
 - [x] Bake to UVs gives the same picture as the projection it replaces.

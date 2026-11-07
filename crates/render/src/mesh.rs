@@ -3,7 +3,7 @@
 //! once per key by [`ViewportRenderer`](crate::ViewportRenderer).
 
 use bytemuck::{Pod, Zeroable};
-use glam::Vec2;
+use glam::{Vec2, Vec4};
 use grid4d_geom::{PolyMesh, Smoothing, TriMesh, Triangulator};
 
 #[repr(C)]
@@ -13,6 +13,9 @@ pub struct Vertex {
     pub normal: [f32; 3],
     /// Texture coordinates (the mesh's own, or a projection's).
     pub uv: [f32; 2],
+    /// Along increasing `u`, `w` the side of up the picture (normal maps;
+    /// zero where none is needed).
+    pub tangent: [f32; 4],
 }
 
 /// Buffers reused while generating meshes for new keys.
@@ -20,16 +23,19 @@ pub struct Vertex {
 pub struct TessellationScratch {
     triangulator: Triangulator,
     tri: TriMesh,
+    tangents: Vec<Vec4>,
 }
 
 /// Triangulates `mesh` into GPU vertices and indices (both cleared first),
 /// smoothed with `smoothing` (the object's Phong angle). `uvs` (one per corner
 /// of `mesh`) replaces the mesh's own texture coordinates; without either the
-/// vertices get (0, 0).
+/// vertices get (0, 0). With `tangents` the vertices get them (normal and
+/// bump maps); they cost a little, so only meshes that need them ask.
 pub fn tessellate(
     mesh: &PolyMesh,
     smoothing: Smoothing,
     uvs: Option<&[Vec2]>,
+    tangents: bool,
     scratch: &mut TessellationScratch,
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u32>,
@@ -39,6 +45,12 @@ pub fn tessellate(
     let uvs = uvs
         .filter(|uvs| uvs.len() == scratch.tri.positions.len())
         .unwrap_or(&scratch.tri.uvs);
+    scratch.tangents.clear();
+    if tangents {
+        let tri = &scratch.tri;
+        grid4d_geom::uv::tangents(&tri.positions, &tri.normals, uvs, &tri.indices, &mut scratch.tangents);
+    }
+    let tangent_of = &scratch.tangents;
     vertices.clear();
     vertices.extend(
         scratch
@@ -51,6 +63,7 @@ pub fn tessellate(
                 position: p.to_array(),
                 normal: n.to_array(),
                 uv: uvs.get(i).map_or([0.0; 2], |uv| uv.to_array()),
+                tangent: tangent_of.get(i).map_or([0.0; 4], |t| t.to_array()),
             }),
     );
     indices.clear();
@@ -113,6 +126,7 @@ mod tests {
                 &key.build().unwrap(),
                 Smoothing::default(),
                 None,
+                true,
                 &mut scratch,
                 &mut vertices,
                 &mut indices,
@@ -148,6 +162,7 @@ mod tests {
             &mesh,
             Smoothing::default(),
             None,
+            false,
             &mut scratch,
             &mut vertices,
             &mut indices,

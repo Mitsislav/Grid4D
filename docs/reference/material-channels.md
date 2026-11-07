@@ -142,6 +142,23 @@ of switchable channels and reflectance layers; no procedural textures (Phase
 - A frame of 10 000 objects in textured and projected materials allocates
   nothing (`render/tests/steady_frame.rs`).
 
+## As built (15.5b)
+
+- Normal pictures are tangent-space, +Y up the picture (glTF's way); the
+  vertices of meshes drawn with a Normal or Bump picture carry tangents
+  (`grid4d_geom::uv::tangents`: along increasing `u`, shared by vertices at
+  one place with one normal and UV, so smooth surfaces show no seams; `w`
+  says which side is up the picture, flipped again for mirrored objects).
+  *Strength* scales the bend (with the slot's strength).
+- Bump pictures tilt the normal against the height's slope across the pixel
+  (screen-space derivatives, no tangents); *Height* is in centimetres; used
+  only without a Normal picture.
+- The GPU memory of all pictures is held under 1 GiB, and no side over the
+  device's limit: a picture that would pass either goes up from the first
+  mip level that fits.
+- Not yet: Transmission and Clearcoat in the viewport; cut-outs in the
+  shadow map and the ambient occlusion (they shade as solid).
+
 ## Acceptance criteria
 
 - [x] A 1.0 document's materials open with the same four values and render
