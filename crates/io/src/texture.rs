@@ -48,6 +48,16 @@ pub struct Level {
 }
 
 impl Level {
+    /// The texels as bytes, as the GPU takes them: RGBA8 as stored, half
+    /// floats little-endian.
+    #[must_use]
+    pub fn bytes(&self) -> std::borrow::Cow<'_, [u8]> {
+        match &self.pixels {
+            Pixels::Rgba8(bytes) => std::borrow::Cow::Borrowed(bytes),
+            Pixels::RgbaF16(values) => values.iter().flat_map(|v| v.to_le_bytes()).collect(),
+        }
+    }
+
     /// The level as 8-bit sRGB-encoded RGBA, for showing it on screen (values
     /// above 1 are clipped).
     #[must_use]

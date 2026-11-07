@@ -22,7 +22,7 @@ grid4d-geom ◀── grid4d-scene ◀── grid4d-eval ◀── grid4d-render
 | `grid4d-scene` | The document — the single source of truth: the scene graph, object kinds and parameters, tags, animation tracks, materials, textures, layers, takes, render and simulation settings, and `SceneEdit` (every undoable change). No GPU, no interface, no file formats | geom |
 | `grid4d-plugin` | The plugin API: parameter descriptions, generator / deformer / command traits, the registry | geom, scene |
 | `grid4d-eval` | What is shown at a frame: world matrices, drawables, pick shapes, the Material tags reaching each object (material layers), generated and deformed meshes, clones, lights — cached, and skipped when nothing changed | geom, text, scene, plugin |
-| `grid4d-render` | The wgpu viewport: per-frame extraction, mesh cache, shading modes, shadows, SSAO, picking, snapping. Reads the evaluated scene, never the document | geom, scene, eval |
+| `grid4d-render` | The wgpu viewport: per-frame extraction, mesh cache, shading modes, textures (pictures handed over by the interface, a bind group per textured material), shadows, SSAO, picking, snapping. Reads the evaluated scene, never the document (the materials' texture slots come with the frame) | geom, scene, eval |
 | `grid4d-raytrace` | The final renderer: a deterministic CPU path tracer over the evaluated scene | geom, scene, eval |
 | `grid4d-sim` | Rigid-body simulation, cached per frame; the only crate that sees `rapier3d` | geom, scene, eval |
 | `grid4d-io` | `.g4d` files (a versioned zip: JSON, binary meshes, embedded pictures), glTF and OBJ import / export, PNG and OpenEXR out, texture pictures in (decoded with mip-maps) | geom, scene |

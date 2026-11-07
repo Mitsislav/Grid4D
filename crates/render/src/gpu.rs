@@ -4,15 +4,17 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt as _;
 
 use grid4d_eval::{CurveHandle, MeshKey, Shading};
-use grid4d_scene::MeshHandle;
+use grid4d_scene::{MaterialId, MeshHandle, TextureId};
 
 use crate::{
     DisplayStyle, FrameData, InstanceRaw, LightRaw, Vertex, ViewportTarget,
     components::{ComponentOverlay, EdgeInstance, FaceVertex, PointInstance},
     display::{Fill, bounding_box, curve_lines, edge_lines},
     effects::{ShadowMaps, ShadowUniform, Ssao, SsaoUniform, shadow_view},
+    frame::UvKey,
     mesh::{TessellationScratch, tessellate},
     shaders,
+    textures::{TexelFormat, TextureLevel, Textures},
 };
 
 /// Describes the render target the viewport draws into. Must match the host's
@@ -180,12 +182,13 @@ struct GpuMesh {
 }
 
 /// What a cached mesh is made of: a key's geometry with a Phong angle, as is or
-/// as its bounding box.
+/// as its bounding box, with its own texture coordinates or a projection's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct DrawKey {
     mesh: MeshKey,
     shading: Shading,
     boxed: bool,
+    uvs: UvKey,
 }
 
 /// One instanced draw: a cached mesh and its instances in the instance buffer.
@@ -195,6 +198,8 @@ struct Draw {
     instances: Range<u32>,
     /// A spline's curve: its lines show in every display mode.
     curve: bool,
+    /// Its textured material (bind group 2), if any.
+    material: Option<MaterialId>,
 }
 
 const INSTANCE_STRIDE: u64 = size_of::<InstanceRaw>() as u64;
@@ -207,7 +212,8 @@ const POLYGON_TTL_FRAMES: u64 = 8;
 /// How often (in frames) the cache looks for meshes to free.
 const EVICTION_INTERVAL: u64 = 120;
 
-const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 12 => Float32x2];
 /// Line vertices: a position.
 const LINE_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x3];
 /// `PointInstance` and `FaceVertex`: position, flags.
@@ -215,12 +221,14 @@ const POSITION_FLAGS_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_
 /// `EdgeInstance`: a, flags, b.
 const EDGE_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32, 2 => Float32x3];
-const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
+const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 12] = wgpu::vertex_attr_array![
     2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, // model
     6 => Float32x4, 7 => Float32x4, 8 => Float32x4,                 // normal matrix
     9 => Float32x4,                                                 // color
     10 => Float32x4,                                                // params
     11 => Float32x4,                                                // emission
+    13 => Float32x4,                                                // uv (2 × 2)
+    14 => Float32x4,                                                // uv offset, flags
 ];
 /// The instances ([`InstanceRaw`]) as vertex buffer 1 of every object pass.
 pub(crate) const INSTANCE_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
@@ -256,6 +264,8 @@ pub struct ViewportRenderer {
     shadows: ShadowMaps,
     /// The ambient-occlusion passes.
     ssao: Ssao,
+    /// Texture pictures and the bind groups of textured materials.
+    textures: Textures,
     /// This frame's shadow faces to draw (0: no shadow) and whether it draws SSAO.
     shadow_faces: u32,
     ssao_on: bool,
@@ -340,12 +350,14 @@ impl ViewportRenderer {
         let light_buffer = create_light_buffer(device, INITIAL_LIGHT_CAPACITY);
         let shadows = ShadowMaps::new(device);
         let ssao = Ssao::new(device);
+        let textures = Textures::new(device);
         let camera_bind_group =
             create_camera_bind_group(device, &camera_layout, &camera_buffer, &light_buffer, &shadows);
-        // Group 0: camera, lights and shadow; group 1: the view's ambient occlusion.
+        // Group 0: camera, lights and shadow; group 1: the view's ambient
+        // occlusion; group 2: the object's material (textures).
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("grid4d.viewport.layout"),
-            bind_group_layouts: &[Some(&camera_layout), Some(&ssao.layouts.ao)],
+            bind_group_layouts: &[Some(&camera_layout), Some(&ssao.layouts.ao), Some(&textures.layout)],
             immediate_size: 0,
         });
 
@@ -433,6 +445,7 @@ impl ViewportRenderer {
             camera_bind_group,
             shadows,
             ssao,
+            textures,
             shadow_faces: 0,
             ssao_on: false,
             meshes: HashMap::new(),
@@ -460,6 +473,7 @@ impl ViewportRenderer {
     /// them; the overlay is uploaded only when it changed.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FrameData, viewport: [u32; 2]) {
         self.frame += 1;
+        self.textures.begin_frame(queue);
         let display = frame.display;
         self.fill = display.shading.fill();
         self.draw_lines = display.shading.lines();
@@ -567,6 +581,7 @@ impl ViewportRenderer {
                 shading,
                 // A curve is a curve in every style.
                 boxed: boxed && !curve,
+                uvs: geometry.uvs,
             };
             let ready = if curve {
                 self.ensure_curve(device, key, geometry.curve)
@@ -575,6 +590,9 @@ impl ViewportRenderer {
             };
             if !ready {
                 continue; // nothing to draw for this shape
+            }
+            if let Some(material) = geometry.material {
+                self.textures.prepare(device, queue, material, self.frame);
             }
             queue.write_buffer(
                 &self.instance_buffer,
@@ -586,6 +604,7 @@ impl ViewportRenderer {
                 key,
                 instances: to_u32(offset)..to_u32(end),
                 curve,
+                material: geometry.material.map(|m| m.id),
             });
             offset = end;
         }
@@ -597,8 +616,13 @@ impl ViewportRenderer {
         let periodic = self.frame.is_multiple_of(EVICTION_INTERVAL);
         self.meshes.retain(|key, mesh| match key.mesh {
             MeshKey::Polygon(_) | MeshKey::Curve(_) => mesh.last_used + POLYGON_TTL_FRAMES > frame_now,
+            // A projection's coordinates follow the object's size.
+            _ if key.uvs != UvKey::Own => mesh.last_used + POLYGON_TTL_FRAMES > frame_now,
             _ => !periodic || mesh.last_used + MESH_TTL_FRAMES > frame_now,
         });
+        if periodic {
+            self.textures.evict(frame_now);
+        }
         self.draw_grid = frame.show_grid;
         self.overlay.sync(device, queue, &frame.components);
     }
@@ -651,9 +675,16 @@ impl ViewportRenderer {
             if build_faces {
                 mesh.faces = match geometry {
                     Some(geometry) => {
+                        // A projection's coordinates, one per corner.
+                        let projected = key
+                            .uvs
+                            .projection()
+                            .filter(|_| !key.boxed)
+                            .map(|(projection, matrix)| grid4d_geom::uv::project(projection, geometry, matrix));
                         tessellate(
                             geometry,
                             key.shading.smoothing(),
+                            projected.as_deref(),
                             &mut self.tessellation,
                             &mut self.vertex_scratch,
                             &mut self.index_scratch,
@@ -697,13 +728,13 @@ impl ViewportRenderer {
         for face in 0..self.shadow_faces {
             let mut pass = self.shadows.begin_face(&mut encoder, face);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            self.draw_parts(&mut pass, |mesh| mesh.faces.get());
+            self.draw_parts(&mut pass, false, |mesh| mesh.faces.get());
         }
         let ao = match target.ssao_textures() {
             Some(textures) if self.ssao_on => {
                 self.ssao.record(&mut encoder, textures, |pass| {
                     pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-                    self.draw_parts(pass, |mesh| mesh.faces.get());
+                    self.draw_parts(pass, false, |mesh| mesh.faces.get());
                 });
                 &textures.ao
             }
@@ -727,6 +758,7 @@ impl ViewportRenderer {
     fn paint(&self, pass: &mut wgpu::RenderPass<'_>, ao: &wgpu::BindGroup) {
         pass.set_bind_group(0, &self.camera_bind_group, &[]);
         pass.set_bind_group(1, ao, &[]);
+        pass.set_bind_group(2, self.textures.group(None), &[]);
 
         let surfaces = match self.fill {
             Fill::Lit | Fill::Quick | Fill::Constant => Some(&self.mesh_pipeline),
@@ -736,7 +768,8 @@ impl ViewportRenderer {
         if let Some(pipeline) = surfaces {
             pass.set_pipeline(pipeline);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            self.draw_parts(pass, |mesh| mesh.faces.get());
+            self.draw_parts(pass, true, |mesh| mesh.faces.get());
+            pass.set_bind_group(2, self.textures.group(None), &[]);
         }
 
         // The grid after the meshes: depth-tested against them, alpha-blended.
@@ -751,7 +784,7 @@ impl ViewportRenderer {
             pass.set_pipeline(&self.line_pipeline);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             let all = self.draw_lines;
-            self.draw_parts_where(pass, |draw| all || draw.curve, |mesh| mesh.lines.get());
+            self.draw_parts_where(pass, |draw| all || draw.curve, false, |mesh| mesh.lines.get());
         }
 
         // Component overlay on top: tinted polygons, edges, points, then the
@@ -781,9 +814,15 @@ impl ViewportRenderer {
 }
 
 impl ViewportRenderer {
-    /// One instanced draw per batch, of the part of its mesh that `part` picks.
-    fn draw_parts(&self, pass: &mut wgpu::RenderPass<'_>, part: impl Fn(&GpuMesh) -> Option<&GpuGeometry>) {
-        self.draw_parts_where(pass, |_| true, part);
+    /// One instanced draw per batch, of the part of its mesh that `part` picks;
+    /// with `materials` each batch's material is bound first (group 2).
+    fn draw_parts(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        materials: bool,
+        part: impl Fn(&GpuMesh) -> Option<&GpuGeometry>,
+    ) {
+        self.draw_parts_where(pass, |_| true, materials, part);
     }
 
     /// [`draw_parts`](Self::draw_parts) for the batches `which` picks.
@@ -791,16 +830,56 @@ impl ViewportRenderer {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         which: impl Fn(&Draw) -> bool,
+        materials: bool,
         part: impl Fn(&GpuMesh) -> Option<&GpuGeometry>,
     ) {
+        let mut bound = None;
         for draw in self.draws.iter().filter(|d| which(d)) {
             let Some(geometry) = self.meshes.get(&draw.key).and_then(&part) else {
                 continue;
             };
+            if materials && bound != Some(draw.material) {
+                pass.set_bind_group(2, self.textures.group(draw.material), &[]);
+                bound = Some(draw.material);
+            }
             pass.set_vertex_buffer(0, geometry.vertices.slice(..));
             pass.set_index_buffer(geometry.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..geometry.count, 0, draw.instances.clone());
         }
+    }
+}
+
+impl ViewportRenderer {
+    /// Whether texture `id`'s picture is on the GPU at `version`.
+    #[must_use]
+    pub fn has_texture(&self, id: TextureId, version: u64) -> bool {
+        self.textures.has(id, version)
+    }
+
+    /// Puts texture `id`'s picture (its mip chain, largest first) on the GPU;
+    /// materials using it show it from the next frame. Call it when a picture
+    /// arrives or changes, never every frame.
+    pub fn upload_texture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        id: TextureId,
+        version: u64,
+        format: TexelFormat,
+        levels: &[TextureLevel<'_>],
+    ) {
+        self.textures.upload(device, queue, id, version, format, levels);
+    }
+
+    /// Shows texture `id` as missing (a magenta and black checker); its version
+    /// becomes [`MISSING_VERSION`](crate::MISSING_VERSION).
+    pub fn missing_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, id: TextureId) {
+        self.textures.missing(device, queue, id);
+    }
+
+    /// Frees the pictures of textures `keep` refuses (no longer in the document).
+    pub fn retain_textures(&mut self, keep: impl Fn(TextureId) -> bool) {
+        self.textures.retain(keep);
     }
 }
 

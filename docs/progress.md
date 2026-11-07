@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.4c — Preview balls (2026-11-07) |
-| Next step | 15.5 — Textures, projections and the material channels in the viewport |
-| Tests | 816 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.5a — Textures in the viewport (2026-11-07) |
+| Next step | 15.5b — Normal and bump maps, layers of Material tags, the GPU memory budget |
+| Tests | 819 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2316,6 +2316,7 @@ risks R5 – R8 go with it.
 | 15.4a | The material channels: `Material` gains Specular, Normal / Bump, Emission Strength, Opacity and its threshold, Transmission and IOR, Clearcoat and its roughness, Two-Sided, and a `TextureSlot` (tiling, offset, range, strength) per `Channel`; `.g4d` v4 writes them (each left out at its default) and `maps` by texture index, version 3 files drop them; the Attribute Manager's material page in groups with a texture row per channel and Load…; Remove Unused keeps textures materials use; emission strength reaches the viewport and the path tracer; Greek; the manual's §19 rewritten with a picture | 806 |
 | 15.4b | The Material tag's projections and layers: `Tag::Material(MaterialTag)` with a `Projection` (UV, Box, Spherical, Cylindrical, Flat, Camera; `grid4d_geom::uv::project`, `fit`), offset, tiling, rotation, a `Placement` or Fit to Object, and a camera; several Material tags per object, the selected tag a `TagRef` with its `nth`; `MaterialLayer`s per evaluated node and clone (own tags, else inherited, else a generator's cage's); `.g4d` v4 writes the new fields (version 3 drops them, also in takes); Shift + drop adds a layer, a drop on a tag icon changes that tag; Bake to UVs; the script `material` property keeps projections; Greek; manual §19.2 with a picture | 814 |
 | 15.4c | Preview balls: `ui::previews::MaterialPreviews` renders each material on a ball with the path tracer (96 px, two lights, a dim grey surrounding for reflections, the ball's coverage from a second render so the background stays transparent) on a worker thread, one at a time, again after each change (the old picture shown meanwhile, a painted ball before the first); the Material Manager, the dragged material and the Attribute Manager's material page show them; the manual's §19 with a picture | 816 |
+| 15.5a | Textures in the viewport: GPU vertices carry UVs; a Material tag's shape projection makes per-corner coordinates once per GPU mesh (`UvKey`: projection + matrix), its turn / tiling / offset ride per instance (`InstanceRaw` 192 bytes), Camera projects through the view; the interface hands decoded pictures to the renderer when they arrive (`upload_texture`, sRGB / linear / half float, mip chains; a magenta checker for missing ones); one bind group per textured material (group 2: a uniform of channel settings, a trilinear anisotropic sampler, a picture per channel); Base Color, Metallic, Roughness, Specular and Emission pictures and Opacity cut-out in `mesh.wgsl`; untextured objects batch as before; the allocation test includes textured and projected materials; manual §19 with a picture | 819 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2479,6 +2480,34 @@ risks R5 – R8 go with it.
   Material Manager and the Attribute Manager share one upload.
 - **Manual pictures waited for nothing.** The walkthrough now runs frames
   until every preview is current before it saves the material pictures.
+
+**15.5a — Textures in the viewport**
+
+*Problems and solutions:*
+- **Another large step split in two.** 15.5 (pictures on the GPU, every
+  channel, normal maps, layers, a memory budget) is built as 15.5a (the
+  pipeline and the value channels) and 15.5b (tangents, normal and bump,
+  layers, the budget).
+- **Projections need the drawn mesh at its size.** Primitives are drawn as
+  unit meshes scaled per instance, so a shape projection's matrix is the
+  placement (or fitted box) times the instance's scale; the projection and
+  that matrix (as bits) key the GPU mesh, so moving and turning an object
+  reuse its coordinates. Such meshes are dropped as soon as no frame draws
+  them, like edited polygon meshes.
+- **The renderer may not see the interface's picture cache.** It takes
+  pictures through `upload_texture` (levels as bytes and a texel format) and
+  `missing_texture`; the interface's glue compares versions each frame and
+  copies nothing while all are current.
+- **No queue when the renderer is made.** The white picture bound for empty
+  channels is created then and written on the first frame.
+- **Untextured scenes unchanged.** Only materials with a picture (or a
+  cut-out) get a bind group and their own batches; everything else batches
+  and draws as in 1.0, with a default group whose channels have strength 0.
+- **Sampling in uniform control flow.** Every channel's picture is read at
+  the start of the fragment shader (a white one where there is none), before
+  the cut-out's `discard`.
+- **Sixteen vertex attributes.** Three per vertex and twelve per instance:
+  one left for 15.5b's tangents.
 
 ---
 

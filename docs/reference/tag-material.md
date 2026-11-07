@@ -126,6 +126,19 @@ object's, or an inheriting child's), not always the tag's object's.
 - Bake to UVs is a button on the tag's page (polygon objects; Box,
   Spherical, Cylindrical, Flat); it clears the placement once the tag is UV.
 
+## As built (15.5a, the viewport)
+
+- A shape projection's coordinates are made per corner on the CPU, once per
+  GPU mesh: the batch key holds the projection and its matrix (the
+  placement, or the fitted box, times the drawn mesh's scale), so moving or
+  turning an object reuses them; a change of size or placement makes new
+  ones (dropped as soon as they are not drawn).
+- The tag's turn, tiling and offset travel per instance and apply in the
+  shader, so they cost no new mesh.
+- Camera projects through the view's camera (a linked camera object is used
+  by the path tracer, 15.6, and by the viewport later).
+- Only the top tag is drawn; layering in the viewport follows in 15.5b.
+
 ## Acceptance criteria
 
 - [ ] A cube with a photo on a Box projection shows it on all six sides,

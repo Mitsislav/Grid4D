@@ -60,9 +60,48 @@ struct Shadow {
 @group(1) @binding(0) var ao_map: texture_2d<f32>;
 @group(1) @binding(1) var ao_sampler: sampler;
 
+// The object's material's textures. Must match `MaterialUniform` in
+// textures.rs. A channel without a picture has strength 0 (its value stays)
+// and a white picture bound.
+struct ChannelSettings {
+    // xy: tiling, zw: offset.
+    place: vec4<f32>,
+    // xy: the range the picture's 0 – 1 maps to, z: strength, w: flags (1: a
+    // picture, 2: a grey one, which multiplies a colour).
+    range: vec4<f32>,
+};
+
+struct MaterialUniform {
+    // x: emission strength, y: opacity, z: opacity threshold, w: specular.
+    header: vec4<f32>,
+    // In `Channel::ALL` order.
+    channels: array<ChannelSettings, 10>,
+};
+
+@group(2) @binding(0) var<uniform> material: MaterialUniform;
+@group(2) @binding(1) var material_sampler: sampler;
+@group(2) @binding(2) var map_base_color: texture_2d<f32>;
+@group(2) @binding(3) var map_metallic: texture_2d<f32>;
+@group(2) @binding(4) var map_roughness: texture_2d<f32>;
+@group(2) @binding(5) var map_specular: texture_2d<f32>;
+@group(2) @binding(6) var map_normal: texture_2d<f32>;
+@group(2) @binding(7) var map_bump: texture_2d<f32>;
+@group(2) @binding(8) var map_emission: texture_2d<f32>;
+@group(2) @binding(9) var map_opacity: texture_2d<f32>;
+@group(2) @binding(10) var map_transmission: texture_2d<f32>;
+@group(2) @binding(11) var map_clearcoat: texture_2d<f32>;
+
+const BASE_COLOR: u32 = 0u;
+const METALLIC: u32 = 1u;
+const ROUGHNESS: u32 = 2u;
+const SPECULAR: u32 = 3u;
+const EMISSION: u32 = 6u;
+const OPACITY: u32 = 7u;
+
 struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(12) uv: vec2<f32>,
 };
 
 // Must match `InstanceRaw` in frame.rs.
@@ -79,6 +118,10 @@ struct InstanceIn {
     @location(10) params: vec4<f32>,
     // rgb: light the surface gives off
     @location(11) emission: vec4<f32>,
+    // The Material tag's change to texture coordinates: a 2 × 2 matrix
+    // (columns), then its shift (xy) and z: 1 for a Camera projection.
+    @location(13) uv_matrix: vec4<f32>,
+    @location(14) uv_offset: vec4<f32>,
 };
 
 struct VertexOut {
@@ -88,6 +131,11 @@ struct VertexOut {
     @location(2) color: vec4<f32>,
     @location(3) params: vec4<f32>,
     @location(4) emission: vec3<f32>,
+    // The texture coordinates (the tag's change applied; not used by a
+    // Camera projection).
+    @location(5) uv: vec2<f32>,
+    @location(6) @interpolate(flat) uv_matrix: vec4<f32>,
+    @location(7) @interpolate(flat) uv_offset: vec4<f32>,
 };
 
 @vertex
@@ -103,7 +151,37 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     out.color = instance.color;
     out.params = instance.params;
     out.emission = instance.emission.rgb;
+    out.uv = tag_uv(vertex.uv, instance.uv_matrix, instance.uv_offset);
+    out.uv_matrix = instance.uv_matrix;
+    out.uv_offset = instance.uv_offset;
     return out;
+}
+
+// A Material tag's change to coordinates `uv`.
+fn tag_uv(uv: vec2<f32>, m: vec4<f32>, offset: vec4<f32>) -> vec2<f32> {
+    return mat2x2<f32>(m.xy, m.zw) * uv + offset.xy;
+}
+
+// Where channel `index`'s picture is read: the surface's coordinates through
+// the channel's tiling and offset.
+fn channel_uv(index: u32, uv: vec2<f32>) -> vec2<f32> {
+    let place = material.channels[index].place;
+    return uv * place.xy + place.zw;
+}
+
+// A number channel: its value, or towards the picture's red mapped onto its range.
+fn scalar_channel(index: u32, value: f32, picture: vec4<f32>) -> f32 {
+    let r = material.channels[index].range;
+    return mix(value, mix(r.x, r.y, picture.r), r.z);
+}
+
+// A colour channel: its value, or towards the picture (a grey picture
+// multiplies the value).
+fn colour_channel(index: u32, value: vec3<f32>, picture: vec4<f32>) -> vec3<f32> {
+    let r = material.channels[index].range;
+    let grey = (u32(r.w + 0.5) & 2u) != 0u;
+    let textured = select(picture.rgb, value * picture.rgb, grey);
+    return mix(value, textured, r.z);
 }
 
 fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
@@ -209,6 +287,23 @@ fn lit_by_key_light(p: vec3<f32>, n: vec3<f32>, light_position: vec3<f32>) -> f3
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    // The material's pictures, read first (in uniform control flow). A
+    // Camera projection reads them where the view shows the point.
+    var uv = in.uv;
+    if (in.uv_offset.z > 0.5) {
+        uv = tag_uv(in.clip_position.xy / camera.viewport.xy, in.uv_matrix, in.uv_offset);
+    }
+    let base_picture = textureSample(map_base_color, material_sampler, channel_uv(BASE_COLOR, uv));
+    let metallic_picture = textureSample(map_metallic, material_sampler, channel_uv(METALLIC, uv));
+    let roughness_picture = textureSample(map_roughness, material_sampler, channel_uv(ROUGHNESS, uv));
+    let specular_picture = textureSample(map_specular, material_sampler, channel_uv(SPECULAR, uv));
+    let emission_picture = textureSample(map_emission, material_sampler, channel_uv(EMISSION, uv));
+    let opacity_picture = textureSample(map_opacity, material_sampler, channel_uv(OPACITY, uv));
+    // Cut-out: below the threshold the surface is not there.
+    if (scalar_channel(OPACITY, material.header.y, opacity_picture) < material.header.z) {
+        discard;
+    }
+
     let view_dir = normalize(camera.eye.xyz - in.world_position);
     var n = normalize(in.world_normal);
     // Two-sided lighting that does not depend on winding (planes seen from below).
@@ -216,12 +311,14 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         n = -n;
     }
 
-    // The material: metals reflect their colour and have no diffuse part.
-    let base = in.color.rgb;
-    let roughness = clamp(in.params.z, 0.02, 1.0);
-    let metallic = clamp(in.params.w, 0.0, 1.0);
+    // The material: metals reflect their colour and have no diffuse part; a
+    // dielectric reflects 8 % × its specular (4 % at the usual 0.5).
+    let base = colour_channel(BASE_COLOR, in.color.rgb, base_picture);
+    let roughness = clamp(scalar_channel(ROUGHNESS, in.params.z, roughness_picture), 0.02, 1.0);
+    let metallic = clamp(scalar_channel(METALLIC, in.params.w, metallic_picture), 0.0, 1.0);
+    let specular = clamp(scalar_channel(SPECULAR, material.header.w, specular_picture), 0.0, 1.0);
     let diffuse = base * (1.0 - metallic);
-    let f0 = mix(vec3<f32>(0.04), base, metallic);
+    let f0 = mix(vec3<f32>(0.08 * specular), base, metallic);
     let shininess = clamp(2.0 / pow(roughness, 4.0) - 2.0, 1.0, 2048.0);
 
     // Soft light from all around (stronger from above), and its reflection: a dim
@@ -267,7 +364,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         // Constant Shading: the colour itself.
         lit = base;
     }
-    var rgb = mix(lit, base, in.params.y) + in.emission;
+    // Emission: a grey picture scales the light given off, a coloured one is it.
+    let emission_range = material.channels[EMISSION].range;
+    let grey_emission = (u32(emission_range.w + 0.5) & 2u) != 0u;
+    let pictured = select(emission_picture.rgb * material.header.x, in.emission * emission_picture.rgb, grey_emission);
+    let emission = mix(in.emission, pictured, emission_range.z);
+    var rgb = mix(lit, base, in.params.y) + emission;
 
     // Selected objects get a subtle orange Fresnel rim (the UI adds bbox corner brackets).
     let rim = pow(1.0 - facing, 4.0);

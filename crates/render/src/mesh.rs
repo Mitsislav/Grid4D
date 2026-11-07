@@ -3,6 +3,7 @@
 //! once per key by [`ViewportRenderer`](crate::ViewportRenderer).
 
 use bytemuck::{Pod, Zeroable};
+use glam::Vec2;
 use grid4d_geom::{PolyMesh, Smoothing, TriMesh, Triangulator};
 
 #[repr(C)]
@@ -10,6 +11,8 @@ use grid4d_geom::{PolyMesh, Smoothing, TriMesh, Triangulator};
 pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    /// Texture coordinates (the mesh's own, or a projection's).
+    pub uv: [f32; 2],
 }
 
 /// Buffers reused while generating meshes for new keys.
@@ -20,15 +23,22 @@ pub struct TessellationScratch {
 }
 
 /// Triangulates `mesh` into GPU vertices and indices (both cleared first),
-/// smoothed with `smoothing` (the object's Phong angle).
+/// smoothed with `smoothing` (the object's Phong angle). `uvs` (one per corner
+/// of `mesh`) replaces the mesh's own texture coordinates; without either the
+/// vertices get (0, 0).
 pub fn tessellate(
     mesh: &PolyMesh,
     smoothing: Smoothing,
+    uvs: Option<&[Vec2]>,
     scratch: &mut TessellationScratch,
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u32>,
 ) {
     scratch.triangulator.triangulate(mesh, smoothing, &mut scratch.tri);
+    // The triangulated mesh has one vertex per corner, in corner order.
+    let uvs = uvs
+        .filter(|uvs| uvs.len() == scratch.tri.positions.len())
+        .unwrap_or(&scratch.tri.uvs);
     vertices.clear();
     vertices.extend(
         scratch
@@ -36,9 +46,11 @@ pub fn tessellate(
             .positions
             .iter()
             .zip(&scratch.tri.normals)
-            .map(|(p, n)| Vertex {
+            .enumerate()
+            .map(|(i, (p, n))| Vertex {
                 position: p.to_array(),
                 normal: n.to_array(),
+                uv: uvs.get(i).map_or([0.0; 2], |uv| uv.to_array()),
             }),
     );
     indices.clear();
@@ -100,11 +112,16 @@ mod tests {
             tessellate(
                 &key.build().unwrap(),
                 Smoothing::default(),
+                None,
                 &mut scratch,
                 &mut vertices,
                 &mut indices,
             );
             assert!(!indices.is_empty() && indices.len() % 3 == 0, "{key:?}");
+            assert!(
+                vertices.iter().all(|v| v.uv.iter().all(|c| c.is_finite())),
+                "{key:?}: texture coordinates"
+            );
             let n = u32::try_from(vertices.len()).unwrap();
             assert!(indices.iter().all(|&i| i < n), "{key:?}");
             for tri in indices.as_chunks::<3>().0 {
@@ -127,7 +144,14 @@ mod tests {
         let mesh = grid4d_geom::primitives::torus(200.0, 50.0, 1000, 500);
         let (mut scratch, mut vertices, mut indices) = (TessellationScratch::default(), Vec::new(), Vec::new());
         let start = Instant::now();
-        tessellate(&mesh, Smoothing::default(), &mut scratch, &mut vertices, &mut indices);
+        tessellate(
+            &mesh,
+            Smoothing::default(),
+            None,
+            &mut scratch,
+            &mut vertices,
+            &mut indices,
+        );
         let tessellation = start.elapsed();
         let triangles = indices.len() / 3;
 

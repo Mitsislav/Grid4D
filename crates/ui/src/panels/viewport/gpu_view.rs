@@ -7,7 +7,11 @@
 use std::fmt;
 
 use egui_wgpu::wgpu;
-use grid4d_render::{FrameData, ViewportRenderer, ViewportTarget};
+use grid4d_io::Pixels;
+use grid4d_render::{FrameData, MISSING_VERSION, TexelFormat, TextureLevel, ViewportRenderer, ViewportTarget};
+use grid4d_scene::{ColorSpace, Textures};
+
+use crate::textures::{Status, TextureCache};
 
 /// The GPU side of the viewport: one renderer (pipelines, mesh cache) shared by
 /// the views, and an offscreen target per view.
@@ -66,6 +70,50 @@ impl GpuView {
         // instances, then submits its own pass, so they never mix.
         self.renderer.render(&rs.device, &rs.queue, frame, target);
         *texture
+    }
+}
+
+impl GpuView {
+    /// Hands the renderer the document's texture pictures that arrived or
+    /// changed since it last looked (missing and unreadable ones as a
+    /// checker), and lets it free the ones the document no longer has.
+    /// Nothing is copied while every picture is up to date.
+    pub(super) fn sync_textures(&mut self, textures: &Textures, cache: &TextureCache) {
+        let rs = &self.render_state;
+        for (id, texture) in textures.iter() {
+            match cache.status(id, texture) {
+                Status::Ready { image, version } => {
+                    if self.renderer.has_texture(id, version) {
+                        continue;
+                    }
+                    let format = match image.levels.first().map(|l| &l.pixels) {
+                        Some(Pixels::RgbaF16(_)) => TexelFormat::Float16,
+                        _ if texture.color_space == ColorSpace::Linear => TexelFormat::Linear8,
+                        _ => TexelFormat::Srgb8,
+                    };
+                    let bytes: Vec<_> = image.levels.iter().map(grid4d_io::Level::bytes).collect();
+                    let levels: Vec<TextureLevel<'_>> = image
+                        .levels
+                        .iter()
+                        .zip(&bytes)
+                        .map(|(level, bytes)| TextureLevel {
+                            width: level.width,
+                            height: level.height,
+                            bytes,
+                        })
+                        .collect();
+                    self.renderer
+                        .upload_texture(&rs.device, &rs.queue, id, version, format, &levels);
+                }
+                Status::Missing | Status::Failed(_) => {
+                    if !self.renderer.has_texture(id, MISSING_VERSION) {
+                        self.renderer.missing_texture(&rs.device, &rs.queue, id);
+                    }
+                }
+                Status::Loading => {}
+            }
+        }
+        self.renderer.retain_textures(|id| textures.contains(id));
     }
 }
 

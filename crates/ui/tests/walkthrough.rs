@@ -435,6 +435,77 @@ fn texture_manager_picture() {
     }
     wait_for_previews(&mut h);
     save(&mut h, &dir, "material-previews");
+
+    // Textures in the viewport: planks tiled on a floor, a Box projection on
+    // the cube, a Spherical one on the sphere, a missing picture on the
+    // cylinder.
+    {
+        use grid4d_scene::{Channel, Material, MaterialTag, Node, ObjectKindTag, Projection, Tag, TextureSlot};
+        let shell = h.state_mut();
+        let scene = &mut shell.doc.scene;
+        let texture = |scene: &grid4d_scene::Scene, name: &str| {
+            scene
+                .textures()
+                .iter()
+                .find(|(_, t)| t.name == name)
+                .map(|(id, _)| id)
+                .unwrap()
+        };
+        let (planks, checker, bricks) = (
+            texture(scene, "oak planks"),
+            texture(scene, "Roughness checker"),
+            texture(scene, "brick wall"),
+        );
+        let mut textured = |name: &str, picture, tiling: [f32; 2]| {
+            let mut material = Material::new(name);
+            *material.map_mut(Channel::BaseColor) = Some(TextureSlot {
+                tiling,
+                ..TextureSlot::new(picture)
+            });
+            scene.materials_mut().insert(material)
+        };
+        let (floor, crate_, ball, wall) = (
+            textured("Floor", planks, [4.0, 4.0]),
+            textured("Crate", planks, [1.0, 1.0]),
+            textured("Checker", checker, [4.0, 2.0]),
+            textured("Bricks", bricks, [1.0, 1.0]),
+        );
+        let tag = |material, projection| {
+            vec![Tag::Material(MaterialTag {
+                projection,
+                ..MaterialTag::new(Some(material))
+            })]
+        };
+        let named = |scene: &grid4d_scene::Scene, name: &str| {
+            scene
+                .iter()
+                .find(|(_, n)| n.data.name == name)
+                .map(|(id, _)| id)
+                .unwrap()
+        };
+        for (name, material, projection) in [
+            ("Cube", crate_, Projection::Box),
+            ("Sphere", ball, Projection::Spherical),
+            ("Cylinder", wall, Projection::Uv),
+        ] {
+            let id = named(scene, name);
+            scene.get_mut(id).unwrap().data.tags = tag(material, projection);
+        }
+        let mut plane = Node::new("Floor", ObjectKindTag::Plane.default_kind());
+        plane.data.tags = tag(floor, Projection::Uv);
+        scene.insert(plane);
+        shell.editor.materials.shown = false;
+        shell.editor.tag_selection = None;
+        let cube = named(scene, "Cube");
+        let sphere = named(scene, "Sphere");
+        shell.editor.selection.set_single(cube);
+        shell.editor.selection.toggle(sphere);
+        shell.editor.commands.push(grid4d_ui::EditorCommand::FrameSelected);
+    }
+    h.run_steps(3);
+    h.state_mut().editor.selection.clear();
+    wait_for_previews(&mut h);
+    save(&mut h, &dir, "viewport-textures");
     println!("pictures in {}", dir.display());
 }
 

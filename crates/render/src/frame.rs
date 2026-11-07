@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat3, Mat4, Vec3};
-use grid4d_eval::{CurveHandle, EvaluatedLight, EvaluatedScene, MeshKey, Shading};
+use glam::{Affine2, Mat3, Mat4, Vec3};
+use grid4d_eval::{CurveHandle, EvaluatedLight, EvaluatedScene, MaterialLayers, MeshKey, Shading};
 use grid4d_geom::Component;
-use grid4d_scene::{Falloff, LightType, MeshHandle, NodeId, ObjectKindTag};
+use grid4d_scene::{
+    Channel, Falloff, LightType, Material, MaterialId, Materials, MeshHandle, NodeId, ObjectKindTag, Projection,
+    TextureSlot,
+};
 
 use crate::{
     ComponentHit, ComponentStyle, DisplayMode, OrbitCamera, ViewEffects, ViewFilter, components::ComponentOverlay,
@@ -24,6 +27,85 @@ pub struct InstanceRaw {
     /// Linear RGB the surface gives off (its material's luminance); `w`: 1 for
     /// markers (cameras, lights), which cast no shadow and occlude nothing.
     pub emission: [f32; 4],
+    /// The Material tag's change to texture coordinates: the 2 × 2 part
+    /// (columns), then `uv_offset.xy` its shift.
+    pub uv: [f32; 4],
+    /// `xy`: shift of the texture coordinates, `z`: 1 for a Camera projection
+    /// (coordinates from the view's picture), `w` unused.
+    pub uv_offset: [f32; 4],
+}
+
+/// Where a batch's texture coordinates come from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum UvKey {
+    /// The mesh's own UVs (a Camera projection works in the shader).
+    Own,
+    /// A Material tag's projection, `matrix` (as bits) taking the drawn mesh's
+    /// points into the projection's shape.
+    Projected { projection: Projection, matrix: [u32; 16] },
+}
+
+impl UvKey {
+    fn projected(projection: Projection, matrix: Mat4) -> Self {
+        Self::Projected {
+            projection,
+            matrix: matrix.to_cols_array().map(f32::to_bits),
+        }
+    }
+
+    /// The projection and its matrix, for a projected key.
+    pub(crate) fn projection(self) -> Option<(Projection, Mat4)> {
+        match self {
+            Self::Own => None,
+            Self::Projected { projection, matrix } => {
+                Some((projection, Mat4::from_cols_array(&matrix.map(f32::from_bits))))
+            }
+        }
+    }
+}
+
+/// What the viewport needs of a material with textures (or a cut-out), per
+/// batch: its texture slots and the values the instances do not carry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MaterialData {
+    pub id: MaterialId,
+    /// In [`Channel::ALL`] order.
+    pub maps: [Option<TextureSlot>; 10],
+    pub emission_strength: f32,
+    pub opacity: f32,
+    pub opacity_threshold: f32,
+    pub specular: f32,
+}
+
+impl MaterialData {
+    /// `None` for a material the shader draws from the instance alone (no
+    /// texture, nothing cut out).
+    fn of(id: MaterialId, material: &Material) -> Option<Self> {
+        let needed = material.maps().next().is_some() || material.opacity < material.opacity_threshold;
+        needed.then(|| Self {
+            id,
+            maps: Channel::ALL.map(|channel| material.map(channel).copied()),
+            emission_strength: material.emission_strength,
+            opacity: material.opacity,
+            opacity_threshold: material.opacity_threshold,
+            specular: material.specular,
+        })
+    }
+}
+
+/// How the instance's texture coordinates are changed (its Material tag's
+/// turn, tiling and offset; a Camera projection's flag).
+fn uv_fields(transform: Affine2, camera: bool) -> ([f32; 4], [f32; 4]) {
+    let m = transform.matrix2;
+    (
+        [m.x_axis.x, m.x_axis.y, m.y_axis.x, m.y_axis.y],
+        [
+            transform.translation.x,
+            transform.translation.y,
+            f32::from(u8::from(camera)),
+            0.0,
+        ],
+    )
 }
 
 /// One light for the shaders. Layout must match `Light` in `shaders/mesh.wgsl`.
@@ -81,6 +163,10 @@ struct Batch {
     key: MeshKey,
     /// Meshes with another Phong angle are other GPU meshes.
     shading: Shading,
+    /// Texture coordinates by a projection make other GPU meshes too.
+    uvs: UvKey,
+    /// The textured material its instances share (refreshed every frame).
+    material: Option<MaterialData>,
     /// The geometry of a [`MeshKey::Polygon`], for the renderer to upload.
     mesh: Option<MeshHandle>,
     /// The curve of a [`MeshKey::Curve`].
@@ -91,10 +177,12 @@ struct Batch {
 
 /// The stored geometry of a batch: a polygon object's mesh or a spline's curve
 /// (primitives' meshes are generated from their key).
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Geometry<'a> {
     pub mesh: Option<&'a MeshHandle>,
     pub curve: Option<&'a CurveHandle>,
+    pub uvs: UvKey,
+    pub material: Option<&'a MaterialData>,
 }
 
 /// The plane the grid lies in: the ground in perspective views and looking down
@@ -183,9 +271,13 @@ pub struct FrameData {
     pub(crate) components: ComponentOverlay,
     /// One batch per mesh key seen recently; emptied (capacity kept) every frame.
     batches: Vec<Batch>,
-    batch_index: HashMap<(MeshKey, Shading), usize>,
+    batch_index: HashMap<BatchKey, usize>,
     frame: u64,
 }
+
+/// What separates batches: the mesh, its smoothing, its texture coordinates
+/// and its textured material.
+type BatchKey = (MeshKey, Shading, UvKey, Option<MaterialId>);
 
 impl Default for FrameData {
     fn default() -> Self {
@@ -236,6 +328,8 @@ impl FrameData {
             let geometry = Geometry {
                 mesh: b.mesh.as_ref(),
                 curve: b.curve.as_ref(),
+                uvs: b.uvs,
+                material: b.material.as_ref(),
             };
             (b.key, b.shading, geometry, b.instances.as_slice())
         })
@@ -271,12 +365,26 @@ impl FrameData {
         self.light_dir = (camera.back() * 0.6 + camera.up() * 0.7 - camera.right() * 0.4).normalize_or(Vec3::Y);
     }
 
-    /// Rebuilds the instance batches from the evaluated scene.
+    /// Rebuilds the instance batches from the evaluated scene, without
+    /// textures (see [`extract_with_materials`](Self::extract_with_materials)).
+    pub fn extract(&mut self, scene: &EvaluatedScene, is_selected: impl Fn(NodeId) -> bool) {
+        self.extract_with_materials(scene, None, is_selected);
+    }
+
+    /// Rebuilds the instance batches from the evaluated scene; with the
+    /// document's `materials`, objects whose top Material tag's material has
+    /// textures (or a cut-out) are drawn with them, through the tag's
+    /// projection.
     ///
     /// Hot path: allocation-free once every shape has been seen, because batches
     /// are emptied (keeping capacity), never recreated; a new shape allocates its
     /// batch once. Selection is editor state, so it is applied here, per frame.
-    pub fn extract(&mut self, scene: &EvaluatedScene, is_selected: impl Fn(NodeId) -> bool) {
+    pub fn extract_with_materials(
+        &mut self,
+        scene: &EvaluatedScene,
+        materials: Option<&Materials>,
+        is_selected: impl Fn(NodeId) -> bool,
+    ) {
         self.frame += 1;
         let frame = self.frame;
         for batch in &mut self.batches {
@@ -296,13 +404,13 @@ impl FrameData {
             .nodes()
             .iter()
             .filter(|n| filter.shows_object(n.kind))
-            .map(|n| (n.id, n.world, n.bounds, n.drawable));
+            .map(|n| (n.id, n.world, n.bounds, n.drawable, n.materials));
         let clones = scene
             .instances()
             .iter()
             .filter(|c| filter.shows_object(ObjectKindTag::Cloner) && filter.shows_object(c.kind))
-            .map(|c| (c.owner, c.world, c.bounds, c.drawable));
-        for (id, world, object_bounds, drawable) in objects.chain(clones) {
+            .map(|c| (c.owner, c.world, c.bounds, c.drawable, c.materials));
+        for (id, world, object_bounds, drawable, layers) in objects.chain(clones) {
             let Some(draw) = drawable else {
                 continue;
             };
@@ -324,8 +432,11 @@ impl FrameData {
             if draw.marker && model.inverse().transform_point3(self.eye).length() <= 1.0 {
                 continue;
             }
+            let (uvs, material, transform, camera) = textured(scene, materials, layers, object_bounds, draw.scale);
+            let material = material.filter(|_| !draw.marker);
             let batches = &mut self.batches;
-            let slot = *self.batch_index.entry((draw.key, draw.shading)).or_insert_with(|| {
+            let index_key = (draw.key, draw.shading, uvs, material.map(|m| m.id));
+            let slot = *self.batch_index.entry(index_key).or_insert_with(|| {
                 // A key's mesh never changes (an edited mesh has a new id), so the
                 // handle is looked up once, when its batch is created.
                 let mesh = match draw.key {
@@ -339,6 +450,8 @@ impl FrameData {
                 batches.push(Batch {
                     key: draw.key,
                     shading: draw.shading,
+                    uvs,
+                    material,
                     mesh,
                     curve,
                     instances: Vec::new(),
@@ -348,7 +461,9 @@ impl FrameData {
             });
             let batch = &mut self.batches[slot];
             batch.last_used = frame;
+            batch.material = material;
             let surface = &draw.surface;
+            let (uv, uv_offset) = uv_fields(transform, camera);
             batch.instances.push(InstanceRaw {
                 model: model.to_cols_array_2d(),
                 normal: normal_matrix(&model),
@@ -365,12 +480,14 @@ impl FrameData {
                     surface.emission[2],
                     f32::from(u8::from(draw.marker)),
                 ],
+                uv,
+                uv_offset,
             });
         }
         self.bounds = bounds;
         // A polygon object's mesh changes id on every edit (each frame of a
         // drag): its old batches go at once, so they never pile up.
-        let gone = |b: &Batch| matches!(b.key, MeshKey::Polygon(_) | MeshKey::Curve(_)) && b.last_used != frame;
+        let gone = |b: &Batch| b.is_fleeting() && b.last_used != frame;
         if frame.is_multiple_of(BATCH_TTL_FRAMES) || self.batches.iter().any(gone) {
             self.drop_stale_batches();
         }
@@ -393,15 +510,67 @@ impl FrameData {
     /// and polygon meshes not drawn this frame.
     fn drop_stale_batches(&mut self) {
         let frame = self.frame;
-        self.batches.retain(|b| match b.key {
-            MeshKey::Polygon(_) | MeshKey::Curve(_) => b.last_used == frame,
-            _ => b.last_used + BATCH_TTL_FRAMES > frame,
+        self.batches.retain(|b| {
+            if b.is_fleeting() {
+                b.last_used == frame
+            } else {
+                b.last_used + BATCH_TTL_FRAMES > frame
+            }
         });
         self.batch_index.clear();
         for (slot, batch) in self.batches.iter().enumerate() {
-            self.batch_index.insert((batch.key, batch.shading), slot);
+            let key = (batch.key, batch.shading, batch.uvs, batch.material.map(|m| m.id));
+            self.batch_index.insert(key, slot);
         }
     }
+}
+
+impl Batch {
+    /// Shapes that change with every edit or move (a polygon object's mesh, a
+    /// curve, a projection's coordinates): dropped as soon as a frame does not
+    /// draw them.
+    fn is_fleeting(&self) -> bool {
+        matches!(self.key, MeshKey::Polygon(_) | MeshKey::Curve(_)) || self.uvs != UvKey::Own
+    }
+}
+
+/// How an object with `layers` (its Material tags) is textured: its texture
+/// coordinates, its material if it has textures, the tag's change to the
+/// coordinates and whether they come from the view (Camera projection).
+/// Untextured objects keep their own coordinates and batch as before.
+fn textured(
+    scene: &EvaluatedScene,
+    materials: Option<&Materials>,
+    layers: MaterialLayers,
+    bounds: Option<grid4d_scene::Aabb>,
+    scale: Vec3,
+) -> (UvKey, Option<MaterialData>, Affine2, bool) {
+    let untextured = (UvKey::Own, None, Affine2::IDENTITY, false);
+    let Some(materials) = materials else {
+        return untextured;
+    };
+    let Some(layer) = scene.material_layers(layers).last() else {
+        return untextured;
+    };
+    let Some(material) = materials
+        .get(layer.material)
+        .and_then(|m| MaterialData::of(layer.material, m))
+    else {
+        return untextured;
+    };
+    let mut uvs = UvKey::Own;
+    let mut camera = false;
+    match layer.projection {
+        Projection::Uv => {}
+        Projection::Camera => camera = true,
+        Projection::Box | Projection::Spherical | Projection::Cylindrical | Projection::Flat => {
+            // The drawn mesh is the object's at unit size: its scale first.
+            if let Some(to_unit) = layer.to_unit(bounds) {
+                uvs = UvKey::projected(layer.projection, to_unit * Mat4::from_scale(scale));
+            }
+        }
+    }
+    (uvs, Some(material), layer.uv_transform, camera)
 }
 
 fn normal_matrix(model: &Mat4) -> [[f32; 4]; 3] {
@@ -420,6 +589,8 @@ fn normal_matrix(model: &Mat4) -> [[f32; 4]; 3] {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, reason = "test code")]
+
     use grid4d_scene::{Document, Node, ObjectKind, ObjectKindTag};
 
     use super::*;
@@ -489,8 +660,79 @@ mod tests {
     }
 
     #[test]
-    fn instance_layout_is_160_bytes() {
-        assert_eq!(size_of::<InstanceRaw>(), 160);
+    fn instance_layout_is_192_bytes() {
+        assert_eq!(size_of::<InstanceRaw>(), 192);
+    }
+
+    #[test]
+    fn textured_materials_get_their_own_batches_and_projections_their_own_coordinates() {
+        use grid4d_scene::{MaterialTag, Tag, Texture};
+        let mut doc = Document::new("Textured");
+        let wood = doc.scene.textures_mut().insert(Texture::linked("wood.png".into()));
+        let plain = doc.scene.materials_mut().insert(Material::new("Plain"));
+        let mut oak = Material::new("Oak");
+        *oak.map_mut(Channel::BaseColor) = Some(TextureSlot::new(wood));
+        let oak = doc.scene.materials_mut().insert(oak);
+        let cube = || Node::new("Cube", ObjectKindTag::Cube.default_kind());
+        let tagged = |tag: MaterialTag| {
+            let mut node = cube();
+            node.data.tags = vec![Tag::Material(tag)];
+            node
+        };
+        doc.scene.insert(cube());
+        doc.scene.insert(tagged(MaterialTag::new(Some(plain))));
+        doc.scene.insert(tagged(MaterialTag {
+            tiling: [2.0, 3.0],
+            ..MaterialTag::new(Some(oak))
+        }));
+        doc.scene.insert(tagged(MaterialTag {
+            projection: Projection::Box,
+            ..MaterialTag::new(Some(oak))
+        }));
+        doc.scene.insert(tagged(MaterialTag {
+            projection: Projection::Camera,
+            ..MaterialTag::new(Some(oak))
+        }));
+        let eval = evaluated(&doc);
+        let mut frame = FrameData::new();
+        let summary = |frame: &FrameData| {
+            frame
+                .draw_batches()
+                .map(|(_, _, g, i)| {
+                    (
+                        g.material.map(|m| m.id),
+                        matches!(g.uvs, UvKey::Projected { .. }),
+                        i.len(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        // Without materials: one batch, as in 1.0.
+        frame.extract(&eval, |_| false);
+        assert_eq!(summary(&frame), [(None, false, 5)]);
+
+        let mut frame = FrameData::new();
+        frame.extract_with_materials(&eval, Some(doc.scene.materials()), |_| false);
+        let mut batches = summary(&frame);
+        batches.sort_by_key(|&(m, projected, _)| (m.is_some(), projected));
+        assert_eq!(
+            batches,
+            [(None, false, 2), (Some(oak), false, 2), (Some(oak), true, 1)],
+            "untextured objects batch together; a projection has its own coordinates"
+        );
+        // The tag's tiling and the Camera flag travel with the instances.
+        let instances: Vec<InstanceRaw> = frame
+            .draw_batches()
+            .filter(|(_, _, g, _)| g.material.is_some() && g.uvs == UvKey::Own)
+            .flat_map(|(_, _, _, i)| i.iter().copied())
+            .collect();
+        assert!(instances.iter().any(|i| i.uv == [2.0, 0.0, 0.0, 3.0]));
+        assert!(instances.iter().any(|i| i.uv_offset[2] == 1.0), "the Camera projection");
+        let (_, _, projected, _) = frame.draw_batches().find(|(_, _, g, _)| g.uvs != UvKey::Own).unwrap();
+        // The unit cube's corner (0.5, 0.5, 0.5) is the fitted box's corner.
+        let (projection, matrix) = projected.uvs.projection().unwrap();
+        assert_eq!(projection, Projection::Box);
+        assert!(matrix.transform_point3(Vec3::splat(0.5)).abs_diff_eq(Vec3::ONE, 1e-5));
     }
 
     #[test]

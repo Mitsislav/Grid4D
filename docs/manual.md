@@ -2065,9 +2065,20 @@ In the viewport ([§4.1](#41-lights)) the colour is the surface's colour,
 **Roughness** the size of its highlights (sharp and bright near 0 %, wide and faint
 near 100 %), **Metallic** makes highlights and reflections take the colour (a metal
 has no colour of its own otherwise) and **Emission** adds glow that no light
-needs. Constant Shading shows the colour and the emission only. Textures,
-opacity, transmission and the coat are kept with the material and shown in
-the viewport and renders from Grid4D 1.1's next steps on.
+needs. Constant Shading shows the colour and the emission only.
+
+**Textures in the viewport.** The viewport shows the pictures on Base Color,
+Metallic, Roughness, Specular and Emission, and cuts out what Opacity says,
+through the object's Material tag (its projection, tiling, offset and
+rotation; [§19.2](#192-placing-a-material-projections-and-layers)). A
+picture that is still loading shows the channel's value meanwhile; a missing
+one shows as a magenta and black checker.
+
+![Textures in the viewport: planks tiled on a floor, on a cube through a Box projection, a checker wrapped round a sphere, and a missing picture on a cylinder](images/manual/viewport-textures.png)
+
+Normal and Bump pictures, Transmission and the coat are kept with the
+material and shown from Grid4D 1.1's next steps on, as are textures in
+renders.
 
 **Giving an object a material**
 
@@ -2101,8 +2112,8 @@ Manager, or **Window ▸ Texture Manager**) lists every texture of the
 document. Grid4D reads **PNG, JPEG, TIFF, WebP, HDR** and **OpenEXR**
 pictures.
 
-> A material's channels take textures (§19 above); the viewport and renders
-> show them from Grid4D 1.1's next steps on.
+> A material's channels take textures (§19 above); the viewport shows them,
+> renders from Grid4D 1.1's next steps on.
 
 ![The Texture Manager: two linked pictures from the document's maps folder (one selected, its colour space Linear), an embedded sky, and a picture that is missing](images/manual/texture-manager.png)
 
@@ -2188,8 +2199,9 @@ or Flat projection) writes the projection into the object's UVs and switches
 the tag to UV — one undo step. The picture stays where it was, and later
 edits to the object keep it in place.
 
-> The viewport and renders show textures, projections and layers from
-> Grid4D 1.1's next steps on; the settings are kept and saved now.
+> The viewport shows the top Material tag of each object (the last one) with
+> its projection; layers below it and renders follow in Grid4D 1.1's next
+> steps.
 
 ## 20. Rendering
 
@@ -2610,9 +2622,10 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   without building it); scripts cannot set keys, create materials or layers,
   or run every frame; the Script Manager's editor has no syntax colouring or
   completion, and the library no sub-folders.
-- **Materials**: the viewport, renders and preview balls show only the
-  colour of an object's top Material tag (textures, projections and layers
-  follow in 1.1's next steps); no per-polygon-selection limit on a tag.
+- **Materials**: the viewport shows only an object's top Material tag (no
+  layers yet), without Normal and Bump pictures; renders and preview balls
+  show only the colours (textures follow in 1.1's next steps); no
+  per-polygon-selection limit on a tag.
 - **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's
   angle or length while dragging it (Ctrl / Alt), normalised curves, copying and
   pasting keys, animating counts (segments, sides) and choices, Frame

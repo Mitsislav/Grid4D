@@ -790,13 +790,17 @@ impl ViewportPanel {
             self.frame.filter = self.filter;
             self.frame.effects = self.effects;
             let start = Instant::now();
-            self.frame.extract(&self.evaluated, |id| editor.selection.contains(id));
+            self.frame
+                .extract_with_materials(&self.evaluated, Some(doc.scene.materials()), |id| {
+                    editor.selection.contains(id)
+                });
             self.frame.component_style = component_style(ui.ctx().pixels_per_point());
             // What a click would select shows where the pointer is.
             let hover: &[ComponentHit] = if interactive { &self.hover } else { &[] };
             self.frame.extract_components(&self.evaluated, target, hover);
             self.times.add(Part::Extraction, start);
             let start = Instant::now();
+            gpu.sync_textures(doc.scene.textures(), &editor.textures);
             let texture = gpu.render(index, &self.frame, pixel_size(rect, ui.ctx().pixels_per_point()));
             self.times.add(Part::Drawing, start);
             // Drawn over the background gradient: the target is cleared to transparent.

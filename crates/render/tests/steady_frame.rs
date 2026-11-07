@@ -14,9 +14,25 @@ use grid4d_render::{ComponentHit, FrameData, OrbitCamera};
 use grid4d_scene::{Axis, Curve, Document, Key, Node, NodeData, NodeId, ObjectKind, Param, Track};
 
 /// `count` primitives of every shape in groups of 100, every `animated`-th
-/// one moving and turning over frames 0–90, and one polygon object.
+/// one moving and turning over frames 0–90, and one polygon object. The
+/// groups take turns at a plain material, a textured one on the objects' UVs
+/// and the textured one through a Box projection.
 fn scene(count: usize, animated: usize) -> (Document, NodeId) {
+    use grid4d_scene::{Channel, Material, MaterialTag, Projection, Tag, Texture, TextureSlot};
     let mut doc = Document::with_demo_scene();
+    let wood = doc.scene.textures_mut().insert(Texture::linked("wood.png".into()));
+    let plain = doc.scene.materials_mut().insert(Material::new("Plain"));
+    let mut oak = Material::new("Oak");
+    *oak.map_mut(Channel::BaseColor) = Some(TextureSlot::new(wood));
+    let oak = doc.scene.materials_mut().insert(oak);
+    let tags = [
+        MaterialTag::new(Some(plain)),
+        MaterialTag::new(Some(oak)),
+        MaterialTag {
+            projection: Projection::Box,
+            ..MaterialTag::new(Some(oak))
+        },
+    ];
     let kinds = [
         grid4d_scene::ObjectKindTag::Cube,
         grid4d_scene::ObjectKindTag::Sphere,
@@ -30,7 +46,9 @@ fn scene(count: usize, animated: usize) -> (Document, NodeId) {
     let mut group = None;
     for k in 0..count {
         if k % 100 == 0 {
-            group = Some(doc.scene.insert(Node::new("Group", ObjectKind::Null)));
+            let mut node = Node::new("Group", ObjectKind::Null);
+            node.data.tags = vec![Tag::Material(tags[(k / 100) % tags.len()])];
+            group = Some(doc.scene.insert(node));
         }
         let mut data = NodeData::new("Object", kinds[k % kinds.len()].default_kind());
         let (x, z) = (k % 100, k / 100);
@@ -91,7 +109,8 @@ impl View {
         self.evaluated.set_frame(at);
         self.evaluated.update(&doc.scene);
         self.frame.set_camera(&self.camera, 16.0 / 9.0);
-        self.frame.extract(&self.evaluated, selected);
+        self.frame
+            .extract_with_materials(&self.evaluated, Some(doc.scene.materials()), selected);
         self.frame.extract_components(&self.evaluated, target, hover);
     }
 }

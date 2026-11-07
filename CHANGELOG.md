@@ -31,6 +31,10 @@ Toward 1.1: materials, UVs and textures.
 - **Material previews** — every material shows as a ball rendered by the
   path tracer, in the Material Manager and the Attribute Manager, made in
   the background and again after each change.
+- **Textures in the viewport** — Base Color, Metallic, Roughness, Specular
+  and Emission pictures and Opacity cut-outs show in the viewport through
+  each object's Material tag and its projection; missing pictures show as a
+  magenta checker.
 - **Files** — documents are saved in `.g4d` format version 4. Every file of
   Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
   files and says they come from a newer Grid4D.

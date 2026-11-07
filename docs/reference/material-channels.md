@@ -123,6 +123,25 @@ of switchable channels and reflectance layers; no procedural textures (Phase
   of the material's Attribute Manager page (48 points); Material tag icons
   in the Object Manager stay painted (16 points).
 
+## As built (15.5a)
+
+- The viewport draws an object's top Material tag (the last one) when its
+  material has a picture on a channel or cuts something out; other objects
+  draw and batch exactly as before. Base Color, Metallic, Roughness,
+  Specular, Emission and Opacity (cut-out, also in Hidden Line) read their
+  pictures; Normal, Bump, Transmission and Clearcoat follow in 15.5b.
+- Pictures reach the GPU when they arrive (`ViewportRenderer::upload_texture`,
+  called by the interface's glue, never per frame): 8-bit sRGB, 8-bit linear
+  or half-float RGBA, the whole mip chain, sampled with trilinear filtering,
+  8× anisotropy and repeat. A picture is grey when every texel is; on a
+  colour channel it multiplies the value.
+- Each textured material has one bind group (its channels' tiling, offset,
+  range and strength in a uniform, a picture per channel, white where there
+  is none), made again only when its slots or a picture change.
+- Specular sets a dielectric's reflection (8 % × specular; 4 % at 0.5).
+- A frame of 10 000 objects in textured and projected materials allocates
+  nothing (`render/tests/steady_frame.rs`).
+
 ## Acceptance criteria
 
 - [x] A 1.0 document's materials open with the same four values and render
