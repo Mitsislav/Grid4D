@@ -32,6 +32,7 @@ with a clear message rather than losing what it does not understand.
 | 15.4 | **material channels** ✅ (15.4a; see [`material-channels.md`](material-channels.md)); **projections** on Material tags, several Material tags per object ✅ (15.4b; see [`tag-material.md`](tag-material.md)) | `document.materials`, tags |
 | 15.7 | **seams** marked in the UV editor, kept with a polygon object's components (its UVs are already stored) | the `polygon` kind |
 
+- **Frozen since 1.1 (2026-11-07).** What follows held during Phase 15.
 - **Additive until 1.1 ships.** During Phase 15 version 4 grows only by
   optional fields that are left out while they have their default, and by new
   types. When 1.1 is released version 4 is frozen like version 3: later data

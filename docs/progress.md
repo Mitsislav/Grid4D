@@ -12,9 +12,9 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.9a — The materials chapter, the review in two languages, the acceptance test, the textured budget (2026-11-07) |
-| Next step | 15.9b — release v1.1.0 |
+| Current phase | 15 — Materials, UVs and textures (v1.1): done; 16 — Render quality (v1.2) next |
+| Last step done | 15.9b — Release v1.1.0 prepared: version, changelog, `.g4d` v4 frozen (2026-11-07) |
+| Next step | The `v1.1.0` tag (the release workflow builds the packages and uploads to itch.io); then Phase 16's specs |
 | Tests | 865 (and 6 ignored, run by hand: three timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
@@ -2325,6 +2325,7 @@ risks R5 – R8 go with it.
 | 15.8a | glTF materials and pictures: images as textures (embedded from buffer views and `data:` URIs, linked when relative; one per colour space), every core channel, alpha Mask / Blend as a cut-out from the base colour's alpha, `KHR_texture_transform` offset / scale, `KHR_materials_transmission` / `_ior` / `_emissive_strength` / `_specular`, clear coat from the raw extension, `doubleSided`; export writes them back with the pictures inside the buffer (PNG / JPEG) and lists the extensions; `PictureChannel` on texture slots (`.g4d` v4 `channel`; viewport, path tracer, Attribute Manager); `Objects::textures` and Merge bringing pictures; tests with a hand-written sample | 861 |
 | 15.8b | OBJ `.mtl` materials and pictures: `Kd` / `Ke` / `Ni`, the PBR extension's `Pr` / `Pm` / `Pc` / `Pcr` (roughness from `Ns` without `Pr`), pictures `map_Kd` / `map_Ke` / `map_d` / `bump` / `norm` / `map_Pr` / `map_Pm` with `-s`, `-o` (V turned round), `-bm`, `-imfchan` (`MapLine`), linked next to the OBJ; export writes the same and puts embedded pictures next to the OBJ; tests | 864 |
 | 15.9a | The manual's §19 as "Materials and textures" with an overview and a walk-through from a model to a render (§19.5); the review walkthrough (EN / EL × Dark / Light) with the UV Editor, a material page with a texture, a Material tag and the UV Editor's menus (one Greek label shortened); Phase 15's acceptance as an integration test (glTF in, Box photo, seam unwrap and pack, glass and brushed metal, a render with pictures, v4 save and reopen, glTF out and back, a 1.0 file); textured stress scenes and a GPU timing of the viewport, plain and textured (`docs/performance.md`) | 865 |
+| 15.9b | Release 1.1.0 prepared: the workspace version 1.1.0 (the lockfile's own crates; the licence list unchanged, `cargo deny` clean), the changelog's `[1.1.0]` section, `.g4d` version 4 frozen (`FILE_FORMAT.md`, `v4.rs`, the golden test's notes, the v4 spec), the README's and the itch.io page's features, the release spec's version list, the plan's next action | 865 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2715,6 +2716,16 @@ risks R5 – R8 go with it.
 - **The acceptance in one test.** Phase 15's acceptance runs through the
   editor's commands (Merge, Make Editable, selections, Mark Seams, Unwrap,
   Pack) plus a render and file round trips; it passed at the first run.
+
+**15.9b — Release 1.1.0**
+
+*Problems and solutions:*
+- **Freezing version 4.** As with version 3 at 1.0: the format text, the
+  module and the golden test now say version 4 never changes; new data
+  means a version 5 with a migration and fixtures of its own, and the v4
+  fixtures stay as they are.
+- **The tag waits.** Tagging `v1.1.0` starts the release workflow and the
+  itch.io uploads, so it is left for the user's go-ahead.
 
 ---
 

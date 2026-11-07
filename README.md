@@ -40,14 +40,18 @@ Direct3D 12 or Metal (any from the last decade).
   the timeline and an F-Curve editor.
 - **Simulation** — rigid and collider bodies on objects and on clones,
   cached and saved with the document.
-- **Rendering** — materials and lights; a viewport with shading modes,
-  shadows, ambient occlusion, up to four views and scene cameras; a built-in
-  path tracer with an interactive Render View, a Picture Viewer, and stills
-  and animations to PNG or OpenEXR.
+- **Materials and UVs** — one principled material with pictures on every
+  channel (colour, roughness, metallic, normal and bump, emission, cut-outs,
+  glass, clear coat), layered Material tags with projections, a Texture
+  Manager, and a UV Editor with unwrapping, relaxing and packing.
+- **Rendering** — a viewport with textures, shading modes, shadows, ambient
+  occlusion, up to four views and scene cameras; a built-in path tracer with
+  an interactive Render View, a Picture Viewer, and stills and animations to
+  PNG or OpenEXR.
 - **Workspace** — dockable layouts, Layers, Takes, Preferences, Dark /
   Darker / Light themes, English and Greek.
 - **Files** — the documented `.g4d` format; glTF 2.0 and OBJ import and
-  export.
+  export, with materials and pictures.
 - **Extending** — scripts in [Rhai](https://rhai.rs) with a Script Manager;
   plugins written in Rust.
 - **Peace of mind** — undo for every change, autosave with recovery after a
@@ -62,7 +66,7 @@ Direct3D 12 or Metal (any from the last decade).
 - [The `.g4d` file format](docs/FILE_FORMAT.md), so other programs can read
   and write it.
 - [Changelog](CHANGELOG.md) and the [plan](docs/IMPLEMENTATION_PLAN.md),
-  including what comes after 1.0.
+  including what comes after 1.1.
 - [Architecture](docs/ARCHITECTURE.md) — how the code is organised, for
   contributors; [performance](docs/performance.md) — what is measured.
 

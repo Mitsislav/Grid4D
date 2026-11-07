@@ -1,11 +1,12 @@
 //! File-level tests: the golden fixture pins the on-disk format, older fixtures
 //! must keep loading, and save/load go through the real filesystem.
 //!
-//! Regenerate the current golden file after an *intentional* format change (which
-//! also needs a new format version and a migration) with:
-//! `GRID4D_UPDATE_FIXTURES=1 cargo test -p grid4d-io --test format`
-//! Older fixtures (`demo_v1.oc4d`, `demo_v2.g4d`, the `_v3` files) are never
-//! regenerated.
+//! Version 4 is frozen with Grid4D 1.1: its golden files (`demo_v4.g4d`,
+//! `full_v4.g4d`) change only if a wrong fixture is found, never for a format
+//! change — that needs a new format version, a migration and fixtures of its
+//! own (`GRID4D_UPDATE_FIXTURES=1 cargo test -p grid4d-io --test format`
+//! writes the current version's). Older fixtures (`demo_v1.oc4d`,
+//! `demo_v2.g4d`, the `_v3` files) are never regenerated.
 //!
 //! The golden archive is compared entry by entry, decompressed: the compressed
 //! bytes may legitimately change with the deflate library.

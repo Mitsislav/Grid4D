@@ -6,10 +6,8 @@ Version 3 (Grid4D 1.0, **frozen**) is the same format without version 4's
 additions — see [Version 4 and version 3](#version-4-and-version-3) and
 [Versions](#versions).
 
-> Version 4 is being completed during the development of Grid4D 1.1: until
-> 1.1 is released it may still gain optional fields and new types (each
-> listed under [Version 4 and version 3](#version-4-and-version-3)); from
-> the release on it never changes.
+> Version 4 was completed with Grid4D 1.1 (2026-11-07) and is **frozen**: it
+> never changes. Later data will come in a version 5.
 
 ## The container
 
@@ -300,7 +298,7 @@ make the file invalid.
 ## Version 4 and version 3
 
 Version 4 keeps everything about version 3 — the container, every field and
-its meaning — and only adds to it. What it adds, as of this writing:
+its meaning — and only adds to it. What it adds:
 
 | Addition | Since |
 |----------|-------|
@@ -323,7 +321,7 @@ its `version` says `3`.
 |---------|-----------|----------------|
 | 1, 2 | a single JSON file, `"format": "oc4d"` (from the project's former name OpenC4D; extension `.oc4d`) | yes, converted when opened |
 | 3 | the zip archive above, `"format": "grid4d"`; Grid4D 1.0 | yes, converted when opened |
-| 4 | the same archive with version 4's additions; Grid4D 1.1 | yes; written |
+| 4 | the same archive with version 4's additions; Grid4D 1.1 (frozen) | yes; written |
 
 A version grows during development only by optional fields and new types.
 **From Grid4D 1.0 a released version never changes:** new data means a new

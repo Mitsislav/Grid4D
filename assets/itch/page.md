@@ -40,12 +40,18 @@ hand.
 > **Animate** — keyframes on positions and on object parameters, Autokeying, an
 > F-curve editor, and rigid-body dynamics on objects and on clones.
 >
-> **Render** — materials and lights, a viewport with shadows and ambient
-> occlusion, up to four views, and a built-in path tracer: an interactive Render
-> View, a Picture Viewer, still images and animations to PNG or OpenEXR.
+> **Materials and UVs** (new in 1.1) — pictures on every channel of a material
+> (colour, roughness, metallic, normal and bump, emission, cut-outs, glass,
+> clear coat), layered Material tags with projections, and a UV Editor with
+> unwrapping, relaxing and packing.
+>
+> **Render** — textures in the viewport, shadows and ambient occlusion, up to
+> four views, and a built-in path tracer: an interactive Render View, a
+> Picture Viewer, still images and animations to PNG or OpenEXR.
 >
 > **Work your way** — dockable layouts, Layers and Takes, Dark / Darker / Light
-> themes, English or Greek, glTF 2.0 and OBJ import and export, Rhai scripts with
+> themes, English or Greek, glTF 2.0 and OBJ import and export with materials and
+> pictures, Rhai scripts with
 > a Script Manager, plugins written in Rust, autosave and crash recovery.
 >
 > Grid4D is free and stays free: the full source is on GitHub under MIT OR

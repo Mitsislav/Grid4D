@@ -5,9 +5,11 @@ Notable changes to Grid4D, newest first. Versions follow
 opens every file of the same major version; the plugin and script interfaces
 may grow in a minor version and change only in a major one.
 
-## [Unreleased]
+## [1.1.0] - 2026-11-07
 
-Toward 1.1: materials, UVs and textures.
+Materials, UVs and textures: pictures on every channel of a material, UVs on
+everything with a UV Editor and unwrapping, textures in the viewport and in
+renders, and materials with their pictures through glTF and OBJ.
 
 - **UVs** — every primitive and generator (Extrude, Lathe, Sweep, Loft,
   Subdivision Surface) has texture coordinates, kept by Make Editable and
@@ -60,9 +62,10 @@ Toward 1.1: materials, UVs and textures.
   with their scale, offset and picture channel, and the PBR numbers
   (roughness, metallic, clear coat, IOR); embedded pictures are written
   next to an exported OBJ.
-- **Files** — documents are saved in `.g4d` format version 4. Every file of
-  Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
-  files and says they come from a newer Grid4D.
+- **Files** — documents are saved in `.g4d` format version 4, now final
+  (frozen like version 3). Every file of Grid4D 1.0 (version 3) opens
+  unchanged; Grid4D 1.0 cannot open version 4 files and says they come from
+  a newer Grid4D.
 
 ## [1.0.0] - 2026-11-02
 
