@@ -1391,28 +1391,148 @@ nodes), displacement (Phase 16), UDIMs, video textures.
 
 ---
 
-## Phase 16 — Render quality (v1.2) — outline
+## Phase 16 — Render quality (v1.2)
 
-**Goal:** stills and animations that can be shown to a client: real light,
-real glass, clean images in reasonable time.
+**Goal:** stills and animations that can be shown to a client: real light
+(area lights, a sky, an HDRI), real lenses (depth of field, motion blur),
+clean pictures in reasonable time (smarter sampling and a denoiser), the
+passes a compositor needs, and renders that run unattended (a queue) or
+follow the user's edits (an interactive Render View).
 
-* **Lights:** area lights (rectangle, disc, sphere; visible or not), a
-  physical sky with a sun, an HDRI dome (equirectangular EXR / HDR, importance
-  sampled), light linking (include / exclude), light groups.
-* **Materials in the render:** subsurface scattering (random walk), thin
-  film and sheen if cheap; displacement (subdivided at render time).
-* **Camera:** depth of field (aperture, focus distance, a focus object),
-  motion blur (camera and objects, deformation), bokeh shape.
-* **Output:** render passes / AOVs (beauty, alpha, depth, normal, albedo,
-  object and material IDs, light groups) into multi-layer EXR; a render
-  queue (several documents or takes, one after another); a render region.
-* **Speed and noise:** adaptive sampling; a **denoiser** guided by albedo
-  and normal (D27: our own first, an optional OIDN build later); the Render
-  View re-rendering while editing (interactive preview).
-* Steps (outline): area lights and sky → HDRI and importance sampling →
-  depth of field and motion blur → passes and multi-layer EXR → adaptive
-  sampling and the denoiser → render queue and region → interactive Render
-  View → SSS and displacement → manual and release.
+### Where things stand (2026-11-07, Grid4D 1.1)
+
+* The final renderer is `grid4d-raytrace`, a deterministic CPU path tracer:
+  every surface baked into world-space triangles in one BVH (median splits),
+  a diffuse + GGX surface with glass, clear coat and the Phase 15 pictures;
+  rows in parallel with `rayon`, progressive passes.
+* Light comes only from Omni, Spot and Infinite lights (a soft shadow treats
+  the light as a small ball or a half-degree disc) and from luminance seen
+  through bounces; emissive surfaces are never sampled as lights, and there
+  is no multiple importance sampling. Light after a bounce is capped (no
+  fireflies, darker caustics). Rays that miss everything see black.
+* Every pixel gets the same number of samples; there is no denoiser.
+* The camera is a pinhole (perspective or parallel): no depth of field, no
+  motion blur.
+* Output: one RGBA picture per frame, PNG or single-layer OpenEXR
+  (`grid4d_io::save_exr`, written by hand). The Picture Viewer keeps a
+  history; the Render View (Ctrl+R) renders the active view and is cleared,
+  and started again from nothing, by any change.
+* The viewport lights with the document's lights (a shadow map for the key
+  light, SSAO); the background is a gradient.
+* `.g4d` version 4 is frozen (Grid4D 1.1): Phase 16's data needs version 5
+  (D24).
+
+### Design
+
+* **The `.g4d` format v5** (D24, D31): area lights and their shapes, the
+  Sky and Environment objects, light linking and light groups, the camera's
+  lens and shutter, render passes, adaptive sampling and denoising settings,
+  the render region, the Subsurface and Displacement channels. A migration
+  from v4 written as `v4::upgrade` (JSON → JSON, like `v3::upgrade`);
+  `FILE_FORMAT.md` gains v5; v5 golden fixtures; v4 stays readable forever.
+  v5 grows additively until 1.2 ships, then freezes. Grid4D 1.1 refuses v5
+  with its "newer version" message.
+* **Light transport** (D32): next-event estimation with **multiple
+  importance sampling** (power heuristic) for every kind of light — the
+  three of today, area lights, emissive surfaces and the environment — one
+  light chosen per bounce from a power-weighted table (a light tree later).
+  The bounce cap stays as an option ("Clamp indirect", on by default) so
+  old documents render as before.
+* **Area lights:** a fourth `LightType` with a shape — rectangle, disc,
+  sphere, cylinder (tube) — its size, *Visible in render*, one- or
+  two-sided. Soft shadows come from the shape itself. **Emissive surfaces**
+  (a material's Emission) become lights automatically (their triangles in
+  the light table by power). The viewport draws the shape and lights with a
+  representative point, its shadow softened by the size.
+* **Sky and environment** (D33): a **Sky** object — an analytic daylight
+  sky (the Preetham model, from the published formulas, our own code) with
+  a sun disc whose direction is the object's rotation (or elevation and
+  azimuth fields) and whose colour follows the sky's turbidity; an
+  **Environment** object — an equirectangular HDR / EXR picture from the
+  document's textures, intensity, rotation, *Visible to camera*; importance
+  sampled through a 2D luminance table. One of them at a time lights the
+  scene (the topmost visible one). The viewport shows it as the background
+  and uses its irradiance (nine spherical-harmonic numbers, made once per
+  change) as ambient light.
+* **Light linking and groups:** a light's Include / Exclude list of objects
+  (children included; dangling ids do nothing — the existing rule); a
+  light's *Group* name, which becomes a render pass of its own.
+* **Lens** (D34): the Camera object gains *Focus distance* (or a focus
+  object), *f-stop* (aperture from a 36 mm sensor convention: focal length
+  from the field of view), *Blades* and *Rotation* for polygonal bokeh —
+  a thin-lens model. **Motion blur:** a *Shutter* (fraction of a frame,
+  centred or opening at the frame) and *Segments* (2 – 8 sub-frame
+  evaluations); each camera ray gets a time; moving triangles keep a
+  position per segment and the BVH's boxes span the whole shutter, so
+  transforms, deformers, generators and simulations all blur alike.
+* **Passes** (D35): a fixed list chosen in Render Settings — beauty, alpha,
+  depth, normal, albedo, emission, direct / indirect diffuse and specular,
+  object ID, material ID, one per light group. Written together into a
+  **multi-layer OpenEXR** by our own writer (no new crate); PNG writes
+  beauty only, or one file per pass. The Picture Viewer picks a pass.
+* **Noise** (D36): **adaptive sampling** — every pixel gets a minimum,
+  then more only where its error estimate (from two half-sample buffers)
+  is above a threshold, up to a maximum; a **denoiser of our own** (D27):
+  an edge-avoiding à-trous wavelet filter guided by albedo, normal, depth
+  and the per-pixel variance, run on the finished picture (and on Render
+  View passes once they have a few samples). An Open Image Denoise build
+  stays optional and later. The BVH gets a binned SAH builder (a speed
+  step for every render).
+* **Unattended and interactive** (D37): a **Render Queue** window — jobs
+  of a document file, a take, a frame range and an output, run one after
+  another in the background, kept in the app's own storage (not in
+  documents) and shown with their progress; a **render region** (a
+  rectangle in the view, Alt+R) for the Render View and the final render;
+  an **interactive Render View** that keeps rendering while you edit — a
+  changed camera reuses the built scene, a changed scene rebuilds it on the
+  worker, and the old picture stays until the new one's first pass arrives.
+* **Materials in renders:** a **Subsurface** channel (weight, colour,
+  radius per colour in cm; a random-walk inside closed meshes) and a
+  **Displacement** channel (a height picture, an amount in cm; meshes
+  subdivided at render time to a level set per object or in Render
+  Settings, then moved along their normals). The viewport keeps showing
+  displacement as bump. Both may move to 1.3 if the phase runs long (R5).
+* **Rules kept:** every new document field undoable through `SceneEdit`;
+  a reference picture per feature in `grid4d-raytrace/tests` (fixed seeds;
+  compared within a tolerance); the viewport's allocation-free frame;
+  specs in `docs/reference/` written first, clean-room.
+
+### Steps
+
+| Step | Size | Work |
+|------|------|------|
+| 16.1 | M | Specs (`render-lights-area.md`, `render-environment.md`, `render-lens.md`, `render-passes.md`, `render-sampling.md`, `render-queue.md`, `material-subsurface-displacement.md`, `app-format-v5.md`); `.g4d` v5 with the migration from v4, `FILE_FORMAT.md` v5, v5 golden fixtures, fuzzing and property tests on v5; a render-time budget measured on reference scenes (the numbers this phase must beat or keep) |
+| 16.2 | L | Light transport: next-event estimation with MIS for the existing lights; emissive surfaces as lights; **area lights** (rectangle, disc, sphere, tube; visible, two-sided) in the scene, the Attribute Manager, the viewport (shape, approximate lighting) and the tracer; "Clamp indirect" kept; reference pictures |
+| 16.3 | L | **Sky** (Preetham sky and sun) and **Environment** (equirectangular HDR / EXR, importance sampled) objects; the viewport's background and spherical-harmonic ambient; reference pictures |
+| 16.4 | M | **Light linking** (include / exclude) and **light groups**; tests that a linked light lights only its objects |
+| 16.5 | L | **Lens and shutter:** thin-lens depth of field (focus distance or object, f-stop, blades, rotation); **motion blur** (shutter, segments; transforms, deformation, simulations) with per-segment triangle positions and shutter-wide BVH boxes |
+| 16.6 | M | **Render passes** and **multi-layer OpenEXR** (our writer); per-pass PNG; the Picture Viewer's pass picker; light-group passes |
+| 16.7 | L | **Adaptive sampling** (minimum, maximum, threshold) and the **denoiser** (à-trous, albedo / normal / depth / variance guided); the SAH BVH builder; budget re-measured (time to a given quality) |
+| 16.8 | M | The **Render Queue** window (jobs, background runs, progress, kept by the app) and the **render region** (Alt+R; Render View and final render) |
+| 16.9 | M | The **interactive Render View** (keeps rendering while editing; the built scene reused for camera changes; no blank frames) |
+| 16.10 | L | **Subsurface scattering** (random walk) and **displacement** at render time (render subdivision, height along normals) — may move to 1.3 (R5) |
+| 16.11 | S | The manual's Rendering chapter for all of it with pictures, the walkthrough and an acceptance test, the render budget re-measured; release v1.2 (`.g4d` v5 frozen) |
+
+### Acceptance
+
+A user opens a product shot from 1.1: it renders as before. They light it
+with an HDRI and a large rectangle light (soft shadows from the light's
+size), add a glass bottle in front with depth of field focused on the
+label, spin a wheel with motion blur, and render 1280 × 720 at a low sample
+count with adaptive sampling and the denoiser: the result is clean to the
+eye and within a set error of a 4096-sample reference (measured in a test).
+The passes land in one multi-layer EXR that another compositor reads. A
+render queue of two takes runs unattended to the end. A daylight scene lit
+by the Sky shows a sun and a blue sky in the viewport and the render. The
+Render View follows edits without going blank. Saved as `.g4d` v5 and
+reopened identically; every 1.0 and 1.1 file opens unchanged.
+
+**Not in Phase 16:** GPU rendering (Phase 23, D28), volumes and fog, true
+caustics (photon mapping), spectral rendering, Cryptomatte-style ID mattes,
+thin film and sheen, a light tree, toon / line rendering, network
+rendering.
+
+---
 
 ## Phase 17 — Modelling 2 (v1.3) — outline
 
@@ -1607,6 +1727,13 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 | D28 | GPU rendering | wgpu compute, never a vendor API; the CPU path tracer stays the reference (tests compare against it) and the fallback | Phase 23 |
 | D29 | Formats beyond glTF / OBJ | Pure-Rust readers and writers first; a C dependency only when no other way exists and it passes `cargo deny` and packaging on all three systems | Phase 24 |
 | D30 | Python | Optional, beside Rhai (which stays the sandboxed default); the same `SceneEdit`-based API, one undo step per run | Phase 24 |
+| D31 | The file format in 1.2 | `.g4d` v5 holds Phase 16's data (area lights, Sky / Environment, linking and groups, lens and shutter, passes, sampling and denoising, region, Subsurface and Displacement); migrated from v4 as JSON; additive until 1.2 ships, then frozen | Phase 16 |
+| D32 | Light transport | Next-event estimation with multiple importance sampling (power heuristic) for every light — point, spot, infinite, area, emissive surfaces, the environment — one light per bounce from a power-weighted table (a light tree later); the bounce clamp kept as an option, on by default | Phase 16 |
+| D33 | The sky | The Preetham analytic daylight model from its published formulas, our own code, with a sun disc; Hosek-Wilkie only if its data's licence fits `cargo deny` | Phase 16 |
+| D34 | Lens and motion blur | A thin-lens camera (36 mm sensor convention, f-stop, blades); motion blur by sub-frame evaluations (2 – 8 segments) with per-segment triangle positions and shutter-wide BVH boxes, so every kind of motion blurs alike | Phase 16 |
+| D35 | Render passes | A fixed list of passes chosen in Render Settings, written into one multi-layer OpenEXR by our own writer (no new crate); light groups add passes | Phase 16 |
+| D36 | Noise | Adaptive sampling from a two-buffer error estimate, then our own denoiser (D27): an edge-avoiding à-trous wavelet filter guided by albedo, normal, depth and variance | Phase 16 |
+| D37 | Render queue | Jobs (document, take, frames, output) kept in the app's storage by the binary, never in documents; run one at a time in the background like today's renders | Phase 16 |
 | R5 | Scope against capacity | The suites Grid4D is compared with have large teams. Ship one phase per minor release in the order above; a phase may be cut, never the rules (undo, tests, docs, the frame budget) | ongoing |
 | R6 | Robust mesh booleans | Coplanar and degenerate cases break naive booleans; Phase 17 starts with a spike on exact predicates and a fuzzed test corpus before any interface | Phase 17 |
 | R7 | GPU compute portability | Shader behaviour differs between Vulkan, Metal and DX12; CI renders the reference scenes on every backend it has and compares with the CPU tracer | Phase 23 |
@@ -1614,6 +1741,6 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 
 ---
 
-**Next action:** the `v1.1.0` tag (the release workflow builds the packages,
-a draft release and the itch.io uploads); then Phase 16 (render quality,
-v1.2), starting with its specs.
+**Next action:** Phase 16 (render quality, v1.2) is planned in detail
+(2026-11-07); it starts with step 16.1 — its specs, `.g4d` v5 and a measured
+render-time budget — when the user says so.
