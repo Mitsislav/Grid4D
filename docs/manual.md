@@ -803,15 +803,24 @@ and drop `.obj` files like glTF files, and pick the `.obj` type in
 
 - **Importing:** every object or group in the file becomes a polygon object, placed
   at the origin. Quads and n-gons stay as they are. Texture coordinates are kept,
-  and the materials of the `.mtl` file named in the OBJ become materials (colour,
-  emission) linked by Material tags, their colours also the display colours.
+  and the materials of the `.mtl` file named in the OBJ become materials linked
+  by Material tags, their colours also the display colours: colour, emission,
+  roughness and metallic (`Pr`, `Pm`, else a roughness from the shininess
+  `Ns`), clear coat, IOR, and their **pictures** — colour (`map_Kd`), emission
+  (`map_Ke`), cut-out (`map_d`), bump (`bump` with its `-bm` height), normal
+  (`norm`), roughness and metallic (`map_Pr`, `map_Pm`), each with its `-s`
+  scale and `-o` offset and the picture channel `-imfchan` names. The
+  pictures are **linked**, found next to the OBJ for relative paths.
   OBJ has no units: 1 unit is read as 1 cm.
 - **Exporting:** every mesh (primitives, generators and deformed shapes included,
   as for glTF) becomes one OBJ object, with its points where they are in the scene (OBJ
   has no positions or hierarchy of its own). Polygons keep all their corners.
-  Normals follow the viewport's smoothing. Materials (under their names, with colour
-  and emission), or display colours, go to a `.mtl` file of the same name next to
-  the `.obj`; keep the two together. Cameras, lights and Nulls are left out.
+  Normals follow the viewport's smoothing. Materials (under their names, with the
+  same values and pictures), or display colours, go to a `.mtl` file of the same
+  name next to the `.obj`; keep them together. Linked pictures are named by
+  their path (relative when they are in the `.obj`'s folder); **embedded
+  pictures are written next to the `.obj`** as files. Cameras, lights and Nulls
+  are left out.
 
 ![Top: the document; bottom: its OBJ export opened again. One polygon object per mesh, in the same places, quads intact](images/manual/obj_export.png)
 

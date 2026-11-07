@@ -59,6 +59,29 @@ None yet (an import/export dialog with scale, flips and splitting is *later*):
   object, at the origin, with the same world-space points and the **same polygons**
   (corner counts included), the same UVs and colours.
 
+## As built (15.8b, materials and pictures)
+
+- **In**: each `.mtl` material → a material: `Kd`, `Ke`, `Ni` (≥ 1, as IOR),
+  `Pr` / `Pm` / `Pc` / `Pcr` (the PBR extension; `tobj` keeps them as unknown
+  parameters), else roughness √(2 / (Ns + 2)) from Phong's shininess.
+  Pictures: `map_Kd` → Base Color, `map_Ke` → Emission (sRGB), `map_d` →
+  Opacity, `bump` / `map_Bump` → Bump (`-bm` → Height), `norm` → Normal,
+  `map_Pr` / `map_Pm` → Roughness / Metallic (linear); options `-s` (tiling),
+  `-o` (offset, V turned round: offset_v = 1 − scale_v − o_v), `-imfchan`
+  (`r` `g` `b`, `m` → alpha; others red); the other options are skipped; the
+  file is the rest of the line (spaces allowed). Pictures are linked:
+  relative paths next to the OBJ (backslashes read as folder breaks),
+  absolute ones as written; one texture per file and colour space.
+- **Out**: a material's block gets `Kd`, `Ka 0`, `Ks 0`, `Ke` (emission ×
+  strength), `Pr`, `Pm`, `Ni` (when not 1.5), `Pc` / `Pcr` (with a coat),
+  `illum 2`, and the picture lines above with `-s`, `-o`, `-bm` and
+  `-imfchan` as needed. Linked pictures by path (relative inside the OBJ's
+  folder); embedded ones are written next to the OBJ under their file name
+  (made unique) and named so.
+- Tests: picture lines and their options; a `.mtl` with every picture and
+  number; export → import keeping values, tiling, offsets, picture channels
+  and files.
+
 ## Grid4D mapping
 
 | Piece | Where |
@@ -77,3 +100,5 @@ None yet (an import/export dialog with scale, flips and splitting is *later*):
 - [x] Export → import gives the same world-space points, polygons and UVs; cameras,
       lights and Nulls are left out; the `.mtl` holds one material per colour.
 - [x] `.obj` works with File ▸ Open, File ▸ Merge, drag and drop and File ▸ Export.
+- [x] (15.8b) `.mtl` pictures and PBR numbers come in and go out; embedded
+      pictures are written next to the OBJ.

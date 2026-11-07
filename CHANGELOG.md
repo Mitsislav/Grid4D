@@ -55,6 +55,11 @@ Toward 1.1: materials, UVs and textures.
   export writes them all, the pictures inside the file. A channel texture
   can read a picture's red, green, blue or alpha (glTF packs roughness and
   metallic in one picture). Merging a document brings its pictures too.
+- **OBJ materials and pictures** — `.mtl` files bring and take their
+  pictures (colour, emission, cut-out, bump, normal, roughness, metallic)
+  with their scale, offset and picture channel, and the PBR numbers
+  (roughness, metallic, clear coat, IOR); embedded pictures are written
+  next to an exported OBJ.
 - **Files** — documents are saved in `.g4d` format version 4. Every file of
   Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
   files and says they come from a newer Grid4D.

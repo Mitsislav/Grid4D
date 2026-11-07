@@ -2,13 +2,25 @@
 //! OBJ has no units (1 unit = 1 cm here), no hierarchy and no transforms: objects
 //! come in at the origin, and go out with their points in world space. Polygons
 //! keep all their corners both ways. Texture coordinates start at the bottom left
-//! in OBJ and at the top left in Grid4D, so V is flipped both ways.
+//! in OBJ and at the top left in Grid4D, so V is flipped both ways (a picture's
+//! `-o` offset in V too). Materials go through the `.mtl`: colours, the PBR
+//! extension's numbers (`Pr`, `Pm`, `Pc`, `Pcr`) and the pictures (`map_Kd`,
+//! `map_Ke`, `map_d`, `bump`, `norm`, `map_Pr`, `map_Pm`) with their `-s`, `-o`,
+//! `-bm` and `-imfchan` options.
 
-use std::{collections::HashMap, fmt::Write as _, path::Path};
+use std::{
+    collections::HashMap,
+    fmt::Write as _,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use glam::{Mat3, Mat4, Vec2, Vec3};
 use grid4d_geom::{PolyMesh, Smoothing, TriMesh, Triangulator};
-use grid4d_scene::{Material, MaterialId, Materials, MeshHandle, NodeData, ObjectKind, Tag, Tags};
+use grid4d_scene::{
+    Channel, ColorSpace, Material, MaterialId, Materials, MeshHandle, NodeData, ObjectKind, PictureChannel, Tag, Tags,
+    Texture, TextureId, TextureSlot, TextureSource, Textures,
+};
 
 use crate::{
     IoError,
@@ -48,23 +60,19 @@ pub fn import_obj(bytes: &[u8], base: Option<&Path>, fallback: &str) -> Result<O
     let mtl = materials.unwrap_or_default();
     // Every material of the .mtl, in its order; objects get a Material tag for theirs.
     let mut materials = Materials::default();
+    let mut pictures = MtlPictures {
+        base,
+        textures: Textures::default(),
+        made: HashMap::new(),
+    };
     let material_ids: Vec<MaterialId> = mtl
         .iter()
         .map(|m| {
-            let name = match m.name.trim() {
-                "" => materials.unique_name("Mat"),
-                name => name.to_owned(),
-            };
-            let mut material = Material::new(name);
-            if let Some(colour) = m.diffuse.filter(|c| finite(c)) {
-                material.color = colour.map(|c| c.max(0.0));
-            }
-            if let Some(emission) = m.emissive.filter(|c| finite(c)) {
-                material.emission = emission.map(|c| c.max(0.0));
-            }
+            let material = read_material(m, &materials, &mut pictures);
             materials.insert(material)
         })
         .collect();
+    let textures = pictures.textures;
 
     let mut nodes = Vec::new();
     for model in models {
@@ -94,10 +102,216 @@ pub fn import_obj(bytes: &[u8], base: Option<&Path>, fallback: &str) -> Result<O
     Ok(Objects {
         nodes,
         materials,
-        textures: grid4d_scene::Textures::default(),
+        textures,
         layers: grid4d_scene::Layers::default(),
         sources: Vec::new(),
     })
+}
+
+/// A `.mtl` material as a Grid4D one.
+fn read_material(m: &tobj::Material, taken: &Materials, pictures: &mut MtlPictures<'_>) -> Material {
+    let name = match m.name.trim() {
+        "" => taken.unique_name("Mat"),
+        name => name.to_owned(),
+    };
+    let mut material = Material::new(name);
+    if let Some(colour) = m.diffuse.filter(|c| finite(c)) {
+        material.color = colour.map(|c| c.max(0.0));
+    }
+    if let Some(emission) = m.emissive.filter(|c| finite(c)) {
+        material.emission = emission.map(|c| c.max(0.0));
+    }
+    if let Some(ior) = m.optical_density.filter(|v| v.is_finite() && *v >= 1.0) {
+        material.ior = ior.clamp(Material::IOR_RANGE.0, Material::IOR_RANGE.1);
+    }
+    let number = |key: &str| {
+        m.unknown_param
+            .get(key)
+            .and_then(|v| v.split_whitespace().next()?.parse::<f32>().ok())
+            .filter(|v| v.is_finite())
+    };
+    // Roughness from the PBR extension, else from Phong's shininess.
+    if let Some(rough) = number("Pr") {
+        material.roughness = rough.clamp(0.0, 1.0);
+    } else if let Some(shine) = m.shininess.filter(|s| s.is_finite() && *s >= 0.0) {
+        material.roughness = (2.0 / (shine + 2.0)).sqrt().clamp(0.0, 1.0);
+    }
+    if let Some(metal) = number("Pm") {
+        material.metallic = metal.clamp(0.0, 1.0);
+    }
+    if let Some(coat) = number("Pc") {
+        material.clearcoat = coat.clamp(0.0, 1.0);
+    }
+    if let Some(coat) = number("Pcr") {
+        material.clearcoat_roughness = coat.clamp(0.0, 1.0);
+    }
+
+    let unknown = |key: &str| m.unknown_param.get(key).map(String::as_str);
+    let maps: [(Channel, Option<&str>); 7] = [
+        (Channel::BaseColor, m.diffuse_texture.as_deref()),
+        (Channel::Emission, unknown("map_Ke")),
+        (Channel::Opacity, m.dissolve_texture.as_deref()),
+        // `tobj` files `bump` and `map_Bump` (height pictures) as its normal texture.
+        (Channel::Bump, m.normal_texture.as_deref()),
+        (Channel::Normal, unknown("norm")),
+        (Channel::Roughness, unknown("map_Pr")),
+        (Channel::Metallic, unknown("map_Pm")),
+    ];
+    for (channel, line) in maps {
+        let Some(map) = line.and_then(MapLine::parse) else {
+            continue;
+        };
+        let space = if channel.is_colour() {
+            ColorSpace::Srgb
+        } else {
+            ColorSpace::Linear
+        };
+        let texture = pictures.texture(&map.path, space);
+        let mut slot = TextureSlot::new(texture);
+        slot.tiling = map.scale;
+        // OBJ's V runs up the picture: an offset there turns round.
+        slot.offset = [map.offset[0], 1.0 - map.scale[1] - map.offset[1]];
+        if let Some(source) = map.channel {
+            slot.source = source;
+        }
+        if channel == Channel::Bump
+            && let Some(height) = map.bump
+        {
+            material.bump_height = height;
+        }
+        *material.map_mut(channel) = Some(slot);
+    }
+    material
+}
+
+/// The `.mtl`'s pictures as linked textures, one per file and colour space.
+struct MtlPictures<'a> {
+    base: Option<&'a Path>,
+    textures: Textures,
+    made: HashMap<(PathBuf, bool), TextureId>,
+}
+
+impl MtlPictures<'_> {
+    fn texture(&mut self, path: &str, space: ColorSpace) -> TextureId {
+        // A relative path is next to the OBJ (backslashes as folder breaks too).
+        let written = Path::new(path);
+        let path = if written.is_absolute() || path.contains(':') {
+            written.to_path_buf()
+        } else {
+            let relative = PathBuf::from(path.replace('\\', "/"));
+            self.base.map_or_else(|| relative.clone(), |base| base.join(&relative))
+        };
+        let key = (path.clone(), space == ColorSpace::Srgb);
+        if let Some(&id) = self.made.get(&key) {
+            return id;
+        }
+        let mut texture = Texture::linked(path);
+        texture.name = self.textures.unique_name(&texture.name);
+        texture.color_space = space;
+        let id = self.textures.insert(texture);
+        self.made.insert(key, id);
+        id
+    }
+}
+
+/// A `.mtl` picture line: its file and the options Grid4D keeps.
+#[derive(Clone, Debug, PartialEq)]
+struct MapLine {
+    path: String,
+    scale: [f32; 2],
+    offset: [f32; 2],
+    bump: Option<f32>,
+    channel: Option<PictureChannel>,
+}
+
+impl MapLine {
+    /// `text` after the keyword: options (`-name values…`), then the file
+    /// (which may hold spaces). `None` without a file.
+    fn parse(text: &str) -> Option<Self> {
+        let mut words = text.split_whitespace().peekable();
+        let mut line = Self {
+            path: String::new(),
+            scale: [1.0, 1.0],
+            offset: [0.0, 0.0],
+            bump: None,
+            channel: None,
+        };
+        let numbers = |words: &mut std::iter::Peekable<std::str::SplitWhitespace<'_>>, most: usize| {
+            let mut out = Vec::new();
+            while out.len() < most
+                && let Some(value) = words.peek().and_then(|w| w.parse::<f32>().ok())
+            {
+                out.push(value);
+                words.next();
+            }
+            out
+        };
+        while let Some(&word) = words.peek() {
+            if !word.starts_with('-') || word.parse::<f32>().is_ok() {
+                break;
+            }
+            words.next();
+            match word {
+                "-s" => {
+                    let v = numbers(&mut words, 3);
+                    if let [u, v, ..] = v[..]
+                        && u.is_finite()
+                        && v.is_finite()
+                        && u.abs() > 1e-6
+                        && v.abs() > 1e-6
+                    {
+                        line.scale = [u, v];
+                    } else if let [u] = v[..]
+                        && u.is_finite()
+                        && u.abs() > 1e-6
+                    {
+                        line.scale = [u, u];
+                    }
+                }
+                "-o" => {
+                    let v = numbers(&mut words, 3);
+                    if let [u, v, ..] = v[..]
+                        && u.is_finite()
+                        && v.is_finite()
+                    {
+                        line.offset = [u, v];
+                    } else if let [u] = v[..]
+                        && u.is_finite()
+                    {
+                        line.offset = [u, 0.0];
+                    }
+                }
+                "-t" => {
+                    numbers(&mut words, 3);
+                }
+                "-bm" | "-boost" | "-texres" => {
+                    let v = numbers(&mut words, 1);
+                    if word == "-bm"
+                        && let Some(&height) = v.first().filter(|h| h.is_finite())
+                    {
+                        line.bump = Some(height);
+                    }
+                }
+                "-mm" => {
+                    numbers(&mut words, 2);
+                }
+                "-imfchan" => {
+                    line.channel = match words.next() {
+                        Some("g") => Some(PictureChannel::Green),
+                        Some("b") => Some(PictureChannel::Blue),
+                        Some("m") => Some(PictureChannel::Alpha),
+                        _ => Some(PictureChannel::Red),
+                    };
+                }
+                // On / off switches and anything else with one word after it.
+                _ => {
+                    words.next();
+                }
+            }
+        }
+        line.path = words.collect::<Vec<_>>().join(" ");
+        (!line.path.is_empty()).then_some(line)
+    }
 }
 
 /// The `.mtl` named by `mtllib`, read only from a path relative to the OBJ.
@@ -195,7 +409,13 @@ fn read_mesh(mesh: &tobj::Mesh, name: &str) -> Result<Option<PolyMesh>, IoError>
 pub fn export_obj(objects: &Objects, path: &Path) -> Result<(), IoError> {
     let mtl_path = path.with_extension("mtl");
     let mtl_name = mtl_path.file_name().map(|n| n.to_string_lossy().into_owned());
-    let (obj, mtl) = obj_text(objects, mtl_name.as_deref())?;
+    let folder = path.parent();
+    let (obj, mtl, files) = texts(objects, mtl_name.as_deref(), folder)?;
+    // Embedded pictures go next to the OBJ, where the .mtl names them.
+    for (name, bytes) in files {
+        let target = folder.map_or_else(|| PathBuf::from(&name), |f| f.join(&name));
+        write_atomic(&target, &bytes)?;
+    }
     if !mtl.is_empty() {
         write_atomic(&mtl_path, mtl.as_bytes())?;
     }
@@ -203,12 +423,147 @@ pub fn export_obj(objects: &Objects, path: &Path) -> Result<(), IoError> {
 }
 
 /// The OBJ text and its `.mtl` text (empty without polygon objects). `mtl_name`
-/// is the `.mtl` file the OBJ refers to (`None`: no materials).
+/// is the `.mtl` file the OBJ refers to (`None`: no materials). Embedded
+/// pictures are named by their file names (not written).
 ///
 /// # Errors
 ///
 /// [`IoError::Invalid`] for non-finite numbers.
 pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, String), IoError> {
+    texts(objects, mtl_name, None).map(|(obj, mtl, _)| (obj, mtl))
+}
+
+/// An embedded picture to write next to the OBJ: its file name and bytes.
+type Picture = (String, Arc<[u8]>);
+
+/// Where each picture a `.mtl` names is: a linked file by its path (relative
+/// to `folder` when inside it), an embedded one by a file name next to the
+/// OBJ, written there.
+struct Names<'a> {
+    folder: Option<&'a Path>,
+    named: HashMap<TextureId, Option<String>>,
+    /// Embedded pictures to write.
+    files: Vec<Picture>,
+}
+
+impl Names<'_> {
+    fn name(&mut self, id: TextureId, textures: &Textures) -> Option<String> {
+        if let Some(named) = self.named.get(&id) {
+            return named.clone();
+        }
+        let named = textures.get(id).map(|texture| match &texture.source {
+            TextureSource::Linked(path) => self
+                .folder
+                .and_then(|folder| path.strip_prefix(folder).ok())
+                .map_or_else(
+                    || path.to_string_lossy().into_owned(),
+                    |relative| relative.to_string_lossy().replace('\\', "/"),
+                ),
+            TextureSource::Embedded { file_name, bytes } => {
+                let file: String = file_name
+                    .chars()
+                    .map(|c| {
+                        if c.is_whitespace() || c.is_control() || "/\\:".contains(c) {
+                            '_'
+                        } else {
+                            c
+                        }
+                    })
+                    .collect();
+                let file = if file.is_empty() {
+                    "picture.png".to_owned()
+                } else {
+                    file
+                };
+                // Two pictures with one name stay apart.
+                let mut name = file.clone();
+                let mut n = 1;
+                while self.files.iter().any(|(taken, _)| *taken == name) {
+                    let stem = Path::new(&file)
+                        .file_stem()
+                        .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+                    let extension = Path::new(&file)
+                        .extension()
+                        .map_or_else(String::new, |e| format!(".{}", e.to_string_lossy()));
+                    name = format!("{stem}_{n}{extension}");
+                    n += 1;
+                }
+                self.files.push((name.clone(), Arc::clone(bytes)));
+                name
+            }
+        });
+        self.named.insert(id, named.clone());
+        named
+    }
+}
+
+/// `material`'s `.mtl` lines after `newmtl`.
+fn material_lines(mtl: &mut String, m: &Material, textures: &Textures, names: &mut Names<'_>) {
+    let [r, g, b] = m.color;
+    let _ = write!(mtl, "Kd {r} {g} {b}\nKa 0 0 0\nKs 0 0 0\n");
+    if m.emission != [0.0; 3] {
+        let [r, g, b] = m.emitted();
+        let _ = writeln!(mtl, "Ke {r} {g} {b}");
+    }
+    let _ = writeln!(mtl, "Pr {}\nPm {}", m.roughness, m.metallic);
+    if (m.ior - 1.5).abs() > 1e-6 {
+        let _ = writeln!(mtl, "Ni {}", m.ior);
+    }
+    if m.clearcoat > 0.0 {
+        let _ = writeln!(mtl, "Pc {}\nPcr {}", m.clearcoat, m.clearcoat_roughness);
+    }
+    let keys = [
+        (Channel::BaseColor, "map_Kd"),
+        (Channel::Emission, "map_Ke"),
+        (Channel::Opacity, "map_d"),
+        (Channel::Bump, "bump"),
+        (Channel::Normal, "norm"),
+        (Channel::Roughness, "map_Pr"),
+        (Channel::Metallic, "map_Pm"),
+    ];
+    for (channel, key) in keys {
+        let Some(slot) = m.map(channel) else { continue };
+        let Some(file) = names.name(slot.texture, textures) else {
+            continue;
+        };
+        let mut line = key.to_owned();
+        let [su, sv] = slot.tiling;
+        if [su, sv] != [1.0, 1.0] {
+            let _ = write!(line, " -s {su} {sv} 1");
+        }
+        // OBJ's V runs up the picture: the offset turns round.
+        let (ou, ov) = (slot.offset[0], 1.0 - sv - slot.offset[1]);
+        if ou != 0.0 || ov.abs() > 1e-6 {
+            let _ = write!(line, " -o {ou} {ov} 0");
+        }
+        if channel == Channel::Bump {
+            let _ = write!(line, " -bm {}", m.bump_height);
+        }
+        if !channel.is_colour() && channel != Channel::Normal && slot.source != PictureChannel::Red {
+            let name = match slot.source {
+                PictureChannel::Green => "g",
+                PictureChannel::Blue => "b",
+                PictureChannel::Alpha => "m",
+                PictureChannel::Red => "r",
+            };
+            let _ = write!(line, " -imfchan {name}");
+        }
+        let _ = writeln!(mtl, "{line} {file}");
+    }
+}
+
+/// [`obj_text`], and the embedded pictures to write next to the OBJ (named
+/// relative to `folder`).
+fn texts(
+    objects: &Objects,
+    mtl_name: Option<&str>,
+    folder: Option<&Path>,
+) -> Result<(String, String, Vec<Picture>), IoError> {
+    let mut names = Names {
+        folder,
+        named: HashMap::new(),
+        files: Vec::new(),
+    };
     let worlds = world_matrices(objects);
     let mut obj = format!("# Grid4D {}\n", env!("CARGO_PKG_VERSION"));
     let mut mtl = String::new();
@@ -293,13 +648,20 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
                 if !finite(&colour) || !finite(&emission) {
                     return Err(invalid(format!("\"{}\" has a non-finite colour", data.name)));
                 }
-                let [r, g, b] = colour;
-                let _ = write!(mtl, "newmtl {name}\nKd {r} {g} {b}\nKa 0 0 0\nKs 0 0 0\n");
-                if emission != [0.0; 3] {
-                    let [r, g, b] = emission;
-                    let _ = writeln!(mtl, "Ke {r} {g} {b}");
+                let _ = writeln!(mtl, "newmtl {name}");
+                match material {
+                    Some((_, m)) => {
+                        if !finite(&m.numbers()) {
+                            return Err(invalid(format!("material \"{}\" is not finite", m.name)));
+                        }
+                        material_lines(&mut mtl, m, &objects.textures, &mut names);
+                    }
+                    None => {
+                        let [r, g, b] = colour;
+                        let _ = write!(mtl, "Kd {r} {g} {b}\nKa 0 0 0\nKs 0 0 0\n");
+                    }
                 }
-                let _ = writeln!(mtl, "illum 1\n");
+                let _ = writeln!(mtl, "illum 2\n");
                 material_of.insert(key, name);
             }
             if let Some(name) = material_of.get(&key) {
@@ -371,7 +733,7 @@ pub fn obj_text(objects: &Objects, mtl_name: Option<&str>) -> Result<(String, St
         let _ = writeln!(obj, "mtllib {name}");
     }
     obj.push_str(&body);
-    Ok((obj, mtl))
+    Ok((obj, mtl, names.files))
 }
 
 /// Each object's world matrix (parents come first in `objects`).
@@ -403,7 +765,7 @@ mod tests {
 
     use super::*;
 
-    fn temp_dir(test: &str) -> std::path::PathBuf {
+    fn temp_dir(test: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("grid4d-obj-{}-{test}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
@@ -653,5 +1015,127 @@ l 5 6
         let (plain, no_mtl) = obj_text(&scene(), None).unwrap();
         assert!(!plain.contains("mtllib") && !plain.contains("usemtl") && no_mtl.is_empty());
         assert!(obj_text(&Objects::default(), Some("x.mtl")).unwrap().1.is_empty());
+    }
+
+    #[test]
+    fn picture_lines_keep_their_file_and_options() {
+        let line = MapLine::parse("-bm 0.5 -s 2 3 1 -o 0.25 0.5 0 -clamp on -imfchan g maps/wood grain.png").unwrap();
+        assert_eq!(line.path, "maps/wood grain.png", "a name with a space");
+        assert_eq!((line.scale, line.offset), ([2.0, 3.0], [0.25, 0.5]));
+        assert_eq!((line.bump, line.channel), (Some(0.5), Some(PictureChannel::Green)));
+        assert_eq!(MapLine::parse("plain.png").unwrap().scale, [1.0, 1.0]);
+        assert!(MapLine::parse("-s 2 2").is_none(), "no file");
+    }
+
+    #[test]
+    fn a_mtl_with_pictures_and_pbr_numbers_brings_them_in() {
+        let dir = temp_dir("mtl_pictures");
+        fs::write(
+            dir.join("shapes.mtl"),
+            "newmtl red\nKd 1 1 1\nNs 100\nPm 0.75\nPc 0.5\nPcr 0.1\nNi 1.33\n\
+             map_Kd -s 2 2 1 -o 0.5 0 0 maps/paint.png\n\
+             map_Ke glow.png\n\
+             map_d -imfchan m maps/paint.png\n\
+             bump -bm 0.3 maps/height.png\n\
+             norm maps/normal.png\n\
+             map_Pr -imfchan g maps/packed.png\n\
+             map_Pm -imfchan b maps/packed.png\n",
+        )
+        .unwrap();
+        let objects = import_obj(SHAPES.as_bytes(), Some(&dir), "Shapes").unwrap();
+        let (_, red) = objects.materials.iter().find(|(_, m)| m.name == "red").unwrap();
+        // Shininess 100 is a rough guess at roughness; the PBR numbers come as written.
+        assert!((red.roughness - (2.0f32 / 102.0).sqrt()).abs() < 1e-5);
+        assert_eq!(
+            (red.metallic, red.clearcoat, red.clearcoat_roughness, red.ior),
+            (0.75, 0.5, 0.1, 1.33)
+        );
+        let slot = |channel| *red.map(channel).unwrap_or_else(|| panic!("{channel:?}"));
+        let base = slot(Channel::BaseColor);
+        // V turned round: −o's 0 becomes 1 − 2 − 0.
+        assert_eq!((base.tiling, base.offset), ([2.0, 2.0], [0.5, -1.0]));
+        let texture = |slot: TextureSlot| objects.textures.get(slot.texture).unwrap();
+        assert_eq!(texture(base).source, TextureSource::Linked(dir.join("maps/paint.png")));
+        assert_eq!(texture(base).color_space, ColorSpace::Srgb);
+        assert_eq!(slot(Channel::Opacity).source, PictureChannel::Alpha);
+        assert_eq!(
+            texture(slot(Channel::Opacity)).color_space,
+            ColorSpace::Linear,
+            "data: its own texture"
+        );
+        assert!((red.bump_height - 0.3).abs() < 1e-6);
+        let _ = slot(Channel::Normal);
+        let _ = slot(Channel::Emission);
+        let (rough, metal) = (slot(Channel::Roughness), slot(Channel::Metallic));
+        assert_eq!(
+            (rough.source, metal.source),
+            (PictureChannel::Green, PictureChannel::Blue)
+        );
+        assert_eq!(rough.texture, metal.texture);
+        // paint (colour), paint (data), glow, height, normal, packed.
+        assert_eq!(objects.textures.len(), 6);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pictures_go_out_with_the_mtl_and_come_back() {
+        let dir = temp_dir("mtl_out");
+        fs::create_dir_all(dir.join("maps")).unwrap();
+        let mut objects = scene();
+        let wood = objects
+            .textures
+            .insert(Texture::linked(dir.join("maps").join("wood.png")));
+        let stamp = objects.textures.insert(Texture {
+            name: "Stamp".to_owned(),
+            source: TextureSource::Embedded {
+                file_name: "stamp.png".to_owned(),
+                bytes: vec![1u8, 2, 3].into(),
+            },
+            color_space: ColorSpace::Linear,
+        });
+        let mut painted = Material::new("Painted");
+        (painted.roughness, painted.metallic, painted.bump_height) = (0.4, 0.2, 0.7);
+        *painted.map_mut(Channel::BaseColor) = Some(TextureSlot {
+            tiling: [3.0, 2.0],
+            offset: [0.25, 0.5],
+            ..TextureSlot::new(wood)
+        });
+        *painted.map_mut(Channel::Bump) = Some(TextureSlot::new(stamp));
+        *painted.map_mut(Channel::Roughness) = Some(TextureSlot {
+            source: PictureChannel::Blue,
+            ..TextureSlot::new(stamp)
+        });
+        let painted = objects.materials.insert(painted);
+        objects.nodes[0]
+            .data
+            .tags
+            .push(Tag::Material(grid4d_scene::MaterialTag::new(Some(painted))));
+        let path = dir.join("scene.obj");
+        export_obj(&objects, &path).unwrap();
+        let mtl = fs::read_to_string(dir.join("scene.mtl")).unwrap();
+        assert!(mtl.contains("map_Kd -s 3 2 1 -o 0.25 -1.5 0 maps/wood.png"), "{mtl}");
+        assert!(mtl.contains("bump -bm 0.7 stamp.png"), "{mtl}");
+        assert!(mtl.contains("map_Pr -imfchan b stamp.png"), "{mtl}");
+        assert_eq!(
+            fs::read(dir.join("stamp.png")).unwrap(),
+            [1, 2, 3],
+            "the embedded picture next to it"
+        );
+
+        let back = import_obj(&fs::read(&path).unwrap(), Some(&dir), "scene").unwrap();
+        let (_, found) = back.materials.iter().find(|(_, m)| m.name == "Painted").unwrap();
+        assert_eq!((found.roughness, found.metallic, found.bump_height), (0.4, 0.2, 0.7));
+        let base = *found.map(Channel::BaseColor).unwrap();
+        assert_eq!(
+            (base.tiling, base.offset),
+            ([3.0, 2.0], [0.25, 0.5]),
+            "offsets turn back"
+        );
+        assert_eq!(
+            back.textures.get(base.texture).unwrap().source,
+            TextureSource::Linked(dir.join("maps/wood.png"))
+        );
+        assert_eq!(found.map(Channel::Roughness).unwrap().source, PictureChannel::Blue);
+        let _ = fs::remove_dir_all(&dir);
     }
 }
