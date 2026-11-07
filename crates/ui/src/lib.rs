@@ -41,6 +41,7 @@ pub mod simulation;
 pub mod startup;
 pub mod textures;
 pub mod theme;
+pub mod uv_tools;
 mod widgets;
 pub mod window;
 pub mod workspace;

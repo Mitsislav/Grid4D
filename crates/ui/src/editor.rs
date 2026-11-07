@@ -754,6 +754,8 @@ pub struct EditorState {
     pub selection_settings: SelectionSettings,
     pub transform_settings: TransformSettings,
     pub modeling_settings: ModelingSettings,
+    /// The UV tools' options.
+    pub uv_settings: crate::uv_tools::UvSettings,
     pub pen: PenSettings,
     /// The spline the Pen finished (Esc, Enter, closing it): the next Pen click
     /// starts a new spline even while it is active.
@@ -854,6 +856,7 @@ impl Default for EditorState {
             selection_settings: SelectionSettings::default(),
             transform_settings: TransformSettings::default(),
             modeling_settings: ModelingSettings::default(),
+            uv_settings: crate::uv_tools::UvSettings::default(),
             pen: PenSettings::default(),
             pen_finished: None,
             chord: None,

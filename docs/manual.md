@@ -2204,6 +2204,34 @@ edits to the object keep it in place.
 > the ones before it where its Opacity lets it. A Camera projection uses its
 > camera object in renders; in the viewport it always uses the view's camera.
 
+### 19.3 UV tools
+
+A polygon object's **UVs** say where each point of its surface lies on a
+picture. **Mesh ▸ UV** changes them on the active polygon object: on its
+selected polygons, or on all its visible ones when none is selected. Each
+command is one undo step.
+
+| Command | What it does |
+|---------|--------------|
+| **Unwrap** | flattens the polygons as if cut along the **seams** and laid out flat, keeping their angles as well as it can; each piece is as large on the picture as on the surface, and the pieces are laid into the square. In Edges mode the selected edges are cut too. With no seams and no edges selected it cuts where polygons meet at more than 60° (a cube falls apart into its six sides) |
+| **Relax** | evens out how much the picture stretches: the inner points of each piece move so its edges take the lengths they have on the surface. The outline of each piece stays where it is, and no polygon is ever turned over |
+| **Pack Islands** | lays the pieces (islands) the polygons belong to into the square without overlapping, all at the same scale, with a small gap between them; a piece may be turned a quarter to fit better |
+| **Project ▸ Box, Spherical, Cylindrical, Flat** | gives the polygons the UVs of that projection, its shape fitted to the object ([§19.2](#192-placing-a-material-projections-and-layers)) |
+| **Flip U / Flip V** | mirrors the polygons' UVs left to right, or top to bottom |
+| **Mark Seams** | the selected edges become seams: later Unwraps cut there |
+| **Clear Seams** | the selected edges stop being seams; with no edge selected, every seam goes |
+
+**Seams** are kept with the object and saved with the document. Modelling
+keeps them where their edges survive (an Extrude, a cut, a deletion).
+
+A good habit: select edges where a cut will hide well (along the back, an
+inner corner), **Mark Seams**, then **Unwrap**. A sphere or a closed shape
+with no seams at all is cut by the directions its polygons face, so it
+always lies flat.
+
+> A UV Editor that shows and edits the UVs over the picture follows in
+> Grid4D 1.1's next step.
+
 ## 20. Rendering
 
 A **render** is the finished picture of the scene: materials and lights as

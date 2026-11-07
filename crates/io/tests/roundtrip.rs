@@ -216,8 +216,22 @@ proptest! {
             ("[a-z]{1,8}", prop::option::of(prop::collection::vec(any::<u8>(), 0..32)), any::<bool>()),
             0..4,
         ),
+        seams in prop::collection::vec(prop::collection::vec(any::<bool>(), 24), 0..3),
     ) {
         let mut doc = document(objects, materials, layers);
+        // UV seams (version 4): cubes whose corners are flagged at random.
+        for flags in seams {
+            let mut state = grid4d_scene::ComponentState::default();
+            state.seams.extend(flags.iter().enumerate().filter(|(_, f)| **f).map(|(c, _)| c));
+            state.selected.edges.extend(flags.iter().enumerate().filter(|(_, f)| !**f).map(|(c, _)| c));
+            doc.scene.insert(Node::new(
+                "Seamed",
+                ObjectKind::Polygon {
+                    mesh: grid4d_scene::MeshHandle::new(grid4d_geom::primitives::cube(Vec3::splat(10.0), [1, 1, 1])),
+                    components: grid4d_scene::Components::new(state),
+                },
+            ));
+        }
         // Textures (version 4): linked by a relative path, or embedded.
         for (name, embedded, linear) in textures {
             let source = match embedded {

@@ -71,9 +71,15 @@ pub(crate) fn rebuilt_data(data: &NodeData, rebuilt: Rebuilt, fresh: Fresh) -> O
         return None;
     }
     let topology = mesh.topology();
+    // Seams are edges by corner: carried like an edge selection.
+    let seams = grid4d_geom::ComponentSet {
+        edges: components.state().seams.clone(),
+        ..grid4d_geom::ComponentSet::default()
+    };
     let mut state = ComponentState {
         selected: rebuilt.carry(components.selected(), topology),
         hidden: rebuilt.carry(components.hidden(), topology),
+        seams: rebuilt.carry(&seams, topology).edges,
     };
     match fresh {
         Fresh::EdgesSelected if !rebuilt.new_edges.is_empty() => state.selected.edges = rebuilt.new_edge_corners(),

@@ -129,6 +129,25 @@ All in `grid4d_geom::uv`, pure functions that return new corner UVs:
   reference machine (`cargo bench -p grid4d-geom`, "UV"); a flat one of
   65 536 quads 0.4 s.
 
+## As built (15.7b, seams and commands)
+
+- `ComponentState::seams` (scene): a `BitSet` of corners, edges by corner
+  like an edge selection; `.g4d` v4 writes it as `seams` (a component set
+  with `edges` only) on polygon kinds; a version 3 file's `seams` are
+  dropped. Rebuilding operations carry seams like the edge selection
+  (`Rebuilt::carry`).
+- `EditorCommand::UvCommand(UvOp)` (`ui/src/uv_tools.rs`): Unwrap, Relax,
+  Pack, Project (Box, Spherical, Cylindrical, Flat, fitted to the mesh's
+  bounds), Flip U / V, Mark Seams, Clear Seams on the active polygon
+  object's selected visible polygons (all visible ones when none); one undo
+  step, none when nothing changes. UV changes make a new mesh handle and
+  keep the components; seam changes keep the mesh.
+- Unwrap's cuts: the seams, plus the selected edges in Edges mode; with
+  neither, edges sharper than `UvSettings::seam_angle` (60°). Pack's margin:
+  `margin_pixels` of a `texture_size` picture (4 of 1024).
+- Mesh ▸ UV holds the commands until the pane (15.7c) has its own menus;
+  the random-command test applies them.
+
 ## Acceptance criteria
 
 - [x] Unwrap of a cube cut along seven edges gives one island with no

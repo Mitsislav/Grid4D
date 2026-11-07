@@ -111,7 +111,7 @@ The `kind` of an object, by its `type`:
 | `capsule` | `radius`, `height`, `rotation_segments`, `height_segments`, `cap_segments` |
 | `camera` | `fov_y_deg` (vertical field of view, degrees) |
 | `light` | `color`, `intensity` (1 = 100 %); `light_type`: `omni` (default), `spot`, `infinite`; `details` (default: none): `use_inner`, `inner_angle_deg`, `outer_angle_deg`, `falloff` (`none`, `linear`, `inverse_square`), `radius`; `shadow`: `none` (default), `shadow_maps`, `raytraced`, `area` |
-| `polygon` | `mesh` (index into `meshes`); `selected`, `hidden` (component sets, below; default empty) |
+| `polygon` | `mesh` (index into `meshes`); `selected`, `hidden` (component sets, below; default empty); `seams` (a component set with `edges` only: the UV seams; default none) |
 | `subdivision_surface` | `viewport_levels`, `render_levels`, `linear_pre` (0 – 6), `boundary` (`edge`, `edge_and_corner`) |
 | `extrude` | `offset`, `movement` (vector), `subdivision`; `direction`: `auto` (default), `x`, `y`, `z`, `custom`, `absolute`; `reverse_normals` (false), `hierarchical` (false), `start_cap` (true), `end_cap` (true), `cap_type`: `n_gons` (default), `triangles` |
 | `lathe` | `angle`, `subdivision`, `movement` (0), `scaling` (1), `reverse_normals` (false), `start_cap` (true), `end_cap` (true), `cap_type` |
@@ -305,10 +305,11 @@ its meaning — and only adds to it. What it adds, as of this writing:
 | `document.textures` and the entries `textures/<n>.<ext>` | Grid4D 1.1 development (step 15.3) |
 | the materials' channels beyond colour, roughness, metallic and emission, and `maps` | Grid4D 1.1 development (step 15.4) |
 | a Material tag's `projection`, `offset`, `tiling`, `rotation`, `placement` and `camera` (on objects and in takes' overrides) | Grid4D 1.1 development (step 15.4) |
+| a polygon object's `seams` (on objects and in takes' overrides) | Grid4D 1.1 development (step 15.7b) |
 
 A version 3 file is therefore read as a version 4 file with the version
 number changed, minus any field this table lists (a material's and a Material
-tag's added fields included) (version 3 readers ignore
+tag's added fields and a polygon object's `seams` included) (version 3 readers ignore
 unknown fields, so such a field in a version 3 file means nothing). A
 version 4 file that uses none of the additions is a valid version 3 file once
 its `version` says `3`.

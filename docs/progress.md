@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.7a — The UV algorithms: islands, unwrap (LSCM), relax, pack (2026-11-07) |
-| Next step | 15.7b — Seams in the document and the UV commands |
-| Tests | 849 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.7b — Seams in the document and the UV commands (2026-11-07) |
+| Next step | 15.7c — The UV Editor pane |
+| Tests | 854 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2320,6 +2320,7 @@ risks R5 – R8 go with it.
 | 15.5b | Normal and bump maps in the viewport: `grid4d_geom::uv::tangents` (along `u`, shared by vertices at one place with one normal and UV, `w` the side of up the picture), tangents in the vertices of meshes whose material bends normals (`DrawKey::tangents`), tangent-space normal pictures (+Y up) and bump pictures by screen-space derivatives in `mesh.wgsl`; layers: Material tags above the lowest covering one drawn as levels over the surface on its depth (`layer_pipeline`, `@invariant` position), their values from their own material; the picture budget (1 GiB, the device's largest side; smaller mips first); the manual's picture with a label layer and studs | 822 |
 | 15.6 | Textures in the path tracer: `RenderScene::textured` with a `Texturing` (materials, `Pictures` — the cache's full-size levels shared, `Pixels` now `Arc` — the render's camera and aspect, camera objects); every Material tag a layer read per hit from the top (`channels.rs` reads channels like the shader); coordinates per triangle corner (shape projections, UVs, the tag's transform) or through a camera; bilinear repeating pictures (8-bit sRGB / linear, half float); normal pictures in the tangent frame, bump by the height's slope; cut-outs for rays and shadows; glass (exact Fresnel, refraction about a microfacet normal, total internal reflection, tinted lighter shadows), a clear coat, Specular; renders and the Render View get the pictures, preview balls too (made again when a picture arrives); the render example decodes a document's textures; a second reference picture; the manual's §20 with a render | 838 |
 | 15.7a | The UV algorithms in `grid4d_geom::uv` (now a folder): `layout` (UV vertices and islands by a union-find over corners), `sharp_edges`; `unwrap` (parts across uncut edges, non-discs split by facing, LSCM per part solved by CGLS from a planar guess, scaled to surface area, packed); `relax` (edge springs at the island's scale, steps halved rather than flipping, borders pinned); `pack` (rows, quarter turns, margin after scaling, all in 0 – 1); `flip`; `face_stretch`, `stretch_measure`; the spec corrected after reading the reference (one shared selection, seams of their own, H / S framing) and the step split in three; an unwrap bench | 849 |
+| 15.7b | Seams: `ComponentState::seams` (edges by corner), carried through rebuilding operations like the edge selection, written by `.g4d` v4 on polygon kinds (`seams`; dropped from version 3 files; `FILE_FORMAT.md`, the golden `full_v4.g4d` and the property test updated); `EditorCommand::UvCommand(UvOp)` in `ui/src/uv_tools.rs` (Unwrap with seams / selected edges / sharp edges, Relax, Pack, Project, Flip U / V, Mark / Clear Seams; selected visible polygons or all; one undo step); `UvSettings` in the editor; Mesh ▸ UV; the random-command test; Greek; the manual's §19.3 | 854 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2607,6 +2608,27 @@ risks R5 – R8 go with it.
   end, so the gap before scaling is found in a few rounds (gap = margin ×
   layout size).
 - clippy asked for iterators over index loops and a derived `Default`.
+
+**15.7b — Seams in the document and the UV commands**
+
+*Problems and solutions:*
+- **Where seams live.** As a third set beside the selection and the hidden
+  flags, edges by corner like the edge selection, so rebuilding operations
+  carry them with the same code (`Rebuilt::carry`) and the file stores them
+  with the same ranges.
+- **A version 3 file must mean what it meant.** `seams` is new in version 4
+  and sits inside an object's kind, so the upgrade walks the document (and
+  takes' overrides) and removes it from every kind whose type is `polygon`.
+- **Which polygons a tool works on.** The selected polygons that are not
+  hidden; with none, every visible polygon; with everything hidden,
+  nothing (no undo step).
+- **Selected edges as cuts.** An old edge selection would cut unexpectedly
+  in Polygons mode, so Unwrap counts the selected edges only in Edges mode.
+- **The Greek table has entries on several lines.** A helper that inserted
+  new pairs looked only at one-line entries and put two of them out of
+  order; it now reads both forms.
+- The test of seams through an Extrude first undid too few steps: selecting
+  polygons is a step of its own.
 
 ---
 

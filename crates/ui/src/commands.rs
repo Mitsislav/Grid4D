@@ -276,6 +276,10 @@ pub enum EditorCommand {
     /// the active polygon object's selection in the current mode (its Apply
     /// button). One undo step if anything changed.
     ApplyMeshTool,
+    /// A UV tool on the active polygon object's selected polygons (all its
+    /// visible ones when none), with the editor's UV settings: its UVs or its
+    /// seams change. One undo step if anything changed.
+    UvCommand(crate::uv_tools::UvOp),
     /// A click, frame or loop in a component mode on polygon object `node`:
     /// `hits` are the picked points, unique edges or polygons — none for empty
     /// space, which clears the selection on a plain click. One undo step if
@@ -956,6 +960,22 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     editor,
                     "Weld",
                     vec![SceneEdit::SetData { id: node, data }],
+                    |_, _| {},
+                );
+            }
+        }
+        EditorCommand::UvCommand(op) => {
+            let edges_cut = editor.mode == EditMode::Edges;
+            let data = editor.selection.active().and_then(|id| {
+                let node = doc.scene.get(id)?;
+                crate::uv_tools::apply(&node.data, op, &editor.uv_settings, edges_cut).map(|d| (id, d))
+            });
+            if let Some((id, data)) = data {
+                commit(
+                    doc,
+                    editor,
+                    op.label(),
+                    vec![SceneEdit::SetData { id, data }],
                     |_, _| {},
                 );
             }
@@ -3470,6 +3490,78 @@ mod tests {
         assert!(after.mesh().point_count() < before);
         assert!(after.topology().is_closed());
         assert_eq!(editor.history.undo_label(), Some("Optimize"));
+    }
+
+    #[test]
+    fn uv_tools_are_one_undo_step_each_and_seams_survive_modelling() {
+        use crate::uv_tools::UvOp;
+        let mut doc = Document::new("cube");
+        let id = doc.scene.insert(Node::new("Cube", ObjectKindTag::Cube.default_kind()));
+        let mut editor = EditorState::default();
+        let mut vp = viewport();
+        editor.selection.set_single(id);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let before = mesh_of(&doc, id);
+
+        // Unwrap: new UVs, unmirrored, in the square; undo gives the old mesh back.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::UvCommand(UvOp::Unwrap)],
+        );
+        assert_eq!(editor.history.undo_label(), Some("Unwrap UVs"));
+        let unwrapped = mesh_of(&doc, id);
+        assert_ne!(unwrapped.id(), before.id());
+        assert_eq!(grid4d_geom::uv::flipped_faces(unwrapped.mesh()), 0);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(mesh_of(&doc, id).id(), before.id());
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Redo]);
+        assert_eq!(mesh_of(&doc, id).id(), unwrapped.id());
+
+        // Seams from the selected edges, kept through an Extrude.
+        editor.mode = EditMode::Edges;
+        select_in(&mut doc, &mut editor, &mut vp, id, Component::Edge, vec![0, 1]);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::UvCommand(UvOp::MarkSeams)],
+        );
+        assert_eq!(editor.history.undo_label(), Some("Mark Seams"));
+        let seams = |doc: &Document| {
+            let ObjectKind::Polygon { components, .. } = &doc.scene.get(id).unwrap().data.kind else {
+                unreachable!()
+            };
+            components.state().seams.len()
+        };
+        assert_eq!(seams(&doc), 4, "two edges, both sides");
+        editor.mode = EditMode::Polygons;
+        select_in(&mut doc, &mut editor, &mut vp, id, Component::Polygon, vec![5]);
+        editor.tool = crate::Tool::Extrude;
+        editor.modeling_settings.extrude.offset = 20.0;
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::ApplyMeshTool]);
+        assert!(seams(&doc) >= 2, "the seams away from the extruded side stay");
+        // Undo the Extrude, the polygon selection, then the seams.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::Undo, EditorCommand::Undo],
+        );
+        assert_eq!(editor.history.undo_label(), Some("Mark Seams"));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(seams(&doc), 0);
+
+        // A tool with nothing to change adds no step.
+        let steps = editor.history.undo_len();
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::UvCommand(UvOp::ClearSeams)],
+        );
+        assert_eq!(editor.history.undo_len(), steps);
     }
 
     #[test]

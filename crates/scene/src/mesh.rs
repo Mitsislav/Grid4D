@@ -7,7 +7,7 @@ use std::{
 };
 
 use glam::Vec3;
-use grid4d_geom::{Bvh, ComponentSet, PolyMesh, RayHit, Topology};
+use grid4d_geom::{BitSet, Bvh, ComponentSet, PolyMesh, RayHit, Topology};
 
 use crate::Aabb;
 
@@ -127,12 +127,16 @@ impl fmt::Debug for MeshHandle {
     }
 }
 
-/// What is selected and hidden on a polygon object, per component kind.
+/// What is selected and hidden on a polygon object, per component kind, and
+/// where its UVs are cut.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ComponentState {
     pub selected: ComponentSet,
     /// Hidden components are neither drawn nor pickable.
     pub hidden: ComponentSet,
+    /// UV seams: edges flagged by corner, like an edge selection (an edge is a
+    /// seam when any of its corners is flagged). Unwrap cuts along them.
+    pub seams: BitSet,
 }
 
 /// A polygon object's [`ComponentState`], shared copy-on-write: snapshots (undo

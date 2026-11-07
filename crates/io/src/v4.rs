@@ -1885,13 +1885,16 @@ enum KindDto {
         shadow: LightShadowDto,
     },
     /// `mesh` indexes the file's `meshes`; objects sharing a mesh share an index.
-    /// `selected` / `hidden` flag components (optional, added in step 4.1).
+    /// `selected` / `hidden` flag components (optional, added in step 4.1);
+    /// `seams` the UV seams, as `edges` ranges (version 4, step 15.7b).
     Polygon {
         mesh: usize,
         #[serde(default, skip_serializing_if = "SetDto::is_empty")]
         selected: SetDto,
         #[serde(default, skip_serializing_if = "SetDto::is_empty")]
         hidden: SetDto,
+        #[serde(default, skip_serializing_if = "SetDto::is_empty")]
+        seams: SetDto,
     },
     /// Added to v3 before its release (additive): files without it still load.
     SubdivisionSurface {
@@ -3821,6 +3824,10 @@ impl KindDto {
                 mesh: meshes.index(mesh, object),
                 selected: SetDto::new(components.selected()),
                 hidden: SetDto::new(components.hidden()),
+                seams: SetDto::new(&ComponentSet {
+                    edges: components.state().seams.clone(),
+                    ..ComponentSet::default()
+                }),
             },
             ObjectKind::SubdivisionSurface {
                 viewport_levels,
@@ -4118,7 +4125,12 @@ impl KindDto {
                 details: details.map_or_else(LightDetails::default, LightDetailsDto::details),
                 shadow: shadow.into(),
             },
-            Self::Polygon { mesh, selected, hidden } => {
+            Self::Polygon {
+                mesh,
+                selected,
+                hidden,
+                seams,
+            } => {
                 let mesh = meshes.get(mesh).cloned().ok_or_else(|| {
                     IoError::Invalid(format!(
                         "object \"{object}\" uses mesh {mesh}, but the file has {} meshes",
@@ -4128,6 +4140,7 @@ impl KindDto {
                 let state = ComponentState {
                     selected: selected.into_set(mesh.mesh(), object, "selection")?,
                     hidden: hidden.into_set(mesh.mesh(), object, "hidden")?,
+                    seams: seams.into_set(mesh.mesh(), object, "seams")?.edges,
                 };
                 ObjectKind::Polygon {
                     mesh,
@@ -4231,6 +4244,7 @@ impl KindDto {
                 let state = ComponentState {
                     selected: selected.into_counts(count, 0, 0, object, "selected")?,
                     hidden: hidden.into_counts(count, 0, 0, object, "hidden")?,
+                    seams: BitSet::new(),
                 };
                 ObjectKind::Ffd {
                     ffd,
@@ -4459,6 +4473,7 @@ impl KindDto {
                 let state = ComponentState {
                     selected: selected.into_counts(count, 0, 0, object, "selected")?,
                     hidden: hidden.into_counts(count, 0, 0, object, "hidden")?,
+                    seams: BitSet::new(),
                 };
                 ObjectKind::Spline {
                     spline: SplineHandle::new(spline),

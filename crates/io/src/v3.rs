@@ -52,6 +52,27 @@ const V4_MATERIAL_FIELDS: &[&str] = &[
 /// projection), on objects and in takes' overrides.
 const V4_MATERIAL_TAG_FIELDS: &[&str] = &["projection", "offset", "tiling", "rotation", "placement", "camera"];
 
+/// Fields of a polygon object's kind that version 4 adds (step 15.7b: its
+/// UV seams), on objects and in takes' overrides.
+const V4_POLYGON_FIELDS: &[&str] = &["seams"];
+
+/// Removes [`V4_POLYGON_FIELDS`] from every polygon object kind in `value`
+/// (any object whose `type` is `polygon`, wherever it is).
+fn strip_polygon_fields(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            if map.get("type").and_then(Value::as_str) == Some("polygon") {
+                for field in V4_POLYGON_FIELDS {
+                    map.remove(*field);
+                }
+            }
+            map.values_mut().for_each(strip_polygon_fields);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_polygon_fields),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
 /// Removes [`V4_MATERIAL_TAG_FIELDS`] from every Material tag in `value`
 /// (any `tags` list, wherever it is).
 fn strip_material_tags(value: &mut Value) {
@@ -98,6 +119,7 @@ pub(crate) fn upgrade(mut json: Value) -> Result<Value, IoError> {
         for field in ["objects", "takes"] {
             if let Some(value) = document.get_mut(field) {
                 strip_material_tags(value);
+                strip_polygon_fields(value);
             }
         }
     }
@@ -169,6 +191,28 @@ mod tests {
         assert_eq!(
             v4["document"]["takes"]["takes"][0]["overrides"][0]["tags"],
             json!([{ "type": "material" }])
+        );
+    }
+
+    #[test]
+    fn a_polygon_object_s_seams_are_dropped_from_a_version_3_file() {
+        let v3 = json!({
+            "version": 3,
+            "document": {
+                "objects": [
+                    { "name": "Mesh", "kind": { "type": "polygon", "mesh": 0, "seams": { "edges": [[0, 3]] } } },
+                    { "name": "Other", "kind": { "type": "cube", "seams": 1 } }
+                ]
+            }
+        });
+        let v4 = upgrade(v3).unwrap();
+        assert_eq!(
+            v4["document"]["objects"][0]["kind"],
+            json!({ "type": "polygon", "mesh": 0 })
+        );
+        assert_eq!(
+            v4["document"]["objects"][1]["kind"]["seams"], 1,
+            "only polygon kinds lose them"
         );
     }
 

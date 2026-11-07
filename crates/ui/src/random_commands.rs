@@ -359,7 +359,7 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
                 Component::Edge => edges,
                 Component::Polygon => faces,
             };
-            match rng.below(16) {
+            match rng.below(17) {
                 0..=3 => EditorCommand::SelectComponents {
                     node,
                     component,
@@ -407,6 +407,24 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
                     }
                 }
                 14 => EditorCommand::Optimize,
+                15 => {
+                    use crate::uv_tools::UvOp;
+                    use grid4d_geom::uv::{FlipAxis, Projection};
+                    let settings = &mut editor.uv_settings;
+                    settings.relax.iterations = 1 + u32::try_from(rng.below(5)).unwrap();
+                    settings.relax.pin_borders = rng.chance(2);
+                    settings.rotate = rng.chance(2);
+                    let op = [
+                        UvOp::Unwrap,
+                        UvOp::Relax,
+                        UvOp::Pack,
+                        UvOp::Project(Projection::ALL[rng.below(Projection::ALL.len())]),
+                        UvOp::Flip(if rng.chance(2) { FlipAxis::U } else { FlipAxis::V }),
+                        UvOp::MarkSeams,
+                        UvOp::ClearSeams,
+                    ][rng.below(7)];
+                    EditorCommand::UvCommand(op)
+                }
                 _ => {
                     editor.tool = [Tool::Extrude, Tool::Inset, Tool::Bevel][rng.below(3)];
                     let settings = &mut editor.modeling_settings;

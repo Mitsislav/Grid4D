@@ -123,10 +123,12 @@ fn full_document() -> (Document, SimulationCache) {
     });
     let id = doc.scene.iter().find(|(_, n)| n.data.name == "Mesh").unwrap().0;
     let node = doc.scene.get_mut(id).unwrap();
-    let ObjectKind::Polygon { mesh, .. } = &mut node.data.kind else {
+    let ObjectKind::Polygon { mesh, components } = &mut node.data.kind else {
         unreachable!("the Mesh is a polygon object")
     };
     *mesh = MeshHandle::new(grid4d_geom::primitives::cube(Vec3::splat(80.0), [1, 2, 1]));
+    // UV seams around one side (15.7b).
+    components.make_mut().seams.insert_range(4..8);
 
     // A material with every channel away from its default and textures on
     // two channels (15.4).

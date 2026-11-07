@@ -35,6 +35,10 @@ Toward 1.1: materials, UVs and textures.
   Emission, Normal and Bump pictures and Opacity cut-outs show in the
   viewport through each object's Material tags and their projections, one
   layer over another; missing pictures show as a magenta checker.
+- **UV tools** — Mesh ▸ UV unwraps a polygon object's selected polygons
+  (cutting along seams, flattening each piece with little stretching and
+  packing the pieces), relaxes, packs islands, projects, flips and marks or
+  clears seams; seams are saved with the object and survive modelling.
 - **Textures in renders** — renders and preview balls show every channel's
   picture through the Material tags, normal and bump pictures, Opacity
   cut-outs (shadows pass through them too), glass that bends light by its
