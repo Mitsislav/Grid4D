@@ -97,7 +97,11 @@ fn wait_for_previews(harness: &mut Harness<'_, Shell>) {
     for _ in 0..2000 {
         harness.run_steps(1);
         let shell = harness.state();
-        if !shell.editor.previews.pending(shell.doc.scene.materials()) {
+        if !shell
+            .editor
+            .previews
+            .pending(shell.doc.scene.materials(), &shell.editor.textures)
+        {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -581,6 +585,44 @@ fn texture_manager_picture() {
     wait_for_textures(&mut h);
     wait_for_previews(&mut h);
     save(&mut h, &dir, "viewport-textures");
+
+    // The same view in the Render View: the pictures, the label's cut-out
+    // and the studs path-traced, with a glass ball beside them.
+    {
+        use grid4d_scene::{Material, MaterialTag, Node, ObjectKind, Tag};
+        let shell = h.state_mut();
+        let scene = &mut shell.doc.scene;
+        let mut glass = Material::new("Glass");
+        (glass.color, glass.roughness, glass.transmission) = ([0.85, 0.95, 1.0], 0.05, 1.0);
+        let glass = scene.materials_mut().insert(glass);
+        let mut ball = Node::new(
+            "Glass Ball",
+            ObjectKind::Sphere {
+                radius: 60.0,
+                segments: 32,
+            },
+        )
+        .with_position(glam::Vec3::new(0.0, 60.0, 260.0));
+        ball.data.tags = vec![Tag::Material(MaterialTag::new(Some(glass)))];
+        scene.insert(ball);
+        shell.doc.render.samples = 48;
+        shell.doc.render.bounces = 4;
+        shell.editor.commands.push(grid4d_ui::EditorCommand::RenderView);
+    }
+    for _ in 0..4000 {
+        h.run_steps(1);
+        let done = h
+            .state()
+            .editor
+            .renders
+            .view_render()
+            .is_some_and(|view| !view.is_rendering());
+        if done {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    save(&mut h, &dir, "render-textures");
     println!("pictures in {}", dir.display());
 }
 

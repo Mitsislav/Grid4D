@@ -6,7 +6,7 @@
 //! (16 384 pixels a side, 1 GiB of memory), so a hostile file is an error,
 //! never an abort.
 
-use std::io::Cursor;
+use std::{io::Cursor, sync::Arc};
 
 use grid4d_scene::ColorSpace;
 use half::f16;
@@ -28,15 +28,16 @@ pub fn is_texture_extension(extension: &str) -> bool {
     TEXTURE_EXTENSIONS.iter().any(|e| extension.eq_ignore_ascii_case(e))
 }
 
-/// One level's pixels, RGBA, rows top to bottom.
+/// One level's pixels, RGBA, rows top to bottom; shared, so the path
+/// tracer reads them without a copy.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Pixels {
     /// 8 bits a channel as the file stores them (sRGB-encoded or data,
     /// as the texture's colour space says).
-    Rgba8(Vec<u8>),
+    Rgba8(Arc<[u8]>),
     /// Half floats: pictures with more than 8 bits a channel (16-bit, HDR,
     /// OpenEXR), as stored.
-    RgbaF16(Vec<f16>),
+    RgbaF16(Arc<[f16]>),
 }
 
 /// One level of a mip chain.
@@ -63,9 +64,8 @@ impl Level {
     #[must_use]
     pub fn to_srgb8(&self, color_space: ColorSpace) -> Vec<u8> {
         match (&self.pixels, color_space) {
-            (Pixels::Rgba8(bytes), ColorSpace::Srgb) => bytes.clone(),
             // Data shown as it is (a normal map looks like a normal map).
-            (Pixels::Rgba8(bytes), ColorSpace::Linear) => bytes.clone(),
+            (Pixels::Rgba8(bytes), ColorSpace::Srgb | ColorSpace::Linear) => bytes.to_vec(),
             (Pixels::RgbaF16(values), _) => values
                 .as_chunks::<4>()
                 .0
@@ -156,7 +156,7 @@ pub fn decode_texture(bytes: &[u8], color_space: ColorSpace) -> Result<TextureIm
         pixels: if wide {
             Pixels::RgbaF16(image.into_rgba32f().into_raw().into_iter().map(f16::from_f32).collect())
         } else {
-            Pixels::Rgba8(image.into_rgba8().into_raw())
+            Pixels::Rgba8(image.into_rgba8().into_raw().into())
         },
     };
     let mut levels = vec![first];
@@ -208,7 +208,7 @@ fn half_size(level: &Level, color_space: ColorSpace) -> Level {
                     }
                 }
             }
-            Pixels::Rgba8(out)
+            Pixels::Rgba8(out.into())
         }
         Pixels::RgbaF16(src) => {
             let mut out = Vec::with_capacity(us(nw * nh) * 4);
@@ -221,7 +221,7 @@ fn half_size(level: &Level, color_space: ColorSpace) -> Level {
                     }
                 }
             }
-            Pixels::RgbaF16(out)
+            Pixels::RgbaF16(out.into())
         }
     };
     Level {
@@ -341,7 +341,7 @@ mod tests {
             let Pixels::Rgba8(p) = &image.levels[1].pixels else {
                 panic!("8 bits")
             };
-            p.clone()
+            p.to_vec()
         };
         assert_eq!(level(ColorSpace::Srgb), [188, 188, 188, 128], "alpha is never encoded");
         assert_eq!(level(ColorSpace::Linear), [128, 128, 128, 128]);

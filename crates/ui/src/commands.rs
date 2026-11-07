@@ -449,7 +449,9 @@ pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mu
     // Texture pictures loading in the background.
     changed |= editor.textures.update(doc.scene.textures());
     // Material previews rendered in the background.
-    changed |= editor.previews.update(doc.scene.materials());
+    changed |= editor
+        .previews
+        .update(doc.scene.materials(), doc.scene.textures(), &editor.textures);
     // News from renders in the background; finished frames are saved.
     let (rendered, finished) = editor.renders.poll();
     changed |= rendered;
@@ -508,15 +510,17 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             });
             let shown = other.as_ref().unwrap_or(doc);
             let replay = editor.simulation.replay(shown);
+            let pictures = editor.textures.pictures(shown.scene.textures());
             editor
                 .renders
-                .start(shown, viewport.camera(), camera, editor.file.path(), replay);
+                .start(shown, pictures, viewport.camera(), camera, editor.file.path(), replay);
             editor.renders.viewer_open = true;
         }
         EditorCommand::RenderView => {
             let key = viewport.view_key(doc);
             let replay = editor.simulation.replay(doc);
-            editor.renders.start_view(doc, viewport.camera(), key, replay);
+            let pictures = editor.textures.pictures(doc.scene.textures());
+            editor.renders.start_view(doc, pictures, viewport.camera(), key, replay);
         }
         EditorCommand::BakeSimulation => editor.simulation.bake(doc),
         EditorCommand::ClearSimulation => editor.simulation.clear(),

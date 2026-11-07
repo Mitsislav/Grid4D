@@ -149,12 +149,19 @@ object's, or an inheriting child's), not always the tag's object's.
 - Layers are batched like surfaces (by mesh, coordinates, material and
   level); shadows, ambient occlusion and edge lines use the surface only.
 
+## As built (15.6, the path tracer)
+
+- Every layer is read at each hit, from the top down: the first one solid
+  there is the surface; where all are cut out, rays and shadows pass.
+- Camera projections project the hit point through the tag's camera object
+  (where it is at the rendered frame), else through the render's camera.
+
 ## Acceptance criteria
 
 - [ ] A cube with a photo on a Box projection shows it on all six sides,
       undistorted, in the viewport and the render.
 - [x] Two tags on one object: the later one's opaque parts cover the earlier
-      (viewport; the render follows in 15.6).
+      (viewport, 15.5b; render, 15.6).
 - [x] A 1.0 document's Material tags read as UV projection, tiling 1 —
       unchanged rendering.
 - [x] Bake to UVs gives the same picture as the projection it replaces.

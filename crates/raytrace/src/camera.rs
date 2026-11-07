@@ -46,6 +46,25 @@ impl RenderCamera {
         (origin, right, up, forward)
     }
 
+    /// Where world point `p` lies in the picture, in normalised device
+    /// coordinates (−1…1, +y up) of a picture `aspect` wide per unit of height;
+    /// `None` for a point at the eye's plane of a perspective camera.
+    pub(crate) fn screen(&self, p: Vec3, aspect: f32) -> Option<glam::Vec2> {
+        let (origin, right, up, forward) = self.frame();
+        let d = p - origin;
+        let (x, y, depth) = (d.dot(right), d.dot(up), d.dot(forward));
+        match self.projection {
+            CameraProjection::Perspective { fov_y } => {
+                let h = (fov_y * 0.5).tan();
+                (depth.abs() > f32::MIN_POSITIVE && h > 0.0)
+                    .then(|| glam::Vec2::new(x / (depth * h * aspect), y / (depth * h)))
+            }
+            CameraProjection::Parallel { half_height } => {
+                (half_height > 0.0).then(|| glam::Vec2::new(x / (half_height * aspect), y / half_height))
+            }
+        }
+    }
+
     /// The ray through the picture point (`x`, `y`) in normalised device
     /// coordinates (−1…1, +y up) of a picture `aspect` wide per unit of height.
     pub(crate) fn ray(&self, x: f32, y: f32, aspect: f32) -> (Vec3, Vec3) {
@@ -90,6 +109,17 @@ mod tests {
         };
         let (start, dir) = parallel.ray(1.0, -1.0, 2.0);
         assert!(start.abs_diff_eq(Vec3::new(10.0, -5.0, 10.0), 1e-5) && dir.abs_diff_eq(Vec3::NEG_Z, 1e-6));
+
+        // Points along a ray land where the ray left the picture.
+        for cam in [camera, parallel] {
+            let (origin, dir) = cam.ray(0.5, -0.25, 2.0);
+            let at = cam.screen(origin + dir * 7.0, 2.0).unwrap();
+            assert!(at.abs_diff_eq(glam::Vec2::new(0.5, -0.25), 1e-5), "{at}");
+        }
+        assert!(
+            camera.screen(Vec3::new(1.0, 0.0, 10.0), 2.0).is_none(),
+            "at the eye's plane"
+        );
     }
 
     #[test]

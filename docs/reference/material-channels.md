@@ -117,8 +117,7 @@ of switchable channels and reflectance layers; no procedural textures (Phase
   old picture stays until the new one arrives; a painted ball stands in
   before the first.
 - The picture is keyed by the whole `Material` (its texture slots
-  included); the texture pictures themselves reach previews when the path
-  tracer reads textures (15.6).
+  included) and, from 15.6, by its pictures' versions.
 - Shown in the Material Manager, while dragging a material, and at the top
   of the material's Attribute Manager page (48 points); Material tag icons
   in the Object Manager stay painted (16 points).
@@ -159,12 +158,28 @@ of switchable channels and reflectance layers; no procedural textures (Phase
 - Not yet: Transmission and Clearcoat in the viewport; cut-outs in the
   shadow map and the ambient occlusion (they shade as solid).
 
+## As built (15.6)
+
+- The path tracer reads every channel the way the viewport's shader does
+  (`grid4d-raytrace` `channels.rs`): a grey picture multiplies a colour
+  channel, a coloured one replaces it, number channels map the picture's red
+  onto the slot's range, and the slot's strength blends from the value.
+- Normal (tangent-space, +Y up the picture) and Bump pictures bend the
+  shading; Opacity cuts out for the view and for shadows; Transmission and
+  IOR make glass (Fresnel, refraction, total internal reflection, tinted by
+  Base Color, lighter tinted shadows); Clearcoat adds a 4 % coat with its
+  own roughness; Specular sets a dielectric's reflection (8 % × specular).
+- Missing or loading pictures render as the channel's value.
+- Preview balls read the material's pictures (from the texture cache) and are
+  made again when one arrives or changes (the cache's version per slot is
+  part of what a preview shows).
+
 ## Acceptance criteria
 
 - [x] A 1.0 document's materials open with the same four values and render
       the same.
 - [x] Each channel's value and texture settings save, load and undo.
-- [ ] Glass (Transmission 1, IOR 1.5) and brushed metal (Metallic 1, a
+- [x] Glass (Transmission 1, IOR 1.5) and brushed metal (Metallic 1, a
       Normal texture) render as expected in the path tracer; the viewport
       shows the normal map and opacity cut-out.
 - [x] Preview balls update after an edit without stalling the interface.

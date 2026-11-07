@@ -5,7 +5,8 @@
 //! `commands::apply_pending`): it starts loads for new or changed textures,
 //! notices files that changed, appeared or vanished on disk (checked at most
 //! once a second each), and forgets textures the document no longer has.
-//! Loading never changes the document.
+//! Loading never changes the document. Each decoded picture also gives the
+//! path tracer its full-size level (sharing the pixels): [`TextureCache::pictures`].
 
 use std::{
     collections::HashMap,
@@ -18,7 +19,8 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use grid4d_io::TextureImage;
+use grid4d_io::{Pixels, TextureImage};
+use grid4d_raytrace::{Picture, Pictures, Texels};
 use grid4d_scene::{ColorSpace, Texture, TextureId, TextureSource, Textures};
 
 /// How often a linked file is checked for changes.
@@ -65,7 +67,8 @@ impl Input {
 #[derive(Debug)]
 enum State {
     Loading,
-    Ready(Arc<TextureImage>),
+    /// Decoded, and the full-size level as the path tracer reads it.
+    Ready(Arc<TextureImage>, Option<Arc<Picture>>),
     Missing,
     Failed(String),
 }
@@ -175,7 +178,7 @@ impl TextureCache {
             Some(entry) if entry.input.matches(&texture.source) && entry.color_space == texture.color_space => {
                 match &entry.state {
                     State::Loading => Status::Loading,
-                    State::Ready(image) => Status::Ready {
+                    State::Ready(image, _) => Status::Ready {
                         image,
                         version: entry.version,
                     },
@@ -185,6 +188,30 @@ impl TextureCache {
             }
             _ => Status::Loading,
         }
+    }
+
+    /// The pictures of `textures` decoded so far, for a render (shared, not
+    /// copied). Textures still loading, missing or broken have none.
+    #[must_use]
+    pub fn pictures(&self, textures: &Textures) -> Pictures {
+        let mut pictures = Pictures::new();
+        for (id, texture) in textures.iter() {
+            if let Some(entry) = self.entries.get(&id)
+                && entry.input.matches(&texture.source)
+                && entry.color_space == texture.color_space
+                && let State::Ready(_, Some(picture)) = &entry.state
+            {
+                pictures.insert(id, Arc::clone(picture));
+            }
+        }
+        pictures
+    }
+
+    /// The version of the picture of texture `id` (changes with every
+    /// result), if the cache knows the texture.
+    #[must_use]
+    pub fn version(&self, id: TextureId) -> Option<u64> {
+        self.entries.get(&id).map(|entry| entry.version)
     }
 
     /// How many of `textures` are linked to files that do not exist.
@@ -329,7 +356,10 @@ fn load(job: Job) -> Done {
         Err(grid4d_io::IoError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => State::Missing,
         Err(err) => State::Failed(err.to_string()),
         Ok(bytes) => match grid4d_io::decode_texture(&bytes, color_space) {
-            Ok(image) => State::Ready(Arc::new(image)),
+            Ok(image) => {
+                let picture = render_picture(&image, color_space);
+                State::Ready(Arc::new(image), picture)
+            }
             Err(err) => State::Failed(err.to_string()),
         },
     };
@@ -339,6 +369,18 @@ fn load(job: Job) -> Done {
         modified,
         state,
     }
+}
+
+/// The full-size level of `image` as the path tracer reads it, sharing its
+/// pixels.
+fn render_picture(image: &TextureImage, color_space: ColorSpace) -> Option<Arc<Picture>> {
+    let level = image.levels.first()?;
+    let texels = match (&level.pixels, color_space) {
+        (Pixels::Rgba8(bytes), ColorSpace::Srgb) => Texels::Srgb8(Arc::clone(bytes)),
+        (Pixels::Rgba8(bytes), ColorSpace::Linear) => Texels::Linear8(Arc::clone(bytes)),
+        (Pixels::RgbaF16(values), _) => Texels::Half(Arc::clone(values)),
+    };
+    Picture::new(level.width, level.height, texels).map(Arc::new)
 }
 
 #[cfg(test)]

@@ -7,14 +7,17 @@
 //!  EvaluatedScene::for_render ──▶ RenderScene ──render(camera, options)──▶ Image
 //!  (grid4d-eval: render          (world triangles   (rows in parallel,      (linear RGBA,
 //!   visibility and levels)        in one BVH,         one seeded random      premultiplied;
-//!                                 materials, lights)  stream per pixel)      8-bit sRGB out)
+//!  + Texturing: materials,        material layers,    stream per pixel)      8-bit sRGB out)
+//!    pictures, cameras            lights)
 //! ```
 //!
 //! Deterministic: a pixel's samples depend only on the scene, the options and its
 //! position, never on how threads share the work.
 
 mod camera;
+mod channels;
 mod image;
+mod picture;
 mod sample;
 mod scene;
 mod shade;
@@ -22,5 +25,6 @@ mod trace;
 
 pub use camera::{CameraProjection, RenderCamera};
 pub use image::Image;
-pub use scene::RenderScene;
+pub use picture::{Picture, Pictures, Texels};
+pub use scene::{RenderScene, Texturing};
 pub use trace::{Progressive, RenderControl, RenderOptions, render};

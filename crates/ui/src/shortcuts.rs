@@ -709,9 +709,13 @@ mod tests {
         crate::rendering::tests::small(&mut doc, 1);
         let mut editor = EditorState::default();
         let key = crate::ViewportPanel::new(None).view_key(&doc);
-        editor
-            .renders
-            .start_view(&doc, &grid4d_render::OrbitCamera::default(), key, None);
+        editor.renders.start_view(
+            &doc,
+            grid4d_raytrace::Pictures::new(),
+            &grid4d_render::OrbitCamera::default(),
+            key,
+            None,
+        );
         assert!(editor.renders.view_render().is_some());
         press_on(&mut doc, &mut editor, Key::Escape, Modifiers::NONE);
         assert!(editor.renders.view_render().is_none(), "Esc clears it");

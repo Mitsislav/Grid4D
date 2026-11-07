@@ -2019,9 +2019,10 @@ Manager**, the **Materials** tab at the bottom (beside Timeline and F-Curve;
   Selecting an object shows the object again.
 
 **Previews.** Each material shows as a small ball rendered with Grid4D's own
-renderer, in the Material Manager and at the top of its settings. The balls
-are made in the background, one after the other, and made again a moment
-after you change a material — Grid4D never waits for them. Until a ball is
+renderer, in the Material Manager and at the top of its settings, its
+textures included. The balls are made in the background, one after the
+other, and made again a moment after you change a material or one of its
+pictures arrives or changes — Grid4D never waits for them. Until a ball is
 ready, a plain ball in the material's colour stands in.
 
 ![The Material Manager: a preview ball for each material — plain, glossy plastic, gold, rubber and a glowing one](images/manual/material-previews.png)
@@ -2077,8 +2078,9 @@ magenta and black checker.
 
 ![Textures in the viewport: planks tiled on a floor and on a cube through a Box projection, a red label with a round cut-out over the cube's planks, a checker wrapped round a sphere, a missing picture on a cylinder and a normal picture of round studs on a small box](images/manual/viewport-textures.png)
 
-Transmission and the coat are kept with the material and shown from Grid4D
-1.1's next steps on, as are textures in renders.
+Renders show every channel, Transmission and the coat included
+([§20](#20-rendering)); the viewport draws glass and coats as an opaque
+surface.
 
 **Giving an object a material**
 
@@ -2112,8 +2114,8 @@ Manager, or **Window ▸ Texture Manager**) lists every texture of the
 document. Grid4D reads **PNG, JPEG, TIFF, WebP, HDR** and **OpenEXR**
 pictures.
 
-> A material's channels take textures (§19 above); the viewport shows them,
-> renders from Grid4D 1.1's next steps on.
+> A material's channels take textures (§19 above); the viewport, renders
+> and preview balls show them.
 
 ![The Texture Manager: two linked pictures from the document's maps folder (one selected, its colour space Linear), an embedded sky, and a picture that is missing](images/manual/texture-manager.png)
 
@@ -2190,18 +2192,17 @@ tag's icon in the Object Manager to see its settings in the Attribute Manager.
 **Several tags.** An object can carry several Material tags; each one lies
 over the ones before it (to its left in the Object Manager) wherever its
 material is opaque — a label over paint, dirt over a wall. Add one with
-**Shift** + drop, or Tags ▸ Material. The last tag's material is the one the
-object shows in the viewport for now, and the one its children take when they
-have no Material tag of their own.
+**Shift** + drop, or Tags ▸ Material. The last tag's material is the one its
+children take when they have no Material tag of their own.
 
 **Bake to UVs** (on a polygon object's tag with a Box, Spherical, Cylindrical
 or Flat projection) writes the projection into the object's UVs and switches
 the tag to UV — one undo step. The picture stays where it was, and later
 edits to the object keep it in place.
 
-> The viewport shows every Material tag of an object, each over the ones
-> before it where its Opacity lets it; renders follow in Grid4D 1.1's next
-> steps.
+> The viewport and renders show every Material tag of an object, each over
+> the ones before it where its Opacity lets it. A Camera projection uses its
+> camera object in renders; in the viewport it always uses the view's camera.
 
 ## 20. Rendering
 
@@ -2210,6 +2211,26 @@ they look for real — soft shadows, light bouncing between surfaces, reflection
 where the viewport only approximates them. **Render Settings** say how the
 document is rendered; the **Picture Viewer** renders it and shows the result;
 the **Render View** renders the view you work in, in place.
+
+**Materials in renders.** Renders read every channel of a material
+([§19](#19-materials)), through its Material tags and their projections:
+
+- the **pictures** on each channel, at full size and smoothly blended between
+  their pixels;
+- **Normal** and **Bump** pictures, which bend the light on the surface;
+- **Opacity** cut-outs: where a surface is cut out, both the view and the
+  light pass through, so the shadow has the same holes;
+- **Transmission**: glass bends the light by its **IOR**, reflects more at
+  grazing angles and tints what is seen through it with its Base Color; its
+  shadow is lighter and tinted;
+- **Clearcoat**: a sharp, white reflection over the rest;
+- **Camera** projections through the tag's camera object (else through the
+  camera the render looks through).
+
+A picture that is still loading, missing or unreadable when the render starts
+renders as its channel's value.
+
+![A render of the textured scene in the Render View: planks on the floor and the crate, round red labels cut out on each side of the crate, a checker on a sphere, studs from a normal picture on a small blue box and a glass ball reflecting and bending the floor](images/manual/render-textures.png)
 
 ### 20.1 Render Settings
 
@@ -2622,9 +2643,10 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   without building it); scripts cannot set keys, create materials or layers,
   or run every frame; the Script Manager's editor has no syntax colouring or
   completion, and the library no sub-folders.
-- **Materials**: the viewport shows no Transmission or coat; cut-outs cast
-  full shadows; renders and preview balls show only the colours (textures
-  follow in 1.1's next steps); no per-polygon-selection limit on a tag.
+- **Materials**: the viewport shows no Transmission or coat, and its
+  shadows ignore cut-outs; renders have no environment for glass and metals
+  to reflect, and light through glass is tinted but not focused (no
+  caustics); no per-polygon-selection limit on a tag.
 - **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's
   angle or length while dragging it (Ctrl / Alt), normalised curves, copying and
   pasting keys, animating counts (segments, sides) and choices, Frame

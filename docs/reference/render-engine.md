@@ -72,8 +72,43 @@ however many processor cores render it.
 | Example: render a `.g4d` (or the demo scene) to PNG | `crates/raytrace/examples/render.rs` |
 
 Deliberate differences: no environment or sky (bounces reach only other
-objects), no textures, transparency, refraction, depth of field or motion blur
-yet; no render-time anti-aliasing filters other than a box.
+objects), no depth of field or motion blur yet; no render-time anti-aliasing
+filters other than a box.
+
+## As built (15.6, materials and textures)
+
+- `RenderScene::textured(evaluated, &Texturing)` reads the document's
+  `Materials`, the decoded `Pictures` (by texture id; the interface hands
+  over the full-size level, sharing its pixels), the render's camera and
+  aspect and the camera objects; `RenderScene::new` keeps the plain colours.
+- Every Material tag of an object is a layer; a hit reads them from the top
+  down and takes the first that is solid there (its Opacity at or above the
+  threshold); where none is, the ray goes on, and so do shadow rays.
+- Coordinates: shape projections and UVs are made per triangle corner once
+  per render (the tag's turn, tiling and offset baked in); Camera
+  projections project the hit point through the tag's camera object, else
+  the render's camera. Pictures are read bilinearly, repeating; no mip-maps
+  (many samples per pixel do their work).
+- Normal pictures bend the normal in the tangent frame
+  (`grid4d_geom::uv::tangents`, stored per corner; per triangle for Camera
+  projections); Bump pictures by the height's slope half a texel either way,
+  through the triangle's change of position per unit of u and v.
+- The surface: a matte part and a GGX highlight (Specular: 8 % × specular
+  straight on), a glass part (Transmission × (1 − Metallic)) that reflects or
+  refracts about a microfacet normal as often as the exact dielectric
+  Fresnel term says, tinted by the Base Color, with total internal
+  reflection; a clear coat (4 %, its own roughness) over both. A path that
+  refracts continues on the other side; whether it enters or leaves is told
+  by the triangle's front.
+- Shadow rays pass cut-outs and are tinted by glass (Base Color ×
+  transmission at each glass surface), so glass casts lighter, tinted
+  shadows; caustics are not traced.
+- Materials without transmission or coat render exactly as before (the
+  reference picture of the demo scene did not change).
+- Tests: channel reading, sampling, cut-outs, layers, glass, Camera
+  projections through a camera object, normal and bump pictures, and a second
+  reference picture (`textured_reference.png`: Box and UV projections, a cut
+  out label layer, a bump map under a clear coat, glass).
 
 ## Acceptance criteria
 
@@ -82,3 +117,5 @@ yet; no render-time anti-aliasing filters other than a box.
       scene without lights; luminance glows; the background is transparent.
 - [x] Renders are repeatable, the same with one thread or many; reference-image
       tests compare a small render within a tolerance.
+- [x] (15.6) Textures, layers, normal and bump pictures, cut-outs, glass and
+      clear coats render; a textured reference picture guards them.

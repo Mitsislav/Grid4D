@@ -2008,6 +2008,7 @@ dependencies = [
  "grid4d-geom",
  "grid4d-io",
  "grid4d-scene",
+ "half",
  "png",
  "rayon",
 ]

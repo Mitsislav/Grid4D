@@ -12,6 +12,7 @@ grid4d-scene.workspace = true
 grid4d-geom.workspace = true
 grid4d-eval.workspace = true
 glam.workspace = true
+half.workspace = true
 rayon.workspace = true
 
 [dev-dependencies]

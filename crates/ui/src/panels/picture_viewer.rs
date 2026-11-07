@@ -398,9 +398,14 @@ mod tests {
         crate::rendering::tests::small(&mut doc, 1);
         (doc.render.width, doc.render.height) = (160, 90);
         let mut editor = EditorState::default();
-        editor
-            .renders
-            .start(&doc, &grid4d_render::OrbitCamera::default(), None, None, None);
+        editor.renders.start(
+            &doc,
+            grid4d_raytrace::Pictures::new(),
+            &grid4d_render::OrbitCamera::default(),
+            None,
+            None,
+            None,
+        );
         crate::rendering::tests::wait(&mut editor.renders);
         editor.renders.viewer_open = true;
 

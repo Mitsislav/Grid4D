@@ -5,7 +5,9 @@
 //! picture, starts the next material whose picture is out of date, and forgets
 //! materials the document no longer has. A material changed while its picture
 //! is being made is simply rendered again afterwards, so a drag on a slider
-//! ends with a picture of its last value. Previews never change the document.
+//! ends with a picture of its last value; so is one whose texture pictures
+//! arrive or change (the texture cache's versions are part of what a picture
+//! shows). Previews never change the document.
 
 use std::{
     collections::HashMap,
@@ -16,10 +18,13 @@ use std::{
 use egui::{ColorImage, Painter, Rect, TextureHandle, TextureOptions};
 use glam::{Mat4, Vec3};
 use grid4d_eval::EvaluatedScene;
-use grid4d_raytrace::{CameraProjection, Image, RenderCamera, RenderOptions, RenderScene};
+use grid4d_raytrace::{CameraProjection, Image, Pictures, RenderCamera, RenderOptions, RenderScene, Texturing};
 use grid4d_scene::{
-    Document, LightDetails, LightShadow, LightType, Material, MaterialId, MaterialTag, Materials, Node, ObjectKind, Tag,
+    Channel, Document, LightDetails, LightShadow, LightType, Material, MaterialId, MaterialTag, Materials, Node,
+    ObjectKind, Tag, Textures,
 };
+
+use crate::textures::TextureCache;
 
 /// A preview's side, in pixels.
 pub const PREVIEW_SIZE: u32 = 96;
@@ -27,9 +32,10 @@ pub const PREVIEW_SIZE: u32 = 96;
 /// The picture of `material` on the preview ball: a sphere seen from the
 /// front, lit from the upper left with a dimmer light from the lower right,
 /// inside a soft grey surrounding (so metals have something to reflect),
-/// over a transparent background (linear, premultiplied).
+/// over a transparent background (linear, premultiplied). Its textures read
+/// `pictures` (by the ball's own coordinates).
 #[must_use]
-pub fn render_preview(material: &Material) -> Image {
+pub fn render_preview(material: &Material, pictures: &Pictures) -> Image {
     let mut doc = Document::new("Preview");
     let id = doc.scene.materials_mut().insert(material.clone());
     let mut ball = Node::new(
@@ -69,9 +75,16 @@ pub fn render_preview(material: &Material) -> Image {
     let render = |doc: &Document| {
         let mut evaluated = EvaluatedScene::for_render();
         evaluated.update(&doc.scene);
-        grid4d_raytrace::render(&RenderScene::new(&evaluated), &camera, &options)
+        let texturing = Texturing {
+            materials: doc.scene.materials(),
+            pictures,
+            camera,
+            aspect: 1.0,
+            cameras: &[],
+        };
+        grid4d_raytrace::render(&RenderScene::textured(&evaluated, &texturing), &camera, &options)
     };
-    // Where the ball is, without the surrounding.
+    // Where the ball is, without the surrounding (cut-outs show through).
     let mask = render(&doc);
     let mut surrounding = Material::new("Surrounding");
     (surrounding.color, surrounding.emission) = ([0.0; 3], [0.22; 3]);
@@ -93,10 +106,37 @@ pub fn render_preview(material: &Material) -> Image {
     image
 }
 
+/// What a preview shows: a material, and the versions of its channels'
+/// texture pictures (`None`: a channel without texture, or one the cache does
+/// not know).
+#[derive(Clone, Debug, PartialEq)]
+struct Shown {
+    material: Material,
+    pictures: [Option<u64>; 10],
+}
+
+impl Shown {
+    fn of(material: &Material, cache: &TextureCache) -> Self {
+        Self {
+            material: material.clone(),
+            pictures: Channel::ALL.map(|c| material.map(c).and_then(|slot| cache.version(slot.texture))),
+        }
+    }
+
+    /// Whether this is what `material` looks like now (no allocation).
+    fn is(&self, material: &Material, cache: &TextureCache) -> bool {
+        self.material == *material
+            && Channel::ALL
+                .iter()
+                .zip(&self.pictures)
+                .all(|(&c, &version)| material.map(c).and_then(|slot| cache.version(slot.texture)) == version)
+    }
+}
+
 #[derive(Default)]
 struct Entry {
-    /// The material as its picture shows it (`None`: no picture yet).
-    rendered: Option<Material>,
+    /// What its picture shows (`None`: no picture yet).
+    rendered: Option<Shown>,
     picture: Option<ColorImage>,
     /// Bumped with every new picture.
     version: u64,
@@ -116,12 +156,13 @@ impl std::fmt::Debug for Entry {
 
 struct Job {
     id: MaterialId,
-    material: Material,
+    shown: Shown,
+    pictures: Pictures,
 }
 
 struct Done {
     id: MaterialId,
-    material: Material,
+    shown: Shown,
     picture: ColorImage,
 }
 
@@ -143,9 +184,10 @@ pub struct MaterialPreviews {
 
 impl MaterialPreviews {
     /// Takes a finished picture, starts the next one and forgets materials
-    /// that are gone. Returns `true` while a picture is being made (keep
+    /// that are gone. `textures` is the document's table, `cache` its
+    /// pictures. Returns `true` while a picture is being made (keep
     /// repainting).
-    pub fn update(&mut self, materials: &Materials) -> bool {
+    pub fn update(&mut self, materials: &Materials, textures: &Textures, cache: &TextureCache) -> bool {
         self.receive();
         for entry in self.entries.values_mut() {
             entry.used = false;
@@ -154,7 +196,7 @@ impl MaterialPreviews {
         for (id, material) in materials.iter() {
             let entry = self.entries.entry(id).or_default();
             entry.used = true;
-            if next.is_none() && entry.rendered.as_ref() != Some(material) {
+            if next.is_none() && !entry.rendered.as_ref().is_some_and(|r| r.is(material, cache)) {
                 next = Some((id, material));
             }
         }
@@ -162,7 +204,12 @@ impl MaterialPreviews {
         if self.busy.is_none()
             && let Some((id, material)) = next
         {
-            self.start(id, material.clone());
+            let job = Job {
+                id,
+                shown: Shown::of(material, cache),
+                pictures: cache.pictures(textures),
+            };
+            self.start(job);
         }
         self.busy.is_some()
     }
@@ -170,11 +217,13 @@ impl MaterialPreviews {
     /// Whether a picture is being made or one of `materials` has none of its
     /// current state yet (for tests and pictures that wait for them).
     #[must_use]
-    pub fn pending(&self, materials: &Materials) -> bool {
+    pub fn pending(&self, materials: &Materials, cache: &TextureCache) -> bool {
         self.busy.is_some()
-            || materials
-                .iter()
-                .any(|(id, m)| self.entries.get(&id).is_none_or(|e| e.rendered.as_ref() != Some(m)))
+            || materials.iter().any(|(id, m)| {
+                self.entries
+                    .get(&id)
+                    .is_none_or(|e| !e.rendered.as_ref().is_some_and(|r| r.is(m, cache)))
+            })
     }
 
     /// The preview of `id` for drawing, uploaded on first use after each new
@@ -209,12 +258,11 @@ impl MaterialPreviews {
         }
     }
 
-    fn start(&mut self, id: MaterialId, material: Material) {
-        self.busy = Some(id);
+    fn start(&mut self, job: Job) {
+        self.busy = Some(job.id);
         if self.worker.is_none() {
             self.worker = spawn();
         }
-        let job = Job { id, material };
         let job = match &self.worker {
             Some(worker) => match worker.jobs.send(job) {
                 Ok(()) => return,
@@ -245,7 +293,7 @@ impl MaterialPreviews {
         let Some(entry) = self.entries.get_mut(&done.id) else {
             return;
         };
-        entry.rendered = Some(done.material);
+        entry.rendered = Some(done.shown);
         entry.picture = Some(done.picture);
         entry.version += 1;
     }
@@ -253,30 +301,30 @@ impl MaterialPreviews {
     /// Waits (up to twenty seconds) until every picture is up to date: for
     /// tests.
     #[cfg(test)]
-    pub(crate) fn wait(&mut self, materials: &Materials) {
+    pub(crate) fn wait(&mut self, materials: &Materials, textures: &Textures, cache: &TextureCache) {
         let start = std::time::Instant::now();
-        while self.update(materials) && start.elapsed() < std::time::Duration::from_secs(20) {
+        while self.update(materials, textures, cache) && start.elapsed() < std::time::Duration::from_secs(20) {
             thread::sleep(std::time::Duration::from_millis(2));
         }
     }
 
     /// Whether `id` has a picture of the material as it is now: for tests.
     #[cfg(test)]
-    pub(crate) fn is_current(&self, id: MaterialId, material: &Material) -> bool {
+    pub(crate) fn is_current(&self, id: MaterialId, material: &Material, cache: &TextureCache) -> bool {
         self.entries
             .get(&id)
-            .is_some_and(|e| e.rendered.as_ref() == Some(material))
+            .is_some_and(|e| e.rendered.as_ref().is_some_and(|r| r.is(material, cache)))
     }
 }
 
 /// Renders a job's picture.
 fn make(job: Job) -> Done {
-    let image = render_preview(&job.material);
+    let image = render_preview(&job.shown.material, &job.pictures);
     let size = [PREVIEW_SIZE as usize; 2];
     let picture = ColorImage::from_rgba_unmultiplied(size, &image.to_rgba8());
     Done {
         id: job.id,
-        material: job.material,
+        shown: job.shown,
         picture,
     }
 }
@@ -310,7 +358,7 @@ mod tests {
         let mut red = Material::new("Red");
         red.color = [0.8, 0.05, 0.05];
         red.roughness = 0.9;
-        let image = render_preview(&red);
+        let image = render_preview(&red, &Pictures::new());
         assert_eq!((image.width, image.height), (PREVIEW_SIZE, PREVIEW_SIZE));
         let centre = image.pixel(PREVIEW_SIZE / 2, PREVIEW_SIZE / 2).unwrap();
         assert_eq!(centre[3], 1.0, "the ball covers the centre");
@@ -323,7 +371,7 @@ mod tests {
         // Glowing materials glow.
         let mut glow = Material::new("Glow");
         (glow.color, glow.emission, glow.emission_strength) = ([0.0; 3], [0.0, 0.0, 1.0], 2.0);
-        let blue = render_preview(&glow).pixel(far, far).unwrap();
+        let blue = render_preview(&glow, &Pictures::new()).pixel(far, far).unwrap();
         assert!(blue[2] > 0.9 && blue[0] < 0.05, "{blue:?}");
     }
 
@@ -332,27 +380,64 @@ mod tests {
         let mut materials = Materials::default();
         let a = materials.insert(Material::new("A"));
         let b = materials.insert(Material::new("B"));
+        let (textures, cache) = (Textures::default(), TextureCache::default());
         let mut previews = MaterialPreviews::default();
-        assert!(previews.update(&materials), "the first picture is on its way");
+        assert!(
+            previews.update(&materials, &textures, &cache),
+            "the first picture is on its way"
+        );
         assert!(previews.busy.is_some());
-        previews.wait(&materials);
-        assert!(previews.is_current(a, materials.get(a).unwrap()));
-        assert!(previews.is_current(b, materials.get(b).unwrap()));
-        assert!(!previews.pending(&materials));
+        previews.wait(&materials, &textures, &cache);
+        assert!(previews.is_current(a, materials.get(a).unwrap(), &cache));
+        assert!(previews.is_current(b, materials.get(b).unwrap(), &cache));
+        assert!(!previews.pending(&materials, &cache));
         let version = previews.entries[&a].version;
 
         // An edit makes a new picture; the old one stays until it comes.
         materials.get_mut(a).unwrap().roughness = 0.1;
-        assert!(previews.update(&materials));
+        assert!(previews.update(&materials, &textures, &cache));
         assert!(previews.entries[&a].picture.is_some());
-        previews.wait(&materials);
-        assert!(previews.is_current(a, materials.get(a).unwrap()));
+        previews.wait(&materials, &textures, &cache);
+        assert!(previews.is_current(a, materials.get(a).unwrap(), &cache));
         assert_eq!(previews.entries[&a].version, version + 1);
-        assert!(!previews.update(&materials), "nothing to do");
+        assert!(!previews.update(&materials, &textures, &cache), "nothing to do");
 
         // A removed material is forgotten.
         materials.remove(b);
-        previews.update(&materials);
+        previews.update(&materials, &textures, &cache);
         assert!(!previews.entries.contains_key(&b));
+    }
+
+    #[test]
+    fn previews_show_texture_pictures_once_they_arrive() {
+        use grid4d_scene::{ColorSpace, Texture, TextureSlot, TextureSource};
+        // A red picture on a white ball's Base Color.
+        let red = grid4d_io::png_bytes(2, 2, grid4d_io::Channels::Rgba, &[255, 0, 0, 255].repeat(4)).unwrap();
+        let mut textures = Textures::default();
+        let texture = textures.insert(Texture {
+            name: "Red".to_owned(),
+            source: TextureSource::Embedded {
+                file_name: "red.png".to_owned(),
+                bytes: red.into(),
+            },
+            color_space: ColorSpace::Srgb,
+        });
+        let mut materials = Materials::default();
+        let mut white = Material::new("White");
+        (white.color, white.roughness) = ([1.0; 3], 1.0);
+        *white.map_mut(Channel::BaseColor) = Some(TextureSlot::new(texture));
+        let id = materials.insert(white);
+        let mut cache = TextureCache::default();
+        let mut previews = MaterialPreviews::default();
+        // The picture still loading: the ball in the channel's value (white),
+        // then again once it is there (red).
+        previews.update(&materials, &textures, &cache);
+        cache.wait(&textures);
+        assert!(previews.pending(&materials, &cache), "the picture's arrival is news");
+        previews.wait(&materials, &textures, &cache);
+        assert!(previews.is_current(id, materials.get(id).unwrap(), &cache));
+        let picture = previews.entries[&id].picture.as_ref().unwrap();
+        let centre = picture.pixels[picture.width() * picture.height() / 2 + picture.width() / 2];
+        assert!(centre.r() > 150 && centre.g() < 70 && centre.b() < 70, "{centre:?}");
     }
 }

@@ -250,6 +250,8 @@ impl Job<'_> {
                 break; // nothing around the scene: black
             };
             let v = -dir;
+            // The ray met the front of the surface (into a closed object).
+            let entering = hit.geometric.dot(v) > 0.0;
             // Both normals turned towards where the ray came from.
             let geometric = if hit.geometric.dot(v) < 0.0 {
                 -hit.geometric
@@ -264,6 +266,11 @@ impl Job<'_> {
             if n.dot(v) <= 0.0 {
                 n = geometric;
             }
+            // Normal and Bump pictures.
+            let bent = hit.bend.apply(n);
+            if bent.dot(v) > 0.0 {
+                n = bent;
+            }
             let material = Material::new(&hit.surface);
             radiance += capped(throughput * hit.surface.emission, depth);
 
@@ -277,31 +284,40 @@ impl Job<'_> {
                 if reflected.max_element() <= 0.0 || incoming.direction.dot(geometric) <= 0.0 {
                     continue;
                 }
-                if light.shadow.casts()
-                    && self
-                        .scene
-                        .occluded(lifted, incoming.direction, incoming.distance - lift)
-                {
+                let passed = if light.shadow.casts() {
+                    self.scene
+                        .transmittance(lifted, incoming.direction, incoming.distance - lift)
+                } else {
+                    Vec3::ONE
+                };
+                if passed.max_element() <= 0.0 {
                     continue;
                 }
-                radiance += capped(throughput * reflected * incoming.strength, depth);
+                radiance += capped(throughput * reflected * incoming.strength * passed, depth);
             }
 
             if depth == self.bounces {
                 break;
             }
-            let Some((next, weight)) = material.bounce(n, v, rng) else {
+            let Some(bounce) = material.bounce(n, v, entering, rng) else {
                 break;
             };
-            if next.dot(geometric) <= 0.0 {
+            // Reflected paths stay on the side they came from, refracted ones
+            // cross the surface.
+            let side = bounce.direction.dot(geometric);
+            if (bounce.through && side >= 0.0) || (!bounce.through && side <= 0.0) {
                 break;
             }
-            throughput *= weight;
+            throughput *= bounce.weight;
             if throughput.max_element() <= 1e-4 {
                 break;
             }
-            origin = lifted;
-            dir = next;
+            origin = if bounce.through {
+                hit.position - geometric * lift
+            } else {
+                lifted
+            };
+            dir = bounce.direction;
         }
         Some(radiance)
     }
@@ -336,7 +352,7 @@ fn automatic_light(camera: &RenderCamera) -> Light {
 
 /// How far to lift a ray off a surface at `p` so it does not meet that surface
 /// again (world units, cm): more far from the origin, where floats are coarser.
-fn offset(p: Vec3) -> f32 {
+pub(crate) fn offset(p: Vec3) -> f32 {
     0.01 + p.abs().max_element() * 1e-5
 }
 
@@ -348,10 +364,16 @@ fn to_f32(n: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use grid4d_eval::EvaluatedScene;
-    use grid4d_scene::{Document, LightDetails, Material as SceneMaterial, Node, ObjectKind, ObjectKindTag, Tag};
+    use std::sync::Arc;
+
+    use glam::Mat4;
+    use grid4d_scene::{
+        Channel, Document, LightDetails, Material as SceneMaterial, MaterialId, MaterialTag, Node, NodeId, ObjectKind,
+        ObjectKindTag, Projection, Tag, Texture, TextureId, TextureSlot,
+    };
 
     use super::*;
-    use crate::CameraProjection;
+    use crate::{CameraProjection, Picture, Pictures, Texels, Texturing};
 
     /// Looking straight down at the origin from 1000 cm, seeing 600 cm across.
     fn top_camera() -> RenderCamera {
@@ -392,7 +414,7 @@ mod tests {
         (white.color, white.roughness) = ([1.0; 3], 1.0);
         let white = doc.scene.materials_mut().insert(white);
         let mut node = Node::new("Floor", floor);
-        node.data.tags = vec![Tag::Material(grid4d_scene::MaterialTag::new(Some(white)))];
+        node.data.tags = vec![Tag::Material(MaterialTag::new(Some(white)))];
         doc.scene.insert(node);
         let cube = ObjectKind::Cube {
             size: Vec3::splat(100.0),
@@ -466,7 +488,7 @@ mod tests {
         (glow.color, glow.emission) = ([0.0; 3], [1.0, 0.5, 0.0]);
         let glow = doc.scene.materials_mut().insert(glow);
         let mut cube = Node::new("Glowing", ObjectKindTag::Cube.default_kind());
-        cube.data.tags = vec![Tag::Material(grid4d_scene::MaterialTag::new(Some(glow)))];
+        cube.data.tags = vec![Tag::Material(MaterialTag::new(Some(glow)))];
         doc.scene.insert(cube);
         doc.scene
             .insert(Node::new("Grey", ObjectKindTag::Sphere.default_kind()).with_position(Vec3::new(200.0, 0.0, 0.0)));
@@ -675,5 +697,228 @@ mod tests {
         doc.scene.insert_child(cube, bend).unwrap();
         let bent = scene_of(&doc).bounds().unwrap();
         assert!(bent.1.x > straight.1.x + 50.0, "{bent:?} vs {straight:?}");
+    }
+
+    /// A 2 × 1 picture: `left` then `right`.
+    fn two_texels(left: [u8; 4], right: [u8; 4], srgb: bool) -> Arc<Picture> {
+        let bytes: Arc<[u8]> = Arc::from([left, right].concat());
+        let texels = if srgb {
+            Texels::Srgb8(bytes)
+        } else {
+            Texels::Linear8(bytes)
+        };
+        Arc::new(Picture::new(2, 1, texels).unwrap())
+    }
+
+    /// `doc` as the renderer sees it in its materials with `pictures`,
+    /// Camera projections through `camera` (or the camera objects `cameras`).
+    fn textured_scene(
+        doc: &Document,
+        pictures: &Pictures,
+        camera: RenderCamera,
+        cameras: &[(NodeId, RenderCamera)],
+    ) -> RenderScene {
+        let mut eval = EvaluatedScene::for_render();
+        eval.update(&doc.scene);
+        let texturing = Texturing {
+            materials: doc.scene.materials(),
+            pictures,
+            camera,
+            aspect: 1.0,
+            cameras,
+        };
+        RenderScene::textured(&eval, &texturing)
+    }
+
+    /// A 400 cm floor carrying `tags`, lit from above (`tilt` degrees
+    /// towards +Z from straight down).
+    fn floor_with(doc: &mut Document, tags: Vec<Tag>, shadow: LightShadow, tilt: f32) {
+        let floor = ObjectKind::Plane {
+            width: 400.0,
+            depth: 400.0,
+            width_segments: 1,
+            depth_segments: 1,
+        };
+        let mut node = Node::new("Floor", floor);
+        node.data.tags = tags;
+        doc.scene.insert(node);
+        let sun = ObjectKind::Light {
+            color: [1.0; 3],
+            intensity: 1.0,
+            light_type: LightType::Infinite,
+            details: LightDetails::default(),
+            shadow,
+        };
+        doc.scene.insert(
+            Node::new("Sun", sun).with_transform(grid4d_scene::Transform::default().with_rotation_deg(Vec3::new(
+                0.0,
+                tilt - 90.0,
+                0.0,
+            ))),
+        );
+    }
+
+    /// A white matte material whose `channel` reads `texture`.
+    fn mapped(channel: Channel, texture: TextureId) -> SceneMaterial {
+        let mut material = SceneMaterial::new("Mapped");
+        (material.color, material.roughness) = ([1.0; 3], 1.0);
+        *material.map_mut(channel) = Some(TextureSlot::new(texture));
+        material
+    }
+
+    fn tag(material: MaterialId) -> Tag {
+        Tag::Material(MaterialTag::new(Some(material)))
+    }
+
+    fn texture(doc: &mut Document) -> TextureId {
+        doc.scene.textures_mut().insert(Texture::linked("picture.png".into()))
+    }
+
+    const RED: [u8; 4] = [255, 0, 0, 255];
+    const BLUE: [u8; 4] = [0, 0, 255, 255];
+    const BLACK: [u8; 4] = [0, 0, 0, 255];
+
+    #[test]
+    fn pictures_colour_surfaces_through_their_coordinates() {
+        let mut doc = Document::new("t");
+        let texture = texture(&mut doc);
+        let material = doc.scene.materials_mut().insert(mapped(Channel::BaseColor, texture));
+        floor_with(&mut doc, vec![tag(material)], LightShadow::None, 0.0);
+        let mut pictures = Pictures::new();
+        pictures.insert(texture, two_texels(RED, BLUE, true));
+        let scene = textured_scene(&doc, &pictures, top_camera(), &[]);
+        let image = render(&scene, &top_camera(), &options(60, 2, 0));
+        // u runs along +X: red on the left, blue on the right (the texels'
+        // centres at u = 0.25 and 0.75).
+        let (left, right) = (at(&image, -100.0, 0.0), at(&image, 100.0, 0.0));
+        assert!(left[0] > 0.9 && left[2] < 0.05, "{left:?}");
+        assert!(right[2] > 0.9 && right[0] < 0.05, "{right:?}");
+        // Without the picture (missing, loading): the channel's value, white.
+        let plain = textured_scene(&doc, &Pictures::new(), top_camera(), &[]);
+        let white = at(&render(&plain, &top_camera(), &options(60, 2, 0)), -100.0, 0.0);
+        assert!(white[0] > 0.9 && white[2] > 0.9, "{white:?}");
+    }
+
+    #[test]
+    fn layers_cover_the_ones_below_where_their_opacity_lets_them() {
+        let mut doc = Document::new("t");
+        let mask = texture(&mut doc);
+        let mut red = SceneMaterial::new("Red");
+        (red.color, red.roughness) = ([1.0, 0.0, 0.0], 1.0);
+        let red = doc.scene.materials_mut().insert(red);
+        let mut label = mapped(Channel::Opacity, mask);
+        label.color = [0.0, 0.0, 1.0];
+        let label = doc.scene.materials_mut().insert(label);
+        floor_with(&mut doc, vec![tag(red), tag(label)], LightShadow::None, 0.0);
+        let mut pictures = Pictures::new();
+        // Solid on the left, cut out on the right.
+        pictures.insert(mask, two_texels(RED, BLACK, false));
+        let scene = textured_scene(&doc, &pictures, top_camera(), &[]);
+        let image = render(&scene, &top_camera(), &options(60, 2, 0));
+        let (left, right) = (at(&image, -100.0, 0.0), at(&image, 100.0, 0.0));
+        assert!(left[2] > 0.9 && left[0] < 0.05, "the label: {left:?}");
+        assert!(right[0] > 0.9 && right[2] < 0.05, "the red below: {right:?}");
+
+        // The label alone: where it is cut out, nothing is there.
+        let mut alone = Document::new("t");
+        let mask = texture(&mut alone);
+        let label = alone.scene.materials_mut().insert(mapped(Channel::Opacity, mask));
+        floor_with(&mut alone, vec![tag(label)], LightShadow::None, 0.0);
+        let mut pictures = Pictures::new();
+        pictures.insert(mask, two_texels(RED, BLACK, false));
+        let scene = textured_scene(&alone, &pictures, top_camera(), &[]);
+        let image = render(&scene, &top_camera(), &options(60, 2, 0));
+        assert_eq!(at(&image, -100.0, 0.0)[3], 1.0);
+        assert_eq!(at(&image, 100.0, 0.0)[3], 0.0, "the background shows through");
+    }
+
+    #[test]
+    fn glass_lets_tinted_light_through() {
+        let glass_cube = |transmission: f32| {
+            let mut doc = Document::new("t");
+            let mut white = SceneMaterial::new("White");
+            (white.color, white.roughness) = ([1.0; 3], 1.0);
+            let white = doc.scene.materials_mut().insert(white);
+            // A little off straight down: the sun's mirror image in the
+            // glass misses the camera.
+            floor_with(&mut doc, vec![tag(white)], LightShadow::Raytraced, 15.0);
+            let mut glass = SceneMaterial::new("Glass");
+            (glass.color, glass.roughness, glass.transmission) = ([1.0, 0.4, 0.4], 0.05, transmission);
+            let glass = doc.scene.materials_mut().insert(glass);
+            let cube = ObjectKind::Cube {
+                size: Vec3::splat(100.0),
+                segments: [1, 1, 1],
+            };
+            let mut cube = Node::new("Cube", cube).with_position(Vec3::new(-100.0, 50.0, 0.0));
+            cube.data.tags = vec![tag(glass)];
+            doc.scene.insert(cube);
+            let scene = textured_scene(&doc, &Pictures::new(), top_camera(), &[]);
+            at(&render(&scene, &top_camera(), &options(60, 16, 3)), -100.0, 0.0)
+        };
+        // Through the glass: the lit floor below, tinted red on the way.
+        let through = glass_cube(1.0);
+        assert!(through[0] > 0.4 && through[0] > through[1] * 3.0, "{through:?}");
+        // An opaque cube of the same colour shows its own top.
+        let solid = glass_cube(0.0);
+        assert!(solid[1] > 0.2 && solid[0] < solid[1] * 3.0, "{solid:?}");
+    }
+
+    #[test]
+    fn camera_projections_look_through_their_camera_object() {
+        let mut doc = Document::new("t");
+        let texture = texture(&mut doc);
+        let material = doc.scene.materials_mut().insert(mapped(Channel::BaseColor, texture));
+        let lens = doc
+            .scene
+            .insert(Node::new("Lens", ObjectKindTag::Camera.default_kind()));
+        let mut projected = MaterialTag::new(Some(material));
+        projected.projection = Projection::Camera;
+        projected.camera = Some(lens);
+        floor_with(&mut doc, vec![Tag::Material(projected)], LightShadow::None, 0.0);
+        let mut pictures = Pictures::new();
+        pictures.insert(texture, two_texels(RED, BLUE, true));
+        // The camera object looks down from x = 200: x = 100 is on the left
+        // of its picture, mostly red (by UV it would be blue).
+        let shifted = RenderCamera {
+            world: Mat4::from_translation(Vec3::new(200.0, 0.0, 0.0)) * top_camera().world,
+            ..top_camera()
+        };
+        let scene = textured_scene(&doc, &pictures, top_camera(), &[(lens, shifted)]);
+        let image = render(&scene, &top_camera(), &options(60, 2, 0));
+        let shifted_view = at(&image, 100.0, 0.0);
+        assert!(shifted_view[0] > 0.7 && shifted_view[2] < 0.3, "{shifted_view:?}");
+        // Without that object, the render's own camera: x = 100 on its right.
+        let scene = textured_scene(&doc, &pictures, top_camera(), &[]);
+        let own = at(&render(&scene, &top_camera(), &options(60, 2, 0)), 100.0, 0.0);
+        assert!(own[2] > 0.7 && own[0] < 0.3, "{own:?}");
+    }
+
+    #[test]
+    fn normal_and_bump_pictures_tilt_the_shading() {
+        let lit = |channel: Channel, left: [u8; 4], right: [u8; 4], height: f32| {
+            let mut doc = Document::new("t");
+            let texture = texture(&mut doc);
+            let mut material = mapped(channel, texture);
+            material.bump_height = height;
+            let material = doc.scene.materials_mut().insert(material);
+            floor_with(&mut doc, vec![tag(material)], LightShadow::None, 0.0);
+            let mut pictures = Pictures::new();
+            pictures.insert(texture, two_texels(left, right, false));
+            let scene = textured_scene(&doc, &pictures, top_camera(), &[]);
+            at(&render(&scene, &top_camera(), &options(60, 2, 0)), 0.0, 0.0)[0]
+        };
+        // A normal tilted 45° (the picture's x and z equal): cos 45° of the light.
+        let tilted = [218, 128, 218, 255];
+        let normal = lit(Channel::Normal, tilted, tilted, 0.1);
+        assert!((normal - 0.707).abs() < 0.06, "{normal}");
+        let flat = [128, 128, 255, 255];
+        let straight = lit(Channel::Normal, flat, flat, 0.1);
+        assert!((straight - 1.0).abs() < 0.05, "{straight}");
+        // A height rising 200 cm over the 200 cm between the texels' centres:
+        // a 45° slope in the middle; a low one barely tilts.
+        let steep = lit(Channel::Bump, BLACK, RED, 200.0);
+        assert!((steep - 0.707).abs() < 0.06, "{steep}");
+        let gentle = lit(Channel::Bump, BLACK, RED, 1.0);
+        assert!(gentle > 0.98, "{gentle}");
     }
 }

@@ -165,9 +165,14 @@ mod tests {
         let mut doc = Document::with_demo_scene();
         crate::rendering::tests::small(&mut doc, 2);
         let mut editor = EditorState::default();
-        editor
-            .renders
-            .start(&doc, &grid4d_render::OrbitCamera::default(), None, None, None);
+        editor.renders.start(
+            &doc,
+            grid4d_raytrace::Pictures::new(),
+            &grid4d_render::OrbitCamera::default(),
+            None,
+            None,
+            None,
+        );
         crate::rendering::tests::wait(&mut editor.renders);
         editor.renders.viewer_open = true;
         assert_idle_frames_leave_the_document_alone(doc, editor);

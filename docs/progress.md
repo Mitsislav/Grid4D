@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.5b — Normal and bump maps, layers, the texture budget (2026-11-07) |
-| Next step | 15.6 — Textures, normal and bump, opacity, transmission and IOR in the path tracer |
-| Tests | 822 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.6 — Textures, glass and layers in the path tracer (2026-11-07) |
+| Next step | 15.7 — The UV editor pane and the UV tools (Unwrap, seams, Project, Pack, Relax) |
+| Tests | 838 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2318,6 +2318,7 @@ risks R5 – R8 go with it.
 | 15.4c | Preview balls: `ui::previews::MaterialPreviews` renders each material on a ball with the path tracer (96 px, two lights, a dim grey surrounding for reflections, the ball's coverage from a second render so the background stays transparent) on a worker thread, one at a time, again after each change (the old picture shown meanwhile, a painted ball before the first); the Material Manager, the dragged material and the Attribute Manager's material page show them; the manual's §19 with a picture | 816 |
 | 15.5a | Textures in the viewport: GPU vertices carry UVs; a Material tag's shape projection makes per-corner coordinates once per GPU mesh (`UvKey`: projection + matrix), its turn / tiling / offset ride per instance (`InstanceRaw` 192 bytes), Camera projects through the view; the interface hands decoded pictures to the renderer when they arrive (`upload_texture`, sRGB / linear / half float, mip chains; a magenta checker for missing ones); one bind group per textured material (group 2: a uniform of channel settings, a trilinear anisotropic sampler, a picture per channel); Base Color, Metallic, Roughness, Specular and Emission pictures and Opacity cut-out in `mesh.wgsl`; untextured objects batch as before; the allocation test includes textured and projected materials; manual §19 with a picture | 819 |
 | 15.5b | Normal and bump maps in the viewport: `grid4d_geom::uv::tangents` (along `u`, shared by vertices at one place with one normal and UV, `w` the side of up the picture), tangents in the vertices of meshes whose material bends normals (`DrawKey::tangents`), tangent-space normal pictures (+Y up) and bump pictures by screen-space derivatives in `mesh.wgsl`; layers: Material tags above the lowest covering one drawn as levels over the surface on its depth (`layer_pipeline`, `@invariant` position), their values from their own material; the picture budget (1 GiB, the device's largest side; smaller mips first); the manual's picture with a label layer and studs | 822 |
+| 15.6 | Textures in the path tracer: `RenderScene::textured` with a `Texturing` (materials, `Pictures` — the cache's full-size levels shared, `Pixels` now `Arc` — the render's camera and aspect, camera objects); every Material tag a layer read per hit from the top (`channels.rs` reads channels like the shader); coordinates per triangle corner (shape projections, UVs, the tag's transform) or through a camera; bilinear repeating pictures (8-bit sRGB / linear, half float); normal pictures in the tangent frame, bump by the height's slope; cut-outs for rays and shadows; glass (exact Fresnel, refraction about a microfacet normal, total internal reflection, tinted lighter shadows), a clear coat, Specular; renders and the Render View get the pictures, preview balls too (made again when a picture arrives); the render example decodes a document's textures; a second reference picture; the manual's §20 with a render | 838 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2538,6 +2539,42 @@ risks R5 – R8 go with it.
   "decal" switch that limits a projection to its shape is noted as later.
 - clippy asked for `as_chunks::<3>()` and for the batch's material to pass
   by reference (392 bytes).
+
+**15.6 — Textures, glass and layers in the path tracer**
+
+*Problems and solutions:*
+- **Pictures without copies or a file crate.** The path tracer must not
+  depend on `grid4d-io`, and copying every picture per render would double
+  its memory. `grid4d_io::Pixels` now holds `Arc`s; the texture cache makes
+  a `grid4d_raytrace::Picture` (its own `Texels`: sRGB 8-bit, linear 8-bit,
+  half float) from the full-size level on its worker thread, sharing the
+  pixels, and works out once whether it is grey.
+- **No mip-maps needed.** A render already averages many samples per pixel,
+  so pictures are read bilinearly from the full-size level only.
+- **The old pictures must not change.** The material model gained glass, a
+  coat and Specular; for surfaces with neither the random numbers are drawn
+  in the same order and the numbers are the same (8 % × 0.5 = 4 %), so the
+  demo's reference picture still matches as it was.
+- **Where glass leads.** Normals are turned towards the viewer for two-sided
+  shading, so whether a refracted path enters or leaves an object is told by
+  the triangle's own front (counter-clockwise) side before turning; a
+  refracted path starts just past the surface.
+- **Shadows through glass were black.** Shadow rays now ask how much light
+  passes (`transmittance`): nothing through opaque surfaces, everything
+  through cut-outs, Base Color × transmission through each glass surface.
+  Caustics are left out (noted in the manual).
+- **The sun in the glass.** The first glass test looked straight down with
+  the sun straight above: the sun's mirror image in the glass filled the
+  pixel. The test tilts the sun by 15°.
+- **A flat bump.** Central differences one whole texel either way read the
+  same value on a two-texel test picture (it repeats); half a texel either
+  way measures the slope of the cell being read, which also suits real
+  pictures.
+- **Previews behind their pictures.** A preview made while a picture was
+  still loading kept the plain colour; the cache's version per slot is part
+  of what a preview shows, so the ball is made again when the picture comes.
+- clippy asked to allow `unwrap` in the reference test's helper (now shared
+  by two tests).
 
 ---
 

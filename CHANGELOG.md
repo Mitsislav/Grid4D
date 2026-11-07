@@ -35,6 +35,11 @@ Toward 1.1: materials, UVs and textures.
   Emission, Normal and Bump pictures and Opacity cut-outs show in the
   viewport through each object's Material tags and their projections, one
   layer over another; missing pictures show as a magenta checker.
+- **Textures in renders** — renders and preview balls show every channel's
+  picture through the Material tags, normal and bump pictures, Opacity
+  cut-outs (shadows pass through them too), glass that bends light by its
+  IOR and casts lighter, tinted shadows, and a clear coat; Camera
+  projections look through their camera object.
 - **Files** — documents are saved in `.g4d` format version 4. Every file of
   Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
   files and says they come from a newer Grid4D.

@@ -1,21 +1,55 @@
 //! The scene as the renderer sees it: every visible surface as world-space
-//! triangles in one bounding volume hierarchy, with their materials, and the
-//! lights.
+//! triangles in one bounding volume hierarchy, with their materials (Material
+//! tags as layers, read at each hit), and the lights.
 
-use glam::{Mat3, Mat4, Vec3};
-use grid4d_eval::{EvaluatedLight, EvaluatedScene, MeshKey};
-use grid4d_geom::{Bvh, PolyMesh, TriMesh, Triangulator};
-use grid4d_scene::{Falloff, LightShadow, LightType};
+use std::collections::HashMap;
 
-/// How a surface reflects and gives off light: its material.
+use glam::{Affine2, Mat3, Mat4, Vec2, Vec3, Vec4};
+use grid4d_eval::{Drawable, EvaluatedLight, EvaluatedScene, MaterialLayers, MeshKey};
+use grid4d_geom::{Bvh, PolyMesh, TriMesh, Triangulator, uv};
+use grid4d_scene::{Aabb, Falloff, LightShadow, LightType, MaterialId, Materials, NodeId, Projection};
+
+use crate::{RenderCamera, channels::Channels, picture::Pictures};
+
+/// How a surface reflects and gives off light at a point: its material there.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Surface {
     /// Linear RGB.
     pub color: Vec3,
     pub roughness: f32,
     pub metallic: f32,
+    /// A dielectric's reflection strength (0.5: 4 %).
+    pub specular: f32,
     /// Light it gives off, linear RGB.
     pub emission: Vec3,
+    /// Light passing through (0 – 1), bent by `ior`.
+    pub transmission: f32,
+    pub ior: f32,
+    /// A varnish over the rest (0 – 1) and its roughness.
+    pub clearcoat: f32,
+    pub clearcoat_roughness: f32,
+}
+
+impl Surface {
+    /// An opaque surface without coat.
+    pub(crate) const fn plain(color: Vec3, roughness: f32, metallic: f32, emission: Vec3) -> Self {
+        Self {
+            color,
+            roughness,
+            metallic,
+            specular: 0.5,
+            emission,
+            transmission: 0.0,
+            ior: 1.5,
+            clearcoat: 0.0,
+            clearcoat_roughness: 0.03,
+        }
+    }
+
+    /// How much light passes through it (no metal transmits).
+    pub(crate) fn transmitted(&self) -> f32 {
+        self.transmission.clamp(0.0, 1.0) * (1.0 - self.metallic.clamp(0.0, 1.0))
+    }
 }
 
 /// A light as the renderer uses it.
@@ -58,15 +92,111 @@ impl Light {
     }
 }
 
+/// How a picture bends the shading normal at a hit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Bend {
+    None,
+    /// A Normal picture: the tangent (world, `w` the side of up the picture)
+    /// and the picture's normal in tangent space.
+    Normal {
+        tangent: Vec4,
+        bent: Vec3,
+    },
+    /// A Bump picture: the surface's change per unit of u and of v (world)
+    /// and the height's (cm).
+    Bump {
+        pu: Vec3,
+        pv: Vec3,
+        hu: f32,
+        hv: f32,
+    },
+}
+
+impl Bend {
+    /// `n` (unit, turned towards the viewer) bent by the picture.
+    pub(crate) fn apply(self, n: Vec3) -> Vec3 {
+        match self {
+            Self::None => n,
+            Self::Normal { tangent, bent } => {
+                let t = tangent.truncate();
+                let Some(t) = (t - n * n.dot(t)).try_normalize() else {
+                    return n;
+                };
+                let b = n.cross(t) * tangent.w;
+                (t * bent.x + b * bent.y + n * bent.z).normalize_or(n)
+            }
+            Self::Bump { pu, pv, hu, hv } => {
+                // The bumped surface's tangents p_u + h_u·n and p_v + h_v·n
+                // span a normal tilted against the slope.
+                let area = pu.cross(pv);
+                let length = area.length();
+                if length <= f32::MIN_POSITIVE {
+                    return n;
+                }
+                let side = if area.dot(n) < 0.0 { -1.0 } else { 1.0 };
+                let tilt = (n.cross(pv) * hu + pu.cross(n) * hv) * (side / length);
+                (n + tilt).normalize_or(n)
+            }
+        }
+    }
+}
+
 /// Where a ray met a surface.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Hit {
     pub position: Vec3,
-    /// The triangle's own normal (unit; either side).
+    /// The triangle's own normal (unit; its front, counter-clockwise side).
     pub geometric: Vec3,
     /// The smoothed normal there (unit; either side).
     pub shading: Vec3,
     pub surface: Surface,
+    pub bend: Bend,
+}
+
+/// What a render reads beyond the evaluated scene to show materials: the
+/// document's materials, the pictures of its textures and the cameras that
+/// Camera projections look through.
+#[derive(Clone, Copy, Debug)]
+pub struct Texturing<'a> {
+    pub materials: &'a Materials,
+    pub pictures: &'a Pictures,
+    /// The render's camera: Camera projections without a camera object.
+    pub camera: RenderCamera,
+    /// The picture's width per unit of height.
+    pub aspect: f32,
+    /// Camera objects, where they are this frame.
+    pub cameras: &'a [(NodeId, RenderCamera)],
+}
+
+/// Where a layer's texture coordinates come from.
+#[derive(Clone, Copy, Debug)]
+enum Coords {
+    /// Its material reads no picture.
+    None,
+    /// Three per triangle of the object, from this index of `uvs`.
+    Corners(usize),
+    /// Seen through a camera, the tag's turn, tiling and offset after.
+    Camera(RenderCamera, Affine2),
+}
+
+/// One Material tag on an object.
+#[derive(Clone, Copy, Debug)]
+struct Layer {
+    /// Into `RenderScene::materials`.
+    material: usize,
+    coords: Coords,
+    /// Three per triangle, from this index of `tangents` (Normal pictures).
+    tangents: Option<usize>,
+}
+
+/// One drawn object or clone.
+#[derive(Clone, Copy, Debug)]
+struct Object {
+    /// Without layers: its drawable's surface.
+    plain: Surface,
+    /// Its layers in `RenderScene::layers` (start, end), bottom first.
+    layers: (usize, usize),
+    first_triangle: usize,
 }
 
 /// Everything a render needs from the scene, built once per render.
@@ -77,30 +207,75 @@ pub struct RenderScene {
     bvh: Bvh,
     /// Three smoothed normals per triangle.
     normals: Vec<Vec3>,
-    surfaces: Vec<Surface>,
-    /// The surface of each triangle.
-    surface_of: Vec<u32>,
+    objects: Vec<Object>,
+    /// The object of each triangle.
+    object_of: Vec<u32>,
+    layers: Vec<Layer>,
+    materials: Vec<Channels>,
+    uvs: Vec<Vec2>,
+    tangents: Vec<Vec4>,
+    aspect: f32,
     lights: Vec<Light>,
     bounds: Option<(Vec3, Vec3)>,
 }
 
+/// What the build keeps between objects.
+#[derive(Default)]
+struct Build {
+    points: Vec<Vec3>,
+    normals: Vec<Vec3>,
+    objects: Vec<Object>,
+    object_of: Vec<u32>,
+    layers: Vec<Layer>,
+    materials: Vec<Channels>,
+    material_index: HashMap<MaterialId, usize>,
+    uvs: Vec<Vec2>,
+    tangents: Vec<Vec4>,
+    bounds: Option<(Vec3, Vec3)>,
+    triangulator: Triangulator,
+    tri: TriMesh,
+    corner_tangents: Vec<Vec4>,
+}
+
+/// One object to add: its mesh at unit size and how it is drawn.
+struct Part<'a> {
+    mesh: &'a PolyMesh,
+    world: Mat4,
+    draw: &'a Drawable,
+    bounds: Option<Aabb>,
+    layers: MaterialLayers,
+}
+
 impl RenderScene {
     /// The scene `evaluated` shows — evaluate it with
-    /// [`EvaluatedScene::for_render`] for what the renderer shows. Light and
+    /// [`EvaluatedScene::for_render`] for what the renderer shows — in its
+    /// objects' colours and surfaces, without pictures or layers. Light and
     /// camera markers are left out.
     #[must_use]
     pub fn new(evaluated: &EvaluatedScene) -> Self {
-        let mut points = Vec::new();
-        let mut normals = Vec::new();
-        let mut surfaces = Vec::new();
-        let mut surface_of = Vec::new();
-        let mut bounds: Option<(Vec3, Vec3)> = None;
-        let mut triangulator = Triangulator::new();
-        let mut tri = TriMesh::default();
+        Self::build(evaluated, None)
+    }
+
+    /// The scene `evaluated` shows in its materials: every Material tag of
+    /// an object, the later over the earlier where their Opacity lets them,
+    /// with their pictures.
+    #[must_use]
+    pub fn textured(evaluated: &EvaluatedScene, texturing: &Texturing<'_>) -> Self {
+        Self::build(evaluated, Some(texturing))
+    }
+
+    fn build(evaluated: &EvaluatedScene, texturing: Option<&Texturing<'_>>) -> Self {
+        let mut b = Build::default();
         // Objects, then clones.
-        let objects = evaluated.nodes().iter().map(|n| (n.world, n.drawable));
-        let clones = evaluated.instances().iter().map(|c| (c.world, c.drawable));
-        for (world, drawable) in objects.chain(clones) {
+        let objects = evaluated
+            .nodes()
+            .iter()
+            .map(|n| (n.world, n.drawable, n.bounds, n.materials));
+        let clones = evaluated
+            .instances()
+            .iter()
+            .map(|c| (c.world, c.drawable, c.bounds, c.materials));
+        for (world, drawable, bounds, layers) in objects.chain(clones) {
             let Some(draw) = drawable.filter(|d| !d.marker) else {
                 continue;
             };
@@ -118,51 +293,150 @@ impl RenderScene {
                     None => continue,
                 },
             };
-            let model = world * Mat4::from_scale(draw.scale);
-            let linear = Mat3::from_mat4(model);
-            if linear.determinant().abs() <= f32::EPSILON {
-                continue; // flattened to nothing
-            }
-            let normal_matrix = linear.inverse().transpose();
-            triangulator.triangulate(mesh, draw.shading.smoothing(), &mut tri);
-            let index = u32::try_from(surfaces.len()).unwrap_or(u32::MAX);
-            surfaces.push(Surface {
-                color: Vec3::from(draw.color),
-                roughness: draw.surface.roughness,
-                metallic: draw.surface.metallic,
-                emission: Vec3::from(draw.surface.emission),
-            });
-            for triangle in tri.indices.as_chunks::<3>().0 {
-                for &corner in triangle {
-                    let corner = usize::try_from(corner).unwrap_or(usize::MAX);
-                    let (Some(&p), Some(&n)) = (tri.positions.get(corner), tri.normals.get(corner)) else {
-                        continue;
-                    };
-                    let p = model.transform_point3(p);
-                    points.push(p);
-                    normals.push((normal_matrix * n).normalize_or_zero());
-                    bounds = Some(bounds.map_or((p, p), |(min, max)| (min.min(p), max.max(p))));
-                }
-                surface_of.push(index);
-            }
+            let part = Part {
+                mesh,
+                world,
+                draw: &draw,
+                bounds,
+                layers,
+            };
+            b.add(evaluated, &part, texturing);
         }
-        let faces = (0..surface_of.len()).map(|t| {
+        let faces = (0..b.object_of.len()).map(|t| {
             let first = u32::try_from(t * 3).unwrap_or(u32::MAX - 2);
             [first, first + 1, first + 2]
         });
-        let triangles = PolyMesh::from_faces(points, faces).unwrap_or_default();
+        let triangles = PolyMesh::from_faces(b.points, faces).unwrap_or_default();
         let bvh = Bvh::build(&triangles);
         Self {
             triangles,
             bvh,
-            normals,
-            surfaces,
-            surface_of,
+            normals: b.normals,
+            objects: b.objects,
+            object_of: b.object_of,
+            layers: b.layers,
+            materials: b.materials,
+            uvs: b.uvs,
+            tangents: b.tangents,
+            aspect: texturing.map_or(1.0, |t| t.aspect),
             lights: evaluated.lights().iter().map(Light::new).collect(),
-            bounds,
+            bounds: b.bounds,
         }
     }
+}
 
+impl Build {
+    /// Adds `part`'s triangles, and its layers when `texturing`.
+    fn add(&mut self, evaluated: &EvaluatedScene, part: &Part<'_>, texturing: Option<&Texturing<'_>>) {
+        let draw = part.draw;
+        let model = part.world * Mat4::from_scale(draw.scale);
+        let linear = Mat3::from_mat4(model);
+        let determinant = linear.determinant();
+        if determinant.abs() <= f32::EPSILON {
+            return; // flattened to nothing
+        }
+        let normal_matrix = linear.inverse().transpose();
+        self.triangulator
+            .triangulate(part.mesh, draw.shading.smoothing(), &mut self.tri);
+        let index = u32::try_from(self.objects.len()).unwrap_or(u32::MAX);
+        let first_triangle = self.object_of.len();
+        let tri = &self.tri;
+        for triangle in tri.indices.as_chunks::<3>().0 {
+            for &corner in triangle {
+                let corner = usize::try_from(corner).unwrap_or(usize::MAX);
+                let (Some(&p), Some(&n)) = (tri.positions.get(corner), tri.normals.get(corner)) else {
+                    continue;
+                };
+                let p = model.transform_point3(p);
+                self.points.push(p);
+                self.normals.push((normal_matrix * n).normalize_or_zero());
+                self.bounds = Some(self.bounds.map_or((p, p), |(min, max)| (min.min(p), max.max(p))));
+            }
+            self.object_of.push(index);
+        }
+
+        let layer_start = self.layers.len();
+        if let Some(texturing) = texturing {
+            for layer in evaluated.material_layers(part.layers) {
+                let Some(material) = texturing.materials.get(layer.material) else {
+                    continue;
+                };
+                let slot = *self.material_index.entry(layer.material).or_insert_with(|| {
+                    self.materials.push(Channels::new(material, texturing.pictures));
+                    self.materials.len() - 1
+                });
+                let Some(channels) = self.materials.get(slot) else {
+                    continue;
+                };
+                let (pictured, normal_map) = (channels.has_pictures(), channels.has_normal_map());
+                let mut coords = Coords::None;
+                let mut tangents = None;
+                if pictured && layer.projection == Projection::Camera {
+                    let camera = layer
+                        .camera
+                        .and_then(|id| texturing.cameras.iter().find(|(c, _)| *c == id))
+                        .map_or(texturing.camera, |&(_, camera)| camera);
+                    coords = Coords::Camera(camera, layer.uv_transform);
+                } else if pictured {
+                    // The mesh is the object's at unit size: its scale first.
+                    let projected = layer
+                        .to_unit(part.bounds)
+                        .map(|to_unit| uv::project(layer.projection, part.mesh, to_unit * Mat4::from_scale(draw.scale)))
+                        .filter(|uvs| uvs.len() == self.tri.positions.len());
+                    let mut corner_uvs = projected.unwrap_or_else(|| self.tri.uvs.clone());
+                    if layer.uv_transform != Affine2::IDENTITY {
+                        for uv in &mut corner_uvs {
+                            *uv = layer.uv_transform.transform_point2(*uv);
+                        }
+                    }
+                    coords = Coords::Corners(self.uvs.len());
+                    let tri = &self.tri;
+                    for &corner in &tri.indices {
+                        let corner = usize::try_from(corner).unwrap_or(usize::MAX);
+                        self.uvs.push(corner_uvs.get(corner).copied().unwrap_or(Vec2::ZERO));
+                    }
+                    if normal_map {
+                        uv::tangents(
+                            &tri.positions,
+                            &tri.normals,
+                            &corner_uvs,
+                            &tri.indices,
+                            &mut self.corner_tangents,
+                        );
+                        tangents = Some(self.tangents.len());
+                        // A mirrored object turns the picture's up around.
+                        let side = if determinant < 0.0 { -1.0 } else { 1.0 };
+                        for &corner in &tri.indices {
+                            let corner = usize::try_from(corner).unwrap_or(usize::MAX);
+                            let t = self.corner_tangents.get(corner).copied().unwrap_or(Vec4::X);
+                            self.tangents.push((linear * t.truncate()).extend(t.w * side));
+                        }
+                    }
+                }
+                self.layers.push(Layer {
+                    material: slot,
+                    coords,
+                    tangents,
+                });
+            }
+        }
+        self.objects.push(Object {
+            plain: Surface::plain(
+                Vec3::from(draw.color),
+                draw.surface.roughness,
+                draw.surface.metallic,
+                Vec3::from(draw.surface.emission),
+            ),
+            layers: (layer_start, self.layers.len()),
+            first_triangle,
+        });
+    }
+}
+
+/// The most cut-out surfaces a ray passes through.
+const MAX_CUT_OUTS: u32 = 64;
+
+impl RenderScene {
     /// The world bounds of every surface (min, max); `None` for an empty scene.
     #[must_use]
     pub fn bounds(&self) -> Option<(Vec3, Vec3)> {
@@ -172,23 +446,69 @@ impl RenderScene {
     /// Number of triangles.
     #[must_use]
     pub fn triangle_count(&self) -> usize {
-        self.surface_of.len()
+        self.object_of.len()
     }
 
     pub(crate) fn lights(&self) -> &[Light] {
         &self.lights
     }
 
-    /// The nearest surface the ray `origin + t · dir` meets.
+    /// The nearest surface the ray `origin + t · dir` meets (passing where
+    /// surfaces are cut out).
     pub(crate) fn intersect(&self, origin: Vec3, dir: Vec3) -> Option<Hit> {
-        let hit = self.bvh.raycast(self.triangles.points(), origin, dir)?;
-        let triangle = usize::try_from(hit.face).ok()?;
-        let corners = triangle * 3;
-        let points = self.triangles.points().get(corners..corners + 3)?;
-        let normals = self.normals.get(corners..corners + 3)?;
+        let mut start = origin;
+        for _ in 0..MAX_CUT_OUTS {
+            let hit = self.bvh.raycast(self.triangles.points(), start, dir)?;
+            let triangle = usize::try_from(hit.face).ok()?;
+            let position = start + dir * hit.t;
+            if let Some(found) = self.hit(triangle, position) {
+                return Some(found);
+            }
+            start = position + dir * crate::trace::offset(position);
+        }
+        None
+    }
+
+    /// How much light passes along `origin + t · dir` before `distance`:
+    /// none through an opaque surface, all where surfaces are cut out,
+    /// tinted through transmitting ones.
+    pub(crate) fn transmittance(&self, origin: Vec3, dir: Vec3, distance: f32) -> Vec3 {
+        let mut start = origin;
+        let mut left = distance;
+        let mut passed = Vec3::ONE;
+        for _ in 0..MAX_CUT_OUTS {
+            let Some(hit) = self.bvh.raycast(self.triangles.points(), start, dir) else {
+                return passed;
+            };
+            if hit.t >= left {
+                return passed;
+            }
+            let Ok(triangle) = usize::try_from(hit.face) else {
+                return passed;
+            };
+            let position = start + dir * hit.t;
+            if let Some((surface, _)) = self.surface_at(triangle, position) {
+                let through = surface.transmitted();
+                if through <= 0.0 {
+                    return Vec3::ZERO;
+                }
+                passed *= surface.color * through;
+                if passed.max_element() <= 1e-4 {
+                    return Vec3::ZERO;
+                }
+            }
+            let step = crate::trace::offset(position);
+            start = position + dir * step;
+            left -= hit.t + step;
+        }
+        Vec3::ZERO
+    }
+
+    /// The triangle's corners (world) and its barycentric weights at `position`.
+    fn corners(&self, triangle: usize, position: Vec3) -> Option<(&[Vec3], Vec3)> {
+        let first = triangle * 3;
+        let points = self.triangles.points().get(first..first + 3)?;
         let (a, e1, e2) = (points[0], points[1] - points[0], points[2] - points[0]);
-        let position = origin + dir * hit.t;
-        // Barycentric weights of `position` in the triangle.
         let p = position - a;
         let (d00, d01, d11) = (e1.dot(e1), e1.dot(e2), e2.dot(e2));
         let (d20, d21) = (p.dot(e1), p.dot(e2));
@@ -201,26 +521,131 @@ impl RenderScene {
         } else {
             (0.0, 0.0)
         };
-        let geometric = e1.cross(e2).normalize_or(Vec3::Y);
-        let shading = (normals[0] * (1.0 - wb - wc) + normals[1] * wb + normals[2] * wc).normalize_or(geometric);
-        let surface = *self
-            .surface_of
+        Some((points, Vec3::new(1.0 - wb - wc, wb, wc)))
+    }
+
+    /// The surface where `triangle` is met at `position` and how its pictures
+    /// bend the shading; `None` where every layer is cut out.
+    fn surface_at(&self, triangle: usize, position: Vec3) -> Option<(Surface, Bend)> {
+        let object = self
+            .object_of
             .get(triangle)
-            .and_then(|&s| self.surfaces.get(usize::try_from(s).ok()?))?;
+            .and_then(|&o| self.objects.get(usize::try_from(o).ok()?))?;
+        let layers = self.layers.get(object.layers.0..object.layers.1)?;
+        if layers.is_empty() {
+            return Some((object.plain, Bend::None));
+        }
+        let (points, weights) = self.corners(triangle, position)?;
+        let local = triangle - object.first_triangle;
+        // From the top layer down, the first one that is there.
+        for layer in layers.iter().rev() {
+            let channels = self.materials.get(layer.material)?;
+            let corner_uvs = self.layer_uvs(layer, local, points);
+            let uv = match layer.coords {
+                Coords::None => None,
+                Coords::Corners(_) => corner_uvs.map(|[a, b, c]| a * weights.x + b * weights.y + c * weights.z),
+                Coords::Camera(camera, transform) => camera
+                    .screen(position, self.aspect)
+                    .map(|s| transform.transform_point2(Vec2::new(0.5 + s.x * 0.5, 0.5 - s.y * 0.5))),
+            };
+            if !channels.is_solid(uv) {
+                continue;
+            }
+            let surface = channels.surface(uv);
+            let mut bend = Bend::None;
+            if let (Some(uv), Some(corner_uvs)) = (uv, corner_uvs) {
+                if let Some(bent) = channels.normal(Some(uv)) {
+                    let tangent = layer
+                        .tangents
+                        .and_then(|start| self.tangents.get(start + local * 3..start + local * 3 + 3))
+                        .map(|t| t[0] * weights.x + t[1] * weights.y + t[2] * weights.z)
+                        .or_else(|| triangle_tangent(points, corner_uvs));
+                    if let Some(tangent) = tangent {
+                        bend = Bend::Normal { tangent, bent };
+                    }
+                } else if channels.has_bump_map()
+                    && let Some((pu, pv)) = derivatives(points, corner_uvs)
+                    && let Some((_, step)) = channels.height(uv)
+                {
+                    // Half a texel either way: within the cell the picture
+                    // is read from, its slope there.
+                    let half = step * 0.5;
+                    let height = |du: f32, dv: f32| channels.height(uv + Vec2::new(du, dv)).map_or(0.0, |(h, _)| h);
+                    let hu = (height(half.x, 0.0) - height(-half.x, 0.0)) / step.x;
+                    let hv = (height(0.0, half.y) - height(0.0, -half.y)) / step.y;
+                    bend = Bend::Bump { pu, pv, hu, hv };
+                }
+            }
+            return Some((surface, bend));
+        }
+        None
+    }
+
+    /// A layer's coordinates at the triangle's corners (`local`: the
+    /// triangle's number in its object); `None` without pictures.
+    fn layer_uvs(&self, layer: &Layer, local: usize, points: &[Vec3]) -> Option<[Vec2; 3]> {
+        match layer.coords {
+            Coords::None => None,
+            Coords::Corners(start) => {
+                let at = start + local * 3;
+                let uvs = self.uvs.get(at..at + 3)?;
+                Some([uvs[0], uvs[1], uvs[2]])
+            }
+            Coords::Camera(camera, transform) => {
+                let mut out = [Vec2::ZERO; 3];
+                for (uv, &p) in out.iter_mut().zip(points) {
+                    let s = camera.screen(p, self.aspect)?;
+                    *uv = transform.transform_point2(Vec2::new(0.5 + s.x * 0.5, 0.5 - s.y * 0.5));
+                }
+                Some(out)
+            }
+        }
+    }
+
+    /// The hit on `triangle` at `position`; `None` where it is cut out.
+    fn hit(&self, triangle: usize, position: Vec3) -> Option<Hit> {
+        let (surface, bend) = self.surface_at(triangle, position)?;
+        let (points, weights) = self.corners(triangle, position)?;
+        let first = triangle * 3;
+        let normals = self.normals.get(first..first + 3)?;
+        let geometric = (points[1] - points[0])
+            .cross(points[2] - points[0])
+            .normalize_or(Vec3::Y);
+        let shading =
+            (normals[0] * weights.x + normals[1] * weights.y + normals[2] * weights.z).normalize_or(geometric);
         Some(Hit {
             position,
             geometric,
             shading,
             surface,
+            bend,
         })
     }
+}
 
-    /// Whether a surface blocks the ray `origin + t · dir` before `distance`.
-    pub(crate) fn occluded(&self, origin: Vec3, dir: Vec3, distance: f32) -> bool {
-        self.bvh
-            .raycast(self.triangles.points(), origin, dir)
-            .is_some_and(|hit| hit.t < distance)
+/// How a triangle's world points change per unit of u and of v; `None` when
+/// its coordinates have no area.
+fn derivatives(points: &[Vec3], uvs: [Vec2; 3]) -> Option<(Vec3, Vec3)> {
+    let (dp1, dp2) = (points[1] - points[0], points[2] - points[0]);
+    let (d1, d2) = (uvs[1] - uvs[0], uvs[2] - uvs[0]);
+    let det = d1.x * d2.y - d1.y * d2.x;
+    if det.abs() <= 1e-12 || !det.is_finite() {
+        return None;
     }
+    let pu = (dp1 * d2.y - dp2 * d1.y) / det;
+    let pv = (dp2 * d1.x - dp1 * d2.x) / det;
+    Some((pu, pv))
+}
+
+/// A triangle's own tangent (along increasing u, `w` the side of up the
+/// picture), where no tangents are stored (Camera projections).
+fn triangle_tangent(points: &[Vec3], uvs: [Vec2; 3]) -> Option<Vec4> {
+    let (pu, pv) = derivatives(points, uvs)?;
+    let normal = (points[1] - points[0]).cross(points[2] - points[0]);
+    let t = pu.try_normalize()?;
+    // Up the picture is decreasing v.
+    let w = if normal.cross(t).dot(-pv) < 0.0 { -1.0 } else { 1.0 };
+    Some(t.extend(w))
 }
 
 #[cfg(test)]
@@ -250,8 +675,9 @@ mod tests {
         let hit = scene.intersect(Vec3::new(10.0, 500.0, 20.0), Vec3::NEG_Y).unwrap();
         assert!(hit.position.abs_diff_eq(Vec3::new(10.0, 200.0, 20.0), 1e-3));
         assert!(hit.geometric.y.abs() > 0.999 && hit.shading.abs_diff_eq(Vec3::Y, 1e-4));
-        assert!(scene.occluded(Vec3::new(10.0, 500.0, 20.0), Vec3::NEG_Y, 400.0));
-        assert!(!scene.occluded(Vec3::new(10.0, 500.0, 20.0), Vec3::NEG_Y, 250.0));
+        let above = Vec3::new(10.0, 500.0, 20.0);
+        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 400.0), Vec3::ZERO);
+        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 250.0), Vec3::ONE);
     }
 
     #[test]
@@ -277,5 +703,44 @@ mod tests {
         assert_eq!(scene.triangle_count(), 8 * 12, "eight cubes");
         let (min, max) = scene.bounds().unwrap();
         assert!(min.x < -400.0 && max.x > 400.0, "around the ring: {min} {max}");
+    }
+
+    #[test]
+    fn rays_and_shadows_pass_where_surfaces_are_cut_out() {
+        use std::sync::Arc;
+
+        use grid4d_scene::{Channel, Material, MaterialTag, Tag, Texture, TextureSlot};
+
+        use crate::picture::{Picture, Texels};
+
+        let mut doc = Document::new("cut");
+        let mask = doc.scene.textures_mut().insert(Texture::linked("mask.png".into()));
+        let mut material = Material::new("Mask");
+        *material.map_mut(Channel::Opacity) = Some(TextureSlot::new(mask));
+        let material = doc.scene.materials_mut().insert(material);
+        let mut plane = Node::new("Plane", ObjectKindTag::Plane.default_kind());
+        plane.data.tags = vec![Tag::Material(MaterialTag::new(Some(material)))];
+        doc.scene.insert(plane);
+        let mut eval = EvaluatedScene::for_render();
+        eval.update(&doc.scene);
+        let mut pictures = Pictures::new();
+        // Solid on the left half (u < 0.5: x < 0), cut out on the right.
+        let texels = Texels::Linear8(Arc::from([255u8, 0, 0, 255, 0, 0, 0, 255]));
+        pictures.insert(mask, Arc::new(Picture::new(2, 1, texels).unwrap()));
+        let texturing = Texturing {
+            materials: doc.scene.materials(),
+            pictures: &pictures,
+            camera: RenderCamera::framing(Vec3::splat(-1.0), Vec3::ONE, 1.0),
+            aspect: 1.0,
+            cameras: &[],
+        };
+        let scene = RenderScene::textured(&eval, &texturing);
+        let (solid, cut) = (Vec3::new(-50.0, 100.0, 0.0), Vec3::new(50.0, 100.0, 0.0));
+        assert!(scene.intersect(solid, Vec3::NEG_Y).is_some());
+        assert_eq!(scene.transmittance(solid, Vec3::NEG_Y, 200.0), Vec3::ZERO);
+        assert!(scene.intersect(cut, Vec3::NEG_Y).is_none(), "cut out");
+        assert_eq!(scene.transmittance(cut, Vec3::NEG_Y, 200.0), Vec3::ONE);
+        // Without materials it is whole.
+        assert!(RenderScene::new(&eval).intersect(cut, Vec3::NEG_Y).is_some());
     }
 }

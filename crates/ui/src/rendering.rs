@@ -4,6 +4,9 @@
 //! pass, so the Picture Viewer shows it sharpening while the editor stays
 //! usable; each finished frame is handed back to be saved. [`Renders`] (editor state) keeps the running job and the
 //! session's pictures; [`Renders::poll`] takes the worker's news once a frame.
+//! Renders show the document's materials with the texture pictures decoded
+//! when they start (`TextureCache::pictures`; one still loading shows its
+//! channel's value).
 
 use std::{
     path::PathBuf,
@@ -17,9 +20,11 @@ use std::{
 
 use crate::i18n::{key, trf};
 use grid4d_eval::EvaluatedScene;
-use grid4d_raytrace::{CameraProjection, Image, Progressive, RenderCamera, RenderControl, RenderOptions, RenderScene};
+use grid4d_raytrace::{
+    CameraProjection, Image, Pictures, Progressive, RenderCamera, RenderControl, RenderOptions, RenderScene, Texturing,
+};
 use grid4d_render::OrbitCamera;
-use grid4d_scene::{Document, ImageFormat, NodeId, ObjectKind, RenderSettings, Scene};
+use grid4d_scene::{Document, ImageFormat, NodeId, ObjectKind, ObjectKindTag, RenderSettings, Scene};
 use grid4d_sim::Replay;
 
 /// The history's pictures may take this much memory together; older ones go first.
@@ -203,21 +208,23 @@ impl Drop for Job {
 impl Job {
     /// Starts a worker rendering `scene` at each of `frames`; `None` if no
     /// thread could start.
-    fn spawn(
-        number: u32,
-        scene: Scene,
-        frames: Vec<i32>,
-        eye: Eye,
-        options: RenderOptions,
-        replay: Option<Replay>,
-    ) -> Option<Self> {
+    fn spawn(number: u32, scene: Scene, pictures: Pictures, frames: Vec<i32>, eye: Eye, look: Look) -> Option<Self> {
+        let Look { options, replay } = look;
         let control = Arc::new(RenderControl::default());
         let (sender, updates) = mpsc::channel();
         let worker_control = Arc::clone(&control);
         let count = u64::try_from(frames.len()).unwrap_or(1).max(1);
         let spawned = thread::Builder::new()
             .name(format!("grid4d render {number}"))
-            .spawn(move || work(&scene, &frames, eye, &options, replay, &worker_control, &sender));
+            .spawn(move || {
+                let input = Input {
+                    scene: &scene,
+                    pictures: &pictures,
+                    frames: &frames,
+                    eye,
+                };
+                work(&input, &options, replay, &worker_control, &sender);
+            });
         if let Err(err) = spawned {
             log::error!("could not start the render thread: {err}");
             return None;
@@ -396,7 +403,15 @@ impl Renders {
     /// the Render Settings' quality) for the Render View, replacing one that
     /// shows. Nothing is saved or kept in the history.
     /// `replay`: the simulation (a copy of its cache), if there is one.
-    pub fn start_view(&mut self, doc: &Document, view: &OrbitCamera, key: ViewKey, replay: Option<Replay>) {
+    /// `pictures`: the texture pictures decoded so far.
+    pub fn start_view(
+        &mut self,
+        doc: &Document,
+        pictures: Pictures,
+        view: &OrbitCamera,
+        key: ViewKey,
+        replay: Option<Replay>,
+    ) {
         self.view = None;
         let settings = doc.render.clone().validated();
         let options = RenderOptions {
@@ -407,10 +422,10 @@ impl Renders {
         let job = Job::spawn(
             0,
             doc.scene.clone(),
+            pictures,
             vec![doc.time.frame()],
             Eye::Fixed(render_camera(view)),
-            options,
-            replay,
+            Look { options, replay },
         );
         let picture = Picture {
             number: 0,
@@ -447,10 +462,12 @@ impl Renders {
     /// range — through `view`, or through camera object `object` (the one the
     /// view looks through) wherever it is at each frame; stops a render that
     /// runs. `document` is where the document is saved (for a relative output
-    /// file). Returns the new picture's number.
+    /// file). `pictures`: the texture pictures decoded so far. Returns the new
+    /// picture's number.
     pub fn start(
         &mut self,
         doc: &Document,
+        pictures: Pictures,
         view: &OrbitCamera,
         object: Option<NodeId>,
         document: Option<&std::path::Path>,
@@ -487,7 +504,14 @@ impl Renders {
 
         let camera = render_camera(view);
         let eye = object.map_or(Eye::Fixed(camera), |id| Eye::Object(id, camera));
-        let job = Job::spawn(number, doc.scene.clone(), frames, eye, options, replay);
+        let job = Job::spawn(
+            number,
+            doc.scene.clone(),
+            pictures,
+            frames,
+            eye,
+            Look { options, replay },
+        );
         if job.is_none() {
             self.end(number, true);
             return number;
@@ -642,18 +666,64 @@ pub fn save_target(settings: &RenderSettings, document: Option<&std::path::Path>
     })
 }
 
+/// How a render looks: its options and the simulation it replays.
+struct Look {
+    options: RenderOptions,
+    replay: Option<Replay>,
+}
+
+/// What a render worker renders: the scene, its texture pictures, its frames
+/// and its eye.
+struct Input<'a> {
+    scene: &'a Scene,
+    pictures: &'a Pictures,
+    frames: &'a [i32],
+    eye: Eye,
+}
+
+/// The scene's camera objects as evaluated, for Camera projections.
+fn camera_objects(scene: &Scene, evaluated: &EvaluatedScene) -> Vec<(NodeId, RenderCamera)> {
+    evaluated
+        .nodes()
+        .iter()
+        .filter(|n| n.kind == ObjectKindTag::Camera)
+        .filter_map(|n| match scene.get(n.id)?.data.kind {
+            ObjectKind::Camera { fov_y_deg } => Some((
+                n.id,
+                RenderCamera {
+                    world: n.world,
+                    projection: CameraProjection::Perspective {
+                        fov_y: fov_y_deg.to_radians(),
+                    },
+                },
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The picture's width per unit of height.
+fn aspect(options: &RenderOptions) -> f32 {
+    let side = |n: u32| f32::from(u16::try_from(n.clamp(1, RenderSettings::MAX_SIZE)).unwrap_or(u16::MAX));
+    side(options.width) / side(options.height)
+}
+
 /// The worker: for each frame, evaluates the scene for the renderer, then
 /// renders pass after pass, sending each picture and the finished frame.
 /// Stops when cancelled or nobody listens.
 fn work(
-    scene: &Scene,
-    frames: &[i32],
-    eye: Eye,
+    input: &Input<'_>,
     options: &RenderOptions,
     mut replay: Option<Replay>,
     control: &RenderControl,
     sender: &Sender<Update>,
 ) {
+    let &Input {
+        scene,
+        pictures,
+        frames,
+        eye,
+    } = input;
     let mut evaluated = EvaluatedScene::for_render();
     let mut simulated = grid4d_eval::Overrides::default();
     for &frame in frames {
@@ -665,7 +735,15 @@ fn work(
         evaluated.set_frame(f64::from(frame));
         evaluated.update(scene);
         let camera = eye.at(scene, &evaluated, f64::from(frame));
-        let render_scene = RenderScene::new(&evaluated);
+        let cameras = camera_objects(scene, &evaluated);
+        let texturing = Texturing {
+            materials: scene.materials(),
+            pictures,
+            camera,
+            aspect: aspect(options),
+            cameras: &cameras,
+        };
+        let render_scene = RenderScene::textured(&evaluated, &texturing);
         let mut progressive = Progressive::new(options);
         while !progressive.is_complete(options) {
             // 1, 1, 2, 4, … samples: a first picture at once, then fewer updates.
@@ -731,7 +809,7 @@ pub(crate) mod tests {
         let mut doc = Document::with_demo_scene();
         small(&mut doc, 5);
         let mut renders = Renders::default();
-        let number = renders.start(&doc, &OrbitCamera::default(), None, None, None);
+        let number = renders.start(&doc, Pictures::new(), &OrbitCamera::default(), None, None, None);
         assert_eq!(number, 1);
         assert!(renders.is_rendering());
         assert_eq!(renders.shown_picture().map(|p| p.state), Some(RenderState::Rendering));
@@ -767,13 +845,13 @@ pub(crate) mod tests {
         let mut doc = Document::with_demo_scene();
         doc.render.samples = 4096;
         let mut renders = Renders::default();
-        renders.start(&doc, &OrbitCamera::default(), None, None, None);
+        renders.start(&doc, Pictures::new(), &OrbitCamera::default(), None, None, None);
         renders.stop();
         assert!(!renders.is_rendering());
         assert_eq!(renders.picture(1).map(|p| p.state), Some(RenderState::Stopped));
 
-        renders.start(&doc, &OrbitCamera::default(), None, None, None);
-        renders.start(&doc, &OrbitCamera::default(), None, None, None);
+        renders.start(&doc, Pictures::new(), &OrbitCamera::default(), None, None, None);
+        renders.start(&doc, Pictures::new(), &OrbitCamera::default(), None, None, None);
         assert_eq!(
             renders.picture(2).map(|p| p.state),
             Some(RenderState::Stopped),
@@ -799,7 +877,7 @@ pub(crate) mod tests {
             frame: 0,
         };
         let mut renders = Renders::default();
-        renders.start_view(&doc, &camera, key.clone(), None);
+        renders.start_view(&doc, Pictures::new(), &camera, key.clone(), None);
         assert!(
             renders.is_busy() && !renders.is_rendering(),
             "not a Picture Viewer render"
@@ -825,7 +903,7 @@ pub(crate) mod tests {
         let whole = grid4d_raytrace::render(&RenderScene::new(&evaluated), &render_camera(&camera), &options);
         assert_eq!(view.picture.rgb, whole.to_rgb8());
 
-        renders.start_view(&doc, &camera, key, None);
+        renders.start_view(&doc, Pictures::new(), &camera, key, None);
         renders.clear_view();
         assert!(renders.view_render().is_none() && !renders.is_busy());
     }
@@ -845,7 +923,7 @@ pub(crate) mod tests {
         data.set_transform_at(&moved, 20.0, true);
 
         let mut renders = Renders::default();
-        renders.start(&doc, &OrbitCamera::default(), Some(camera), None, None);
+        renders.start(&doc, Pictures::new(), &OrbitCamera::default(), Some(camera), None, None);
         let finished = wait(&mut renders);
         let frames: Vec<i32> = finished.iter().map(|f| f.frame).collect();
         assert_eq!(frames, [0, 10, 20], "every 10th frame, in order");
@@ -854,6 +932,50 @@ pub(crate) mod tests {
         assert_eq!(picture.state, RenderState::Finished);
         assert_ne!(finished[0].image, finished[2].image, "the camera moved");
         assert_eq!((finished[0].image.width, finished[0].image.height), (24, 14));
+    }
+
+    #[test]
+    fn renders_show_texture_pictures_and_know_the_camera_objects() {
+        use std::sync::Arc;
+
+        use grid4d_raytrace::{Picture, Texels};
+        use grid4d_scene::{Channel, Material, MaterialTag, Node, Tag, Texture, TextureSlot, Transform};
+
+        let mut doc = Document::new("textured");
+        small(&mut doc, 1);
+        doc.render.auto_light = true;
+        let texture = doc.scene.textures_mut().insert(Texture::linked("red.png".into()));
+        let mut white = Material::new("White");
+        (white.color, white.roughness) = ([1.0; 3], 1.0);
+        *white.map_mut(Channel::BaseColor) = Some(TextureSlot::new(texture));
+        let white = doc.scene.materials_mut().insert(white);
+        let mut floor = Node::new("Floor", ObjectKindTag::Plane.default_kind());
+        floor.data.tags = vec![Tag::Material(MaterialTag::new(Some(white)))];
+        doc.scene.insert(floor);
+        let camera = doc.scene.insert(
+            Node::new("Camera", ObjectKindTag::Camera.default_kind())
+                .with_transform(Transform::default().with_rotation_deg(glam::Vec3::new(0.0, -90.0, 0.0)))
+                .with_position(glam::Vec3::new(0.0, 300.0, 0.0)),
+        );
+        let mut evaluated = EvaluatedScene::for_render();
+        evaluated.update(&doc.scene);
+        let cameras = camera_objects(&doc.scene, &evaluated);
+        assert_eq!(cameras.len(), 1);
+        assert_eq!(cameras[0].0, camera);
+
+        let centre = |pictures: Pictures| {
+            let mut renders = Renders::default();
+            renders.start(&doc, pictures, &OrbitCamera::default(), Some(camera), None, None);
+            let finished = wait(&mut renders);
+            finished[0].image.pixel(12, 7).unwrap()
+        };
+        let mut pictures = Pictures::new();
+        let red = Texels::Srgb8(Arc::from([255u8, 0, 0, 255]));
+        pictures.insert(texture, Arc::new(Picture::new(1, 1, red).unwrap()));
+        let textured = centre(pictures);
+        assert!(textured[0] > 0.3 && textured[1] < 0.05, "{textured:?}");
+        let plain = centre(Pictures::new());
+        assert!(plain[1] > 0.3, "the channel's value while loading: {plain:?}");
     }
 
     #[test]
@@ -925,7 +1047,7 @@ pub(crate) mod tests {
         doc.render.frames = grid4d_scene::FrameRange::Current;
         let picture = |doc: &Document, replay: Option<Replay>| {
             let mut renders = Renders::default();
-            renders.start(doc, &OrbitCamera::default(), None, None, replay);
+            renders.start(doc, Pictures::new(), &OrbitCamera::default(), None, None, replay);
             wait(&mut renders);
             renders.shown_picture().unwrap().rgba.clone()
         };
