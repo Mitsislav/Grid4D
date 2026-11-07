@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.6 — Textures, glass and layers in the path tracer (2026-11-07) |
-| Next step | 15.7 — The UV editor pane and the UV tools (Unwrap, seams, Project, Pack, Relax) |
-| Tests | 838 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.7a — The UV algorithms: islands, unwrap (LSCM), relax, pack (2026-11-07) |
+| Next step | 15.7b — Seams in the document and the UV commands |
+| Tests | 849 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2319,6 +2319,7 @@ risks R5 – R8 go with it.
 | 15.5a | Textures in the viewport: GPU vertices carry UVs; a Material tag's shape projection makes per-corner coordinates once per GPU mesh (`UvKey`: projection + matrix), its turn / tiling / offset ride per instance (`InstanceRaw` 192 bytes), Camera projects through the view; the interface hands decoded pictures to the renderer when they arrive (`upload_texture`, sRGB / linear / half float, mip chains; a magenta checker for missing ones); one bind group per textured material (group 2: a uniform of channel settings, a trilinear anisotropic sampler, a picture per channel); Base Color, Metallic, Roughness, Specular and Emission pictures and Opacity cut-out in `mesh.wgsl`; untextured objects batch as before; the allocation test includes textured and projected materials; manual §19 with a picture | 819 |
 | 15.5b | Normal and bump maps in the viewport: `grid4d_geom::uv::tangents` (along `u`, shared by vertices at one place with one normal and UV, `w` the side of up the picture), tangents in the vertices of meshes whose material bends normals (`DrawKey::tangents`), tangent-space normal pictures (+Y up) and bump pictures by screen-space derivatives in `mesh.wgsl`; layers: Material tags above the lowest covering one drawn as levels over the surface on its depth (`layer_pipeline`, `@invariant` position), their values from their own material; the picture budget (1 GiB, the device's largest side; smaller mips first); the manual's picture with a label layer and studs | 822 |
 | 15.6 | Textures in the path tracer: `RenderScene::textured` with a `Texturing` (materials, `Pictures` — the cache's full-size levels shared, `Pixels` now `Arc` — the render's camera and aspect, camera objects); every Material tag a layer read per hit from the top (`channels.rs` reads channels like the shader); coordinates per triangle corner (shape projections, UVs, the tag's transform) or through a camera; bilinear repeating pictures (8-bit sRGB / linear, half float); normal pictures in the tangent frame, bump by the height's slope; cut-outs for rays and shadows; glass (exact Fresnel, refraction about a microfacet normal, total internal reflection, tinted lighter shadows), a clear coat, Specular; renders and the Render View get the pictures, preview balls too (made again when a picture arrives); the render example decodes a document's textures; a second reference picture; the manual's §20 with a render | 838 |
+| 15.7a | The UV algorithms in `grid4d_geom::uv` (now a folder): `layout` (UV vertices and islands by a union-find over corners), `sharp_edges`; `unwrap` (parts across uncut edges, non-discs split by facing, LSCM per part solved by CGLS from a planar guess, scaled to surface area, packed); `relax` (edge springs at the island's scale, steps halved rather than flipping, borders pinned); `pack` (rows, quarter turns, margin after scaling, all in 0 – 1); `flip`; `face_stretch`, `stretch_measure`; the spec corrected after reading the reference (one shared selection, seams of their own, H / S framing) and the step split in three; an unwrap bench | 849 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2575,6 +2576,37 @@ risks R5 – R8 go with it.
   of what a preview shows, so the ball is made again when the picture comes.
 - clippy asked to allow `unwrap` in the reference test's helper (now shared
   by two tests).
+
+**15.7a — The UV algorithms**
+
+*Problems and solutions:*
+- **What a UV point is.** The reference keeps UV points apart per island
+  and a separate UV selection; Grid4D keeps one selection shared with the
+  viewport (decided in the spec), and finds UV vertices and islands from the
+  UVs themselves: corners of one point joined across an edge whose two
+  sides agree in UV.
+- **Parts that cannot lie flat.** A sphere with no seams, or a tube with no
+  cut, is not a disc; LSCM would fold it. Parts whose Euler characteristic
+  is not 1 are split by the axis their faces face (as a Box projection
+  would), which always leaves open pieces.
+- **Which way round.** The Cauchy-Riemann rows are written in each
+  triangle's own frame (counter-clockwise from its front) with `v` up, so
+  the result is unmirrored once `v` is turned to run down; a part that still
+  comes out mirrored as a whole is turned over.
+- **A solver that would not stop.** On a flat grid the planar first guess
+  is already the answer, and a stopping rule relative to the first residual
+  made CGLS chase rounding for 49 s (65 536 quads). Measured against the
+  problem's own size (the gradient from nothing) it stops in 0.4 s; at
+  10⁻⁶ the result is the same to the eye and the test tolerances.
+- **Large curved parts are slow.** CGLS with column scaling needs about
+  1 500 rounds for 16 384 quads over hills (1.8 s); larger single parts take
+  tens of seconds. Seams keep parts small in practice; a stronger
+  preconditioner (or running Unwrap off the interface thread) is noted for
+  later.
+- **The margin is in the final size.** Packing scales everything at the
+  end, so the gap before scaling is found in a few rounds (gap = margin ×
+  layout size).
+- clippy asked for iterators over index loops and a derived `Default`.
 
 ---
 

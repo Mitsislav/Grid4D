@@ -66,6 +66,7 @@ machine:
 | BVH of 1 M triangles | geom | 270 ms (348 ms before 14.4) |
 | Triangulating 1 M triangles (Phong) | geom | 54 ms |
 | Subdividing 250 k quads into 1 M | geom | 32 ms (74 ms before 14.4) |
+| Unwrapping 16 k quads over hills in one piece (LSCM) | geom | 1.8 s |
 | Evaluating 10 000 objects after an edit | eval | 1.2 ms |
 | Evaluating the next frame, 1 000 of 10 000 animated | eval | 2.2 ms |
 | Subdivision Surface, 3 levels over a 6 × 6 × 6 cube | eval | 3.4 ms |

@@ -12,6 +12,18 @@
 //! Projections keep the picture upright: "up" is world +Y, and for faces
 //! looking up (down) it is −Z (+Z), so a top face reads like a plan seen from
 //! above.
+//!
+//! ## The UV tools
+//!
+//! [`layout`] finds a mesh's UV vertices and islands, [`unwrap`] flattens
+//! faces with least squares conformal maps, [`relax`] evens out stretching,
+//! [`pack`] lays islands into the square and [`flip`] mirrors corners; they
+//! return new corner UVs and never touch the mesh itself.
+
+mod islands;
+mod pack;
+mod relax;
+mod unwrap;
 
 use std::f32::consts::TAU;
 
@@ -19,7 +31,44 @@ use std::collections::HashMap;
 
 use glam::{Mat4, Vec2, Vec3, Vec4};
 
+pub use islands::{UvLayout, face_stretch, layout, sharp_edges, stretch_measure};
+pub use pack::{PackOptions, pack};
+pub use relax::{RelaxOptions, relax};
+pub use unwrap::{UnwrapOptions, unwrap};
+
 use crate::PolyMesh;
+
+/// Which way [`flip`] mirrors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FlipAxis {
+    /// Left and right swap.
+    U,
+    /// Top and bottom swap.
+    V,
+}
+
+/// Mirrors the corners `corners` of `uvs` about the middle of their box,
+/// across `axis` (their faces then show the picture mirrored).
+pub fn flip(uvs: &mut [Vec2], corners: &[usize], axis: FlipAxis) {
+    let mut min = Vec2::splat(f32::INFINITY);
+    let mut max = Vec2::splat(f32::NEG_INFINITY);
+    for uv in corners.iter().filter_map(|&c| uvs.get(c)) {
+        min = min.min(*uv);
+        max = max.max(*uv);
+    }
+    if !(min.is_finite() && max.is_finite()) {
+        return;
+    }
+    let sum = min + max;
+    for &c in corners {
+        if let Some(uv) = uvs.get_mut(c) {
+            match axis {
+                FlipAxis::U => uv.x = sum.x - uv.x,
+                FlipAxis::V => uv.y = sum.y - uv.y,
+            }
+        }
+    }
+}
 
 /// How a Material tag gives a surface its texture coordinates (see
 /// `docs/reference/tag-material.md`).
@@ -397,6 +446,17 @@ fn any_perpendicular(n: Vec3) -> Vec3 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn flipping_mirrors_about_the_middle_of_the_corners() {
+        let mut uvs = vec![Vec2::new(0.1, 0.2), Vec2::new(0.5, 0.4), Vec2::new(9.0, 9.0)];
+        flip(&mut uvs, &[0, 1], FlipAxis::U);
+        assert!(uvs[0].abs_diff_eq(Vec2::new(0.5, 0.2), 1e-6) && uvs[1].abs_diff_eq(Vec2::new(0.1, 0.4), 1e-6));
+        flip(&mut uvs, &[0, 1], FlipAxis::V);
+        assert!(uvs[0].abs_diff_eq(Vec2::new(0.5, 0.4), 1e-6));
+        assert_eq!(uvs[2], Vec2::new(9.0, 9.0), "other corners stay");
+        flip(&mut uvs, &[], FlipAxis::U);
+    }
+
     use super::*;
     use crate::shapes;
 
