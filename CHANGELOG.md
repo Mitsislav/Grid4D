@@ -5,6 +5,17 @@ Notable changes to Grid4D, newest first. Versions follow
 opens every file of the same major version; the plugin and script interfaces
 may grow in a minor version and change only in a major one.
 
+## [Unreleased]
+
+Grid4D 1.2 in development: render quality (planned: area lights, a sky and
+HDR surroundings, depth of field and motion blur, render passes, adaptive
+sampling and a denoiser, a render queue).
+
+- **Files** — documents are saved in `.g4d` format version 5. It holds
+  nothing new yet; Grid4D 1.2's features will add to it until 1.2 is
+  released. Every earlier file opens unchanged; Grid4D 1.1 cannot open
+  version 5 files and says they come from a newer Grid4D.
+
 ## [1.1.0] - 2026-11-07
 
 Materials, UVs and textures: pictures on every channel of a material, UVs on

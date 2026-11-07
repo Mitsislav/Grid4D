@@ -1,4 +1,5 @@
-//! Format version 3 (Grid4D 1.0), frozen: read only, through version 4.
+//! Format version 3 (Grid4D 1.0), frozen: read only, through version 4 (and
+//! from there through version 5, `v4.rs`).
 //!
 //! Version 4 kept version 3's layout and only adds to it, so a version 3
 //! `document.json` is read by turning it into a version 4 one ([`upgrade`], a

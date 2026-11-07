@@ -10,7 +10,7 @@
 //! format version has its own module; older versions are migrated on load.
 //! This crate never depends on `wgpu`, `egui` or `grid4d-ui`.
 //!
-//! ## Format, version 4 (current)
+//! ## Format, version 5 (current)
 //!
 //! A zip archive (deflate) with fixed timestamps, so the same document always
 //! gives the same bytes:
@@ -18,7 +18,7 @@
 //! * `document.json` — UTF-8 JSON:
 //!
 //!   ```text
-//!   { "format": "grid4d", "version": 4,
+//!   { "format": "grid4d", "version": 5,
 //!     "document": { "name": …, "time": { "fps", "start", "end", "looping" },
 //!                   "objects": [ { "name", "parent"?, "kind": { "type": "cube", … },
 //!                                  "position", "rotation_hpb", "scale", "display_color",
@@ -26,7 +26,7 @@
 //!     "meshes": [ { "points", "faces", "corners", "uvs" } ] }
 //!   ```
 //!
-//! * `meshes/<index>.bin` — each polygon mesh's arrays, little-endian (see `v4.rs`);
+//! * `meshes/<index>.bin` — each polygon mesh's arrays, little-endian (see `v5.rs`);
 //!   a polygon object's kind is `{ "type": "polygon", "mesh": <index> }`, and objects
 //!   sharing a mesh share the file.
 //!
@@ -38,9 +38,10 @@
 //! * Primitive kinds carry their segment counts (`"segments"`, `"rotation_segments"`, …).
 //! * Detached (deleted but undoable) nodes and editor state are never saved.
 //!
-//! Version 3 (Grid4D 1.0) is the same archive, frozen; version 4 only adds to it,
-//! so a version 3 `document.json` is upgraded as JSON (`v3.rs`) and read through
-//! version 4's types. Versions 1 and 2 were plain JSON documents (tag `"oc4d"`,
+//! Versions 3 (Grid4D 1.0) and 4 (Grid4D 1.1) are the same archive, frozen; each
+//! later version only adds to the one before, so an older `document.json` is
+//! upgraded as JSON, step by step (`v3.rs` to version 4, `v4.rs` to version 5),
+//! and read through version 5's types. Versions 1 and 2 were plain JSON documents (tag `"oc4d"`,
 //! no polygon objects); they are still read and migrated on load. Files are
 //! always written in the current version. The format is specified in
 //! `docs/FILE_FORMAT.md`.
@@ -56,6 +57,7 @@ mod v1;
 mod v2;
 mod v3;
 mod v4;
+mod v5;
 
 use std::{
     fmt, fs,
@@ -87,7 +89,7 @@ pub const EXTENSION: &str = "g4d";
 /// the project was renamed from OpenC4D (same format). Files are saved as `EXTENSION`.
 pub const OPEN_EXTENSIONS: [&str; 2] = [EXTENSION, "oc4d"];
 /// The format version this build writes (and the newest it reads).
-pub const FORMAT_VERSION: u32 = v4::VERSION;
+pub const FORMAT_VERSION: u32 = v5::VERSION;
 /// The `"format"` tag of archives (version 3 and later).
 const FORMAT_TAG: &str = "grid4d";
 /// The tag of the JSON files of versions 1 and 2, from the project's former name.
@@ -173,18 +175,18 @@ impl From<serde_json::Error> for IoError {
 /// Serialises `doc` in the current format (linked textures' paths as they
 /// are; see [`to_bytes_at`]).
 pub fn to_bytes(doc: &Document) -> Result<Vec<u8>, IoError> {
-    v4::write(doc, None, None)
+    v5::write(doc, None, None)
 }
 
 /// [`to_bytes`], with a simulation's frames saved beside the document.
 pub fn to_bytes_with_cache(doc: &Document, cache: Option<&SimulationCache>) -> Result<Vec<u8>, IoError> {
-    v4::write(doc, cache, None)
+    v5::write(doc, cache, None)
 }
 
 /// [`to_bytes_with_cache`] for a file in `folder`: linked textures inside it
 /// are stored relative to it, so the folder can move with its pictures.
 pub fn to_bytes_at(doc: &Document, cache: Option<&SimulationCache>, folder: &Path) -> Result<Vec<u8>, IoError> {
-    v4::write(doc, cache, Some(folder))
+    v5::write(doc, cache, Some(folder))
 }
 
 /// Reads a document written by this or an older format version: an archive
@@ -208,13 +210,15 @@ pub fn from_bytes_at(bytes: &[u8], folder: &Path) -> Result<(Document, Option<Si
 fn read_bytes(bytes: &[u8], folder: Option<&Path>) -> Result<(Document, Option<SimulationCache>), IoError> {
     if bytes.starts_with(ZIP_MAGIC) {
         let mut archive = Archive::new(bytes)?;
-        let json = archive.read(v4::DOCUMENT_ENTRY, MAX_DOCUMENT_BYTES)?;
+        let json = archive.read(v5::DOCUMENT_ENTRY, MAX_DOCUMENT_BYTES)?;
         let text = std::str::from_utf8(&json).map_err(|_| IoError::NotADocument)?;
         return match Header::parse(text)? {
-            (FORMAT_TAG, v4::VERSION) => v4::File::parse(text)?.into_document(&mut archive, folder),
-            (FORMAT_TAG, v3::VERSION) => {
-                v4::File::from_value(v3::upgrade(serde_json::from_str(text)?)?)?.into_document(&mut archive, folder)
+            (FORMAT_TAG, v5::VERSION) => v5::File::parse(text)?.into_document(&mut archive, folder),
+            (FORMAT_TAG, v4::VERSION) => {
+                v5::File::from_value(v4::upgrade(serde_json::from_str(text)?)?)?.into_document(&mut archive, folder)
             }
+            (FORMAT_TAG, v3::VERSION) => v5::File::from_value(v4::upgrade(v3::upgrade(serde_json::from_str(text)?)?)?)?
+                .into_document(&mut archive, folder),
             (FORMAT_TAG, found) if found > FORMAT_VERSION => Err(IoError::UnsupportedVersion {
                 found,
                 newest: FORMAT_VERSION,
@@ -273,7 +277,7 @@ pub fn save(doc: &Document, path: &Path) -> Result<(), IoError> {
 /// [`save`], with a simulation's frames saved beside the document. Linked
 /// textures inside the file's folder are stored relative to it.
 pub fn save_with_cache(doc: &Document, cache: Option<&SimulationCache>, path: &Path) -> Result<(), IoError> {
-    write_atomic(path, &v4::write(doc, cache, Some(folder_of(path)))?)
+    write_atomic(path, &v5::write(doc, cache, Some(folder_of(path)))?)
 }
 
 /// The folder a file lies in (the current one for a bare name).

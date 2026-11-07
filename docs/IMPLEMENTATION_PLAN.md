@@ -1741,6 +1741,8 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 
 ---
 
-**Next action:** Phase 16 (render quality, v1.2) is planned in detail
-(2026-11-07); it starts with step 16.1 — its specs, `.g4d` v5 and a measured
-render-time budget — when the user says so.
+**Next action:** Phase 16 (render quality, v1.2) is under way: step 16.1
+(its specs in `docs/reference/`, `.g4d` v5 open, the render-time budget in
+`docs/performance.md`) is done (2026-11-07); next is step 16.2 — light
+transport with MIS, emissive surfaces as lights and area lights
+([`render-lights-area.md`](reference/render-lights-area.md)).

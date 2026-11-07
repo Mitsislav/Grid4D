@@ -829,11 +829,12 @@ other programs can read and write `.g4d` files; from Grid4D 1.0 a released
 version of it never changes, and every Grid4D opens the files of every
 earlier version.
 
-**Files and Grid4D versions.** Grid4D 1.1 opens every file Grid4D 1.0 saved,
-unchanged, and saves in a newer version of the format (version 4), which
-holds what 1.1 adds. Grid4D 1.0 cannot open a file saved by 1.1: it says the
-file comes from a newer Grid4D. To hand a document to someone still on 1.0,
-keep a copy saved by 1.0.
+**Files and Grid4D versions.** Each Grid4D opens every file an earlier one
+saved, unchanged, and saves in its own version of the format, which holds
+what it adds: Grid4D 1.1 saves version 4, the coming Grid4D 1.2 (in
+development) version 5. An older Grid4D cannot open a file saved by a newer
+one: it says the file comes from a newer Grid4D. To hand a document to
+someone on an older version, keep a copy saved by that version.
 
 ## 10. Timeline and playback
 

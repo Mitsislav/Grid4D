@@ -272,10 +272,11 @@ fn phase_15_from_a_textured_model_to_a_render_and_back() {
     );
     assert!(image.pixels.iter().all(|p| p.iter().all(|v| v.is_finite())));
 
-    // 6. Saved as version 4, it opens the same.
+    // 6. Saved (as version 4 in 1.1; the current version since), it opens
+    // the same.
     let saved = dir.join("scene.g4d");
     grid4d_io::save(&e.doc, &saved).unwrap();
-    assert_eq!(grid4d_io::FORMAT_VERSION, 4);
+    const { assert!(grid4d_io::FORMAT_VERSION >= 4) };
     let reopened = grid4d_io::load(&saved).unwrap();
     assert_eq!(
         grid4d_io::to_bytes(&reopened).unwrap(),

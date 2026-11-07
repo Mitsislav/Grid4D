@@ -110,4 +110,12 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 15.3 | [`material-textures.md`](material-textures.md) — the document's textures (linked, embedded), colour spaces, missing files, the Texture Manager | implemented 2026-11-06 |
 | 15.4 | [`material-channels.md`](material-channels.md) — the principled channels, a channel's texture, preview balls | channels implemented 2026-11-06 (15.4a); preview balls 2026-11-07 (15.4c) |
 | 15.2, 15.4 | [`tag-material.md`](tag-material.md) — the UVs every object makes (15.2, implemented 2026-11-06); the Material tag's projections (UV, Box, Spherical, Cylindrical, Flat, Camera) and layers | UVs implemented 2026-11-06 (15.2); projections and layers 2026-11-07 (15.4b), shown by the viewport and renders from 15.5 – 15.6 |
-| 15.7 | [`manager-uv-editor.md`](manager-uv-editor.md) — the UV editor: modes, transforms, Unwrap (LSCM), seams, Project, Relax, Pack | draft 2026-11-06 |
+| 15.7 | [`manager-uv-editor.md`](manager-uv-editor.md) — the UV editor: modes, transforms, Unwrap (LSCM), seams, Project, Relax, Pack | implemented 2026-11-07 |
+| 16.1 | [`app-format-v5.md`](app-format-v5.md) — `.g4d` version 5: what Phase 16 adds by step, reading version 4 (fields dropped, new values refused) | implemented 2026-11-07 (the container; each later step adds its data) |
+| 16.2, 16.4 | [`render-lights-area.md`](render-lights-area.md) — next-event estimation with MIS, emissive surfaces as lights, area lights (rectangle, disc, sphere, tube), light linking and groups | draft 2026-11-07 |
+| 16.3 | [`render-environment.md`](render-environment.md) — the Sky (Preetham sky and sun) and the Environment (equirectangular HDR), importance sampled; the viewport's background and ambient | draft 2026-11-07 |
+| 16.5 | [`render-lens.md`](render-lens.md) — thin-lens depth of field (focus, f-stop, blades), motion blur (shutter, segments) | draft 2026-11-07 |
+| 16.6 | [`render-passes.md`](render-passes.md) — lighting, data and ID passes, light-group passes, multi-layer OpenEXR, the Picture Viewer's pass menu | draft 2026-11-07 |
+| 16.7 | [`render-sampling.md`](render-sampling.md) — adaptive sampling, the à-trous denoiser, the SAH BVH, the render-time budget | draft 2026-11-07 |
+| 16.8 – 16.9 | [`render-queue.md`](render-queue.md) — the Render Queue, the render region, the interactive Render View | draft 2026-11-07 |
+| 16.10 | [`material-subsurface-displacement.md`](material-subsurface-displacement.md) — random-walk subsurface scattering, render-time displacement | draft 2026-11-07 |

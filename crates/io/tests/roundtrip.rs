@@ -2,7 +2,8 @@
 //! the same — saved again, they give the same bytes. Every kind of object with
 //! random parameters, a random hierarchy, transforms, switches, tags,
 //! animation, materials, layers and plugin values (see `docs/FILE_FORMAT.md`);
-//! the same documents labelled version 3 read the same.
+//! the same documents labelled version 4 (Grid4D 1.1) and, without what
+//! version 4 added, version 3 (Grid4D 1.0) read the same.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -301,6 +302,11 @@ proptest! {
         prop_assert_eq!(names(&loaded), names(&doc));
         let again = grid4d_io::to_bytes(&loaded).unwrap();
         prop_assert!(again == bytes, "saved again, the file changed");
+        // Written as version 4 (Grid4D 1.1) would have: the same document.
+        // Everything above is version 4's; Phase 16's additions get
+        // strategies of their own, left out of this check.
+        let as_v4 = grid4d_io::from_bytes(&labelled(&bytes, 4)).unwrap();
+        prop_assert!(grid4d_io::to_bytes(&as_v4).unwrap() == bytes, "version 4 read differently");
     }
 
     /// Written as version 3 (Grid4D 1.0) would have: the same document comes
@@ -314,15 +320,16 @@ proptest! {
     ) {
         let doc = document(objects, materials, layers);
         let bytes = grid4d_io::to_bytes(&doc).unwrap();
-        let loaded = grid4d_io::from_bytes(&as_version_3(&bytes)).unwrap();
+        let loaded = grid4d_io::from_bytes(&labelled(&bytes, 3)).unwrap();
         prop_assert!(grid4d_io::to_bytes(&loaded).unwrap() == bytes, "version 3 read differently");
     }
 }
 
-/// The archive `bytes` with its `document.json` labelled version 3.
-fn as_version_3(bytes: &[u8]) -> Vec<u8> {
+/// The archive `bytes` with its `document.json` labelled `version`.
+fn labelled(bytes: &[u8], version: u32) -> Vec<u8> {
     use std::io::{Cursor, Read as _, Write as _};
 
+    let current = format!("\"version\": {}", grid4d_io::FORMAT_VERSION);
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
     let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
     for i in 0..archive.len() {
@@ -332,8 +339,10 @@ fn as_version_3(bytes: &[u8]) -> Vec<u8> {
         entry.read_to_end(&mut data).unwrap();
         if name == "document.json" {
             let text = String::from_utf8(data).unwrap();
-            assert!(text.contains("\"version\": 4"));
-            data = text.replacen("\"version\": 4", "\"version\": 3", 1).into_bytes();
+            assert!(text.contains(&current));
+            data = text
+                .replacen(&current, &format!("\"version\": {version}"), 1)
+                .into_bytes();
         }
         out.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
         out.write_all(&data).unwrap();

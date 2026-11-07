@@ -84,6 +84,58 @@ mesh (tangents are made once, with the mesh). The harness's own way to find a
 GPU prefers a software rasteriser; the measurement picks the discrete GPU
 itself, as the app does.
 
+## Render time (Grid4D 1.2, step 16.1: before Phase 16)
+
+Measured on 2026-11-07 on the same machine (all 16 threads), at the commit
+after `a5f1317`, with the path tracer as Grid4D 1.1 ships it. These are the
+numbers Phase 16 must beat or keep (spec `reference/render-sampling.md`):
+renders without its new features must not get slower, and from step 16.7
+adaptive sampling with the denoiser must reach the error of 256 samples
+below in less time.
+
+```text
+cargo run --release -p grid4d-raytrace --example budget -- [scene …] [--pictures <folder>]
+```
+
+The scenes (`crates/raytrace/examples/budget.rs`):
+
+- **demo** — the demo scene through its camera, 2 bounces (1.1's reference
+  picture);
+- **studio** — a product shot on a floor and backdrop: a glass ball, a
+  brushed gold ring, a chrome cylinder, a coated red cube, a soft spot light
+  and a glowing panel (which lights the scene only through bounces in 1.1),
+  4 bounces;
+- **interior** — a closed room lit by one small soft lamp, so almost all
+  light has bounced, 4 bounces;
+- **dense** — a ball of about a million triangles on a floor in the sun,
+  2 bounces.
+
+Build is evaluation, triangles and BVH (best of three); each render is the
+best of two. The error is the root mean square difference of the 8-bit sRGB
+values (0 – 255) from a 4096-sample render with another seed, at
+320 × 180.
+
+| Scene | Triangles | Build | 1280 × 720, 16 samples | 16 samples (320 × 180): time / error | 64 | 256 | The 4096-sample reference |
+|-------|-----------|-------|------------------------|--------------------------------------|----|-----|---------------------------|
+| demo | 908 | < 1 ms | 0.22 s | 15 ms / 1.87 | 57 ms / 0.96 | 0.23 s / 0.54 | 3.5 s |
+| studio | 7 310 | 3 ms | 3.0 s | 0.19 s / 24.2 | 0.79 s / 13.6 | 3.2 s / 7.16 | 52 s |
+| interior | 1 172 | < 1 ms | 6.8 s | 0.43 s / 17.8 | 1.7 s / 9.36 | 7.4 s / 4.86 | 117 s |
+| dense | 998 002 | 0.46 s | 2.2 s | 0.15 s / 4.08 | 0.57 s / 2.05 | 2.2 s / 1.08 | 38 s |
+
+What the numbers show:
+
+- **Time is linear in samples** and the error halves with every four times
+  the samples (16 → 64 → 256), as plain Monte Carlo does: no scene gets
+  cleaner faster than that today.
+- **studio** and **interior** are the noisy ones — the glass and metals, the
+  panel found only by chance after a bounce, and a room lit almost entirely
+  by bounced light. 256 samples still leave an error of 5 – 7 levels, the
+  speckle visible at a glance; these are the scenes light sampling (16.2)
+  and the denoiser (16.7) are for.
+- **dense**: half a second goes to building the BVH of a million triangles
+  (the median split); rays through it cost about as much as the studio's
+  per sample. The SAH build (16.7) is measured against both.
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

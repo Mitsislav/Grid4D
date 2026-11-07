@@ -12,10 +12,10 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 15 — Materials, UVs and textures (v1.1): done; 16 — Render quality (v1.2) next |
-| Last step done | 15.9b — Release v1.1.0 prepared: version, changelog, `.g4d` v4 frozen (2026-11-07) |
-| Next step | The `v1.1.0` tag (the release workflow builds the packages and uploads to itch.io); then Phase 16's specs |
-| Tests | 865 (and 6 ignored, run by hand: three timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Current phase | 16 — Render quality (v1.2): in progress |
+| Last step done | 16.1 — Phase 16's specs, `.g4d` version 5 open, the render-time budget measured (2026-11-07) |
+| Next step | 16.2 — light transport (next-event estimation with MIS), emissive surfaces as lights, area lights |
+| Tests | 871 (and 6 ignored, run by hand: three timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2726,6 +2726,51 @@ risks R5 – R8 go with it.
   fixtures stay as they are.
 - **The tag waits.** Tagging `v1.1.0` starts the release workflow and the
   itch.io uploads, so it is left for the user's go-ahead.
+
+---
+
+## Phase 16 — Render quality (2026-11-07 – )
+
+| Step | What was built | Tests |
+|------|----------------|-------|
+| 16.1 | Eight specs (the format version 5, area lights with light transport, linking and groups, the Sky and Environment, lens and shutter, passes and multi-layer OpenEXR, adaptive sampling and the denoiser, the Render Queue with the region and the interactive Render View, subsurface and displacement); `.g4d` version 5 written (version 4's module moved to `v5.rs`; `v4.rs` upgrades a version 4 `document.json` as JSON, dropping fields version 5 adds by place and refusing values it adds; version 3 goes through both upgrades); `FILE_FORMAT.md` for version 5, golden `demo_v5.g4d` / `full_v5.g4d`, the version 4 fixtures frozen and checked to read exactly as before, the property test relabels documents as version 4 too; the render-time budget measured on four reference scenes (`examples/budget.rs`, `docs/performance.md`) | 871 |
+
+**16.1 — Specs, the format version 5, the render-time budget**
+
+*Problems and solutions:*
+- **The same move as 15.1.** Version 4's module became `v5.rs`; version 4
+  is now an upgrade of the parsed JSON. Version 3 files take both upgrades
+  in turn, so each frozen version keeps exactly one small module that says
+  what the next one adds.
+- **New values are not new fields.** Removing unknown fields keeps a version
+  4 file's meaning, but a version 4 file naming a kind of object that only
+  version 5 knows (a Sky) was an error for 1.1 and must stay one; the
+  upgrade has a second list, of values it refuses.
+- **Additions live in many places.** Phase 16 adds fields to the render
+  settings (also inside takes), to materials, to two kinds of object and
+  perhaps to tags. Rather than a hand-written walk per step, the upgrade
+  takes a list of (place, fields), and its tests try every place with a
+  trial list while the real one is still empty.
+- **A test that read from the fixtures folder.** Loading the frozen
+  `full_v4.g4d` by path made its linked texture absolute (paths are read
+  against the file's folder); the comparison reads the bytes without a
+  folder, as the version 3 one should have — it passed only because its
+  document has no textures.
+- **Specs that cite only what was read.** The reference's pages were read
+  for area lights, the camera's physical settings, multi-pass, the Render
+  Queue, the sky objects, the render region and displacement; sampling and
+  denoising follow no page (their settings are the common ones, named
+  plainly), and the specs say so. The plan's Alt+R for the region is not in
+  the reference's region page, so the spec leaves it unbound until it is
+  verified.
+- **What to measure before changing the renderer.** A budget needs scenes
+  that will show each change of the phase: the demo (1.1's reference), a
+  studio product shot (glass, metals, a coat, a glowing panel that today
+  lights only through bounces), a closed room lit by one small lamp (almost
+  all light bounced) and a million-triangle ball (the BVH). For each: build
+  time, a 1280 × 720 render at 16 samples, and at 320 × 180 the time and
+  error of 16, 64 and 256 samples against a 4096-sample render with another
+  seed.
 
 ---
 

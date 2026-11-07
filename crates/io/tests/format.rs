@@ -1,12 +1,12 @@
 //! File-level tests: the golden fixture pins the on-disk format, older fixtures
 //! must keep loading, and save/load go through the real filesystem.
 //!
-//! Version 4 is frozen with Grid4D 1.1: its golden files (`demo_v4.g4d`,
-//! `full_v4.g4d`) change only if a wrong fixture is found, never for a format
-//! change — that needs a new format version, a migration and fixtures of its
-//! own (`GRID4D_UPDATE_FIXTURES=1 cargo test -p grid4d-io --test format`
-//! writes the current version's). Older fixtures (`demo_v1.oc4d`,
-//! `demo_v2.g4d`, the `_v3` files) are never regenerated.
+//! Version 5 is current and grows (additively) until Grid4D 1.2 ships: its
+//! golden files (`demo_v5.g4d`, `full_v5.g4d`) are written again with
+//! `GRID4D_UPDATE_FIXTURES=1 cargo test -p grid4d-io --test format` when a
+//! step adds data, and frozen with the release. Older fixtures
+//! (`demo_v1.oc4d`, `demo_v2.g4d`, the `_v3` files frozen with 1.0, the `_v4`
+//! files frozen with 1.1) are never regenerated.
 //!
 //! The golden archive is compared entry by entry, decompressed: the compressed
 //! bytes may legitimately change with the deflate library.
@@ -28,9 +28,13 @@ use grid4d_scene::{
 use grid4d_scene::{Channel, ColorSpace, Texture, TextureSlot, TextureSource};
 
 /// Written by the current format version (an archive).
-const GOLDEN: &str = "tests/fixtures/demo_v4.g4d";
+const GOLDEN: &str = "tests/fixtures/demo_v5.g4d";
 /// Everything the current version can hold (see `full_document`).
-const FULL: &str = "tests/fixtures/full_v4.g4d";
+const FULL: &str = "tests/fixtures/full_v5.g4d";
+/// `golden_document` as Grid4D 1.1 wrote it (format version 4, frozen).
+const DEMO_V4: &str = "tests/fixtures/demo_v4.g4d";
+/// Everything version 4 can hold (see `full_v4_document`), frozen with 1.1.
+const FULL_V4: &str = "tests/fixtures/full_v4.g4d";
 /// `golden_document` as Grid4D 1.0 wrote it (format version 3, frozen).
 const DEMO_V3: &str = "tests/fixtures/demo_v3.g4d";
 /// Everything version 3 can hold (see `full_v3_document`), frozen with 1.0.
@@ -105,10 +109,17 @@ fn golden_with(mesh: grid4d_geom::PolyMesh) -> Document {
     doc
 }
 
-/// Everything a version 4 file can hold (see `docs/FILE_FORMAT.md`): version
-/// 3's, and what Phase 15 adds as it arrives — its mesh has UVs (15.2); a
-/// linked and an embedded texture (15.3).
+/// Everything a version 5 file can hold (see `docs/FILE_FORMAT.md`): version
+/// 4's, and what Phase 16 adds as it arrives (nothing yet in 16.1).
 fn full_document() -> (Document, SimulationCache) {
+    full_v4_document()
+}
+
+/// Everything a version 4 file can hold, which 1.1 froze (`full_v4.g4d`; never
+/// change it): version 3's, and what Phase 15 added — its mesh has UVs (15.2);
+/// a linked and an embedded texture (15.3); material channels and Material
+/// tags' projections (15.4); seams (15.7b); a texture's picture channel (15.8).
+fn full_v4_document() -> (Document, SimulationCache) {
     let (mut doc, cache) = full_v3_document();
     let textures = doc.scene.textures_mut();
     textures.insert(Texture::linked(PathBuf::from("maps/wood.jpg")));
@@ -407,7 +418,7 @@ fn assert_same_entries(bytes: &[u8], fixture: &[u8]) {
 }
 
 #[test]
-fn everything_version_4_holds_matches_its_golden_file_and_round_trips() {
+fn everything_version_5_holds_matches_its_golden_file_and_round_trips() {
     let (doc, cache) = full_document();
     let bytes = grid4d_io::to_bytes_with_cache(&doc, Some(&cache)).unwrap();
     let path = fixture_path(FULL);
@@ -441,6 +452,32 @@ fn the_golden_file_loads() {
         node.data.kind.clone()
     };
     assert_eq!(kind(&doc), kind(&reference), "the mesh, point for point");
+}
+
+#[test]
+fn everything_version_4_held_still_loads_the_same() {
+    // Read from the frozen file and saved: exactly what the current version
+    // writes for the same document, so version 4's meaning has not moved.
+    // From bytes, without a folder: the linked texture's path stays relative.
+    let fixture = fs::read(fixture_path(FULL_V4)).unwrap();
+    let (loaded, cache) = grid4d_io::from_bytes_with_cache(&fixture).unwrap();
+    let (doc, expected_cache) = full_v4_document();
+    assert_same_entries(
+        &grid4d_io::to_bytes_with_cache(&loaded, cache.as_ref()).unwrap(),
+        &grid4d_io::to_bytes_with_cache(&doc, Some(&expected_cache)).unwrap(),
+    );
+    let json = String::from_utf8(entries(&fixture)[0].1.clone()).unwrap();
+    assert!(json.contains("\"version\": 4"), "the frozen file is version 4");
+}
+
+#[test]
+fn the_version_4_golden_file_still_loads_the_same() {
+    let doc = grid4d_io::load(&fixture_path(DEMO_V4)).unwrap();
+    assert_eq!(outline(&doc), DEMO_OUTLINE.map(|(d, n)| (d, n.to_owned())));
+    assert_same_entries(
+        &grid4d_io::to_bytes(&doc).unwrap(),
+        &grid4d_io::to_bytes(&golden_document()).unwrap(),
+    );
 }
 
 #[test]
