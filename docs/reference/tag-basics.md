@@ -42,7 +42,8 @@ Phong angle, the Protection channels) are ours.
   (Mode ▸ Tags); clicking an object again shows the object.
 - **Adding:** Object Manager ▸ Tags (or the object's context menu) adds the tag to
   every selected object, as one undo step. An object holds one tag of each kind
-  (adding a second Phong tag selects the existing one).
+  (adding a second Phong tag selects the existing one), except Material tags:
+  each one added goes on top of those there (see [`tag-material.md`](tag-material.md)).
 - **Removing:** with a tag selected, Delete removes it (one undo step).
 - **Editing:** tag settings are edited like any attribute; each change is one undo
   step and is saved with the document.

@@ -76,12 +76,16 @@ export them.
   are applied in their order, each later one over the earlier ones wherever
   its material is opaque (Opacity channel). The last tag's material is the
   one Material ▸ Apply replaces, and the one children inherit when they
-  have none of their own.
+  have none of their own (they inherit all the layers).
 - **Dropping a material on a tag** replaces only the material, keeping the
-  projection; on an object it adds a new tag at the end (Shift: replaces the
-  last tag's material instead).
-- **Fit to Object** (tag's context menu): the placement becomes the
-  object's bounding box again.
+  projection; on an object it gives the last Material tag the material
+  (keeping its projection), or adds a tag if there is none; **Shift** adds
+  a new tag on top. (Revised from the draft, which added a tag by default:
+  replacing keeps 1.0's behaviour for the usual one-tag object.)
+- **Fit to Object** (a switch on the tag): on, the shape is the bounding
+  box of each object the tag reaches, following it as it changes; off, the
+  placement is the tag's own (set to the object's current box when it is
+  switched off).
 - **Bake to UVs** (Mesh ▸ UV, or the UV editor's *Project*): writes the
   tag's projection into a polygon object's UVs and switches the tag to UV,
   one undo step.
@@ -93,20 +97,41 @@ export them.
 | Piece | Where |
 |-------|-------|
 | `Tag::Material(MaterialTag)` with `Projection`, offset, tiling, rotation, placement | `grid4d-scene` `tag.rs`; Material tags exempt from "one tag of each kind" |
-| Coordinates per corner | `grid4d-eval`: per drawable, cached with the mesh key, rebuilt when the tag or the mesh changes |
-| Projection maths (pure) | `grid4d-geom` `uv.rs` (shared with Bake / Project) |
+| Which layers reach each object | `grid4d-eval` `material_layer.rs`: `MaterialLayer` per tag (material, projection, the tag's 2D transform, placement), a `MaterialLayers` run on every evaluated node and instance |
+| Coordinates per corner | `MaterialLayer::corners` (the viewport caches them per mesh and layer from 15.5) |
+| Projection maths (pure) | `grid4d-geom` `uv.rs` (`Projection`, `project`, `fit`; shared with Bake / Project) |
 | File | `.g4d` v4: the `material` tag's new optional fields; several per object |
 
 Deliberate differences: no per-polygon-selection limit yet (Grid4D has no
 selection tags), no "seamless" or decal-side switches; the projection set is
-ours.
+ours. A placement is in the space of each object the tag reaches (its own
+object's, or an inheriting child's), not always the tag's object's.
+
+## As built (15.4b)
+
+- The projections work in the shape's own space: the cube −1 … 1 (Box;
+  Flat reads its XY square), the sphere and the cylinder of radius 1
+  (Cylindrical: faces looking more than 45° up or down get a plan, like the
+  Cylinder's caps). Seen from outside the shape no face is mirrored; faces
+  across the seam stay whole (their `u` may pass 1) and corners on the axis
+  take their face's other corners' `u`.
+- Camera projects through the camera's clip space; the viewport and the path
+  tracer give the matrix (15.5 – 15.6). Without a camera matrix the object's
+  UVs are used.
+- The tag's coordinates: turned about the picture's centre, tiled, then
+  offset; a channel's own tiling and offset come after.
+- Evaluation keeps no per-corner coordinates: they depend on the drawn mesh
+  (a primitive's is unit size), so whoever draws computes them with
+  `MaterialLayer::corners` and caches them.
+- Bake to UVs is a button on the tag's page (polygon objects; Box,
+  Spherical, Cylindrical, Flat); it clears the placement once the tag is UV.
 
 ## Acceptance criteria
 
 - [ ] A cube with a photo on a Box projection shows it on all six sides,
       undistorted, in the viewport and the render.
 - [ ] Two tags on one object: the later one's opaque parts cover the earlier.
-- [ ] A 1.0 document's Material tags read as UV projection, tiling 1 —
+- [x] A 1.0 document's Material tags read as UV projection, tiling 1 —
       unchanged rendering.
-- [ ] Bake to UVs gives the same picture as the projection it replaces.
-- [ ] Each edit is one undo step; save and load keep every setting.
+- [x] Bake to UVs gives the same picture as the projection it replaces.
+- [x] Each edit is one undo step; save and load keep every setting.

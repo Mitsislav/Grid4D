@@ -22,6 +22,12 @@ Toward 1.1: materials, UVs and textures.
   strength), Opacity, Transmission and IOR, Clearcoat, Two-Sided; each can
   take a texture with its tiling, offset, range and strength, or Load… a
   picture straight onto it.
+- **Material tags** — a tag now says how its material lies on the object:
+  UV, Box, Spherical, Cylindrical, Flat or Camera projection, with offset,
+  tiling, rotation and a placement that fits the object or is set by hand.
+  An object can carry several Material tags, one over the other (Shift +
+  drop adds one); Bake to UVs writes a projection into a polygon object's
+  UVs.
 - **Files** — documents are saved in `.g4d` format version 4. Every file of
   Grid4D 1.0 (version 3) opens unchanged; Grid4D 1.0 cannot open version 4
   files and says they come from a newer Grid4D.

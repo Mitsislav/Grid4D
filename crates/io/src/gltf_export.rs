@@ -522,7 +522,10 @@ mod tests {
         gold.emission = [0.1, 0.0, 0.0];
         let gold = objects.materials.insert(gold);
         // On the first object; its children inherit it.
-        objects.nodes[0].data.tags.push(Tag::Material { material: Some(gold) });
+        objects.nodes[0]
+            .data
+            .tags
+            .push(Tag::Material(grid4d_scene::MaterialTag::new(Some(gold))));
         let bytes = glb_bytes(&objects).unwrap();
         let back = import_gltf(&bytes, None).unwrap();
         let materials: Vec<&Material> = back.materials.iter().map(|(_, m)| m).collect();

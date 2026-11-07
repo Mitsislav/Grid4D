@@ -156,6 +156,34 @@ fn full_document() -> (Document, SimulationCache) {
         ..TextureSlot::new(checker)
     });
     doc.scene.materials_mut().insert(glass);
+
+    // A second Material tag over the first, every projection field set (15.4).
+    let red = doc.scene.materials().ids()[0];
+    let sphere = doc.scene.iter().find(|(_, n)| n.data.name == "Sphere").unwrap().0;
+    let tagged = doc
+        .scene
+        .iter()
+        .find(|(_, n)| n.data.tags.iter().any(|t| matches!(t, Tag::Material(_))))
+        .unwrap()
+        .0;
+    let tags = &mut doc.scene.get_mut(tagged).unwrap().data.tags;
+    let at = tags.iter().position(|t| matches!(t, Tag::Material(_))).unwrap() + 1;
+    tags.insert(
+        at,
+        Tag::Material(grid4d_scene::MaterialTag {
+            material: Some(red),
+            projection: grid4d_scene::Projection::Box,
+            offset: [0.25, -0.5],
+            tiling: [2.0, 3.0],
+            rotation: 0.5,
+            placement: Some(grid4d_scene::Placement {
+                position: Vec3::new(1.0, 2.0, 3.0),
+                rotation: Vec3::new(0.25, 0.0, 0.0),
+                size: Vec3::new(4.0, 5.0, 6.0),
+            }),
+            camera: Some(sphere),
+        }),
+    );
     (doc, cache)
 }
 
@@ -237,7 +265,7 @@ fn full_v3_document() -> (Document, SimulationCache) {
             up: None,
             pitch: true,
         },
-        Tag::Material { material: Some(red) },
+        Tag::Material(grid4d_scene::MaterialTag::new(Some(red))),
         Tag::Dynamics(Body::rigid()),
     ];
     data.tracks = vec![

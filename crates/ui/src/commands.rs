@@ -127,16 +127,16 @@ pub enum EditorCommand {
     StopRender,
     /// Asks where, then saves the picture the Picture Viewer shows as PNG.
     SaveRenderAs,
-    /// Adds a tag of this kind to every selected object that has none (one undo
-    /// step) and selects it on the active object.
     /// Adds `tag` (a kind's default, or a preset such as Collider Body) to
-    /// the selected objects that have no tag of its kind.
+    /// the selected objects that have no tag of its kind — Material tags are
+    /// added to every one, over those there — (one undo step) and selects it
+    /// on the active object.
     AddTag(grid4d_scene::Tag),
-    /// Removes the tag of this kind from the object (one undo step).
-    DeleteTag {
-        node: NodeId,
-        kind: grid4d_scene::TagKind,
-    },
+    /// Removes one tag from the object (one undo step).
+    DeleteTag(crate::TagRef),
+    /// Writes a Material tag's projection into its polygon object's UVs and
+    /// switches the tag to UV (Bake to UVs; one undo step).
+    BakeMaterialTag(crate::TagRef),
     /// Saves to the current file, asking for a path if there is none yet.
     Save,
     /// Asks for a path and saves there.
@@ -350,11 +350,13 @@ pub enum EditorCommand {
     NewMaterial,
     /// Removes the material; Material tags that used it stay, empty. One undo step.
     DeleteMaterial(grid4d_scene::MaterialId),
-    /// Links `material` to each of `nodes`: their Material tag gets it, or a new
-    /// Material tag is added. One undo step.
+    /// Links `material` to each of `nodes`: their last Material tag gets it
+    /// (keeping its projection), or a new Material tag is added; with `layer`
+    /// a new tag always goes on top. One undo step.
     AssignMaterial {
         material: grid4d_scene::MaterialId,
         nodes: Vec<NodeId>,
+        layer: bool,
     },
     /// Asks for pictures and adds them as textures (Texture Manager ▸ Add…).
     /// One undo step.
@@ -573,7 +575,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 .iter()
                 .filter_map(|&id| {
                     let data = &doc.scene.get(id)?.data;
-                    if data.tags.iter().any(|t| t.kind() == kind) {
+                    if kind != grid4d_scene::TagKind::Material && data.tags.iter().any(|t| t.kind() == kind) {
                         return None;
                     }
                     let mut data = data.clone();
@@ -582,9 +584,14 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 })
                 .collect();
             commit(doc, editor, "Add Tag", edits, |_, _| {});
-            editor.tag_selection = editor.selection.active().map(|node| crate::TagRef { node, kind });
+            editor.tag_selection = editor.selection.active().and_then(|node| {
+                let tags = &doc.scene.get(node)?.data.tags;
+                let index = tags.iter().rposition(|t| t.kind() == kind)?;
+                crate::TagRef::at(node, tags, index)
+            });
         }
-        EditorCommand::DeleteTag { node, kind } => delete_tag(doc, editor, node, kind),
+        EditorCommand::DeleteTag(tag) => delete_tag(doc, editor, tag),
+        EditorCommand::BakeMaterialTag(tag) => bake_material_tag(doc, editor, tag),
         EditorCommand::Save => {
             file::save(doc, editor, false);
         }
@@ -717,7 +724,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         // A selected tag goes first: Delete removes it, not its object.
         EditorCommand::DeleteSelected if editor.mode == EditMode::Model && editor.selected_tag(doc).is_some() => {
             if let Some((tag, _)) = editor.selected_tag(doc) {
-                delete_tag(doc, editor, tag.node, tag.kind);
+                delete_tag(doc, editor, tag);
             }
         }
         // On an editable spline in Points mode: its selected points.
@@ -1372,25 +1379,28 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         | EditorCommand::RevealTexture(_)
         | EditorCommand::RemoveUnusedTextures
         | EditorCommand::LoadChannelTexture { .. } => texture_command(command, doc, editor),
-        EditorCommand::AssignMaterial { material, nodes } => {
+        EditorCommand::AssignMaterial { material, nodes, layer } => {
             let edits: Vec<SceneEdit> = nodes
                 .iter()
                 .filter_map(|&id| {
                     let before = &doc.scene.get(id)?.data;
                     let mut data = before.clone();
-                    match data
+                    let last = data
                         .tags
                         .iter_mut()
-                        .find(|t| t.kind() == grid4d_scene::TagKind::Material)
-                    {
-                        Some(tag) => {
-                            *tag = grid4d_scene::Tag::Material {
-                                material: Some(material),
-                            };
-                        }
-                        None => data.tags.push(grid4d_scene::Tag::Material {
-                            material: Some(material),
-                        }),
+                        .rev()
+                        .find_map(|t| match t {
+                            grid4d_scene::Tag::Material(tag) => Some(tag),
+                            _ => None,
+                        })
+                        .filter(|_| !layer);
+                    match last {
+                        Some(tag) => tag.material = Some(material),
+                        None => data
+                            .tags
+                            .push(grid4d_scene::Tag::Material(grid4d_scene::MaterialTag::new(Some(
+                                material,
+                            )))),
                     }
                     (data != *before).then_some(SceneEdit::SetData { id, data })
                 })
@@ -1733,15 +1743,45 @@ fn rebuild_selection(
 }
 
 /// Removes `node`'s tag of `kind` as one undo step and clears the tag selection.
-fn delete_tag(doc: &mut Document, editor: &mut EditorState, node: NodeId, kind: grid4d_scene::TagKind) {
-    let edit = doc.scene.get(node).and_then(|n| {
+fn delete_tag(doc: &mut Document, editor: &mut EditorState, tag: crate::TagRef) {
+    let edit = doc.scene.get(tag.node).and_then(|n| {
         let mut data = n.data.clone();
-        let before = data.tags.len();
-        data.tags.retain(|t| t.kind() != kind);
-        (data.tags.len() != before).then_some(SceneEdit::SetData { id: node, data })
+        let index = tag.index_in(&data.tags)?;
+        data.tags.remove(index);
+        Some(SceneEdit::SetData { id: tag.node, data })
     });
     commit(doc, editor, "Delete Tag", edit.into_iter().collect(), |_, _| {});
     editor.tag_selection = None;
+}
+
+/// Bake to UVs: the Material tag's projection, fitted or placed as the tag
+/// says, becomes its polygon object's UVs, and the tag projects by UV (its
+/// turn, tiling and offset still apply, so the picture stays where it was).
+/// Nothing for UV and Camera projections or other objects.
+fn bake_material_tag(doc: &mut Document, editor: &mut EditorState, tag: crate::TagRef) {
+    let Some(node) = doc.scene.get(tag.node) else { return };
+    let mut data = node.data.clone();
+    let Some(index) = tag.index_in(&data.tags) else { return };
+    let Some(grid4d_scene::Tag::Material(material_tag)) = data.tags.get_mut(index) else {
+        return;
+    };
+    let ObjectKind::Polygon { mesh, .. } = &mut data.kind else {
+        return;
+    };
+    let polygons = mesh.mesh();
+    let Some(to_unit) = material_tag.to_unit(polygons.bounds()) else {
+        return;
+    };
+    let mut baked = polygons.clone();
+    let uvs = grid4d_geom::uv::project(material_tag.projection, polygons, to_unit);
+    if baked.set_uvs(Some(uvs)).is_err() {
+        return;
+    }
+    *mesh = MeshHandle::new(baked);
+    material_tag.projection = grid4d_scene::Projection::Uv;
+    material_tag.placement = None;
+    let edits = vec![SceneEdit::SetData { id: tag.node, data }];
+    commit(doc, editor, "Bake to UVs", edits, |_, _| {});
 }
 
 /// Alt + create: a new generator takes the active object's place (same parent and
@@ -2852,6 +2892,110 @@ mod tests {
     }
 
     #[test]
+    fn material_tags_layer_and_bake_their_projection_one_step_each() {
+        use grid4d_scene::{MaterialTag, Projection, Tag, TagKind, Tags};
+        let mut doc = Document::with_demo_scene();
+        let (mut editor, mut vp) = (EditorState::default(), viewport());
+        let cube = id_of(&doc, "Cube");
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::NewMaterial, EditorCommand::NewMaterial],
+        );
+        let ids = doc.scene.materials().ids().to_vec();
+        editor.selection.set_single(cube);
+        let assign = |material, layer| EditorCommand::AssignMaterial {
+            material,
+            nodes: vec![cube],
+            layer,
+        };
+        let materials = |doc: &Document| {
+            doc.scene
+                .get(cube)
+                .unwrap()
+                .data
+                .tags
+                .material_tags()
+                .map(|t| (t.material, t.projection))
+                .collect::<Vec<_>>()
+        };
+        run(&mut doc, &mut editor, &mut vp, &[assign(ids[0], false)]);
+        // A second tag on top (Shift), then a plain drop replaces the top one's material.
+        run(&mut doc, &mut editor, &mut vp, &[assign(ids[1], true)]);
+        assert_eq!(
+            materials(&doc),
+            [(Some(ids[0]), Projection::Uv), (Some(ids[1]), Projection::Uv)]
+        );
+        let data = &mut doc.scene.get_mut(cube).unwrap().data;
+        let Some(Tag::Material(top)) = data.tags.last_mut() else {
+            panic!("the new tag is last")
+        };
+        top.projection = Projection::Box;
+        run(&mut doc, &mut editor, &mut vp, &[assign(ids[0], false)]);
+        assert_eq!(
+            materials(&doc),
+            [(Some(ids[0]), Projection::Uv), (Some(ids[0]), Projection::Box)],
+            "the projection stays"
+        );
+
+        // Adding a Material tag adds another and selects it; deleting removes only it.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::AddTag(TagKind::Material.default_tag())],
+        );
+        assert_eq!(materials(&doc).len(), 3);
+        let (tag, index) = editor.selected_tag(&doc).unwrap();
+        assert_eq!((tag.kind, tag.nth, index), (TagKind::Material, 2, 2));
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::DeleteTag(crate::TagRef { nth: 0, ..tag })],
+        );
+        assert_eq!(
+            materials(&doc),
+            [(Some(ids[0]), Projection::Box), (None, Projection::Uv)]
+        );
+
+        // Bake to UVs needs a polygon object: nothing on the primitive.
+        let boxed = crate::TagRef {
+            node: cube,
+            kind: TagKind::Material,
+            nth: 0,
+        };
+        let steps = editor.history.undo_len();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::BakeMaterialTag(boxed)]);
+        assert_eq!(editor.history.undo_len(), steps);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let before = doc.scene.get(cube).unwrap().data.clone();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::BakeMaterialTag(boxed)]);
+        assert_eq!(editor.history.undo_label(), Some("Bake to UVs"));
+        let data = &doc.scene.get(cube).unwrap().data;
+        let ObjectKind::Polygon { mesh, .. } = &data.kind else {
+            panic!("a polygon object")
+        };
+        let ObjectKind::Polygon { mesh: old, .. } = &before.kind else {
+            unreachable!()
+        };
+        let tag = MaterialTag {
+            projection: Projection::Box,
+            ..MaterialTag::new(None)
+        };
+        let expected = grid4d_geom::uv::project(Projection::Box, old.mesh(), tag.to_unit(old.mesh().bounds()).unwrap());
+        assert_eq!(mesh.mesh().uvs().unwrap(), expected);
+        assert_eq!(
+            materials(&doc)[0],
+            (Some(ids[0]), Projection::Uv),
+            "the tag reads the UVs now"
+        );
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(cube).unwrap().data, before);
+    }
+
+    #[test]
     fn materials_are_made_assigned_and_deleted_one_step_each() {
         use grid4d_scene::{Tag, Tags};
         let mut doc = Document::with_demo_scene();
@@ -2874,6 +3018,7 @@ mod tests {
         let assign = |material| EditorCommand::AssignMaterial {
             material,
             nodes: vec![cube, sphere],
+            layer: false,
         };
         run(&mut doc, &mut editor, &mut vp, &[assign(ids[0])]);
         run(&mut doc, &mut editor, &mut vp, &[assign(ids[1])]);
@@ -2889,10 +3034,7 @@ mod tests {
         assert!(!doc.scene.materials().contains(ids[1]));
         assert_eq!(editor.materials.selected, None);
         assert_eq!(doc.scene.effective_material(cube), None);
-        assert!(matches!(
-            doc.scene.get(cube).unwrap().data.tags[..],
-            [Tag::Material { .. }]
-        ));
+        assert!(matches!(doc.scene.get(cube).unwrap().data.tags[..], [Tag::Material(_)]));
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
         assert_eq!(doc.scene.effective_material(cube), Some(ids[1]));
 
@@ -4901,10 +5043,11 @@ mod tests {
             &mut doc,
             &mut editor,
             &mut vp,
-            &[EditorCommand::DeleteTag {
+            &[EditorCommand::DeleteTag(crate::TagRef {
                 node: sphere,
                 kind: TagKind::Phong,
-            }],
+                nth: 0,
+            })],
         );
         assert!(
             doc.scene

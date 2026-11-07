@@ -1943,7 +1943,8 @@ Object Manager.
 
 **Adding a tag:** select the objects, then choose a tag in the Object Manager's
 **Tags** menu (or right-click an object ▸ *Add Tag*). Every selected object gets
-the tag, in one undo step. An object has at most one tag of each kind.
+the tag, in one undo step. An object has at most one tag of each kind, except
+Material tags: it can carry several, one over the other ([§19.2](#192-placing-a-material-projections-and-layers)).
 
 ![The Object Manager's Tags menu](images/manual/menu_tags.png)
 
@@ -1993,7 +1994,8 @@ Turns the object to face another object.
 
 ### 18.4 Material
 
-Links a material to the object; see [§19](#19-materials).
+Links a material to the object and says how it lies on the surface; see
+[§19](#19-materials) and [§19.2](#192-placing-a-material-projections-and-layers).
 
 ### 18.5 Rigid Body and Collider Body
 
@@ -2066,7 +2068,10 @@ the viewport and renders from Grid4D 1.1's next steps on.
 - Or select the objects and choose **Material ▸ Apply** in the Material Manager
   (or right-click the material ▸ *Apply to Selected Objects*).
 - The object gets a **Material tag** (its icon shows the material's colour); if it
-  has one already, the tag gets the new material. In the Attribute Manager the tag
+  has one already, its last Material tag gets the new material and keeps its
+  projection. Hold **Shift** while dropping to add a new tag on top instead
+  ([§19.2](#192-placing-a-material-projections-and-layers)). Dropping a material
+  on a Material tag's icon changes just that tag. In the Attribute Manager the tag
   has a **Material** list to pick another one. **Double-click** the tag icon to see
   its material.
 - **Children inherit**: an object without its own Material tag shows the material
@@ -2136,6 +2141,47 @@ Put the files back, or use **Relink…** / **Relink Folder…**.
 
 Every change in the Texture Manager is one undo step; textures are saved with
 the document (Grid4D 1.1's file format, [§9](#9-files)).
+
+### 19.2 Placing a material: projections and layers
+
+A Material tag says how its material's textures lie on the object. Click the
+tag's icon in the Object Manager to see its settings in the Attribute Manager.
+
+![Two Material tags on an editable Cube in the Object Manager; the selected one lays the Label material over the first as a Box projection, tiled twice, turned 15° and placed by hand](images/manual/material-tag.png)
+
+| Setting | Meaning |
+|---------|---------|
+| Material | the material the tag applies |
+| Projection | how the picture is laid on the surface (below) |
+| Offset | shifts the picture (U, V), in picture widths |
+| Tiling | how many times the picture repeats (U, V) |
+| Rotation | turns the picture about its centre |
+| Camera | Camera projection only: the camera it is seen from (or the view's camera) |
+| Fit to Object | on: the projection's shape follows the object's size; off: set its **Position**, **Rotation** and **Size** yourself (in the object's own space) |
+
+| Projection | Best for |
+|------------|----------|
+| **UV** | the object's own UVs: every primitive and generator makes good ones (the usual setting) |
+| **Box** | crates, walls, anything boxy: each side of a box shows the whole picture |
+| **Spherical** | planets, balls: the picture wraps round once, top to bottom |
+| **Cylindrical** | cans, columns: the picture wraps round the Y axis; the ends get a plan |
+| **Flat** | decals and labels: the picture straight on, along the shape's −Z |
+| **Camera** | matching a backplate: the picture where the camera sees it |
+
+**Several tags.** An object can carry several Material tags; each one lies
+over the ones before it (to its left in the Object Manager) wherever its
+material is opaque — a label over paint, dirt over a wall. Add one with
+**Shift** + drop, or Tags ▸ Material. The last tag's material is the one the
+object shows in the viewport for now, and the one its children take when they
+have no Material tag of their own.
+
+**Bake to UVs** (on a polygon object's tag with a Box, Spherical, Cylindrical
+or Flat projection) writes the projection into the object's UVs and switches
+the tag to UV — one undo step. The picture stays where it was, and later
+edits to the object keep it in place.
+
+> The viewport and renders show textures, projections and layers from
+> Grid4D 1.1's next steps on; the settings are kept and saved now.
 
 ## 20. Rendering
 
@@ -2556,8 +2602,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   without building it); scripts cannot set keys, create materials or layers,
   or run every frame; the Script Manager's editor has no syntax colouring or
   completion, and the library no sub-folders.
-- **Materials**: one Material tag per object (no layering), projection settings,
-  textures, rendered previews; the viewport shows only the colour.
+- **Materials**: rendered previews; the viewport and renders show only the
+  colour of an object's top Material tag (textures, projections and layers
+  follow in 1.1's next steps); no per-polygon-selection limit on a tag.
 - **Animation**: Ease presets, mirroring and quantizing keys, keeping a handle's
   angle or length while dragging it (Ctrl / Alt), normalised curves, copying and
   pasting keys, animating counts (segments, sides) and choices, Frame

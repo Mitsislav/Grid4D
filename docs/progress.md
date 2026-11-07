@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 15 — Materials, UVs and textures (v1.1) |
-| Last step done | 15.4a — The material channels (2026-11-06) |
-| Next step | 15.4b — The Material tag's projections and layers; then 15.4c, preview balls |
-| Tests | 806 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
+| Last step done | 15.4b — The Material tag's projections and layers (2026-11-07) |
+| Next step | 15.4c — Preview balls in the Material Manager; then 15.5, textures in the viewport |
+| Tests | 814 (and 5 ignored, run by hand: two timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy, rustfmt and `cargo deny` clean |
 
 ---
 
@@ -2314,6 +2314,7 @@ risks R5 – R8 go with it.
 | 15.2 | UVs everywhere: `grid4d_geom::uv` (conventions, planar and box projections, mirrored-face check); every primitive (size-independent, so the shared unit meshes stay correct); the walls and caps of Extrude, Lathe, Sweep and Loft; the Subdivision Surface's merged cage keeps its parts' UVs (a Box projection for parts without); plugin generators without UVs get a Box projection; Make Editable, Current State and glTF / OBJ export carry them; the layouts written in `tag-material.md`; the v4 golden files regenerated (the frozen v3 ones compared with UV-less meshes) | 792 |
 | 15.3 | Images and textures: the `image` crate (six decoders, no C; licences regenerated, `cargo deny` clean); `grid4d_io::decode_texture` under limits with mip-maps; the document's `Textures` table (`SceneEdit::SetTextures`), linked or embedded; `.g4d` v4 `textures` and `textures/<n>.<ext>` (paths inside the document's folder stored relative); `ui::textures::TextureCache` decoding on a worker thread and noticing changed files; the Texture Manager pane (Add, Relink, Relink Folder, Embed, Unembed, Reveal, Delete, Remove Unused, name and colour space); dropped pictures; the status bar's count of missing pictures; Greek; the manual's §19.1 with a picture rendered headless | 804 |
 | 15.4a | The material channels: `Material` gains Specular, Normal / Bump, Emission Strength, Opacity and its threshold, Transmission and IOR, Clearcoat and its roughness, Two-Sided, and a `TextureSlot` (tiling, offset, range, strength) per `Channel`; `.g4d` v4 writes them (each left out at its default) and `maps` by texture index, version 3 files drop them; the Attribute Manager's material page in groups with a texture row per channel and Load…; Remove Unused keeps textures materials use; emission strength reaches the viewport and the path tracer; Greek; the manual's §19 rewritten with a picture | 806 |
+| 15.4b | The Material tag's projections and layers: `Tag::Material(MaterialTag)` with a `Projection` (UV, Box, Spherical, Cylindrical, Flat, Camera; `grid4d_geom::uv::project`, `fit`), offset, tiling, rotation, a `Placement` or Fit to Object, and a camera; several Material tags per object, the selected tag a `TagRef` with its `nth`; `MaterialLayer`s per evaluated node and clone (own tags, else inherited, else a generator's cage's); `.g4d` v4 writes the new fields (version 3 drops them, also in takes); Shift + drop adds a layer, a drop on a tag icon changes that tag; Bake to UVs; the script `material` property keeps projections; Greek; manual §19.2 with a picture | 814 |
 
 **15.1 — Specs and the format version 4**
 
@@ -2427,6 +2428,38 @@ risks R5 – R8 go with it.
 - **Load… is two changes** (a texture added, a material's slot set); they are
   committed together, one undo step, and a picture already in the table is
   reused rather than added twice.
+
+**15.4b — The Material tag's projections and layers**
+
+*Problems and solutions:*
+- **"One tag of each kind" was everywhere.** The selected tag was named by
+  its kind alone; with several Material tags it is now a `TagRef` with the
+  kind and which one of that kind (`nth`), and Delete Tag removes that one.
+  Adding a Material tag always adds (on top); other kinds still select the
+  one already there.
+- **Coordinates depend on the mesh that is drawn.** A primitive is drawn as
+  a unit mesh scaled per instance, so evaluation cannot keep per-corner
+  coordinates without building every mesh at size. It keeps, per node and
+  clone, a run of `MaterialLayer`s (material, projection, the tag's 2D
+  transform, placement) in one reused list — no allocation in steady state —
+  and `MaterialLayer::corners` makes the coordinates for whoever draws.
+- **Fitting per object.** A tag without a placement is fitted to the bounds
+  of each object it reaches, so children can share their parent's layers
+  (the placement stays `None` in the layer and the reader fits it).
+- **Seams.** Spherical and Cylindrical faces across the seam got `u` from
+  both ends of the picture; a face whose `u`s spread more than half a turn
+  has its small ones moved past 1, and corners on the axis take their
+  face's mean `u`. Tests check that no face of a sphere or cylinder is
+  mirrored or torn.
+- **Replace or add on drop.** The spec's draft added a tag on every drop;
+  keeping 1.0's behaviour (the last tag gets the material, keeping its
+  projection) and adding with Shift avoids piling up tags by accident.
+- **Version 3 files.** The tag fields version 4 adds are dropped from every
+  `tags` list of a version 3 file, objects' and takes' alike (a recursive
+  walk over the JSON, so no path is missed).
+- **A pattern rewritten by a search-and-replace** (`let [Tag::Material { material:
+  Some(m) }]`) became an invalid call in a pattern; written back as a struct
+  pattern with `..`.
 
 ---
 

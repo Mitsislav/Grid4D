@@ -410,7 +410,7 @@ fn clone_mesh(
 fn dynamics(tags: &[Tag]) -> Option<Body> {
     tags.iter().find_map(|tag| match tag {
         Tag::Dynamics(body) => Some(*body),
-        Tag::Phong { .. } | Tag::Protection { .. } | Tag::Target { .. } | Tag::Material { .. } => None,
+        Tag::Phong { .. } | Tag::Protection { .. } | Tag::Target { .. } | Tag::Material(_) => None,
     })
 }
 

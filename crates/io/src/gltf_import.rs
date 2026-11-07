@@ -253,9 +253,8 @@ fn node_data(
                 data.display_color = *colour;
             }
             if let Some(&material) = material.and_then(|i| materials.get(i)) {
-                data.tags.push(Tag::Material {
-                    material: Some(material),
-                });
+                data.tags
+                    .push(Tag::Material(grid4d_scene::MaterialTag::new(Some(material))));
             }
             return Ok(data);
         }

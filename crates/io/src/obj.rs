@@ -86,9 +86,8 @@ pub fn import_obj(bytes: &[u8], base: Option<&Path>, fallback: &str) -> Result<O
             data.display_color = colour;
         }
         if let Some(&material) = model.mesh.material_id.and_then(|id| material_ids.get(id)) {
-            data.tags.push(Tag::Material {
-                material: Some(material),
-            });
+            data.tags
+                .push(Tag::Material(grid4d_scene::MaterialTag::new(Some(material))));
         }
         nodes.push(ObjectEntry { parent: None, data });
     }
@@ -522,7 +521,10 @@ l 5 6
         lamp.color = [0.9, 0.8, 0.1];
         lamp.emission = [1.0, 0.5, 0.0];
         let lamp = objects.materials.insert(lamp);
-        objects.nodes[0].data.tags.push(Tag::Material { material: Some(lamp) });
+        objects.nodes[0]
+            .data
+            .tags
+            .push(Tag::Material(grid4d_scene::MaterialTag::new(Some(lamp))));
         let (obj, mtl) = obj_text(&objects, Some("scene.mtl")).unwrap();
         assert!(mtl.contains("newmtl Warm_Lamp\nKd 0.9 0.8 0.1"), "{mtl}");
         assert!(mtl.contains("Ke 1 0.5 0"), "{mtl}");

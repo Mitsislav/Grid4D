@@ -39,13 +39,15 @@ enum RowAction {
     MakeRoot(NodeId),
     Frame(NodeId),
     /// A click on a tag icon: select the tag (and its object).
-    SelectTag(NodeId, TagKind),
-    DeleteTag(NodeId, TagKind),
+    SelectTag(TagRef),
+    DeleteTag(TagRef),
+    /// A material dropped on a Material tag: it replaces the tag's material.
+    SetTagMaterial(TagRef, grid4d_scene::MaterialId),
     /// Context menu: add a tag to the (just selected) object.
     /// An entry of [`tag_menu`], by index.
     AddTag(usize),
-    /// A material dropped on the object.
-    AssignMaterial(NodeId, grid4d_scene::MaterialId),
+    /// A material dropped on the object (with Shift: as a new layer).
+    AssignMaterial(NodeId, grid4d_scene::MaterialId, bool),
     /// A double-click on a Material tag: show its material.
     ShowMaterial(grid4d_scene::MaterialId),
     /// A double-click on a camera's icon: look through it (again: stop).
@@ -224,7 +226,8 @@ impl OutlinerPanel {
                 StrokeKind::Inside,
             );
             if ui.input(|i| i.pointer.any_released()) {
-                self.actions.push(RowAction::AssignMaterial(id, drag.material));
+                let layer = ui.input(|i| i.modifiers.shift);
+                self.actions.push(RowAction::AssignMaterial(id, drag.material, layer));
             }
         }
 
@@ -294,12 +297,15 @@ impl OutlinerPanel {
         // Tags: icons right of the name, before the visibility dots.
         let tags_right = rect.right() - 44.0;
         let tags_left = tags_right - node.data.tags.len() as f32 * TAG_STEP;
-        let selected_tag = editor.tag_selection.filter(|t| t.node == id).map(|t| t.kind);
+        let selected_tag = editor.tag_selection.filter(|t| t.node == id);
         for (k, tag) in node.data.tags.iter().enumerate() {
             let kind = tag.kind();
+            let Some(this) = TagRef::at(id, &node.data.tags, k) else {
+                continue;
+            };
             let icon_rect = Rect::from_min_size(pos2(tags_left + k as f32 * TAG_STEP, cy - 8.0), Vec2::splat(16.0));
             let hit = ui.interact(icon_rect, ui.scope_id().with(("tag", id, k)), Sense::click());
-            if selected_tag == Some(kind) {
+            if selected_tag == Some(this) {
                 painter.rect_stroke(
                     icon_rect.expand(1.5),
                     CornerRadius::same(2),
@@ -310,7 +316,7 @@ impl OutlinerPanel {
             let color = if hit.hovered() { p().text_strong } else { p().tag };
             // A Material tag shows its material's colour.
             let material = match tag {
-                Tag::Material { material } => material.and_then(|m| scene.materials().get(m).map(|mat| (m, mat))),
+                Tag::Material(tag) => tag.material.and_then(|m| scene.materials().get(m).map(|mat| (m, mat))),
                 Tag::Phong { .. } | Tag::Protection { .. } | Tag::Target { .. } | Tag::Dynamics(_) => None,
             };
             match material {
@@ -327,12 +333,20 @@ impl OutlinerPanel {
             {
                 self.actions.push(RowAction::ShowMaterial(m));
             } else if hit.clicked() {
-                self.actions.push(RowAction::SelectTag(id, kind));
+                self.actions.push(RowAction::SelectTag(this));
+            }
+            // A material dropped on a Material tag replaces only its material.
+            if kind == TagKind::Material
+                && let Some(drag) = editor.materials.drag
+                && ui.rect_contains_pointer(icon_rect)
+                && ui.input(|i| i.pointer.any_released())
+            {
+                self.actions.push(RowAction::SetTagMaterial(this, drag.material));
             }
             let actions = &mut self.actions;
             hit.context_menu(|ui| {
                 if ui.button(tr("Delete Tag")).clicked() {
-                    actions.push(RowAction::DeleteTag(id, kind));
+                    actions.push(RowAction::DeleteTag(this));
                     ui.close();
                 }
             });
@@ -523,25 +537,44 @@ impl OutlinerPanel {
                     editor.tag_selection = None;
                     editor.commands.push(EditorCommand::Select { id, mode });
                 }
-                RowAction::SelectTag(id, kind) => {
-                    if editor.selection.active() != Some(id) {
+                RowAction::SelectTag(tag) => {
+                    if editor.selection.active() != Some(tag.node) {
                         editor.commands.push(EditorCommand::Select {
-                            id,
+                            id: tag.node,
                             mode: SelectMode::Replace,
                         });
                     }
-                    editor.tag_selection = Some(TagRef { node: id, kind });
+                    editor.tag_selection = Some(tag);
                 }
-                RowAction::DeleteTag(node, kind) => editor.commands.push(EditorCommand::DeleteTag { node, kind }),
+                RowAction::DeleteTag(tag) => editor.commands.push(EditorCommand::DeleteTag(tag)),
+                RowAction::SetTagMaterial(tag, material) => {
+                    if let Some(node) = doc.scene.get(tag.node)
+                        && let Some(index) = tag.index_in(&node.data.tags)
+                    {
+                        let mut data = node.data.clone();
+                        if let Some(Tag::Material(t)) = data.tags.get_mut(index) {
+                            t.material = Some(material);
+                        }
+                        if data != node.data {
+                            editor.commands.push(EditorCommand::Edit {
+                                edit: SceneEdit::SetData { id: tag.node, data },
+                                label: "Assign Material",
+                            });
+                        }
+                    }
+                }
                 RowAction::AddTag(index) => {
                     if let Some((_, tag)) = tag_menu().nth(index) {
                         editor.commands.push(EditorCommand::AddTag(tag));
                     }
                 }
-                RowAction::AssignMaterial(node, material) => editor.commands.push(EditorCommand::AssignMaterial {
-                    material,
-                    nodes: vec![node],
-                }),
+                RowAction::AssignMaterial(node, material, layer) => {
+                    editor.commands.push(EditorCommand::AssignMaterial {
+                        material,
+                        nodes: vec![node],
+                        layer,
+                    });
+                }
                 RowAction::LookThrough(id) => {
                     editor.view_camera = if editor.view_camera == Some(id) { None } else { Some(id) };
                 }

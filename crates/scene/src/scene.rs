@@ -220,8 +220,7 @@ impl Scene {
         let mut current = Some(id);
         while let Some(c) = current {
             let node = self.get(c)?;
-            if let Some(material) =
-                crate::Tags::material(node.data.tags.as_slice()).filter(|&m| self.materials.contains(m))
+            if let Some(material) = crate::Tags::material_in(node.data.tags.as_slice(), |m| self.materials.contains(m))
             {
                 return Some(material);
             }
@@ -955,14 +954,14 @@ mod tests {
             .unwrap()
             .data
             .tags
-            .push(Tag::Material { material: Some(red) });
+            .push(Tag::Material(crate::MaterialTag::new(Some(red))));
         assert_eq!(s.effective_material(grandchild), Some(red), "inherited");
         let blue = s.materials_mut().insert(Material::new("Blue"));
         s.get_mut(child)
             .unwrap()
             .data
             .tags
-            .push(Tag::Material { material: Some(blue) });
+            .push(Tag::Material(crate::MaterialTag::new(Some(blue))));
         assert_eq!(s.effective_material(grandchild), Some(blue), "the nearest wins");
         assert_eq!(s.effective_material(group), Some(red));
         s.materials_mut().remove(blue);

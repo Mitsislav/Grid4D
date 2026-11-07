@@ -527,7 +527,7 @@ mod tests {
         (shiny.roughness, shiny.metallic, shiny.emission) = (0.2, 1.0, [0.5, 0.0, 0.0]);
         let id = doc.scene.materials_mut().insert(shiny);
         let mut cube = Node::new("Cube", ObjectKindTag::Cube.default_kind());
-        cube.data.tags = vec![Tag::Material { material: Some(id) }];
+        cube.data.tags = vec![Tag::Material(grid4d_scene::MaterialTag::new(Some(id)))];
         doc.scene.insert(cube);
 
         let mut frame = FrameData::new();

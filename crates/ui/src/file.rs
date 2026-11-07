@@ -872,14 +872,18 @@ pub fn exportable_at(doc: &Document, simulated: &grid4d_eval::Overrides) -> Obje
                 .map_or(glam::Mat4::IDENTITY, |n| n.world);
             data.transform = grid4d_scene::Transform::from_matrix(&(parent.inverse() * world));
         }
-        // A generator without a material shows its cage's.
+        // A generator without a material shows its cage's Material tags.
         if let Some(cage) = cage.and_then(|c| doc.scene.get(c))
             && data.tags.material().is_none()
-            && let Some(material) = cage.data.tags.material()
+            && cage.data.tags.material().is_some()
         {
-            data.tags.push(grid4d_scene::Tag::Material {
-                material: Some(material),
-            });
+            data.tags.extend(
+                cage.data
+                    .tags
+                    .iter()
+                    .filter(|t| matches!(t, grid4d_scene::Tag::Material(_)))
+                    .cloned(),
+            );
         }
         let parent = node.parent().and_then(|p| index_of.get(&p).copied());
         let index = nodes.len();
@@ -1676,7 +1680,7 @@ mod tests {
         let find = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
         let (cube, boxed) = (find(&other, "Cube"), find(&other, "Box"));
         other.scene.get_mut(cube).unwrap().data.tags = vec![
-            Tag::Material { material: Some(red) },
+            Tag::Material(grid4d_scene::MaterialTag::new(Some(red))),
             Tag::Target {
                 target: Some(boxed),
                 up: None,

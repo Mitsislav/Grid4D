@@ -27,6 +27,7 @@ mod drawable;
 mod evaluated;
 mod generator;
 mod key;
+mod material_layer;
 mod overrides;
 
 pub use curve::{CurveHandle, CurveId};
@@ -35,4 +36,5 @@ pub use drawable::{Drawable, Shading, Surface, drawable, editable_mesh};
 pub use evaluated::{EvaluatedInstance, EvaluatedLight, EvaluatedNode, EvaluatedScene, PickShape, Purpose};
 pub use generator::{generator_color, generator_mesh};
 pub use key::{MeshKey, Ratio};
+pub use material_layer::{MaterialLayer, MaterialLayers};
 pub use overrides::Overrides;

@@ -19,8 +19,8 @@ use grid4d_geom::spline::{
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
     Axis, Body, Channel, CollisionShape, Document, Falloff, Inherit, KeyState, LightDetails, LightShadow, LightType,
-    MassMode, Material, MaterialId, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, Scene, SceneEdit,
-    SimulationSettings, SplineHandle, Tag, TagKind, TextureSlot, TimeSettings,
+    MassMode, Material, MaterialId, MaterialTag, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, Placement,
+    Projection, Scene, SceneEdit, SimulationSettings, SplineHandle, Tag, TagKind, TextureSlot, TimeSettings,
 };
 
 use crate::i18n::{key, tr, trf};
@@ -317,6 +317,24 @@ impl AttributesPanel {
             ui.add_space(4.0);
             if let Some(tag) = data.tags.get_mut(index) {
                 tag_ui(ui, tag, &doc.scene, id);
+            }
+            // A Material tag's projection, written into a polygon object's UVs.
+            if let Some(Tag::Material(material_tag)) = data.tags.get(index)
+                && material_tag.projection.has_shape()
+            {
+                ui.add_space(4.0);
+                let polygon = matches!(data.kind, ObjectKind::Polygon { .. });
+                if ui
+                    .add_enabled(polygon, Button::new(tr("Bake to UVs")))
+                    .on_hover_text(tr(
+                        "Writes this projection into the object's UVs and switches the tag to UV (one undo step)",
+                    ))
+                    .on_disabled_hover_text(tr("Only a polygon object keeps UVs: make it editable first"))
+                    .clicked()
+                    && let Some(tag) = crate::TagRef::at(id, &data.tags, index)
+                {
+                    commands.push(EditorCommand::BakeMaterialTag(tag));
+                }
             }
             self.finish_node_edit(ui, doc, id, &data, key("Edit Tag"), commands);
             return;
@@ -1198,7 +1216,7 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
                 object_row(ui, "Up Vector", up, scene, owner);
                 check_row(ui, "Pitch", pitch);
             }
-            Tag::Material { material } => material_row(ui, material, scene),
+            Tag::Material(tag) => material_tag_rows(ui, k, tag, scene, owner),
             Tag::Dynamics(body) => body_rows(ui, body),
         });
     let hint = match tag {
@@ -1207,8 +1225,8 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
         Tag::Target { .. } => {
             key("The object turns its forward axis (−Z) towards the target; Pitch off keeps it level")
         }
-        Tag::Material { .. } => key(
-            "The object and its children without a Material tag of their own show this material; drag a material onto an object to assign it",
+        Tag::Material(_) => key(
+            "The object and its children without a Material tag of their own show this material; later Material tags lie over earlier ones. Drag a material onto an object to assign it (Shift: as a new layer)",
         ),
         Tag::Dynamics(body) => match body.motion {
             Motion::Dynamic => key("A rigid body: it falls, collides and bounces from the start frame on"),
@@ -1443,6 +1461,91 @@ fn material_row(ui: &mut Ui, value: &mut Option<MaterialId>, scene: &Scene) {
                 ui.selectable_value(value, Some(id), &material.name);
             }
         });
+    ui.end_row();
+}
+
+/// A Material tag: its material, projection and how the picture lies.
+fn material_tag_rows(ui: &mut Ui, k: &mut KeyRows, tag: &mut MaterialTag, scene: &Scene, owner: NodeId) {
+    material_row(ui, &mut tag.material, scene);
+    attr_label(ui, "Projection", LABEL_WIDTH);
+    let combo = egui::ComboBox::from_id_salt("grid4d.attr.tag.projection")
+        .selected_text(tr(tag.projection.label()))
+        .show_ui(ui, |ui| {
+            for projection in Projection::ALL {
+                ui.selectable_value(&mut tag.projection, projection, tr(projection.label()));
+            }
+        });
+    name_field(ui, &combo.response, "Projection");
+    ui.end_row();
+    pair_row(ui, "Offset", &mut tag.offset, 0.01, -1000.0..=1000.0);
+    pair_row(ui, "Tiling", &mut tag.tiling, 0.01, -1000.0..=1000.0);
+    angle_row(ui, k, "Rotation", &mut tag.rotation, -360.0..=360.0);
+    if tag.projection == Projection::Camera {
+        camera_row(ui, &mut tag.camera, scene);
+    }
+    if tag.projection.has_shape() {
+        let mut fitted = tag.placement.is_none();
+        check_row(ui, "Fit to Object", &mut fitted);
+        if fitted {
+            tag.placement = None;
+        } else {
+            let placement = tag.placement.get_or_insert_with(|| {
+                let bounds = scene.get(owner).and_then(|n| n.data.kind.local_bounds());
+                bounds.filter(|b| !b.is_empty()).map_or(
+                    Placement::fitted(glam::Vec3::splat(-100.0), glam::Vec3::splat(100.0)),
+                    |b| Placement::fitted(b.min, b.max),
+                )
+            });
+            vec3_length_row(ui, "Projection Position", &mut placement.position);
+            attr_label(ui, "Projection Rotation", LABEL_WIDTH);
+            ui.horizontal(|ui| {
+                for v in placement.rotation.as_mut() {
+                    let mut degrees = v.to_degrees();
+                    let field = ui.add_sized([56.0, 19.0], DragValue::new(&mut degrees).speed(0.5).suffix(" °"));
+                    name_field(ui, &field, "Projection Rotation");
+                    if field.changed() {
+                        *v = degrees.to_radians();
+                    }
+                }
+            });
+            ui.end_row();
+            vec3_length_row(ui, "Projection Size", &mut placement.size);
+        }
+    }
+    *tag = tag.validated();
+}
+
+/// Three lengths in a row (X, Y, Z).
+fn vec3_length_row(ui: &mut Ui, label: &str, value: &mut glam::Vec3) {
+    attr_label(ui, label, LABEL_WIDTH);
+    ui.horizontal(|ui| {
+        for v in value.as_mut() {
+            let field = ui.add_sized([56.0, 19.0], widgets::length(ui, v).speed(0.5));
+            name_field(ui, &field, label);
+        }
+    });
+    ui.end_row();
+}
+
+/// A Camera projection's camera: the document's camera objects, the view's
+/// camera (`None`) first.
+fn camera_row(ui: &mut Ui, value: &mut Option<NodeId>, scene: &Scene) {
+    attr_label(ui, "Camera", LABEL_WIDTH);
+    let name = value
+        .and_then(|id| scene.get(id))
+        .map_or(tr("The View's Camera"), |n| n.data.name.as_str());
+    let combo = egui::ComboBox::from_id_salt("grid4d.attr.tag.camera")
+        .selected_text(name)
+        .width(FIELD_WIDTH + 40.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(value, None, tr("The View's Camera"));
+            for (id, node) in scene.iter() {
+                if matches!(node.data.kind, ObjectKind::Camera { .. }) {
+                    ui.selectable_value(value, Some(id), &node.data.name);
+                }
+            }
+        });
+    name_field(ui, &combo.response, "Camera");
     ui.end_row();
 }
 

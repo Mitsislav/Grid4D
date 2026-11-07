@@ -715,12 +715,34 @@ impl Selection {
     }
 }
 
-/// A tag selected in the Object Manager: the object and the kind of tag (an
-/// object holds at most one of each kind).
+/// A tag selected in the Object Manager: the object, the kind of tag and
+/// which of the object's tags of that kind (0 for the first; only Material
+/// tags come several to an object).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TagRef {
     pub node: NodeId,
     pub kind: grid4d_scene::TagKind,
+    pub nth: usize,
+}
+
+impl TagRef {
+    /// Where this tag is in `tags`, if it is there.
+    #[must_use]
+    pub fn index_in(&self, tags: &[grid4d_scene::Tag]) -> Option<usize> {
+        tags.iter()
+            .enumerate()
+            .filter(|(_, t)| t.kind() == self.kind)
+            .nth(self.nth)
+            .map(|(i, _)| i)
+    }
+
+    /// The tag at `index` of `node`'s `tags`.
+    #[must_use]
+    pub fn at(node: NodeId, tags: &[grid4d_scene::Tag], index: usize) -> Option<Self> {
+        let kind = tags.get(index)?.kind();
+        let nth = tags[..index].iter().filter(|t| t.kind() == kind).count();
+        Some(Self { node, kind, nth })
+    }
 }
 
 /// Everything the editor needs besides the document itself.
@@ -816,7 +838,7 @@ impl EditorState {
             return None;
         }
         let node = doc.scene.get(tag.node)?;
-        let index = grid4d_scene::Tags::tag_index(node.data.tags.as_slice(), tag.kind)?;
+        let index = tag.index_in(&node.data.tags)?;
         Some((tag, index))
     }
 }

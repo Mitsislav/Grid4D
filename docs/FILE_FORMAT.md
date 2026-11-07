@@ -174,7 +174,7 @@ Each tag has a `type`:
 | `phong` | `angle_limit` (bool), `angle` |
 | `protection` | `position`, `scale`, `rotation` (bools) |
 | `target` | `target`, `up` (object indices; none), `pitch` (bool) |
-| `material` | `material` (index into `materials`; none) |
+| `material` | `material` (index into `materials`; none); version 4 adds, each left out at its default: `projection` (`uv` (default), `box`, `spherical`, `cylindrical`, `flat`, `camera`), `offset` ([u, v]; [0, 0]), `tiling` ([u, v]; [1, 1], a 0 reads as 1), `rotation` (radians; 0), `placement` (`position`, `rotation` (heading, pitch, bank in radians), `size` (full size, cm); none: fitted to the object's bounding box), `camera` (object index; none: the view's camera). An object may carry several Material tags, in order (each over the ones before) |
 | `dynamics` | `motion` (`dynamic`, `collider`), `bounce`, `friction`; `enabled` (true), `compound` (false), `shape`: `automatic` (default), `box`, `sphere`, `convex_hull`, `static_mesh`; `mass_mode`: `global_density` (default), `custom_density`, `custom_mass`; `density`, `mass`, `rotational_mass` (1); `linear_damping`, `angular_damping` (0); `initial_velocity` (cm/s), `initial_spin` (radians/s) ([0, 0, 0]) |
 
 ### Materials
@@ -304,10 +304,11 @@ its meaning — and only adds to it. What it adds, as of this writing:
 |----------|-------|
 | `document.textures` and the entries `textures/<n>.<ext>` | Grid4D 1.1 development (step 15.3) |
 | the materials' channels beyond colour, roughness, metallic and emission, and `maps` | Grid4D 1.1 development (step 15.4) |
+| a Material tag's `projection`, `offset`, `tiling`, `rotation`, `placement` and `camera` (on objects and in takes' overrides) | Grid4D 1.1 development (step 15.4) |
 
 A version 3 file is therefore read as a version 4 file with the version
-number changed, minus any field this table lists (a material's added fields
-included) (version 3 readers ignore
+number changed, minus any field this table lists (a material's and a Material
+tag's added fields included) (version 3 readers ignore
 unknown fields, so such a field in a version 3 file means nothing). A
 version 4 file that uses none of the additions is a valid version 3 file once
 its `version` says `3`.

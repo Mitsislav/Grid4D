@@ -252,16 +252,23 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
             Some(material) if rng.chance(2) => EditorCommand::AssignMaterial {
                 material,
                 nodes: editor.selection.as_slice().to_vec(),
+                layer: rng.chance(3),
             },
             Some(material) if rng.chance(3) => EditorCommand::DeleteMaterial(material),
             _ => EditorCommand::NewMaterial,
         },
         23 => EditorCommand::AddTag(TagKind::ALL[rng.below(TagKind::ALL.len())].default_tag()),
         24 => match active {
-            Some(node) => EditorCommand::DeleteTag {
+            Some(node) if rng.chance(4) => EditorCommand::BakeMaterialTag(crate::TagRef {
+                node,
+                kind: TagKind::Material,
+                nth: rng.below(2),
+            }),
+            Some(node) => EditorCommand::DeleteTag(crate::TagRef {
                 node,
                 kind: TagKind::ALL[rng.below(TagKind::ALL.len())],
-            },
+                nth: rng.below(2),
+            }),
             None => EditorCommand::DeselectAll,
         },
         25 => {

@@ -166,9 +166,8 @@ fn document(objects: Vec<RandomObject>, materials: Vec<([f32; 3], f32)>, layers:
             });
         }
         if let Some(material) = pick(&materials, object.material) {
-            data.tags.push(Tag::Material {
-                material: Some(material),
-            });
+            data.tags
+                .push(Tag::Material(grid4d_scene::MaterialTag::new(Some(material))));
         }
         data.layer = pick(&layers, object.layer);
         if !object.keys.is_empty() {
@@ -247,6 +246,30 @@ proptest! {
                     tiling: [1.0 + f, 2.0],
                     ..grid4d_scene::TextureSlot::new(texture)
                 });
+            }
+        }
+        // Material tags' projections (version 4), and a second tag on some.
+        let objects: Vec<NodeId> = doc.scene.iter().map(|(id, _)| id).collect();
+        for (k, &id) in objects.iter().enumerate() {
+            let camera = objects.first().copied();
+            let data = &mut doc.scene.get_mut(id).unwrap().data;
+            let f = f32::from(u8::try_from(k % 7).unwrap());
+            for tag in &mut data.tags {
+                if let Tag::Material(tag) = tag {
+                    tag.projection = grid4d_scene::Projection::ALL[k % 6];
+                    tag.offset = [f * 0.1, -f];
+                    tag.tiling = [1.0 + f, 0.5];
+                    tag.rotation = f * 0.2;
+                    tag.camera = camera.filter(|_| k % 2 == 0);
+                    tag.placement = (k % 3 == 0).then_some(grid4d_scene::Placement {
+                        position: Vec3::splat(f),
+                        rotation: Vec3::new(0.0, f * 0.1, 0.0),
+                        size: Vec3::new(1.0, 2.0, f + 1.0),
+                    });
+                }
+            }
+            if k % 3 == 1 && data.tags.iter().any(|t| matches!(t, Tag::Material(_))) {
+                data.tags.push(Tag::Material(grid4d_scene::MaterialTag::new(None)));
             }
         }
         let bytes = grid4d_io::to_bytes(&doc).unwrap();

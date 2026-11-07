@@ -141,7 +141,7 @@ error.
 | `visible`, `visible_in_render`, `enabled` | its switches, `true` or `false` |
 | `parent` | the object it is under, or `()`; setting it moves the object there (last), keeping its place in the world; `()` moves it to the top |
 | `children` | the objects directly under it |
-| `material` | the name of its material, or `""`; set it to a material's name, or `""` for none |
+| `material` | the name of its material (its last Material tag's), or `""`; set it to a material's name (its last Material tag gets it, keeping its projection; a tag is added if there is none), or `""` to remove its Material tags |
 | `layer` | the name of its layer, or `""`; set it to a layer's name, or `""` for none |
 | `get(name)` | a parameter's value (below) |
 | `set(name, value)` | changes a parameter |

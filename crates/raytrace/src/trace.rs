@@ -392,7 +392,7 @@ mod tests {
         (white.color, white.roughness) = ([1.0; 3], 1.0);
         let white = doc.scene.materials_mut().insert(white);
         let mut node = Node::new("Floor", floor);
-        node.data.tags = vec![Tag::Material { material: Some(white) }];
+        node.data.tags = vec![Tag::Material(grid4d_scene::MaterialTag::new(Some(white)))];
         doc.scene.insert(node);
         let cube = ObjectKind::Cube {
             size: Vec3::splat(100.0),
@@ -466,7 +466,7 @@ mod tests {
         (glow.color, glow.emission) = ([0.0; 3], [1.0, 0.5, 0.0]);
         let glow = doc.scene.materials_mut().insert(glow);
         let mut cube = Node::new("Glowing", ObjectKindTag::Cube.default_kind());
-        cube.data.tags = vec![Tag::Material { material: Some(glow) }];
+        cube.data.tags = vec![Tag::Material(grid4d_scene::MaterialTag::new(Some(glow)))];
         doc.scene.insert(cube);
         doc.scene
             .insert(Node::new("Grey", ObjectKindTag::Sphere.default_kind()).with_position(Vec3::new(200.0, 0.0, 0.0)));

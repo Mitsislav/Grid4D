@@ -132,6 +132,7 @@ fn menu(ui: &mut Ui, editor: &mut EditorState) {
                         editor.commands.push(EditorCommand::AssignMaterial {
                             material,
                             nodes: editor.selection.as_slice().to_vec(),
+                            layer: false,
                         });
                         ui.close();
                     }
@@ -189,6 +190,7 @@ fn cell(ui: &mut Ui, doc: &Document, editor: &mut EditorState, id: MaterialId) -
             editor.commands.push(EditorCommand::AssignMaterial {
                 material: id,
                 nodes: editor.selection.as_slice().to_vec(),
+                layer: false,
             });
             ui.close();
         }

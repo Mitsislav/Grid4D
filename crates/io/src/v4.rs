@@ -40,7 +40,9 @@ use grid4d_scene::{
     ObjectOverrides, ObjectParam, Override, Param, PluginObject, PluginValue, RenderSettings, SimulationCache,
     SimulationSettings, SplineHandle, Tag, Take, TakeId, Takes, Tangents, TimeSettings, Track, Transform,
 };
-use grid4d_scene::{Channel, ColorSpace, Texture, TextureId, TextureSlot, TextureSource};
+use grid4d_scene::{
+    Channel, ColorSpace, MaterialTag, Placement, Projection, Texture, TextureId, TextureSlot, TextureSource,
+};
 use serde::{Deserialize, Serialize};
 use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
 
@@ -1577,13 +1579,87 @@ enum TagDto {
         up: Option<usize>,
         pitch: bool,
     },
-    /// Added with materials (step 6.6): the material's index in `materials`.
+    /// Added with materials (step 6.6): the material's index in `materials`;
+    /// the projection's fields were added in version 4 (step 15.4), each left
+    /// out while it has its default.
     Material {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         material: Option<usize>,
+        #[serde(default, skip_serializing_if = "ProjectionDto::is_uv")]
+        projection: ProjectionDto,
+        #[serde(default, skip_serializing_if = "is_zero_pair")]
+        offset: [f32; 2],
+        #[serde(default = "unit_pair", skip_serializing_if = "is_unit_pair")]
+        tiling: [f32; 2],
+        /// Radians.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        rotation: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placement: Option<PlacementDto>,
+        /// Camera projection: the camera object's index.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        camera: Option<usize>,
     },
     /// A rigid or collider body (step 11.1).
     Dynamics(BodyDto),
+}
+
+/// How a Material tag projects (version 4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProjectionDto {
+    #[default]
+    Uv,
+    Box,
+    Spherical,
+    Cylindrical,
+    Flat,
+    Camera,
+}
+
+impl ProjectionDto {
+    #[allow(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_uv(&self) -> bool {
+        *self == Self::Uv
+    }
+}
+
+impl From<Projection> for ProjectionDto {
+    fn from(projection: Projection) -> Self {
+        match projection {
+            Projection::Uv => Self::Uv,
+            Projection::Box => Self::Box,
+            Projection::Spherical => Self::Spherical,
+            Projection::Cylindrical => Self::Cylindrical,
+            Projection::Flat => Self::Flat,
+            Projection::Camera => Self::Camera,
+        }
+    }
+}
+
+impl From<ProjectionDto> for Projection {
+    fn from(projection: ProjectionDto) -> Self {
+        match projection {
+            ProjectionDto::Uv => Self::Uv,
+            ProjectionDto::Box => Self::Box,
+            ProjectionDto::Spherical => Self::Spherical,
+            ProjectionDto::Cylindrical => Self::Cylindrical,
+            ProjectionDto::Flat => Self::Flat,
+            ProjectionDto::Camera => Self::Camera,
+        }
+    }
+}
+
+/// Where a projection's shape sits in the object's space: centre, turn
+/// (heading, pitch, bank in radians), full size.
+#[derive(Debug, Serialize, Deserialize)]
+struct PlacementDto {
+    position: [f32; 3],
+    rotation: [f32; 3],
+    size: [f32; 3],
 }
 
 impl TagDto {
@@ -1605,8 +1681,18 @@ impl TagDto {
                 up: index(up),
                 pitch,
             },
-            Tag::Material { material } => Self::Material {
-                material: material.and_then(|m| refs.materials.get(&m).copied()),
+            Tag::Material(ref tag) => Self::Material {
+                material: tag.material.and_then(|m| refs.materials.get(&m).copied()),
+                projection: tag.projection.into(),
+                offset: tag.offset,
+                tiling: tag.tiling,
+                rotation: tag.rotation,
+                placement: tag.placement.map(|p| PlacementDto {
+                    position: p.position.to_array(),
+                    rotation: p.rotation.to_array(),
+                    size: p.size.to_array(),
+                }),
+                camera: index(tag.camera),
             },
             Tag::Dynamics(ref body) => Self::Dynamics(BodyDto::new(body)),
         }
@@ -1636,9 +1722,30 @@ impl TagDto {
                 up: id(up),
                 pitch,
             },
-            Self::Material { material } => Tag::Material {
-                material: material.and_then(|i| materials.get(i).copied()),
-            },
+            Self::Material {
+                material,
+                projection,
+                offset,
+                tiling,
+                rotation,
+                placement,
+                camera,
+            } => Tag::Material(
+                MaterialTag {
+                    material: material.and_then(|i| materials.get(i).copied()),
+                    projection: projection.into(),
+                    offset,
+                    tiling,
+                    rotation,
+                    placement: placement.map(|p| Placement {
+                        position: Vec3::from_array(p.position),
+                        rotation: Vec3::from_array(p.rotation),
+                        size: Vec3::from_array(p.size),
+                    }),
+                    camera: id(camera),
+                }
+                .validated(),
+            ),
             Self::Dynamics(body) => Tag::Dynamics(body.into_body()),
         }
     }
@@ -1646,7 +1753,20 @@ impl TagDto {
     fn parameters(&self) -> Vec<f32> {
         match self {
             Self::Phong { angle, .. } => vec![*angle],
-            Self::Protection { .. } | Self::Target { .. } | Self::Material { .. } => Vec::new(),
+            Self::Protection { .. } | Self::Target { .. } => Vec::new(),
+            Self::Material {
+                offset,
+                tiling,
+                rotation,
+                placement,
+                ..
+            } => {
+                let mut numbers = vec![offset[0], offset[1], tiling[0], tiling[1], *rotation];
+                if let Some(p) = placement {
+                    numbers.extend(p.position.iter().chain(&p.rotation).chain(&p.size));
+                }
+                numbers
+            }
             Self::Dynamics(body) => body.parameters(),
         }
     }
@@ -4786,7 +4906,7 @@ mod tests {
         data.transform.position.x = 77.0;
         data.visible_in_editor = false;
         data.display_color = [1.0, 0.0, 0.0];
-        data.tags = vec![Tag::Material { material: Some(red) }];
+        data.tags = vec![Tag::Material(MaterialTag::new(Some(red)))];
         data.kind = ObjectKind::Cube {
             size: Vec3::splat(33.0),
             segments: [2, 2, 2],
@@ -4834,7 +4954,9 @@ mod tests {
             -5.0
         );
         loaded.switch_take(Some(night));
-        let [Tag::Material { material: Some(m) }] = loaded.scene.get(id(&loaded, "Cube")).unwrap().data.tags[..] else {
+        let [Tag::Material(MaterialTag { material: Some(m), .. })] =
+            loaded.scene.get(id(&loaded, "Cube")).unwrap().data.tags[..]
+        else {
             panic!("the take's Material tag");
         };
         assert_eq!(loaded.scene.materials().get(m).unwrap().name, "Red");
@@ -4936,7 +5058,7 @@ mod tests {
         let gone = doc.scene.materials_mut().insert(Material::new("Gone"));
         doc.scene.materials_mut().remove(gone);
         let id = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
-        let tag = |material| Tag::Material { material };
+        let tag = |material| Tag::Material(MaterialTag::new(material));
         doc.scene.get_mut(id(&doc, "Cube")).unwrap().data.tags = vec![tag(Some(red_id))];
         doc.scene.get_mut(id(&doc, "Sphere")).unwrap().data.tags = vec![tag(Some(gone))];
         doc.scene.get_mut(id(&doc, "Box")).unwrap().data.tags = vec![tag(None)];
@@ -4944,7 +5066,7 @@ mod tests {
         let loaded = round_trip(&doc);
         let materials: Vec<Material> = loaded.scene.materials().iter().map(|(_, m)| m.clone()).collect();
         assert_eq!(materials, [red, plain], "in Material Manager order, exactly");
-        let [Tag::Material { material: Some(m) }] = tags_of(&loaded, "Cube")[..] else {
+        let [Tag::Material(MaterialTag { material: Some(m), .. })] = tags_of(&loaded, "Cube")[..] else {
             panic!("the Cube keeps its Material tag");
         };
         assert_eq!(loaded.scene.materials().get(m).unwrap().name, "Red");

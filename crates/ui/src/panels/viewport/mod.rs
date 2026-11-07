@@ -1404,6 +1404,7 @@ impl ViewportPanel {
             editor.commands.push(EditorCommand::AssignMaterial {
                 material: drag.material,
                 nodes: vec![id],
+                layer: ui.input(|i| i.modifiers.shift),
             });
         }
     }

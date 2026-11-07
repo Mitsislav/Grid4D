@@ -241,6 +241,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Back", "Πίσω"),
     ("Backface Culling", "Απόρριψη πίσω όψεων"),
     ("Bake Simulation", "Ψήσιμο προσομοίωσης"),
+    ("Bake to UVs", "Ψήσιμο σε UV"),
     ("Banking", "Κλίση"),
     ("Base", "Βάση"),
     ("Base Color", "Βασικό χρώμα"),
@@ -439,6 +440,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Custom Density", "Προσαρμοσμένη πυκνότητα"),
     ("Custom Mass", "Προσαρμοσμένη μάζα"),
     ("Cylinder", "Κύλινδρος"),
+    ("Cylindrical", "Κυλινδρική"),
     ("Dark", "Σκούρο"),
     ("Darker", "Σκουρότερο"),
     ("Data Folder Unavailable", "Ο φάκελος δεδομένων δεν είναι διαθέσιμος"),
@@ -614,7 +616,9 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Fillet", "Στρογγύλεμα"),
     ("Filter", "Φίλτρο"),
     ("Fit", "Προσαρμογή"),
+    ("Fit to Object", "Προσαρμογή στο αντικείμενο"),
     ("Fit to Parent", "Προσαρμογή στον γονέα"),
+    ("Flat", "Επίπεδη"),
     ("Flower", "Λουλούδι"),
     ("Font", "Γραμματοσειρά"),
     (
@@ -1086,6 +1090,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Only Select Visible Elements", "Επιλογή μόνο ορατών στοιχείων"),
     (
+        "Only a polygon object keeps UVs: make it editable first",
+        "Μόνο ένα πολυγωνικό αντικείμενο κρατά UV: κάντε το πρώτα επεξεργάσιμο",
+    ),
+    (
         "Only points inside the box move",
         "Κινούνται μόνο τα σημεία μέσα στο κουτί",
     ),
@@ -1210,6 +1218,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Project Settings", "Ρυθμίσεις έργου"),
     ("Project Settings…", "Ρυθμίσεις έργου…"),
     ("Project [{0}]", "Έργο [{0}]"),
+    ("Projection", "Προβολή"),
+    ("Projection Position", "Θέση προβολής"),
+    ("Projection Rotation", "Περιστροφή προβολής"),
+    ("Projection Size", "Μέγεθος προβολής"),
     (
         "Protected channels cannot be changed with the gizmo or the Coordinates fields",
         "Τα προστατευμένα κανάλια δεν αλλάζουν με το gizmo ή με τα πεδία Συντεταγμένων",
@@ -1610,6 +1622,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Specular", "Κατοπτρισμός"),
     ("Specular Texture", "Υφή κατοπτρισμού"),
     ("Sphere", "Σφαίρα"),
+    ("Spherical", "Σφαιρική"),
     ("Spin . X", "Περιστροφή . X"),
     ("Spin . Y", "Περιστροφή . Y"),
     ("Spin . Z", "Περιστροφή . Z"),
@@ -1671,6 +1684,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Texture Strength", "Ισχύς υφής"),
     ("Textures", "Υφές"),
     ("The Render View is not saved.", "Η Προβολή απόδοσης δεν αποθηκεύεται."),
+    ("The View's Camera", "Η κάμερα της προβολής"),
     (
         "The camera renders of this take look through",
         "Η κάμερα μέσα από την οποία βλέπουν οι αποδόσεις αυτής της λήψης",
@@ -1696,8 +1710,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Το στρώμα του αντικειμένου· Κανένα: του γονέα του",
     ),
     (
-        "The object and its children without a Material tag of their own show this material; drag a material onto an object to assign it",
-        "Το αντικείμενο και τα παιδιά του χωρίς δική τους ετικέτα υλικού δείχνουν αυτό το υλικό· σύρετε ένα υλικό σε αντικείμενο για ανάθεση",
+        "The object and its children without a Material tag of their own show this material; later Material tags lie over earlier ones. Drag a material onto an object to assign it (Shift: as a new layer)",
+        "Το αντικείμενο και τα παιδιά του χωρίς δική τους ετικέτα υλικού δείχνουν αυτό το υλικό· οι επόμενες ετικέτες υλικού μπαίνουν πάνω από τις προηγούμενες. Σύρετε ένα υλικό σε αντικείμενο για ανάθεση (Shift: ως νέο στρώμα)",
     ),
     (
         "The object selected last has no polygons to scatter on",
@@ -1821,6 +1835,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Type a name for the script first (without \\ / : * ? \" < > |).",
         "Γράψτε πρώτα ένα όνομα για το script (χωρίς \\ / : * ? \" < > |).",
     ),
+    ("UV", "UV"),
     ("Undo", "Αναίρεση"),
     (
         "Undo (Ctrl+Z) — nothing to undo",
@@ -1925,6 +1940,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Γράφει την εικόνα σε αρχείο και τη συνδέει",
     ),
     ("Writes the fields as shown", "Γράφει τα πεδία όπως φαίνονται"),
+    (
+        "Writes this projection into the object's UVs and switches the tag to UV (one undo step)",
+        "Γράφει αυτή την προβολή στα UV του αντικειμένου και γυρίζει την ετικέτα σε UV (ένα βήμα αναίρεσης)",
+    ),
     ("X-Axis", "Άξονας X"),
     ("X-Ray", "Ακτίνες X"),
     ("XY", "XY"),

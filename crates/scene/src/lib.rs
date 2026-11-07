@@ -58,7 +58,7 @@ pub use plugin::{PluginObject, PluginValue};
 pub use render::{FrameNaming, FrameRange, ImageFormat, RenderSettings};
 pub use scene::{Detached, Scene, SceneError, WalkItem};
 pub use spline::{SplineHandle, SplineId};
-pub use tag::{Aim, DEFAULT_PHONG_ANGLE, Protection, Tag, TagKind, Tags};
+pub use tag::{Aim, DEFAULT_PHONG_ANGLE, MaterialTag, Placement, Projection, Protection, Tag, TagKind, Tags};
 pub use take::{ObjectOverrides, Override, OverrideGroup, Take, TakeId, Takes, overridable};
 pub use texture::{ColorSpace, Texture, TextureId, TextureSource, Textures};
 pub use time::{Playback, TimeSettings, TimeState};

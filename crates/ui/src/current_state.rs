@@ -220,17 +220,15 @@ fn copy(
     data
 }
 
-/// A generator shows its cage's Phong tag and material when it has none of its own.
+/// A generator shows its cage's Phong tag and Material tags when it has none
+/// of its own.
 fn take_cage_tags(scene: &Scene, generator: &Node, tags: &mut Vec<Tag>) {
     let Some(cage) = generator.children().first().and_then(|&c| scene.get(c)) else {
         return;
     };
     for kind in [TagKind::Phong, TagKind::Material] {
-        if tags.tag_index(kind).is_none()
-            && let Some(index) = cage.data.tags.tag_index(kind)
-            && let Some(tag) = cage.data.tags.get(index)
-        {
-            tags.push(tag.clone());
+        if tags.tag_index(kind).is_none() {
+            tags.extend(cage.data.tags.iter().filter(|t| t.kind() == kind).cloned());
         }
     }
 }

@@ -360,6 +360,43 @@ fn texture_manager_picture() {
     }
     h.run_steps(3);
     save(&mut h, &dir, "material-channels");
+
+    // A label projected as a box over the floor material, on an editable cube.
+    {
+        let shell = h.state_mut();
+        let cube = shell.doc.scene.iter().find(|(_, n)| n.data.name == "Cube").unwrap().0;
+        shell.editor.selection.set_single(cube);
+        shell.editor.materials.shown = false;
+        shell.editor.commands.push(grid4d_ui::EditorCommand::MakeEditable);
+    }
+    h.run_steps(2);
+    {
+        let shell = h.state_mut();
+        let cube = shell.doc.scene.iter().find(|(_, n)| n.data.name == "Cube").unwrap().0;
+        let oak = shell.doc.scene.materials().ids()[0];
+        let mut label = grid4d_scene::Material::new("Label");
+        label.color = [0.8, 0.12, 0.08];
+        let label = shell.doc.scene.materials_mut().insert(label);
+        shell.doc.scene.get_mut(cube).unwrap().data.tags.extend([
+            grid4d_scene::Tag::Material(grid4d_scene::MaterialTag::new(Some(oak))),
+            grid4d_scene::Tag::Material(grid4d_scene::MaterialTag {
+                projection: grid4d_scene::Projection::Box,
+                tiling: [2.0, 1.0],
+                rotation: 15f32.to_radians(),
+                placement: Some(grid4d_scene::Placement {
+                    position: glam::Vec3::new(0.0, 20.0, 0.0),
+                    rotation: glam::Vec3::ZERO,
+                    size: glam::Vec3::new(200.0, 120.0, 200.0),
+                }),
+                ..grid4d_scene::MaterialTag::new(Some(label))
+            }),
+        ]);
+        let tags = &shell.doc.scene.get(cube).unwrap().data.tags;
+        let last = tags.len() - 1;
+        shell.editor.tag_selection = grid4d_ui::TagRef::at(cube, tags, last);
+    }
+    h.run_steps(3);
+    save(&mut h, &dir, "material-tag");
     println!("pictures in {}", dir.display());
 }
 

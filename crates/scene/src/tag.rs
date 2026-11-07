@@ -4,7 +4,10 @@
 //!
 //! [`NodeData::tags`]: crate::NodeData::tags
 
-use crate::{MaterialId, NodeId};
+use glam::{Affine2, Mat4, Vec2, Vec3};
+pub use grid4d_geom::uv::Projection;
+
+use crate::{MaterialId, NodeId, Transform};
 
 /// Grid4D's smoothing for objects without a Phong tag: 80° (radians).
 pub const DEFAULT_PHONG_ANGLE: f32 = 80.0 * std::f32::consts::PI / 180.0;
@@ -28,8 +31,10 @@ pub enum Tag {
         up: Option<NodeId>,
         pitch: bool,
     },
-    /// Links a material to the object (and its children without their own).
-    Material { material: Option<MaterialId> },
+    /// Links a material to the object (and its children without their own)
+    /// and says how it lies on the surface. An object may carry several:
+    /// later ones lie over earlier ones.
+    Material(MaterialTag),
     /// Makes the object a rigid or collider body in the simulation.
     Dynamics(crate::Body),
 }
@@ -82,7 +87,7 @@ impl TagKind {
                 up: None,
                 pitch: true,
             },
-            Self::Material => Tag::Material { material: None },
+            Self::Material => Tag::Material(MaterialTag::new(None)),
             Self::Dynamics => Tag::Dynamics(crate::Body::rigid()),
         }
     }
@@ -95,9 +100,134 @@ impl Tag {
             Self::Phong { .. } => TagKind::Phong,
             Self::Protection { .. } => TagKind::Protection,
             Self::Target { .. } => TagKind::Target,
-            Self::Material { .. } => TagKind::Material,
+            Self::Material(_) => TagKind::Material,
             Self::Dynamics(_) => TagKind::Dynamics,
         }
+    }
+}
+
+/// Where a projection's shape sits in the object's space (see
+/// `docs/reference/tag-material.md`): its centre, its turn (heading, pitch,
+/// bank in radians) and its full size along its own axes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Placement {
+    pub position: Vec3,
+    pub rotation: Vec3,
+    pub size: Vec3,
+}
+
+impl Placement {
+    /// The placement that fits the box `min` – `max` (unturned).
+    #[must_use]
+    pub fn fitted(min: Vec3, max: Vec3) -> Self {
+        Self {
+            position: (min + max) * 0.5,
+            rotation: Vec3::ZERO,
+            size: max - min,
+        }
+    }
+
+    /// From the object's space into the shape's own (the cube −1 … 1).
+    #[must_use]
+    pub fn to_unit(&self) -> Mat4 {
+        let transform = Transform {
+            position: self.position,
+            rotation: self.rotation,
+            scale: (self.size * 0.5).max(Vec3::splat(1e-4)),
+        };
+        transform.matrix().inverse()
+    }
+}
+
+/// A Material tag: the material and how it is projected onto the surface.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MaterialTag {
+    pub material: Option<MaterialId>,
+    pub projection: Projection,
+    /// Added to the coordinates after tiling, in picture widths (U, V).
+    pub offset: [f32; 2],
+    /// Repeats across the coordinates (U, V); never 0.
+    pub tiling: [f32; 2],
+    /// Turns the coordinates about the picture's centre (radians).
+    pub rotation: f32,
+    /// Where the projection's shape sits; `None`: fitted to the bounding box
+    /// of each object the tag reaches (follows it as it changes). Unused by UV
+    /// and Camera.
+    pub placement: Option<Placement>,
+    /// Camera projection: the camera object (`None`: the view's camera).
+    pub camera: Option<NodeId>,
+}
+
+impl MaterialTag {
+    /// `material` on the object's own UVs, once.
+    #[must_use]
+    pub const fn new(material: Option<MaterialId>) -> Self {
+        Self {
+            material,
+            projection: Projection::Uv,
+            offset: [0.0; 2],
+            tiling: [1.0; 2],
+            rotation: 0.0,
+            placement: None,
+            camera: None,
+        }
+    }
+
+    /// The change the tag makes to projected coordinates: turned about the
+    /// picture's centre, repeated `tiling` times, then shifted by `offset`.
+    #[must_use]
+    pub fn uv_transform(&self) -> Affine2 {
+        Affine2::from_translation(Vec2::from(self.offset))
+            * Affine2::from_scale(Vec2::from(self.tiling))
+            * Affine2::from_translation(Vec2::splat(0.5))
+            * Affine2::from_angle(-self.rotation)
+            * Affine2::from_translation(Vec2::splat(-0.5))
+    }
+
+    /// From the space of an object it reaches into the projection's shape's
+    /// own, for an object with object-space `bounds` (min, max); `None` for UV
+    /// and Camera, or a fitted shape on an object without bounds.
+    #[must_use]
+    pub fn to_unit(&self, bounds: Option<(Vec3, Vec3)>) -> Option<Mat4> {
+        if !self.projection.has_shape() {
+            return None;
+        }
+        match self.placement {
+            Some(placement) => Some(placement.to_unit()),
+            None => bounds.map(|(min, max)| grid4d_geom::uv::fit(min, max)),
+        }
+    }
+
+    /// Every number, for finiteness checks.
+    #[must_use]
+    pub fn numbers(&self) -> Vec<f32> {
+        let mut out = vec![
+            self.offset[0],
+            self.offset[1],
+            self.tiling[0],
+            self.tiling[1],
+            self.rotation,
+        ];
+        if let Some(p) = &self.placement {
+            out.extend(p.position.to_array());
+            out.extend(p.rotation.to_array());
+            out.extend(p.size.to_array());
+        }
+        out
+    }
+
+    /// The tag with a zero tiling made 1 and a placement's size kept positive.
+    #[must_use]
+    pub fn validated(mut self) -> Self {
+        for t in &mut self.tiling {
+            if t.abs() < 1e-6 {
+                *t = 1.0;
+            }
+        }
+        if let Some(p) = &mut self.placement {
+            p.size = p.size.abs();
+        }
+        self
     }
 }
 
@@ -127,8 +257,12 @@ pub trait Tags {
     fn aim(&self) -> Option<Aim>;
     /// The index of its tag of `kind`, if it has one.
     fn tag_index(&self, kind: TagKind) -> Option<usize>;
-    /// The material its Material tag links, if any.
+    /// The material it shows: its last Material tag's that links one.
     fn material(&self) -> Option<MaterialId>;
+    /// The material of its last Material tag whose link passes `exists`.
+    fn material_in(&self, exists: impl Fn(MaterialId) -> bool) -> Option<MaterialId>;
+    /// Its Material tags, in order (each later one over the earlier ones).
+    fn material_tags(&self) -> impl Iterator<Item = &MaterialTag>;
 }
 
 impl Tags for [Tag] {
@@ -140,7 +274,7 @@ impl Tags for [Tag] {
                 } else {
                     std::f32::consts::PI
                 }),
-                Tag::Protection { .. } | Tag::Target { .. } | Tag::Material { .. } | Tag::Dynamics(_) => None,
+                Tag::Protection { .. } | Tag::Target { .. } | Tag::Material(_) | Tag::Dynamics(_) => None,
             })
             .unwrap_or(DEFAULT_PHONG_ANGLE)
     }
@@ -156,14 +290,14 @@ impl Tags for [Tag] {
                 scale: p.scale || scale,
                 rotation: p.rotation || rotation,
             },
-            Tag::Phong { .. } | Tag::Target { .. } | Tag::Material { .. } | Tag::Dynamics(_) => p,
+            Tag::Phong { .. } | Tag::Target { .. } | Tag::Material(_) | Tag::Dynamics(_) => p,
         })
     }
 
     fn aim(&self) -> Option<Aim> {
         self.iter().find_map(|tag| match *tag {
             Tag::Target { target, up, pitch } => target.map(|target| Aim { target, up, pitch }),
-            Tag::Phong { .. } | Tag::Protection { .. } | Tag::Material { .. } | Tag::Dynamics(_) => None,
+            Tag::Phong { .. } | Tag::Protection { .. } | Tag::Material(_) | Tag::Dynamics(_) => None,
         })
     }
 
@@ -172,8 +306,19 @@ impl Tags for [Tag] {
     }
 
     fn material(&self) -> Option<MaterialId> {
-        self.iter().find_map(|tag| match *tag {
-            Tag::Material { material } => material,
+        self.material_tags().filter_map(|tag| tag.material).last()
+    }
+
+    fn material_in(&self, exists: impl Fn(MaterialId) -> bool) -> Option<MaterialId> {
+        self.iter().rev().find_map(|tag| match tag {
+            Tag::Material(tag) => tag.material.filter(|&m| exists(m)),
+            Tag::Phong { .. } | Tag::Protection { .. } | Tag::Target { .. } | Tag::Dynamics(_) => None,
+        })
+    }
+
+    fn material_tags(&self) -> impl Iterator<Item = &MaterialTag> {
+        self.iter().filter_map(|tag| match tag {
+            Tag::Material(tag) => Some(tag),
             Tag::Phong { .. } | Tag::Protection { .. } | Tag::Target { .. } | Tag::Dynamics(_) => None,
         })
     }
@@ -206,8 +351,73 @@ mod tests {
         assert_eq!(tags.material(), None);
         let mut materials = crate::Materials::default();
         let m = materials.insert(crate::Material::new("Mat"));
-        let with = [Tag::Material { material: Some(m) }];
+        let n = materials.insert(crate::Material::new("Label"));
+        let with = [Tag::Material(MaterialTag::new(Some(m)))];
         assert_eq!(with.material(), Some(m));
-        assert_eq!(TagKind::Material.default_tag(), Tag::Material { material: None });
+        assert_eq!(TagKind::Material.default_tag(), Tag::Material(MaterialTag::new(None)));
+        // Several Material tags: the last that links one is what the object shows.
+        let layered = [
+            Tag::Material(MaterialTag::new(Some(m))),
+            Tag::Material(MaterialTag::new(Some(n))),
+            Tag::Material(MaterialTag::new(None)),
+        ];
+        assert_eq!(layered.material(), Some(n));
+        assert_eq!(layered.material_tags().count(), 3);
+        assert_eq!(
+            layered.material_in(|id| id != n),
+            Some(m),
+            "a missing material is passed over"
+        );
+    }
+
+    #[test]
+    fn a_material_tag_maps_coordinates_and_places_its_shape() {
+        let mut tag = MaterialTag::new(None);
+        assert_eq!(tag.uv_transform(), Affine2::IDENTITY);
+        assert_eq!(tag.to_unit(Some((Vec3::ZERO, Vec3::ONE))), None, "UV has no shape");
+        tag.tiling = [2.0, 3.0];
+        tag.offset = [0.25, 0.0];
+        let t = tag.uv_transform();
+        assert!(
+            t.transform_point2(Vec2::new(1.0, 1.0))
+                .abs_diff_eq(Vec2::new(2.25, 3.0), 1e-6)
+        );
+        tag.tiling = [1.0; 2];
+        tag.offset = [0.0; 2];
+        tag.rotation = std::f32::consts::FRAC_PI_2;
+        // A quarter turn keeps the centre and turns the picture.
+        let t = tag.uv_transform();
+        assert!(t.transform_point2(Vec2::splat(0.5)).abs_diff_eq(Vec2::splat(0.5), 1e-6));
+        assert!(
+            t.transform_point2(Vec2::new(1.0, 0.5))
+                .abs_diff_eq(Vec2::new(0.5, 0.0), 1e-6)
+        );
+
+        tag.projection = Projection::Box;
+        let fitted = tag
+            .to_unit(Some((Vec3::new(-2.0, 0.0, 0.0), Vec3::new(2.0, 2.0, 4.0))))
+            .unwrap();
+        assert!(
+            fitted
+                .transform_point3(Vec3::new(2.0, 2.0, 4.0))
+                .abs_diff_eq(Vec3::ONE, 1e-6)
+        );
+        assert_eq!(tag.to_unit(None), None, "fitted to nothing");
+        tag.placement = Some(Placement {
+            position: Vec3::new(0.0, 10.0, 0.0),
+            rotation: Vec3::ZERO,
+            size: Vec3::splat(4.0),
+        });
+        let placed = tag.to_unit(None).unwrap();
+        assert!(
+            placed
+                .transform_point3(Vec3::new(2.0, 12.0, -2.0))
+                .abs_diff_eq(Vec3::new(1.0, 1.0, -1.0), 1e-6)
+        );
+        let box_ = Placement::fitted(Vec3::ZERO, Vec3::new(2.0, 4.0, 6.0));
+        assert_eq!(box_.position, Vec3::new(1.0, 2.0, 3.0));
+        tag.tiling = [0.0, 2.0];
+        assert_eq!(tag.validated().tiling, [1.0, 2.0]);
+        assert_eq!(tag.numbers().len(), 14);
     }
 }

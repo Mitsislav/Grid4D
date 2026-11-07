@@ -101,7 +101,7 @@ impl Objects {
     pub fn effective_materials(&self) -> Vec<Option<MaterialId>> {
         let mut effective: Vec<Option<MaterialId>> = Vec::with_capacity(self.nodes.len());
         for node in &self.nodes {
-            let own = grid4d_scene::Tags::material(node.data.tags.as_slice()).filter(|&m| self.materials.contains(m));
+            let own = grid4d_scene::Tags::material_in(node.data.tags.as_slice(), |m| self.materials.contains(m));
             let inherited = node.parent.and_then(|p| effective.get(p).copied().flatten());
             effective.push(own.or(inherited));
         }
@@ -121,9 +121,13 @@ pub(crate) enum Look {
 /// `map` does not know is dropped).
 pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>) {
     for tag in &mut data.tags {
-        if let Tag::Target { target, up, .. } = tag {
-            *target = target.and_then(&map);
-            *up = up.and_then(&map);
+        match tag {
+            Tag::Target { target, up, .. } => {
+                *target = target.and_then(&map);
+                *up = up.and_then(&map);
+            }
+            Tag::Material(tag) => tag.camera = tag.camera.and_then(&map),
+            Tag::Phong { .. } | Tag::Protection { .. } | Tag::Dynamics(_) => {}
         }
     }
     if let ObjectKind::Cloner { object, effectors, .. } = &mut data.kind {
@@ -136,8 +140,8 @@ pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>
 /// `map` does not know is dropped).
 pub fn remap_materials(data: &mut NodeData, map: impl Fn(MaterialId) -> Option<MaterialId>) {
     for tag in &mut data.tags {
-        if let Tag::Material { material } = tag {
-            *material = material.and_then(&map);
+        if let Tag::Material(tag) = tag {
+            tag.material = tag.material.and_then(&map);
         }
     }
 }
@@ -234,7 +238,7 @@ mod tests {
         let red = doc.scene.materials_mut().insert(Material::new("Red"));
         let id = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
         let (group, cube, boxed) = (id(&doc, "Group"), id(&doc, "Cube"), id(&doc, "Box"));
-        doc.scene.get_mut(group).unwrap().data.tags = vec![Tag::Material { material: Some(red) }];
+        doc.scene.get_mut(group).unwrap().data.tags = vec![Tag::Material(grid4d_scene::MaterialTag::new(Some(red)))];
         // The Cube aims at the Box: an object reference.
         doc.scene.get_mut(cube).unwrap().data.tags = vec![Tag::Target {
             target: Some(boxed),

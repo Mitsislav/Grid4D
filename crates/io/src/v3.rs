@@ -48,6 +48,31 @@ const V4_MATERIAL_FIELDS: &[&str] = &[
     "maps",
 ];
 
+/// Fields of each Material tag that version 4 adds (step 15.4: the
+/// projection), on objects and in takes' overrides.
+const V4_MATERIAL_TAG_FIELDS: &[&str] = &["projection", "offset", "tiling", "rotation", "placement", "camera"];
+
+/// Removes [`V4_MATERIAL_TAG_FIELDS`] from every Material tag in `value`
+/// (any `tags` list, wherever it is).
+fn strip_material_tags(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::Array(tags)) = map.get_mut("tags") {
+                for tag in tags.iter_mut().filter_map(Value::as_object_mut) {
+                    if tag.get("type").and_then(Value::as_str) == Some("material") {
+                        for field in V4_MATERIAL_TAG_FIELDS {
+                            tag.remove(*field);
+                        }
+                    }
+                }
+            }
+            map.values_mut().for_each(strip_material_tags);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_material_tags),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
 /// A version 3 `document.json`, already parsed, as version 4 (see the module
 /// documentation).
 pub(crate) fn upgrade(mut json: Value) -> Result<Value, IoError> {
@@ -68,6 +93,11 @@ pub(crate) fn upgrade(mut json: Value) -> Result<Value, IoError> {
         {
             for field in V4_MATERIAL_FIELDS {
                 material.remove(*field);
+            }
+        }
+        for field in ["objects", "takes"] {
+            if let Some(value) = document.get_mut(field) {
+                strip_material_tags(value);
             }
         }
     }
@@ -110,6 +140,35 @@ mod tests {
         assert_eq!(
             v4["document"],
             json!({ "name": "Shot", "materials": [{ "name": "Glass", "color": [1, 1, 1] }] })
+        );
+    }
+
+    #[test]
+    fn a_material_tags_projection_is_dropped_from_a_version_3_file() {
+        let v3 = json!({
+            "version": 3,
+            "document": {
+                "objects": [{ "name": "Cube", "tags": [
+                    { "type": "material", "material": 0, "projection": "box", "tiling": [2, 2] },
+                    { "type": "phong", "angle_limit": true, "angle": 1, "rotation": 5 }
+                ] }],
+                "takes": { "takes": [{ "overrides": [{ "object": 0, "tags": [
+                    { "type": "material", "camera": 0, "placement": {} }
+                ] }] }] }
+            }
+        });
+        let v4 = upgrade(v3).unwrap();
+        assert_eq!(
+            v4["document"]["objects"][0]["tags"],
+            json!([
+                { "type": "material", "material": 0 },
+                { "type": "phong", "angle_limit": true, "angle": 1, "rotation": 5 }
+            ]),
+            "only Material tags lose them"
+        );
+        assert_eq!(
+            v4["document"]["takes"]["takes"][0]["overrides"][0]["tags"],
+            json!([{ "type": "material" }])
         );
     }
 

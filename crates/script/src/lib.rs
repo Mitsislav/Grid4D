@@ -602,9 +602,14 @@ fn register_object(engine: &mut Engine, state: &Shared) {
             }
         };
         state.edit(o.0, |d| {
-            d.tags.retain(|t| !matches!(t, Tag::Material { .. }));
-            if material.is_some() {
-                d.tags.push(Tag::Material { material });
+            // "" removes its Material tags; a name goes on its last one (which
+            // keeps its projection), or on a new tag.
+            if material.is_none() {
+                d.tags.retain(|t| !matches!(t, Tag::Material(_)));
+            } else if let Some(Tag::Material(tag)) = d.tags.iter_mut().rev().find(|t| matches!(t, Tag::Material(_))) {
+                tag.material = material;
+            } else {
+                d.tags.push(Tag::Material(grid4d_scene::MaterialTag::new(material)));
             }
             Ok(())
         })

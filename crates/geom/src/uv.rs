@@ -13,9 +13,195 @@
 //! looking up (down) it is −Z (+Z), so a top face reads like a plan seen from
 //! above.
 
-use glam::{Vec2, Vec3};
+use std::f32::consts::TAU;
+
+use glam::{Mat4, Vec2, Vec3};
 
 use crate::PolyMesh;
+
+/// How a Material tag gives a surface its texture coordinates (see
+/// `docs/reference/tag-material.md`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Projection {
+    /// The surface's own UVs ([`box_uvs`] for a mesh without any).
+    #[default]
+    Uv,
+    /// Each face from the side of a box its normal faces most.
+    Box,
+    /// Longitude and latitude around the centre.
+    Spherical,
+    /// Around the Y axis; faces looking up or down get a plan.
+    Cylindrical,
+    /// Straight along -Z onto the XY square.
+    Flat,
+    /// As a camera sees it (its screen position).
+    Camera,
+}
+
+impl Projection {
+    pub const ALL: [Self; 6] = [
+        Self::Uv,
+        Self::Box,
+        Self::Spherical,
+        Self::Cylindrical,
+        Self::Flat,
+        Self::Camera,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Uv => "UV",
+            Self::Box => "Box",
+            Self::Spherical => "Spherical",
+            Self::Cylindrical => "Cylindrical",
+            Self::Flat => "Flat",
+            Self::Camera => "Camera",
+        }
+    }
+
+    /// Whether it projects from a shape that a placement puts somewhere (not
+    /// UV, not Camera).
+    #[must_use]
+    pub const fn has_shape(self) -> bool {
+        match self {
+            Self::Box | Self::Spherical | Self::Cylindrical | Self::Flat => true,
+            Self::Uv | Self::Camera => false,
+        }
+    }
+}
+
+/// The matrix that maps the box `min` – `max` onto the cube −1 … 1 (a flat
+/// side keeps a tiny size): the shape fitted to an object's bounds.
+#[must_use]
+pub fn fit(min: Vec3, max: Vec3) -> Mat4 {
+    let half = ((max - min) * 0.5).max(Vec3::splat(1e-4));
+    Mat4::from_scale(half.recip()) * Mat4::from_translation(-(min + max) * 0.5)
+}
+
+/// One UV per corner of `mesh` by `projection`. `to_unit` maps the mesh's
+/// points into the projection's own space, where its shape is the cube
+/// −1 … 1 (Box, and Flat's XY square), the sphere of radius 1 (Spherical) or
+/// the cylinder of radius 1 from y = −1 to 1 (Cylindrical); for Camera it is
+/// the camera's clip space (x, y in −1 … 1 across the picture). UV ignores it.
+///
+/// The picture keeps the conventions above: upright, unmirrored seen from
+/// outside the shape (from in front of the camera). Faces across the seam of a
+/// Spherical or Cylindrical projection are kept whole (their `u` may pass 1),
+/// and a corner on the axis takes its face's other corners' `u`.
+#[must_use]
+pub fn project(projection: Projection, mesh: &PolyMesh, to_unit: Mat4) -> Vec<Vec2> {
+    if projection == Projection::Uv {
+        return mesh.uvs().map_or_else(|| box_uvs(mesh), <[Vec2]>::to_vec);
+    }
+    let mut uvs = Vec::with_capacity(mesh.corner_count());
+    let mut unit = Vec::new();
+    for f in 0..mesh.face_count() {
+        unit.clear();
+        unit.extend(mesh.face(f).iter().map(|&p| {
+            let p = mesh.points().get(crate::us(p)).copied().unwrap_or(Vec3::ZERO);
+            if projection == Projection::Camera {
+                to_unit.project_point3(p)
+            } else {
+                to_unit.transform_point3(p)
+            }
+        }));
+        let start = uvs.len();
+        let normal = newell(&unit);
+        match projection {
+            Projection::Uv => {}
+            Projection::Box => {
+                let a = normal.abs();
+                let side = if a.x >= a.y && a.x >= a.z {
+                    Vec3::X * normal.x.signum()
+                } else if a.y >= a.z {
+                    Vec3::Y * normal.y.signum()
+                } else {
+                    Vec3::Z * normal.z.signum()
+                };
+                uvs.extend(unit.iter().map(|&q| on_side(q, side)));
+            }
+            Projection::Flat | Projection::Camera => {
+                uvs.extend(unit.iter().map(|q| Vec2::new(0.5 + q.x * 0.5, 0.5 - q.y * 0.5)));
+            }
+            Projection::Spherical => {
+                uvs.extend(unit.iter().map(|q| {
+                    let v = (q.y / q.length().max(f32::MIN_POSITIVE)).clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
+                    Vec2::new(around(*q), v)
+                }));
+                wrap(&unit, &mut uvs[start..]);
+            }
+            Projection::Cylindrical => {
+                if normal.y.abs() > normal.length() * std::f32::consts::FRAC_1_SQRT_2 {
+                    let side = Vec3::Y * normal.y.signum();
+                    uvs.extend(unit.iter().map(|&q| on_side(q, side)));
+                } else {
+                    uvs.extend(unit.iter().map(|q| Vec2::new(around(*q), 0.5 - q.y * 0.5)));
+                    wrap(&unit, &mut uvs[start..]);
+                }
+            }
+        }
+    }
+    uvs
+}
+
+/// A face's normal (not normalised) from its points, by Newell's method.
+fn newell(points: &[Vec3]) -> Vec3 {
+    let n = points.len();
+    (0..n).fold(Vec3::ZERO, |acc, i| {
+        let (a, b) = (points[i], points[(i + 1) % n]);
+        acc + Vec3::new(
+            (a.y - b.y) * (a.z + b.z),
+            (a.z - b.z) * (a.x + b.x),
+            (a.x - b.x) * (a.y + b.y),
+        )
+    })
+}
+
+/// A point of the unit cube seen from its `side` (an axis direction): the
+/// side's square spans the picture, upright.
+fn on_side(q: Vec3, side: Vec3) -> Vec2 {
+    let (right, up) = planar_axes(side).unwrap_or((Vec3::X, Vec3::Y));
+    Vec2::new(0.5 + q.dot(right) * 0.5, 0.5 - q.dot(up) * 0.5)
+}
+
+/// The turn around the Y axis from +Z towards +X, 0 – 1.
+fn around(q: Vec3) -> f32 {
+    (q.x.atan2(q.z) / TAU).rem_euclid(1.0)
+}
+
+/// Keeps a face that crosses the seam whole (its small `u`s go past 1), and
+/// gives corners on the axis (no direction around it) the mean `u` of the
+/// face's other corners.
+fn wrap(unit: &[Vec3], uvs: &mut [Vec2]) {
+    let on_axis = |q: Vec3| q.x.hypot(q.z) <= q.length() * 1e-5;
+    let (min, max) = unit
+        .iter()
+        .zip(uvs.iter())
+        .filter(|(q, _)| !on_axis(**q))
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), (_, uv)| {
+            (a.min(uv.x), b.max(uv.x))
+        });
+    if max - min > 0.5 {
+        for (q, uv) in unit.iter().zip(uvs.iter_mut()) {
+            if !on_axis(*q) && uv.x < 0.5 {
+                uv.x += 1.0;
+            }
+        }
+    }
+    let (sum, count) = unit
+        .iter()
+        .zip(uvs.iter())
+        .filter(|(q, _)| !on_axis(**q))
+        .fold((0.0, 0.0), |(s, c), (_, uv)| (s + uv.x, c + 1.0));
+    if count > 0.0 {
+        for (q, uv) in unit.iter().zip(uvs.iter_mut()) {
+            if on_axis(*q) {
+                uv.x = sum / count;
+            }
+        }
+    }
+}
 
 /// The picture's right and up directions on a flat face looking along
 /// `normal` (seen from its front, `right × up = normal`); `None` for a zero
@@ -211,6 +397,101 @@ mod tests {
         let before = cube.uvs().unwrap().to_vec();
         ensure_uvs(&mut cube);
         assert_eq!(cube.uvs().unwrap(), before);
+    }
+
+    fn spans(mesh: &PolyMesh, uvs: &[Vec2], f: usize) -> (Vec2, Vec2) {
+        uvs[mesh.corner_range(f)]
+            .iter()
+            .fold((Vec2::INFINITY, Vec2::NEG_INFINITY), |(a, b), &uv| {
+                (a.min(uv), b.max(uv))
+            })
+    }
+
+    fn with(mesh: &PolyMesh, uvs: Vec<Vec2>) -> PolyMesh {
+        let mut mesh = mesh.clone();
+        mesh.set_uvs(Some(uvs)).unwrap();
+        mesh
+    }
+
+    #[test]
+    fn a_fitted_box_projection_covers_each_side_of_a_box_once() {
+        // A 4 x 2 x 6 box away from the origin: fitted, every side spans the picture.
+        let mut cube = shapes::cube(2.0);
+        for p in cube.points_mut() {
+            *p = *p * Vec3::new(2.0, 1.0, 3.0) + Vec3::new(5.0, -1.0, 2.0);
+        }
+        let (min, max) = cube.bounds().unwrap();
+        let uvs = project(Projection::Box, &cube, fit(min, max));
+        assert_eq!(uvs.len(), cube.corner_count());
+        for f in 0..cube.face_count() {
+            let (lo, hi) = spans(&cube, &uvs, f);
+            assert!(
+                lo.abs_diff_eq(Vec2::ZERO, 1e-5) && hi.abs_diff_eq(Vec2::ONE, 1e-5),
+                "face {f}"
+            );
+        }
+        assert_eq!(flipped_faces(&with(&cube, uvs)), 0, "seen from outside, unmirrored");
+    }
+
+    #[test]
+    fn spherical_and_cylindrical_projections_wrap_once_around_without_mirroring() {
+        let sphere = crate::primitives::sphere(1.0, 24);
+        let uvs = project(Projection::Spherical, &sphere, Mat4::IDENTITY);
+        assert_eq!(flipped_faces(&with(&sphere, uvs.clone())), 0);
+        for f in 0..sphere.face_count() {
+            let (lo, hi) = spans(&sphere, &uvs, f);
+            assert!(hi.x - lo.x < 0.1, "face {f} is kept whole across the seam");
+            assert!(lo.y >= -1e-6 && hi.y <= 1.0 + 1e-6);
+        }
+        // Points on the way round: +Z is the start, +X a quarter.
+        let point = |p: Vec3| {
+            let tri = PolyMesh::from_faces(vec![p, p + Vec3::Y * 1e-3, p + Vec3::X * 1e-3], [[0u32, 1, 2]]).unwrap();
+            project(Projection::Spherical, &tri, Mat4::IDENTITY)[0]
+        };
+        assert!(point(Vec3::X).abs_diff_eq(Vec2::new(0.25, 0.5), 1e-3));
+        assert!(point(Vec3::new(0.0, 1.0, 0.001)).y < 1e-2, "the top is v = 0");
+
+        let cylinder = crate::primitives::cylinder(1.0, 2.0, 16, 1);
+        let uvs = project(Projection::Cylindrical, &cylinder, Mat4::IDENTITY);
+        assert_eq!(flipped_faces(&with(&cylinder, uvs.clone())), 0, "walls and caps");
+        for f in 0..cylinder.face_count() {
+            let (lo, hi) = spans(&cylinder, &uvs, f);
+            assert!(
+                lo.min_element() >= -1e-5 && hi.max_element() <= 1.0 + 1.0 / 16.0 + 1e-5,
+                "face {f}"
+            );
+        }
+    }
+
+    #[test]
+    fn flat_and_camera_projections_read_the_xy_square() {
+        let quad = PolyMesh::from_faces(
+            vec![
+                Vec3::new(-1.0, -1.0, 0.0),
+                Vec3::new(1.0, -1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(-1.0, 1.0, 0.0),
+            ],
+            [[0u32, 1, 2, 3]],
+        )
+        .unwrap();
+        let flat = project(Projection::Flat, &quad, Mat4::IDENTITY);
+        assert_eq!(flat, [Vec2::new(0.0, 1.0), Vec2::ONE, Vec2::new(1.0, 0.0), Vec2::ZERO]);
+        // A camera 2 units in front, 90 degrees wide: the square fills half the picture.
+        let camera = Mat4::from_cols(
+            glam::Vec4::X,
+            glam::Vec4::Y,
+            glam::Vec4::new(0.0, 0.0, 1.0, -1.0),
+            glam::Vec4::ZERO,
+        ) * Mat4::from_translation(Vec3::NEG_Z * 2.0);
+        let seen = project(Projection::Camera, &quad, camera);
+        assert!(seen[0].abs_diff_eq(Vec2::new(0.25, 0.75), 1e-5), "{seen:?}");
+        assert!(seen[2].abs_diff_eq(Vec2::new(0.75, 0.25), 1e-5));
+        // UV: the mesh's own, else a box projection.
+        assert_eq!(project(Projection::Uv, &quad, Mat4::IDENTITY), box_uvs(&quad));
+        let own = with(&quad, vec![Vec2::splat(0.3); 4]);
+        assert_eq!(project(Projection::Uv, &own, Mat4::IDENTITY), [Vec2::splat(0.3); 4]);
+        assert!(Projection::Box.has_shape() && !Projection::Camera.has_shape());
     }
 
     #[test]

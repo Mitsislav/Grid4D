@@ -13,7 +13,7 @@ use grid4d_scene::{
 };
 
 use crate::{
-    CurveHandle, CurveId, Drawable, MeshKey, Shading, Surface,
+    CurveHandle, CurveId, Drawable, MaterialLayer, MaterialLayers, MeshKey, Shading, Surface,
     curve::{CachedCurve, CurveSource},
     deform::{self, Active, Base, Deformed, Link},
     drawable,
@@ -53,6 +53,9 @@ pub struct EvaluatedNode {
     /// What to draw; `None` for objects without geometry.
     pub drawable: Option<Drawable>,
     pub pick: PickShape,
+    /// The Material tags it shows, bottom first (see
+    /// [`EvaluatedScene::material_layers`]).
+    pub materials: MaterialLayers,
 }
 
 /// One shape of a clone a Cloner makes, as viewers see it this frame: a
@@ -73,6 +76,8 @@ pub struct EvaluatedInstance {
     pub bounds: Option<Aabb>,
     pub drawable: Option<Drawable>,
     pub pick: PickShape,
+    /// The Material tags the child shows.
+    pub materials: MaterialLayers,
 }
 
 /// An object inside a Cloner as evaluated: what each clone of it shows.
@@ -88,6 +93,7 @@ struct Source {
     bounds: Option<Aabb>,
     drawable: Option<Drawable>,
     pick: PickShape,
+    materials: MaterialLayers,
 }
 
 /// What an evaluation is for: what is visible, and at what detail.
@@ -199,15 +205,33 @@ pub struct EvaluatedScene {
     animated: bool,
     /// Scratch space for animation: the world matrices of the current ancestors.
     world_stack: Vec<(u32, Mat4)>,
-    /// Scratch space for materials: the material each current ancestor shows
-    /// (its own Material tag's, else inherited).
-    material_stack: Vec<(u32, Option<MaterialId>)>,
+    /// Scratch space for materials: the material and layers each current
+    /// ancestor shows (its own Material tags', else inherited).
+    material_stack: Vec<(u32, Option<MaterialId>, MaterialLayers)>,
+    /// The Material tags the nodes show, each node's a run of them.
+    material_layers: Vec<MaterialLayer>,
     /// Scratch space for layers: the layer each current ancestor is on.
     layer_stack: Vec<(u32, Option<LayerId>)>,
     /// [`Scene::revision`] of the scene `nodes` were built from.
     revision: Option<u64>,
     /// The viewport, or the final render.
     purpose: Purpose,
+}
+
+/// Pushes the layers of `tags`' Material tags that link an existing material
+/// onto `layers`; the run they take.
+fn own_layers(
+    tags: &[grid4d_scene::Tag],
+    materials: &grid4d_scene::Materials,
+    layers: &mut Vec<MaterialLayer>,
+) -> MaterialLayers {
+    let start = layers.len();
+    for tag in tags.material_tags() {
+        if let Some(material) = tag.material.filter(|&m| materials.contains(m)) {
+            layers.push(MaterialLayer::new(material, tag));
+        }
+    }
+    MaterialLayers::between(start, layers.len())
 }
 
 impl EvaluatedScene {
@@ -281,6 +305,8 @@ impl EvaluatedScene {
         let plugin_meshes = &mut self.plugin_meshes;
         let material_stack = &mut self.material_stack;
         material_stack.clear();
+        let material_layers = &mut self.material_layers;
+        material_layers.clear();
         let layer_stack = &mut self.layer_stack;
         layer_stack.clear();
         let layers = scene.layers();
@@ -334,13 +360,19 @@ impl EvaluatedScene {
             }
             // Its deformer children reach it and everything below it.
             deform::push_children(scene, id, depth, frame, active);
-            // Its Material tag's material, else the nearest ancestor's.
-            while material_stack.last().is_some_and(|&(d, _)| d >= depth) {
+            // Its Material tags' material and layers, else the nearest ancestor's.
+            while material_stack.last().is_some_and(|&(d, _, _)| d >= depth) {
                 material_stack.pop();
             }
-            let inherited = material_stack.last().and_then(|&(_, m)| m);
-            let material = data.tags.material().filter(|&m| materials.contains(m)).or(inherited);
-            material_stack.push((depth, material));
+            let (inherited, inherited_layers) = material_stack
+                .last()
+                .map_or((None, MaterialLayers::EMPTY), |&(_, m, l)| (m, l));
+            let material = data.tags.material_in(|m| materials.contains(m)).or(inherited);
+            let mut shown_layers = own_layers(&data.tags, materials, material_layers);
+            if shown_layers.is_empty() {
+                shown_layers = inherited_layers;
+            }
+            material_stack.push((depth, material, shown_layers));
             // Markers (cameras, lights) keep their own colour and surface.
             let own_material = material.and_then(|m| materials.get(m));
             let mut drawable = drawable(&kind, data.display_color).map(|d| {
@@ -470,9 +502,13 @@ impl EvaluatedScene {
                             cage_tags.map_or(&data.tags, |cage| &cage.data.tags)
                         };
                         // Its material (own or inherited), else the cage's, else the cage's colour.
-                        let cage_material = cage_tags
-                            .and_then(|cage| cage.data.tags.material())
-                            .filter(|&m| materials.contains(m));
+                        let cage_material =
+                            cage_tags.and_then(|cage| cage.data.tags.material_in(|m| materials.contains(m)));
+                        if shown_layers.is_empty()
+                            && let Some(cage) = cage_tags
+                        {
+                            shown_layers = own_layers(&cage.data.tags, materials, material_layers);
+                        }
                         let shown = material.or(cage_material).and_then(|m| materials.get(m));
                         drawable = Some(Drawable {
                             key: MeshKey::Polygon(mesh.id()),
@@ -537,6 +573,7 @@ impl EvaluatedScene {
                         bounds,
                         drawable: drawable.filter(|d| !d.marker),
                         pick,
+                        materials: shown_layers,
                     });
                 }
                 drawable = None;
@@ -557,6 +594,7 @@ impl EvaluatedScene {
                 bounds,
                 drawable,
                 pick,
+                materials: shown_layers,
             });
             true
         });
@@ -639,6 +677,16 @@ impl EvaluatedScene {
     #[must_use]
     pub fn instances(&self) -> &[EvaluatedInstance] {
         &self.instances
+    }
+
+    /// The Material tags a node or instance shows (its `materials`), bottom
+    /// first.
+    #[must_use]
+    pub fn material_layers(&self, layers: MaterialLayers) -> &[MaterialLayer] {
+        let start = usize::try_from(layers.start).unwrap_or(usize::MAX);
+        self.material_layers
+            .get(start..start.saturating_add(layers.len()))
+            .unwrap_or(&[])
     }
 
     /// The visible light objects, in Object Manager pre-order.
@@ -898,6 +946,7 @@ fn build_instances(
                             bounds: part.bounds,
                             drawable: coloured(part.drawable),
                             pick: part.pick,
+                            materials: part.materials,
                         },
                         instances,
                     );
@@ -1240,7 +1289,7 @@ mod tests {
                 .unwrap()
                 .data
                 .tags
-                .push(Tag::Material { material: Some(red) });
+                .push(Tag::Material(grid4d_scene::MaterialTag::new(Some(red))));
         }
         let mut eval = EvaluatedScene::new();
         eval.update(&doc.scene);
@@ -1269,6 +1318,84 @@ mod tests {
         doc.scene.materials_mut().get_mut(red).unwrap().color = [0.0, 1.0, 0.0];
         assert!(eval.update(&doc.scene));
         assert_eq!(colour(&eval, cylinder), Some([0.0, 1.0, 0.0]));
+    }
+
+    #[test]
+    fn material_tags_layer_and_reach_children_clones_and_generators() {
+        use grid4d_scene::{Material, MaterialTag, Node, Projection, Tag};
+        let mut doc = Document::new("Layers");
+        let paint = doc.scene.materials_mut().insert(Material::new("Paint"));
+        let label = doc.scene.materials_mut().insert(Material::new("Label"));
+        let gone = doc.scene.materials_mut().insert(Material::new("Gone"));
+        doc.scene.materials_mut().remove(gone);
+        let group = doc.scene.insert(Node::new("Group", ObjectKind::Null));
+        let cube = doc
+            .scene
+            .insert_child(group, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        let boxed = MaterialTag {
+            projection: Projection::Box,
+            ..MaterialTag::new(Some(label))
+        };
+        doc.scene.get_mut(group).unwrap().data.tags = vec![
+            Tag::Material(MaterialTag::new(Some(paint))),
+            Tag::Material(MaterialTag::new(Some(gone))),
+            Tag::Material(boxed),
+            Tag::Material(MaterialTag::new(None)),
+        ];
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let layers = |eval: &EvaluatedScene, id| {
+            let node = eval.nodes().iter().find(|n| n.id == id).unwrap();
+            eval.material_layers(node.materials)
+                .iter()
+                .map(|l| (l.material, l.projection))
+                .collect::<Vec<_>>()
+        };
+        let expected = [(paint, Projection::Uv), (label, Projection::Box)];
+        assert_eq!(
+            layers(&eval, group),
+            expected,
+            "in order; missing and empty links skipped"
+        );
+        assert_eq!(layers(&eval, cube), expected, "inherited");
+        let node = eval.nodes().iter().find(|n| n.id == cube).unwrap();
+        assert_eq!(
+            node.drawable.unwrap().color,
+            Material::new("").color,
+            "the top layer's material"
+        );
+        // Its own tag replaces the inherited layers.
+        doc.scene.get_mut(cube).unwrap().data.tags = vec![Tag::Material(MaterialTag::new(Some(paint)))];
+        eval.update(&doc.scene);
+        assert_eq!(layers(&eval, cube), [(paint, Projection::Uv)]);
+
+        // Clones show their source's layers.
+        let cloner = doc
+            .scene
+            .insert(Node::new("Cloner", ObjectKindTag::Cloner.default_kind()));
+        doc.scene.reparent(group, Some(cloner), false).unwrap();
+        eval.update(&doc.scene);
+        let clone = eval.instances().iter().find(|i| i.source == cube).unwrap();
+        assert_eq!(
+            eval.material_layers(clone.materials)
+                .iter()
+                .map(|l| l.material)
+                .collect::<Vec<_>>(),
+            [paint]
+        );
+
+        // A Subdivision Surface without tags shows its cage's.
+        let subd = doc
+            .scene
+            .insert(Node::new("SubD", ObjectKindTag::SubdivisionSurface.default_kind()));
+        let cage = doc
+            .scene
+            .insert_child(subd, Node::new("Cage", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        doc.scene.get_mut(cage).unwrap().data.tags = vec![Tag::Material(boxed)];
+        eval.update(&doc.scene);
+        assert_eq!(layers(&eval, subd), [(label, Projection::Box)]);
     }
 
     #[test]
