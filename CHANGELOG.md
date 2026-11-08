@@ -22,6 +22,18 @@ sampling and a denoiser, a render queue).
   reflections, one- or two-sided. Soft light and shadows from the shape; a
   larger light is softer, not brighter. The viewport draws the shape and
   lights the scene approximately; glTF export writes a spot or point light.
+- **Sky and Environment** — two new objects surround the scene: a daylight
+  Sky with its sun (placed by elevation and azimuth or by turning the
+  object; haze, size and brightness of the sun) and an Environment showing
+  a panorama picture, best an HDR or EXR. They light renders from every
+  direction — a bright window or the sun in a panorama is sampled where it
+  is, so its shadows come out clean — show behind the scene and in
+  reflections, and in the viewport show as the background and light the
+  objects softly; the Sky's sun lights and shadows the view like an
+  Infinite light. The topmost visible one is used. View ▸ Filter ▸ Sky
+  hides the background in a view.
+- **Renders** — lights that are sampled directly (glowing surfaces, area
+  lights) no longer lose a little light at the last bounce.
 - **Files** — documents are saved in `.g4d` format version 5, which holds
   Grid4D 1.2's additions as they come. Every earlier file opens unchanged;
   Grid4D 1.1 cannot open version 5 files and says they come from a newer

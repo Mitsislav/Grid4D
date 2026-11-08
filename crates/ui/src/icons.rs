@@ -590,6 +590,34 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
                 c.line((0.5 + co * 0.29, 0.5 + s * 0.29), (0.5 + co * 0.44, 0.5 + s * 0.44));
             }
         }
+        // The sun rising over the horizon, under the sky's dome.
+        ObjectKindTag::Sky => {
+            let dome: Vec<P> = (0..=16)
+                .map(|i| {
+                    let a = PI * i as f32 / 16.0;
+                    (0.5 - 0.42 * a.cos(), 0.7 - 0.5 * a.sin())
+                })
+                .collect();
+            c.polyline(&dome, false);
+            c.line((0.04, 0.7), (0.96, 0.7));
+            c.disc((0.5, 0.7), 0.15);
+        }
+        // A globe: the picture all round.
+        ObjectKindTag::Environment => {
+            c.circle((0.5, 0.5), 0.4);
+            c.line((0.1, 0.5), (0.9, 0.5));
+            let meridian: Vec<P> = (0..=16)
+                .map(|i| {
+                    let a = PI * i as f32 / 16.0;
+                    (0.5 + 0.17 * a.sin(), 0.5 - 0.4 * a.cos())
+                })
+                .collect();
+            c.polyline(&meridian, false);
+            let other: Vec<P> = meridian.iter().map(|&(x, y)| (1.0 - x, y)).collect();
+            c.polyline(&other, false);
+            c.line((0.18, 0.3), (0.82, 0.3));
+            c.line((0.18, 0.7), (0.82, 0.7));
+        }
         // Splines: the curve, with dots on its control points.
         ObjectKindTag::Circle => {
             c.circle((0.5, 0.5), 0.36);

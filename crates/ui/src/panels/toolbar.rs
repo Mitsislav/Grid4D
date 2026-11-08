@@ -281,6 +281,8 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Capsule => key("Add Capsule"),
         ObjectKindTag::Camera => key("Add Camera (at the current view)"),
         ObjectKindTag::Light => key("Add Light"),
+        ObjectKindTag::Sky => key("Add Sky"),
+        ObjectKindTag::Environment => key("Add Environment"),
         ObjectKindTag::Polygon => key("Add Polygon Object"),
         ObjectKindTag::SubdivisionSurface => key("Add Subdivision Surface (Alt: around the selected object)"),
         ObjectKindTag::Extrude => key("Add Extrude (Alt: around the selected spline)"),

@@ -14,7 +14,8 @@ use grid4d_render::{ComponentHit, FrameData, OrbitCamera};
 use grid4d_scene::{Axis, Curve, Document, Key, Node, NodeData, NodeId, ObjectKind, Param, Track};
 
 /// `count` primitives of every shape in groups of 100, every `animated`-th
-/// one moving and turning over frames 0–90, and one polygon object. The
+/// one moving and turning over frames 0–90, one polygon object, and a Sky
+/// whose sun rises over the frames (an Environment under it, unused). The
 /// groups take turns at a plain material, a textured one on the objects' UVs
 /// and the textured one through a Box projection.
 fn scene(count: usize, animated: usize) -> (Document, NodeId) {
@@ -70,6 +71,21 @@ fn scene(count: usize, animated: usize) -> (Document, NodeId) {
     let polygon = doc.scene.insert(Node::new(
         "Mesh",
         ObjectKind::polygon(grid4d_scene::MeshHandle::new(mesh)),
+    ));
+    let mut sky = Node::new(
+        "Sky",
+        ObjectKind::Sky(grid4d_scene::Sky {
+            placement: grid4d_scene::SunPlacement::Angles,
+            ..grid4d_scene::Sky::default()
+        }),
+    );
+    sky.data
+        .tracks
+        .push(track(Param::Object(grid4d_scene::ObjectParam::Elevation), 0.1, 1.2));
+    doc.scene.insert(sky);
+    doc.scene.insert(Node::new(
+        "Environment",
+        ObjectKind::Environment(grid4d_scene::Environment::default()),
     ));
     (doc, polygon)
 }

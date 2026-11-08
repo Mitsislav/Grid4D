@@ -2,8 +2,9 @@
 //! within a tolerance (floating-point details differ a little between
 //! machines) — the demo scene through its camera, and a scene of textured
 //! materials (pictures through UV and Box projections, a layer cut out
-//! by its Opacity, a bump map, glass and a clear coat), and a scene lit by an
-//! area light of each shape.
+//! by its Opacity, a bump map, glass and a clear coat), a scene lit by an
+//! area light of each shape, a daylight scene under a Sky and a product lit
+//! by an Environment picture.
 //!
 //! After an intended change to the renderer, write new references with
 //! `GRID4D_UPDATE_REFERENCE=1 cargo test -p grid4d-raytrace --test reference`
@@ -19,13 +20,15 @@ use grid4d_raytrace::{
     CameraProjection, Image, Picture, Pictures, RenderCamera, RenderOptions, RenderScene, Texels, Texturing, render,
 };
 use grid4d_scene::{
-    AreaShape, Channel, Document, LightDetails, LightShadow, LightType, Material, MaterialTag, Node, ObjectKind,
-    Projection, Tag, Texture, TextureId, TextureSlot, Transform,
+    AreaShape, Channel, Document, Environment, LightDetails, LightShadow, LightType, Material, MaterialTag, Node,
+    ObjectKind, Projection, Sky, SunPlacement, Tag, Texture, TextureId, TextureSlot, Transform,
 };
 
 const DEMO: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/demo_reference.png");
 const TEXTURED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/textured_reference.png");
 const AREAS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/area_reference.png");
+const DAYLIGHT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/daylight_reference.png");
+const PRODUCT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/environment_reference.png");
 
 fn demo() -> Image {
     let doc = Document::with_demo_scene();
@@ -340,6 +343,191 @@ fn areas() -> Image {
     render(&RenderScene::textured(&eval, &texturing), &camera, &options)
 }
 
+/// A grey floor and three shapes; `material(name, colour, roughness,
+/// metallic)` adds a material.
+fn still_life(doc: &mut Document) {
+    let add = |doc: &mut Document, name: &str, color: [f32; 3], roughness: f32, metallic: f32| {
+        let mut m = Material::new(name);
+        (m.color, m.roughness, m.metallic) = (color, roughness, metallic);
+        doc.scene.materials_mut().insert(m)
+    };
+    let grey = add(doc, "Grey", [0.55, 0.55, 0.55], 0.8, 0.0);
+    let red = add(doc, "Red", [0.75, 0.08, 0.06], 0.3, 0.0);
+    let chrome = add(doc, "Chrome", [0.95, 0.95, 0.95], 0.08, 1.0);
+    let gold = add(doc, "Gold", [0.9, 0.7, 0.35], 0.3, 1.0);
+    let tag = |m| vec![MaterialTag::new(Some(m))];
+    doc.scene.insert(tagged(
+        ObjectKind::Plane {
+            width: 1200.0,
+            depth: 1200.0,
+            width_segments: 1,
+            depth_segments: 1,
+        },
+        Vec3::ZERO,
+        tag(grey),
+    ));
+    doc.scene.insert(tagged(
+        ObjectKind::Cube {
+            size: Vec3::splat(100.0),
+            segments: [1, 1, 1],
+        },
+        Vec3::new(-110.0, 50.0, 0.0),
+        tag(red),
+    ));
+    doc.scene.insert(tagged(
+        ObjectKind::Sphere {
+            radius: 55.0,
+            segments: 32,
+        },
+        Vec3::new(20.0, 55.0, 60.0),
+        tag(chrome),
+    ));
+    doc.scene.insert(tagged(
+        ObjectKind::Torus {
+            ring_radius: 45.0,
+            pipe_radius: 15.0,
+            ring_segments: 32,
+            pipe_segments: 12,
+        },
+        Vec3::new(130.0, 15.0, -30.0),
+        tag(gold),
+    ));
+}
+
+/// Renders `doc` from a camera above the front left, with `pictures`, at
+/// the size and samples of the reference pictures.
+fn still_life_render(doc: &Document, pictures: &Pictures) -> Image {
+    still_life_at(doc, pictures, 96, 54, 32)
+}
+
+/// Renders `doc` from a camera above the front left, with `pictures`.
+fn still_life_at(doc: &Document, pictures: &Pictures, width: u32, height: u32, samples: u32) -> Image {
+    let mut eval = EvaluatedScene::for_render();
+    eval.update(&doc.scene);
+    // Low and close: the shapes, the floor's edge far away and the sky.
+    let eye = Vec3::new(-260.0, 110.0, -330.0);
+    let camera = RenderCamera {
+        world: glam::camera::rh::view::look_at_mat4(eye, Vec3::new(10.0, 40.0, 0.0), Vec3::Y).inverse(),
+        projection: CameraProjection::Perspective {
+            fov_y: 40f32.to_radians(),
+        },
+    };
+    let options = RenderOptions {
+        width,
+        height,
+        samples,
+        bounces: 2,
+        seed: 0,
+        auto_light: true,
+        clamp_indirect: true,
+        emissive_lights: true,
+    };
+    let texturing = Texturing {
+        materials: doc.scene.materials(),
+        pictures,
+        camera,
+        aspect: f32::from(u16::try_from(width).unwrap()) / f32::from(u16::try_from(height).unwrap()),
+        cameras: &[],
+    };
+    render(&RenderScene::textured(&eval, &texturing), &camera, &options)
+}
+
+/// The still life under a clear afternoon Sky, the sun 35° up in the
+/// south-west.
+fn daylight() -> Image {
+    let (doc, pictures) = daylight_scene();
+    still_life_render(&doc, &pictures)
+}
+
+fn daylight_scene() -> (Document, Pictures) {
+    let mut doc = Document::new("daylight");
+    still_life(&mut doc);
+    doc.scene.insert(Node::new(
+        "Sky",
+        ObjectKind::Sky(Sky {
+            placement: SunPlacement::Angles,
+            elevation: 35f32.to_radians(),
+            azimuth: 220f32.to_radians(),
+            turbidity: 3.0,
+            ..Sky::default()
+        }),
+    ));
+    (doc, Pictures::new())
+}
+
+/// A made-up studio panorama (128 × 64, half floats): a soft grey dome, a
+/// darker floor, and one bright softbox high on one side.
+fn studio_panorama() -> Arc<Picture> {
+    let (w, h) = (128u32, 64u32);
+    let mut values = Vec::with_capacity(usize::try_from(w * h * 4).unwrap());
+    for y in 0..h {
+        for x in 0..w {
+            let v = (f32::from(u16::try_from(y).unwrap()) + 0.5) / 64.0;
+            let u = (f32::from(u16::try_from(x).unwrap()) + 0.5) / 128.0;
+            let mut rgb = if v < 0.5 {
+                [0.35 + 0.25 * v, 0.37 + 0.25 * v, 0.42 + 0.2 * v]
+            } else {
+                [0.12, 0.11, 0.1]
+            };
+            if (0.62..0.72).contains(&u) && (0.18..0.32).contains(&v) {
+                rgb = [16.0, 15.5, 15.0];
+            }
+            values.extend([rgb[0], rgb[1], rgb[2], 1.0].map(half::f16::from_f32));
+        }
+    }
+    Arc::new(Picture::new(w, h, Texels::Half(values.into())).unwrap())
+}
+
+/// The still life lit by the panorama, turned a little.
+fn environment_lit() -> Image {
+    let (doc, pictures) = environment_scene();
+    still_life_render(&doc, &pictures)
+}
+
+fn environment_scene() -> (Document, Pictures) {
+    let mut doc = Document::new("studio");
+    still_life(&mut doc);
+    let mut pictures = Pictures::new();
+    let (texture, _) = add(&mut doc, &mut pictures, "studio.exr", studio_panorama());
+    doc.scene.insert(Node::new(
+        "Environment",
+        ObjectKind::Environment(Environment {
+            texture: Some(texture),
+            intensity: 1.0,
+            rotation: 0.6,
+            visible: true,
+        }),
+    ));
+    (doc, pictures)
+}
+
+/// The manual's picture of the two (`render-sky-environment.png`, before
+/// it is reduced to 256 colours), larger and smoother than the references:
+///
+/// `GRID4D_MANUAL_PICTURES=<folder> cargo test --release -p grid4d-raytrace --test reference -- --ignored`
+#[test]
+#[ignore = "renders a picture for the manual"]
+fn sky_and_environment_for_the_manual() {
+    let dir = std::env::var_os("GRID4D_MANUAL_PICTURES").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let (sky, empty) = daylight_scene();
+    let (studio, pictures) = environment_scene();
+    let (w, h) = (480u32, 270u32);
+    let left = still_life_at(&sky, &empty, w, h, 256).to_rgba8();
+    let right = still_life_at(&studio, &pictures, w, h, 256).to_rgba8();
+    let row = usize::try_from(w * 4).unwrap();
+    let mut both = Vec::with_capacity(row * 2 * usize::try_from(h).unwrap());
+    for (a, b) in left.chunks(row).zip(right.chunks(row)) {
+        both.extend_from_slice(a);
+        both.extend_from_slice(b);
+    }
+    let path = dir.join("render-sky-environment.png");
+    let mut encoder = png::Encoder::new(BufWriter::new(File::create(&path).unwrap()), w * 2, h);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().unwrap().write_image_data(&both).unwrap();
+    println!("{}", path.display());
+}
+
 /// Compares `image` with the picture at `path` (or writes it there when asked).
 fn matches_reference(image: &Image, path: &str) {
     let bytes = image.to_rgba8();
@@ -384,4 +572,14 @@ fn textured_materials_match_their_reference() {
 #[test]
 fn area_lights_match_their_reference() {
     matches_reference(&areas(), AREAS);
+}
+
+#[test]
+fn a_daylight_scene_matches_its_reference() {
+    matches_reference(&daylight(), DAYLIGHT);
+}
+
+#[test]
+fn an_environment_lit_product_matches_its_reference() {
+    matches_reference(&environment_lit(), PRODUCT);
 }

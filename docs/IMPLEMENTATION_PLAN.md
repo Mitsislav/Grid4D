@@ -1745,5 +1745,7 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 (its specs in `docs/reference/`, `.g4d` v5 open, the render-time budget in
 `docs/performance.md`) is done (2026-11-07); step 16.2 — light transport
 with MIS, emissive surfaces as lights (16.2a) and area lights (16.2b) — is
-done (2026-11-08); next is 16.3, the Sky and Environment objects
-([`render-environment.md`](reference/render-environment.md)).
+done (2026-11-08); step 16.3 — the Sky and Environment objects
+([`render-environment.md`](reference/render-environment.md)) — is done
+(2026-11-08); next is 16.4, light linking and light groups
+([`render-lights-area.md`](reference/render-lights-area.md)).

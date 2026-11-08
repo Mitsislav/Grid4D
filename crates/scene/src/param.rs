@@ -11,7 +11,7 @@ use grid4d_geom::{
     surface::ExtrudeDirection,
 };
 
-use crate::{Axis, Falloff, LightType, ObjectKind};
+use crate::{Axis, Falloff, LightType, ObjectKind, SunPlacement};
 
 /// One real-valued parameter of an object, named by meaning. Labels match the
 /// Attribute Manager's rows.
@@ -79,6 +79,14 @@ pub enum ObjectParam {
     Amount,
     /// A Taper's or Bulge's curvature (a fraction).
     Curvature,
+    /// A Sky's sun height (radians).
+    Elevation,
+    /// A Sky's sun compass direction (radians).
+    Azimuth,
+    /// A Sky's haze.
+    Turbidity,
+    /// An Environment's turn about the vertical (radians).
+    PictureRotation,
     /// A plugin object's number: its value at this index of
     /// [`PluginObject::values`](crate::PluginObject::values) (below
     /// [`ObjectParam::PLUGIN_PARAMS`]).
@@ -88,7 +96,7 @@ pub enum ObjectParam {
 impl ObjectParam {
     /// How many built-in ones there are (their [`ObjectParam::index`] is below
     /// this; a plugin's follow).
-    pub const COUNT: usize = 42;
+    pub const COUNT: usize = 46;
 
     /// How many of a plugin object's values can be animated (the first ones).
     pub const PLUGIN_PARAMS: usize = 64;
@@ -137,6 +145,10 @@ impl ObjectParam {
         Self::Strength,
         Self::Amount,
         Self::Curvature,
+        Self::Elevation,
+        Self::Azimuth,
+        Self::Turbidity,
+        Self::PictureRotation,
     ];
 
     /// The row label (shared by the Attribute Manager and the F-Curve editor).
@@ -184,6 +196,10 @@ impl ObjectParam {
             Self::EndGrowth => "End Growth",
             Self::Strength | Self::Amount => "Strength",
             Self::Curvature => "Curvature",
+            Self::Elevation => "Elevation",
+            Self::Azimuth => "Azimuth",
+            Self::Turbidity => "Turbidity",
+            Self::PictureRotation => "Rotation",
             // Named by its plugin: see `ObjectKind::param_label`.
             Self::Plugin(_) => "Plugin Parameter",
         }
@@ -232,6 +248,10 @@ impl ObjectParam {
             Self::Strength => 39,
             Self::Amount => 40,
             Self::Curvature => 41,
+            Self::Elevation => 42,
+            Self::Azimuth => 43,
+            Self::Turbidity => 44,
+            Self::PictureRotation => 45,
             Self::Plugin(i) => Self::COUNT + i as usize,
         }
     }
@@ -241,9 +261,15 @@ impl ObjectParam {
     #[must_use]
     pub const fn unit(self) -> ParamUnit {
         match self {
-            Self::StartAngle | Self::EndAngle | Self::Twist | Self::Angle | Self::EndRotation | Self::Strength => {
-                ParamUnit::Radians
-            }
+            Self::StartAngle
+            | Self::EndAngle
+            | Self::Twist
+            | Self::Angle
+            | Self::EndRotation
+            | Self::Strength
+            | Self::Elevation
+            | Self::Azimuth
+            | Self::PictureRotation => ParamUnit::Radians,
             Self::RadialBias
             | Self::HeightBias
             | Self::Intensity
@@ -276,6 +302,7 @@ impl ObjectParam {
             | Self::Offset
             | Self::Movement(_)
             | Self::Rise
+            | Self::Turbidity
             // A plugin's description says how its numbers are shown.
             | Self::Plugin(_) => ParamUnit::Plain,
         }
@@ -329,6 +356,8 @@ impl ObjectKind {
                 P::Size(Axis::Y),
                 P::FalloffRadius,
             ],
+            Self::Sky(_) => &[P::Elevation, P::Azimuth, P::Turbidity, P::Intensity],
+            Self::Environment(_) => &[P::Intensity, P::PictureRotation],
             Self::SplinePrimitive(primitive) => match primitive.shape {
                 SplineShape::Circle { .. } => &[P::Radius, P::EllipseRadius, P::InnerRadius],
                 SplineShape::Rectangle { .. } => &[P::Width, P::Height, P::RoundingRadius],
@@ -458,6 +487,7 @@ impl ObjectKind {
         let value = match param {
             P::RadialBias | P::HeightBias | P::StartGrowth | P::EndGrowth => value.min(1.0),
             P::FieldOfView => value.clamp(1.0, 170.0),
+            P::Elevation => value.clamp(crate::Sky::MIN_ELEVATION, crate::Sky::MAX_ELEVATION),
             _ => value,
         };
         if let Some(slot) = self.slot(param) {
@@ -501,6 +531,17 @@ impl ObjectKind {
                 _ => None,
             };
         }
+        // A Sky's angles only where they place the sun.
+        if let Self::Sky(sky) = self {
+            let angles = sky.placement == SunPlacement::Angles;
+            return match param {
+                P::Elevation if angles => Some(&mut sky.elevation),
+                P::Azimuth if angles => Some(&mut sky.azimuth),
+                P::Turbidity => Some(&mut sky.turbidity),
+                P::Intensity => Some(&mut sky.intensity),
+                _ => None,
+            };
+        }
         // An Extrude's offset and movement only where its direction uses them.
         if let Self::Extrude { extrusion, .. } = self {
             let direction = extrusion.direction;
@@ -534,6 +575,8 @@ impl ObjectKind {
             (Self::Disc { outer_radius, .. }, P::OuterRadius) => Some(outer_radius),
             (Self::Camera { fov_y_deg }, P::FieldOfView) => Some(fov_y_deg),
             (Self::Light { intensity, .. }, P::Intensity) => Some(intensity),
+            (Self::Environment(environment), P::Intensity) => Some(&mut environment.intensity),
+            (Self::Environment(environment), P::PictureRotation) => Some(&mut environment.rotation),
             (
                 Self::Light {
                     light_type: LightType::Spot,

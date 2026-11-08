@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 16 — Render quality (v1.2): in progress |
-| Last step done | 16.2b — Area lights (rectangle, disc, sphere, tube) in the scene, file, Attribute Manager, viewport and tracer (2026-11-08) |
-| Next step | 16.3 — the Sky (Preetham) and Environment (HDR) objects, the viewport's background and ambient light |
-| Tests | 887 (and 6 ignored, run by hand: three timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy and rustfmt clean |
+| Last step done | 16.3 — the Sky and Environment objects: daylight model and panoramas lighting renders (importance sampled), the viewport's background and ambient light (2026-11-08) |
+| Next step | 16.4 — light linking (include / exclude) and light groups |
+| Tests | 908 (and 8 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky and Sky / Environment render pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2735,6 +2735,7 @@ risks R5 – R8 go with it.
 |------|----------------|-------|
 | 16.1 | Eight specs (the format version 5, area lights with light transport, linking and groups, the Sky and Environment, lens and shutter, passes and multi-layer OpenEXR, adaptive sampling and the denoiser, the Render Queue with the region and the interactive Render View, subsurface and displacement); `.g4d` version 5 written (version 4's module moved to `v5.rs`; `v4.rs` upgrades a version 4 `document.json` as JSON, dropping fields version 5 adds by place and refusing values it adds; version 3 goes through both upgrades); `FILE_FORMAT.md` for version 5, golden `demo_v5.g4d` / `full_v5.g4d`, the version 4 fixtures frozen and checked to read exactly as before, the property test relabels documents as version 4 too; the render-time budget measured on four reference scenes (`examples/budget.rs`, `docs/performance.md`) | 871 |
 | 16.2a | Light transport: emitting triangles in a table by power (four points' brightness × area), one sampled at every surface with a shadow ray (stopped by glass, which refracted paths cross instead), weighed against the material's own bounce by multiple importance sampling (the power heuristic; `Material::pdf`, the mixture of its lobes); Omni / Spot / Infinite unchanged, so scenes without emitters render exactly as in 1.1; Render Settings ▸ Sampling: Clamp Indirect and Emissive Surfaces Light the Scene (`.g4d` v5 `clamp_indirect`, `emissive_lights`; dropped from a v4 file); Greek; the manual's §20.1 with a before / after picture; the studio scene re-measured | 877 |
+| 16.3 | The Sky and Environment objects (`ObjectKind::{Sky, Environment}`, `SunPlacement`; Elevation, Azimuth, Turbidity, Intensity, Rotation animate): the Preetham daylight model and the sun's colour from Rayleigh and haze transmittance (`grid4d-eval::sky`, pure; 1.0 = 100 000 lux), the topmost visible one chosen by evaluation; in the tracer the surround met by rays and sampled as a light — the sun as a disc, the rest by importance over an equirectangular table (`environment.rs`) — with MIS, Auto Light off, and the last bounce followed one ray further for lights sampled directly; in the viewport a background pass (`sky.wgsl`) behind perspective views and spherical-harmonic ambient light in Gouraud shading (a Sky's made when it changes, a picture's on the texture loader's thread), the sun as an Infinite light with the view's shadow; View ▸ Filter ▸ Sky; `.g4d` v5 kinds `sky` / `environment` (refused in a version 4 file); the Attribute Manager's rows and the "Not used" note; Create ▸ Sky / Environment, icons, Greek; two reference pictures (daylight, a panorama-lit still life); the manual's §4.2 | 908 |
 | 16.2b | Area lights: `LightType::Area` and `AreaShape` (Rectangle, Disc, Sphere, Tube) with Size X / Y (animatable as `Size . X / Y`), Visible in Render and Two-Sided in `LightDetails`; `.g4d` v5 `light_type: "area"` and an `area` object (a version 4 file with them is refused / stripped); the Attribute Manager's rows; glTF export as a wide spot or a point; in the tracer one power table for area lights and emitting triangles (`lights.rs`: `AreaLight`, `LightTable`), a Sphere sampled over the cone it fills and a Tube over its facing half, visible lights seen by camera rays and bounces with MIS, others sampled only; brightness matched to an Omni light with Inverse Square falloff at 500 cm; in the viewport the shapes as lines and an approximate light from the shape's nearest point (`LightRaw` 96 bytes); a third reference picture; Greek; the manual's §4.1 with a render | 887 |
 
 **16.1 — Specs, the format version 5, the render-time budget**
@@ -2856,6 +2857,62 @@ risks R5 – R8 go with it.
   three-line entry it did not recognise; entries are now found in both
   forms. "Area" (light type and shadow) reads "Επιφάνεια" rather than
   "Εμβαδόν".
+
+**16.3 — The Sky and the Environment**
+
+*Problems and solutions:*
+- **What 1.0 of sky is.** The daylight model gives luminance in kcd/m²; the
+  renderer's lights have no physical unit. Taking 1.0 of irradiance as
+  100 000 lux — the sun at noon on a clear day — makes the Sky's sun light a
+  white floor about as an Infinite light of 100 % does, the sky add a fifth
+  or so, as outdoors; a test checks both against the model.
+- **The sun's disc was π times too dim.** Its radiance was set to its
+  irradiance over the disc's solid angle, but a surface lit by a light of
+  radiance L over a solid angle Ω shows L·Ω / π in Grid4D's units (as an
+  Infinite light of colour E shows E). Found by integrating the light on a
+  surface facing the sun in a unit test; the disc now gives π E / Ω.
+- **A bright texel spreads.** The picture is read between texels, so one
+  bright texel lights a little of its neighbours' cells too, which the
+  importance table had marked dark: the estimate came out at 56 % with huge
+  noise. Each cell now takes the brightest texel of its 3 × 3 neighbourhood
+  (round the picture's seam).
+- **A test of 1 / density that could not pass.** Checking that the density
+  integrates to one by averaging 1 / pdf over samples has enormous variance
+  when the table is very peaked (one bright texel); the check uses a
+  gradient picture, and the peaked case is tested by the light it gives.
+- **Light lost at the last bounce (also in 16.2).** At the last surface the
+  direct sample is weighed against a bounce that was never traced, so part
+  of the light of every light sampled directly was missing — little for a
+  small area light, a few per cent under a sky. With lights to weigh, the
+  last surface's bounce is now followed one ray further for the light it
+  meets alone; renders without such lights draw exactly as before (the
+  demo and textured references are unchanged, the area-light one was
+  rewritten).
+- **Noise taken for bias.** A furnace test (a white ball under a uniform
+  surround should show its value) read 7 % high at one pixel; the BSDF-only
+  estimate was exact and the light-only one 22 % high at that pixel but right
+  on average. Under a uniform surround cosine sampling has no variance and
+  light sampling a lot; the test now averages 25 pixels.
+- **The ambient light of a panorama.** Nine spherical-harmonic numbers per
+  colour are projected from the picture's level at most 256 texels wide on
+  the texture loader's thread (each texel averages the full picture's, so a
+  small sun keeps its energy); they stay in the picture's own frame, and
+  the shader turns the normal into it, so turning an Environment costs
+  nothing. A Sky's are made from the model when the Sky changes (a cache in
+  `FrameData`); the steady-frame test now holds a Sky whose sun rises over
+  the frames and still allocates nothing.
+- **A new Sky with its sun on the horizon.** Placed by the object, a Sky
+  created at the origin shines along −Z: a sunset. The default places the
+  sun by its angles (45° up in the south-east); From Object is the other
+  choice.
+- **Kinds the frozen fixtures must not grow.** The version 3 and 4 "every
+  kind" documents loop over all kinds; they now leave out the kinds version
+  5 adds, which the version 5 document adds by hand, and the property
+  tests' random kinds do the same (version 5's get a strategy of their own,
+  with a version 4 label refused).
+- **The Greek table's long entries, again.** New entries landed after a
+  multi-line one; the table is now re-sorted by a script that reads both
+  forms.
 
 ---
 

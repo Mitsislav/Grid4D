@@ -235,6 +235,9 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
             | ObjectKind::Taper(_)
             | ObjectKind::Bulge(_)
             | ObjectKind::Ffd { .. }
+            // glTF has no sky or surrounding picture: the node keeps its place.
+            | ObjectKind::Sky(_)
+            | ObjectKind::Environment(_)
             // Curves have no surface: the node keeps its place, nothing more.
             | ObjectKind::SplinePrimitive(_)
             | ObjectKind::Text(_)

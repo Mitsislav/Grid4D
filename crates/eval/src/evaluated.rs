@@ -169,6 +169,8 @@ pub struct EvaluatedScene {
     cloning: Cloning,
     /// The visible light objects, in pre-order.
     lights: Vec<EvaluatedLight>,
+    /// The topmost visible Sky or Environment.
+    environment: Option<crate::EvaluatedEnvironment>,
     /// The meshes of the visible polygon objects as shown (hidden polygons left
     /// out), for drawing and picking.
     meshes: HashMap<MeshId, MeshHandle>,
@@ -663,6 +665,27 @@ impl EvaluatedScene {
                 shadow,
             });
         }
+        // The topmost visible Sky or Environment surrounds the scene.
+        self.environment = self.nodes.iter().find_map(|node| {
+            let kind = scene.get(node.id).map(|n| n.data.kind_at(self.frame))?;
+            let axes = glam::Mat3::from_mat4(node.world);
+            match *kind {
+                ObjectKind::Sky(sky) => Some(crate::EvaluatedEnvironment {
+                    id: node.id,
+                    visible: sky.visible,
+                    surround: crate::Surround::Sky(crate::SkyModel::new(&sky, axes.z_axis)),
+                }),
+                ObjectKind::Environment(environment) => Some(crate::EvaluatedEnvironment {
+                    id: node.id,
+                    visible: environment.visible,
+                    surround: crate::Surround::Picture(crate::PictureSurround::new(
+                        &environment,
+                        crate::sky::rotation_of(axes),
+                    )),
+                }),
+                _ => None,
+            }
+        });
         // Objects gone, hidden or with nothing hidden any more.
         self.shown.retain(|_, entry| self.meshes.contains_key(&entry.mesh.id()));
         self.generated.retain(|_, entry| entry.seen == revision);
@@ -702,6 +725,13 @@ impl EvaluatedScene {
     #[must_use]
     pub fn lights(&self) -> &[EvaluatedLight] {
         &self.lights
+    }
+
+    /// What surrounds the scene: the topmost visible Sky or Environment in
+    /// the Object Manager (the others are ignored).
+    #[must_use]
+    pub const fn environment(&self) -> Option<&crate::EvaluatedEnvironment> {
+        self.environment.as_ref()
     }
 
     /// The mesh behind a [`MeshKey::Polygon`](crate::MeshKey::Polygon) or
@@ -1238,7 +1268,8 @@ fn curve_of(kind: &ObjectKind) -> Polyline {
 
 fn pick_shape(kind: &ObjectKind) -> PickShape {
     match *kind {
-        ObjectKind::Null => PickShape::None,
+        // Nothing to pick: at infinity.
+        ObjectKind::Null | ObjectKind::Sky(_) | ObjectKind::Environment(_) => PickShape::None,
         ObjectKind::Polygon { ref mesh, .. } => PickShape::Mesh(mesh.id()),
         ObjectKind::Sphere { radius, .. } => PickShape::Sphere { radius },
         ObjectKind::Light { .. } => PickShape::Sphere {
@@ -2534,6 +2565,8 @@ mod tests {
                 K::Null
                 | K::Camera
                 | K::Light
+                | K::Sky
+                | K::Environment
                 | K::Polygon
                 | K::Cloner
                 | K::PlainEffector
@@ -3278,5 +3311,38 @@ mod tests {
             -400.0,
             "the bounds follow the moved clone"
         );
+    }
+
+    #[test]
+    fn the_topmost_visible_sky_or_environment_surrounds_the_scene() {
+        use grid4d_scene::{Environment, Sky};
+        let mut doc = Document::new("surround");
+        let group = doc.scene.insert(Node::new("Group", ObjectKind::Null));
+        let environment = doc
+            .scene
+            .insert_child(
+                group,
+                Node::new("Environment", ObjectKind::Environment(Environment::default()))
+                    .with_transform(grid4d_scene::Transform::default().with_rotation_deg(Vec3::new(90.0, 0.0, 0.0))),
+            )
+            .unwrap();
+        let sky = doc.scene.insert(Node::new("Sky", ObjectKind::Sky(Sky::default())));
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let found = eval.environment().unwrap();
+        assert_eq!(found.id, environment, "the first in the Object Manager");
+        let crate::Surround::Picture(picture) = found.surround else {
+            panic!("a picture")
+        };
+        // The object's turn turns the picture: its centre column (−Z) now
+        // looks along −X.
+        assert!((picture.direction(glam::Vec2::new(0.5, 0.5)) - Vec3::NEG_X).length() < 1e-4);
+        // Hidden (with its group), the next one.
+        doc.scene.get_mut(group).unwrap().data.visible_in_editor = false;
+        eval.update(&doc.scene);
+        assert_eq!(eval.environment().map(|e| e.id), Some(sky));
+        doc.scene.get_mut(sky).unwrap().data.enabled = false;
+        eval.update(&doc.scene);
+        assert_eq!(eval.environment(), None);
     }
 }

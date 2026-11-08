@@ -112,6 +112,9 @@ fn golden_with(mesh: grid4d_geom::PolyMesh) -> Document {
 /// Everything a version 5 file can hold (see `docs/FILE_FORMAT.md`): version
 /// 4's, and what Phase 16 adds as it arrives — the light-transport switches
 /// off and an area light with every area field set (16.2).
+/// The kinds of object version 5 adds ([`full_document`] has them).
+const VERSION_5_KINDS: [ObjectKindTag; 2] = [ObjectKindTag::Sky, ObjectKindTag::Environment];
+
 fn full_document() -> (Document, SimulationCache) {
     let (mut doc, cache) = full_v4_document();
     doc.render.clamp_indirect = false;
@@ -131,6 +134,37 @@ fn full_document() -> (Document, SimulationCache) {
             },
             shadow: grid4d_scene::LightShadow::Area,
         },
+    ));
+    // Step 16.3: a Sky with its sun placed by angles (its elevation keyed)
+    // and an Environment showing the embedded texture.
+    let mut sky = Node::new(
+        "Sky",
+        ObjectKind::Sky(grid4d_scene::Sky {
+            placement: grid4d_scene::SunPlacement::Angles,
+            elevation: 0.5,
+            azimuth: 2.0,
+            turbidity: 4.5,
+            intensity: 1.5,
+            sun: true,
+            sun_size: 3.0,
+            sun_intensity: 0.75,
+            visible: false,
+        }),
+    );
+    sky.data.tracks.push(Track {
+        param: Param::Object(ObjectParam::Elevation),
+        curve: Curve::from_keys([Key::new(0.0, 0.5), Key::new(10.0, 0.25)]),
+    });
+    doc.scene.insert(sky);
+    let checker = doc.scene.textures().ids()[1];
+    doc.scene.insert(Node::new(
+        "Environment",
+        ObjectKind::Environment(grid4d_scene::Environment {
+            texture: Some(checker),
+            intensity: 2.0,
+            rotation: -1.0,
+            visible: true,
+        }),
     ));
     (doc, cache)
 }
@@ -244,9 +278,9 @@ fn full_v3_document() -> (Document, SimulationCache) {
     props.switches.render = false;
     let props = doc.scene.layers_mut().insert(props);
 
-    // Every kind, at its defaults, inside a group.
+    // Every kind version 3 has, at its defaults, inside a group.
     let group = doc.scene.insert(Node::new("Everything", ObjectKind::Null));
-    for tag in ObjectKindTag::ALL {
+    for tag in ObjectKindTag::ALL.into_iter().filter(|t| !VERSION_5_KINDS.contains(t)) {
         doc.scene
             .insert_child(group, Node::new(tag.label(), tag.default_kind()))
             .unwrap();

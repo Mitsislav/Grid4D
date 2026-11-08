@@ -18,9 +18,10 @@ use grid4d_geom::spline::{
 };
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
-    AreaShape, Axis, Body, Channel, CollisionShape, Document, Falloff, Inherit, KeyState, LightDetails, LightShadow,
-    LightType, MassMode, Material, MaterialId, MaterialTag, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param,
-    Placement, Projection, Scene, SceneEdit, SimulationSettings, SplineHandle, Tag, TagKind, TextureSlot, TimeSettings,
+    AreaShape, Axis, Body, Channel, CollisionShape, Document, Environment, Falloff, Inherit, KeyState, LightDetails,
+    LightShadow, LightType, MassMode, Material, MaterialId, MaterialTag, Motion, NodeData, NodeId, ObjectKind,
+    ObjectParam, Param, Placement, Projection, Scene, SceneEdit, SimulationSettings, Sky, SplineHandle, SunPlacement,
+    Tag, TagKind, TextureSlot, TimeSettings,
 };
 
 use crate::i18n::{key, tr, trf};
@@ -974,6 +975,14 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
             ObjectKind::RandomEffector(effector) => effector_rows(ui, k, effector, true),
             ObjectKind::SplinePrimitive(primitive) => spline_rows(ui, k, primitive),
             ObjectKind::Text(text) => text_rows(ui, k, text),
+            ObjectKind::Sky(sky) => {
+                unused_surround_note(ui, links);
+                sky_rows(ui, k, sky);
+            }
+            ObjectKind::Environment(environment) => {
+                unused_surround_note(ui, links);
+                environment_rows(ui, k, environment, links.map(|(scene, _)| scene));
+            }
             ObjectKind::Spline {
                 spline, interpolation, ..
             } => editable_spline_rows(ui, spline, interpolation),
@@ -2472,6 +2481,126 @@ fn cap_rows(ui: &mut Ui, start: &mut bool, end: &mut bool, cap_type: &mut CapTyp
             }
         });
     ui.end_row();
+}
+
+/// A note when another Sky or Environment surrounds the scene instead of the
+/// one shown (the first visible one in the Object Manager does).
+fn unused_surround_note(ui: &mut Ui, links: Option<(&Scene, NodeId)>) {
+    let Some((scene, id)) = links else {
+        return;
+    };
+    let mut used = None;
+    let mut stack = Vec::new();
+    scene.walk(&mut stack, |node_id, node, _, _| {
+        if used.is_some() || !node.data.visible_in_editor || !node.data.enabled {
+            return false;
+        }
+        if node.data.kind.is_surround() {
+            used = Some(node_id);
+            return false;
+        }
+        true
+    });
+    if used.is_some_and(|used| used != id) {
+        ui.label(RichText::new(tr("Not used: another sky or environment is above it.")).color(p().text_dim));
+        ui.end_row();
+    }
+}
+
+/// An intensity in percent (0 – 10 000 %) with its key button.
+fn intensity_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let mut percent = *value * 100.0;
+    let field = ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        DragValue::new(&mut percent)
+            .speed(1.0)
+            .range(0.0..=Sky::MAX_INTENSITY * 100.0)
+            .suffix(" %"),
+    );
+    name_field(ui, &field, label);
+    if field.changed() {
+        *value = percent / 100.0;
+    }
+    k.button(ui, label);
+    ui.end_row();
+}
+
+/// A Sky's settings (`docs/reference/render-environment.md`).
+fn sky_rows(ui: &mut Ui, k: &mut KeyRows, sky: &mut Sky) {
+    attr_label(ui, "Sun Direction", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.sky.placement")
+        .selected_text(tr(sky.placement.label()))
+        .show_ui(ui, |ui| {
+            for option in SunPlacement::ALL {
+                ui.selectable_value(&mut sky.placement, option, tr(option.label()));
+            }
+        });
+    ui.end_row();
+    if sky.placement == SunPlacement::Angles {
+        angle_row(ui, k, "Elevation", &mut sky.elevation, -10.0..=90.0);
+        angle_row(ui, k, "Azimuth", &mut sky.azimuth, 0.0..=360.0);
+    }
+    attr_label(ui, "Turbidity", LABEL_WIDTH);
+    let field = ui
+        .add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut sky.turbidity)
+                .speed(0.05)
+                .range(Sky::MIN_TURBIDITY..=Sky::MAX_TURBIDITY)
+                .max_decimals(2),
+        )
+        .on_hover_text(tr("Haze: 2 a clear mountain sky, 3 a clear day, 6 – 10 hazy"));
+    name_field(ui, &field, "Turbidity");
+    k.button(ui, "Turbidity");
+    ui.end_row();
+    intensity_row(ui, k, "Intensity", &mut sky.intensity);
+    check_row(ui, "Sun", &mut sky.sun);
+    if sky.sun {
+        attr_label(ui, "Sun Size", LABEL_WIDTH);
+        let field = ui
+            .add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut sky.sun_size)
+                    .speed(0.05)
+                    .range(Sky::MIN_SUN_SIZE..=Sky::MAX_SUN_SIZE)
+                    .suffix(" ×"),
+            )
+            .on_hover_text(tr("Relative to the real sun: larger gives softer shadows"));
+        name_field(ui, &field, "Sun Size");
+        ui.end_row();
+        intensity_row(ui, k, "Sun Intensity", &mut sky.sun_intensity);
+    }
+    check_row(ui, "Visible to Camera", &mut sky.visible);
+}
+
+/// An Environment's settings: its picture (one of the document's textures),
+/// intensity, turn and visibility.
+fn environment_rows(ui: &mut Ui, k: &mut KeyRows, environment: &mut Environment, scene: Option<&Scene>) {
+    if let Some(scene) = scene {
+        attr_label(ui, "Texture", LABEL_WIDTH);
+        let textures = scene.textures();
+        let name = environment
+            .texture
+            .and_then(|id| textures.get(id))
+            .map_or(tr("None"), |t| t.name.as_str());
+        let combo = egui::ComboBox::from_id_salt("grid4d.attr.environment.texture")
+            .selected_text(name)
+            .width(FIELD_WIDTH + 40.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut environment.texture, None, tr("None"));
+                for (id, texture) in textures.iter() {
+                    ui.selectable_value(&mut environment.texture, Some(id), &texture.name);
+                }
+            });
+        combo.response.on_hover_text(tr(
+            "An equirectangular picture (2 : 1), best an HDR or EXR; add one in the Texture Manager",
+        ));
+        ui.end_row();
+    }
+    intensity_row(ui, k, "Intensity", &mut environment.intensity);
+    angle_row(ui, k, "Rotation", &mut environment.rotation, -360.0..=360.0);
+    check_row(ui, "Visible to Camera", &mut environment.visible);
 }
 
 fn check_row(ui: &mut Ui, label: &str, value: &mut bool) {

@@ -29,6 +29,7 @@ mod generator;
 mod key;
 mod material_layer;
 mod overrides;
+pub mod sky;
 
 pub use curve::{CurveHandle, CurveId};
 pub use deform::is_deformer;
@@ -38,3 +39,4 @@ pub use generator::{generator_color, generator_mesh};
 pub use key::{MeshKey, Ratio};
 pub use material_layer::{MaterialLayer, MaterialLayers};
 pub use overrides::Overrides;
+pub use sky::{Ambient, EvaluatedEnvironment, PictureSurround, SkyModel, Sun, Surround};

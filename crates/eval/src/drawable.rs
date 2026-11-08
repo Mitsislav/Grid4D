@@ -102,7 +102,11 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
     match *kind {
         // A spline's curve is sampled and named during evaluation.
         // A plugin's mesh is built during evaluation too.
+        // A Sky or Environment draws nothing of its own: the view's
+        // background shows it.
         ObjectKind::Null
+        | ObjectKind::Sky(_)
+        | ObjectKind::Environment(_)
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Text(_)
         | ObjectKind::Spline { .. }
@@ -312,7 +316,9 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
         // Curves, not surfaces (a spline primitive is made editable as a spline).
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Text(_)
-        | ObjectKind::Spline { .. } => None,
+        | ObjectKind::Spline { .. }
+        | ObjectKind::Sky(_)
+        | ObjectKind::Environment(_) => None,
     }
 }
 
@@ -347,6 +353,8 @@ mod tests {
             let expected = !matches!(
                 tag,
                 ObjectKindTag::Null
+                    | ObjectKindTag::Sky
+                    | ObjectKindTag::Environment
                     | ObjectKindTag::Polygon
                     | ObjectKindTag::SubdivisionSurface
                     | ObjectKindTag::Extrude

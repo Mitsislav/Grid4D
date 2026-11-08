@@ -22,8 +22,14 @@ struct Camera {
     sizes: vec4<f32>,
     alphas: vec4<f32>,
     // x: scene lights to use (0: the default light), y: ambient with scene lights,
-    // z: 1 to darken the ambient light by the view's occlusion.
+    // z: 1 to darken the ambient light by the view's occlusion, w: 1 when a Sky
+    // or Environment gives the soft light (`ambient`).
     lighting: vec4<f32>,
+    // Rows: world directions → the frame `ambient` is in.
+    ambient_frame: array<vec4<f32>, 3>,
+    // The surround's light all round: nine spherical-harmonic terms
+    // (irradiance ÷ π) per colour.
+    ambient: array<vec4<f32>, 9>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -226,6 +232,33 @@ const SELECTION_RIM: vec3<f32> = vec3<f32>(1.0, 0.42, 0.06);
 const DEFAULT_LIGHT: f32 = 0.62;
 // How much the ambient occlusion darkens the lights' direct light.
 const AO_ON_DIRECT: f32 = 0.6;
+
+// What a white diffuse surface facing `d` (world) shows under the surround's
+// light all round (its spherical harmonics, as `Ambient::diffuse` in
+// grid4d-eval's sky.rs).
+fn surround_light(d_world: vec3<f32>) -> vec3<f32> {
+    let d = vec3<f32>(
+        dot(camera.ambient_frame[0].xyz, d_world),
+        dot(camera.ambient_frame[1].xyz, d_world),
+        dot(camera.ambient_frame[2].xyz, d_world),
+    );
+    let basis = array<f32, 9>(
+        0.282095,
+        0.488603 * d.y,
+        0.488603 * d.z,
+        0.488603 * d.x,
+        1.092548 * d.x * d.y,
+        1.092548 * d.y * d.z,
+        0.315392 * (3.0 * d.z * d.z - 1.0),
+        1.092548 * d.x * d.z,
+        0.546274 * (d.x * d.x - d.y * d.y),
+    );
+    var sum = vec3<f32>(0.0);
+    for (var i = 0u; i < 9u; i = i + 1u) {
+        sum = sum + camera.ambient[i].xyz * basis[i];
+    }
+    return max(sum, vec3<f32>(0.0));
+}
 
 // What one light reflects towards the viewer: diffuse, and a highlight whose size
 // follows the roughness (Blinn-Phong with a normalised exponent, Schlick Fresnel).
@@ -433,9 +466,16 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // studio, brighter overhead, that mostly metals show (smoother ones more).
     let facing = max(dot(n, view_dir), 0.0);
     let sky = 0.5 + 0.5 * n.y;
-    let ambient = diffuse * (0.08 + 0.22 * sky + 0.16 * facing);
+    var ambient = diffuse * (0.08 + 0.22 * sky + 0.16 * facing);
     let mirrored = reflect(-view_dir, n);
-    let studio = f0 * (0.16 + 0.34 * (0.5 + 0.5 * mirrored.y)) * (1.0 - 0.5 * roughness);
+    var studio = f0 * (0.16 + 0.34 * (0.5 + 0.5 * mirrored.y)) * (1.0 - 0.5 * roughness);
+    let surrounded = camera.lighting.w > 0.5;
+    if (surrounded) {
+        // A Sky's or Environment's light instead of the studio's; its
+        // reflection blurred to what the harmonics hold.
+        ambient = diffuse * surround_light(n);
+        studio = f0 * surround_light(mirrored) * (1.0 - 0.5 * roughness);
+    }
 
     // The view's ambient occlusion darkens the soft light, and the lights' own
     // light in part, so it shows in scenes lit mostly by their lights.
@@ -449,11 +489,14 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     var direct = vec3<f32>(0.0);
     let count = u32(camera.lighting.x + 0.5);
     if (count == 0u) {
-        // The default light, from over the viewer's shoulder.
-        let light = normalize(camera.light_dir.xyz);
-        direct = reflected(n, view_dir, light, vec3<f32>(DEFAULT_LIGHT), diffuse, f0, shininess);
+        // The default light, from over the viewer's shoulder (not with a
+        // surround: it lights the scene).
+        if (!surrounded) {
+            let light = normalize(camera.light_dir.xyz);
+            direct = reflected(n, view_dir, light, vec3<f32>(DEFAULT_LIGHT), diffuse, f0, shininess);
+        }
     } else {
-        soft = studio + ambient * camera.lighting.y;
+        soft = studio + ambient * select(camera.lighting.y, 1.0, surrounded);
         let caster = u32(shadow.params.x + 0.5);
         for (var i = 0u; i < count; i = i + 1u) {
             let light = lights[i];

@@ -153,6 +153,19 @@ every path, towards the panel), but the error halves at every sample count:
 1.1's 256-sample cleanliness (7.16) is now reached at 64 samples, in about a
 third of the time (1.15 s against 3.2 s).
 
+### After step 16.3 (Sky and Environment)
+
+Measured on 2026-11-08, same machine. None of the four scenes has a Sky or
+an Environment. With lights sampled directly, the last surface's bounce is
+now followed one ray further for the light it meets (16.2 lost a little of
+that light): **demo** renders exactly as before (same errors, same time);
+**studio** costs about 5 % more for the same error.
+
+| Scene | 1280 × 720, 16 samples | 16 samples: time / error | 64 | 256 | The 4096-sample reference |
+|-------|------------------------|--------------------------|----|-----|---------------------------|
+| studio, 16.2a | 4.5 s | 0.29 s / 11.4 | 1.15 s / 6.19 | 4.8 s / 3.32 | 76 s |
+| studio, 16.3 | 4.5 s | 0.31 s / 11.4 | 1.24 s / 6.20 | 5.0 s / 3.32 | 81 s |
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

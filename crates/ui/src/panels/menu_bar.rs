@@ -177,6 +177,8 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             ui.separator();
             create(ui, editor, ObjectKindTag::Camera);
             create(ui, editor, ObjectKindTag::Light);
+            create(ui, editor, ObjectKindTag::Sky);
+            create(ui, editor, ObjectKindTag::Environment);
             ui.separator();
             if ui
                 .button(tr("Material"))

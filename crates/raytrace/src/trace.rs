@@ -12,6 +12,7 @@ use rayon::prelude::*;
 
 use crate::{
     Image, RenderCamera, RenderScene,
+    environment::EnvironmentLight,
     lights::{Entry, LightTable},
     sample::Rng,
     scene::{Hit, Light},
@@ -173,7 +174,9 @@ impl Progressive {
             return !control.is_cancelled();
         }
         let automatic = [automatic_light(camera)];
-        let lights = if scene.lights().is_empty() && options.auto_light {
+        // Auto Light only for a scene with no light at all: a Sky or an
+        // Environment lights it too.
+        let lights = if scene.lights().is_empty() && options.auto_light && scene.environment().is_none() {
             &automatic[..]
         } else {
             scene.lights()
@@ -274,8 +277,17 @@ impl Job<'_> {
         // having been sampled directly from there. `None` for the camera ray
         // and for refracted paths, which direct sampling cannot reproduce.
         let mut last_pdf: Option<f32> = None;
-        let sampling = !self.table.is_empty();
-        for depth in 0..=self.bounces {
+        let sampling = !self.table.is_empty() || self.scene.environment().is_some();
+        // With lights that are also sampled directly, the last surface's
+        // bounce is followed one ray further for the light it meets alone:
+        // direct sampling there is weighed against it, so without it light
+        // would be missing.
+        let last = self.bounces + u32::from(sampling);
+        for depth in 0..=last {
+            let completing = depth > self.bounces;
+            if completing && last_pdf.is_none() {
+                break; // refracted: no light was weighed against this ray
+            }
             let hit = self.scene.intersect(origin, dir);
             let reach = hit
                 .as_ref()
@@ -287,10 +299,21 @@ impl Job<'_> {
                 break;
             }
             let Some(hit) = hit else {
+                let Some(environment) = self.scene.environment() else {
+                    if depth == 0 {
+                        return None;
+                    }
+                    break; // nothing around the scene: black
+                };
                 if depth == 0 {
-                    return None;
+                    // The background: the surround, or transparent.
+                    return environment.visible.then(|| environment.radiance(dir));
                 }
-                break; // nothing around the scene: black
+                // Found by a bounce: weighed against having been sampled
+                // directly (refracted paths cannot be).
+                let weight = last_pdf.map_or(1.0, |bsdf| power_heuristic(bsdf, environment.density(dir)));
+                radiance += self.capped(throughput * environment.radiance(dir) * weight, depth);
+                break;
             };
             let v = -dir;
             // The ray met the front of the surface (into a closed object).
@@ -320,11 +343,20 @@ impl Job<'_> {
                     Some(bsdf) => {
                         let distance2 = reach * reach;
                         let light = self.triangle_density(hit.triangle, geometric.dot(v), distance2);
-                        power_heuristic(bsdf, light)
+                        // The ray past the last bounce brings only light
+                        // that was also sampled directly.
+                        if completing && light <= 0.0 {
+                            0.0
+                        } else {
+                            power_heuristic(bsdf, light)
+                        }
                     }
                     None => 1.0,
                 };
                 radiance += self.capped(throughput * hit.surface.emission * weight, depth);
+            }
+            if completing {
+                break;
             }
 
             let lift = offset(hit.position);
@@ -351,12 +383,26 @@ impl Job<'_> {
                 }
                 radiance += self.capped(throughput * reflected * incoming.strength * passed, depth);
             }
-            if sampling {
+            if !self.table.is_empty() {
                 let direct = self.sample_surface_lights(&hit, &material, n, v, geometric, lifted, entering, rng);
                 radiance += self.capped(throughput * direct, depth);
             }
+            if let Some(environment) = self.scene.environment() {
+                let direct = sample_environment(
+                    self.scene,
+                    environment,
+                    &material,
+                    n,
+                    v,
+                    geometric,
+                    lifted,
+                    entering,
+                    rng,
+                );
+                radiance += self.capped(throughput * direct, depth);
+            }
 
-            if depth == self.bounces {
+            if depth == self.bounces && !sampling {
                 break;
             }
             let Some(bounce) = material.bounce(n, v, entering, rng) else {
@@ -528,6 +574,40 @@ impl Job<'_> {
             light.min(Vec3::splat(BOUNCE_CAP))
         }
     }
+}
+
+/// One sample of the light that the surround sends to a surface at `lifted`
+/// and that it reflects towards `v`, weighed against finding it by a bounce.
+#[expect(clippy::too_many_arguments, reason = "the hit's frame, as the loop has it")]
+fn sample_environment(
+    scene: &RenderScene,
+    environment: &EnvironmentLight,
+    material: &Material,
+    n: Vec3,
+    v: Vec3,
+    geometric: Vec3,
+    lifted: Vec3,
+    entering: bool,
+    rng: &mut Rng,
+) -> Vec3 {
+    let (u, s, t) = (rng.next_f32(), rng.next_f32(), rng.next_f32());
+    let Some((l, light, density)) = environment.sample(u, s, t) else {
+        return Vec3::ZERO;
+    };
+    if l.dot(geometric) <= 0.0 || light.max_element() <= 0.0 {
+        return Vec3::ZERO;
+    }
+    let reflected = material.reflect(n, v, l);
+    if reflected.max_element() <= 0.0 {
+        return Vec3::ZERO;
+    }
+    // Out to infinity; glass stops it (refracted paths bring its light).
+    let passed = scene.transmittance(lifted, l, f32::INFINITY, false);
+    if passed.max_element() <= 0.0 {
+        return Vec3::ZERO;
+    }
+    let weight = power_heuristic(density, material.pdf(n, v, l, entering));
+    reflected * light * passed * (weight / (PI * density))
 }
 
 /// The power heuristic's weight for a sample drawn with density `own`
@@ -1436,5 +1516,121 @@ mod tests {
         assert!((steep - 0.707).abs() < 0.06, "{steep}");
         let gentle = lit(Channel::Bump, BLACK, RED, 1.0);
         assert!(gentle > 0.98, "{gentle}");
+    }
+
+    /// A white matte ball (radius 150 cm) at the origin and `surround`.
+    fn ball_under(surround: ObjectKind) -> Document {
+        let mut doc = Document::new("ball");
+        let mut white = SceneMaterial::new("White");
+        (white.color, white.roughness, white.specular) = ([1.0; 3], 1.0, 0.0);
+        let white = doc.scene.materials_mut().insert(white);
+        let mut ball = Node::new(
+            "Ball",
+            ObjectKind::Sphere {
+                radius: 150.0,
+                segments: 48,
+            },
+        );
+        ball.data.tags = vec![Tag::Material(MaterialTag::new(Some(white)))];
+        doc.scene.insert(ball);
+        doc.scene.insert(Node::new("Surround", surround));
+        doc
+    }
+
+    /// The mean red of the 5 × 5 pixels around the world point (x, z) of a
+    /// 60 × 60 top view.
+    fn around(image: &Image, x: f32, z: f32) -> f32 {
+        let mut sum = 0.0;
+        for dx in [-20.0, -10.0, 0.0, 10.0, 20.0] {
+            for dz in [-20.0, -10.0, 0.0, 10.0, 20.0] {
+                sum += at(image, x + dx, z + dz)[0];
+            }
+        }
+        sum / 25.0
+    }
+
+    /// An Environment without a picture: a uniform grey of half `intensity`.
+    fn grey(intensity: f32, visible: bool) -> ObjectKind {
+        ObjectKind::Environment(grid4d_scene::Environment {
+            intensity,
+            visible,
+            ..grid4d_scene::Environment::default()
+        })
+    }
+
+    #[test]
+    fn a_white_ball_under_a_uniform_surround_shows_its_value() {
+        // The furnace: 0.6 from everywhere, so a white diffuse ball is 0.6
+        // wherever it is seen — direct light only or with bounces (it sees
+        // nothing of itself), and no Auto Light added.
+        for bounces in [0, 2] {
+            let options = RenderOptions {
+                clamp_indirect: false,
+                ..options(60, 64, bounces)
+            };
+            let image = render(&scene_of(&ball_under(grey(1.2, true))), &top_camera(), &options);
+            for (x, z) in [(0.0, 0.0), (80.0, 0.0), (0.0, -100.0)] {
+                let p = around(&image, x, z);
+                assert!((p - 0.6).abs() < 0.02, "{bounces} bounces at {x}, {z}: {p}");
+            }
+            // The background: the surround itself, opaque.
+            let corner = at(&image, 290.0, 290.0);
+            assert!((corner[0] - 0.6).abs() < 1e-4 && corner[3] == 1.0, "{corner:?}");
+        }
+    }
+
+    #[test]
+    fn visible_to_camera_changes_only_the_background() {
+        let options = options(60, 16, 1);
+        let shown = render(&scene_of(&ball_under(grey(1.2, true))), &top_camera(), &options);
+        let hidden = render(&scene_of(&ball_under(grey(1.2, false))), &top_camera(), &options);
+        assert_eq!(at(&hidden, 290.0, 290.0), [0.0; 4], "transparent");
+        assert_eq!(at(&shown, 0.0, 0.0), at(&hidden, 0.0, 0.0), "the ball lit the same");
+    }
+
+    #[test]
+    fn the_topmost_visible_surround_lights_the_scene() {
+        let mut doc = ball_under(grey(1.2, true));
+        // Below the first in the Object Manager: ignored while it is there.
+        doc.scene.insert(Node::new("Dim", grey(0.2, true)));
+        let options = RenderOptions {
+            clamp_indirect: false,
+            ..options(60, 32, 0)
+        };
+        let lit = |doc: &Document| around(&render(&scene_of(doc), &top_camera(), &options), 0.0, 0.0);
+        assert!((lit(&doc) - 0.6).abs() < 0.03, "{}", lit(&doc));
+        let first = doc.scene.iter().find(|(_, n)| n.data.name == "Surround").unwrap().0;
+        doc.scene.get_mut(first).unwrap().data.visible_in_render = false;
+        assert!((lit(&doc) - 0.1).abs() < 0.01, "{}", lit(&doc));
+    }
+
+    #[test]
+    fn the_sky_lights_with_its_sun_and_its_shadow_is_filled_by_the_sky() {
+        use grid4d_eval::SkyModel;
+        let mut doc = floor_scene(LightShadow::None);
+        let sun = doc.scene.iter().find(|(_, n)| n.data.name == "Sun").unwrap().0;
+        doc.scene.remove(sun);
+        // The sun 60° up in the east (+X): the cube's shadow falls west of it.
+        let sky = grid4d_scene::Sky {
+            placement: grid4d_scene::SunPlacement::Angles,
+            elevation: 60f32.to_radians(),
+            azimuth: 90f32.to_radians(),
+            ..grid4d_scene::Sky::default()
+        };
+        doc.scene.insert(Node::new("Sky", ObjectKind::Sky(sky)));
+        let options = RenderOptions {
+            clamp_indirect: false,
+            ..options(60, 64, 0)
+        };
+        let image = render(&scene_of(&doc), &top_camera(), &options);
+        let model = SkyModel::new(&sky, Vec3::Z);
+        let direct = model.sun().unwrap().irradiance.y * 60f32.to_radians().sin();
+        let lit = at(&image, 100.0, 0.0)[1];
+        let shade = at(&image, -180.0, 0.0)[1];
+        assert!(lit > direct && lit < direct * 1.6, "{lit} vs the sun's {direct}");
+        assert!(
+            shade > 0.02 && shade < lit * 0.4,
+            "{shade} in the shadow, {lit} in the sun"
+        );
     }
 }

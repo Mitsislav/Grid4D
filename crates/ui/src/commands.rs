@@ -2687,6 +2687,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
             data.transform.position = Vec3::new(0.0, 400.0, 0.0);
             data.display_color = [1.0, 0.95, 0.85];
         }
+        // At infinity: where it stands does not matter.
+        ObjectKindTag::Sky | ObjectKindTag::Environment => data.display_color = [0.6, 0.8, 1.0],
         // Light lines show on the dark viewport.
         ObjectKindTag::Circle
         | ObjectKindTag::Rectangle
@@ -2769,7 +2771,7 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
     match tag {
         ObjectKindTag::Null => palette().icon_null,
         ObjectKindTag::Camera => palette().icon_camera,
-        ObjectKindTag::Light => palette().icon_light,
+        ObjectKindTag::Light | ObjectKindTag::Sky | ObjectKindTag::Environment => palette().icon_light,
         ObjectKindTag::SubdivisionSurface
         | ObjectKindTag::Extrude
         | ObjectKindTag::Lathe

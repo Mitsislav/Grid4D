@@ -592,6 +592,8 @@ fn texts(
             | ObjectKind::Capsule { .. }
             | ObjectKind::Camera { .. }
             | ObjectKind::Light { .. }
+            | ObjectKind::Sky(_)
+            | ObjectKind::Environment(_)
             | ObjectKind::SubdivisionSurface { .. }
             | ObjectKind::Extrude { .. }
             | ObjectKind::Lathe(_)

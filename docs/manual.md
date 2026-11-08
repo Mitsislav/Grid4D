@@ -345,10 +345,11 @@ Everything is shown in a new view.
 
 - **Object types**: *Polygon* (polygon objects), *Generator* (the parametric
   objects: Cube, Sphere, …, and the Extrude, Lathe, Sweep and Loft),
-  *Subdivision Surface*, *Spline*, *Deformer* (their boxes), *Camera* and *Light*. A hidden
+  *Subdivision Surface*, *Spline*, *Deformer* (their boxes), *Camera*, *Light*
+  and *Sky* (a Sky's or Environment's background). A hidden
   type is neither drawn nor clickable in that view: clicks, rectangle selections
   and snapping go through it. Only the objects of that type are hidden, not their
-  children. Hidden lights still light the view.
+  children. Hidden lights, skies and environments still light the view.
 - **Elements**: *World Grid* (the grid), *World Axis* (the axis triad in the lower
   left corner) and *HUD* (the grid spacing in the lower right corner).
 - Click an entry to turn it off or on. **Ctrl+click** shows only that entry and
@@ -499,7 +500,63 @@ the shape nearest each surface; renders show it exactly.
 how sharp the highlights are, metals reflect in their own colour, and luminance
 makes a surface glow whatever the light.
 
-### 4.2 Plugins
+### 4.2 Sky and Environment
+
+A **Sky** (**Create ▸ Sky**) surrounds the scene with an open daylight sky
+and its sun; an **Environment** (**Create ▸ Environment**) surrounds it with
+a photograph all round — a panorama, best an HDR or EXR file. Either one
+lights the scene from every direction, shows behind it and in reflections,
+and replaces the default light.
+
+![The viewport with a Sky: the blue sky and its sun behind the objects, which are lit by it, and the Sky's settings in the Attribute Manager](images/manual/sky_viewport.png)
+
+The Sky's settings (Object tab):
+
+| Setting | What it does |
+|---------|--------------|
+| Sun Direction | **Elevation and Azimuth** (the default): the sun stands where the two angles below say. **From Object**: the sun shines along the Sky object's −Z axis — turn the object like an Infinite light. |
+| Elevation | How high the sun stands, from −10° (just set) to 90° (straight up). |
+| Azimuth | Its compass direction: 0° is along −Z, 90° along +X. |
+| Turbidity | Haze, from 1.7 to 10: 2 is a clear mountain sky, 3 a clear day, 6 – 10 hazy. More haze whitens the sky and reddens and dims the sun. |
+| Intensity | The brightness of sky and sun together. |
+| Sun | The sun itself, as a light and as a disc in the sky. |
+| Sun Size | The disc's size compared with the real sun's: larger gives softer shadows. |
+| Sun Intensity | The sun's brightness on its own. |
+| Visible to Camera | Renders show the sky where nothing else is. Off: the background stays transparent (for compositing); the sky still lights and reflects. |
+
+The sun's colour follows its height and the haze: white at noon, golden low
+down, red at sunset; below −2° it is gone, and the sky dims towards −10°.
+Below the horizon the sky is a dim ground colour. High up, the sun lights a
+white floor about as brightly as an Infinite light of 100 %.
+
+The Environment's settings:
+
+| Setting | What it does |
+|---------|--------------|
+| Texture | One of the document's textures (add the picture in the Texture Manager first, [§19.1](#191-textures-and-the-texture-manager)). It must be a **latitude-longitude** panorama, twice as wide as it is high. Without one the Environment is a plain grey. |
+| Intensity | Its brightness. |
+| Rotation | Turns the picture about the vertical axis; turning the Environment object turns it too. |
+| Visible to Camera | As for the Sky. |
+
+- **One at a time**: the first visible Sky or Environment in the Object
+  Manager lights the scene; the others are ignored (their Attribute Manager
+  says so). Hide one to try another.
+- Where it stands and how large it is do not matter: it is infinitely far
+  away.
+- In the viewport, a **perspective** view shows it behind the objects in
+  Gouraud and Quick Shading, and Gouraud Shading lights the objects with its
+  soft light all round; the Sky's sun also lights and casts the view's
+  shadow like an Infinite light. **View ▸ Filter ▸ Sky** hides the
+  background in one view.
+- Renders light the scene with it exactly: a bright window or sun in a
+  panorama gives clean, sharp shadows even with few samples. **Auto Light**
+  stays off while a Sky or Environment lights the scene.
+- Elevation, Azimuth, Turbidity, Intensity and Rotation can be animated —
+  a sun that sets over the frames, for instance.
+
+![A render under a Sky in the afternoon, and the same objects lit by a studio panorama with one bright softbox](images/manual/render-sky-environment.png)
+
+### 4.3 Plugins
 
 **Create ▸ Plugins** lists the kinds of objects and deformers that plugins
 add to Grid4D (it comes with a Gear and a Wave): see [Plugins](#21-plugins).
@@ -2436,7 +2493,7 @@ the more of the scene's light it gives.
 
 | Setting | Meaning |
 |---------|---------|
-| Auto Light | a scene without lights is lit by an automatic light over the camera's shoulder; off, such a scene renders dark (only glowing materials show) |
+| Auto Light | a scene without lights (and without a Sky or Environment) is lit by an automatic light over the camera's shoulder; off, such a scene renders dark (only glowing materials show) |
 
 Every change is one undo step, and the settings are saved with the document.
 
@@ -2796,8 +2853,7 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   or run every frame; the Script Manager's editor has no syntax colouring or
   completion, and the library no sub-folders.
 - **Materials**: the viewport shows no Transmission or coat, and its
-  shadows ignore cut-outs; renders have no environment for glass and metals
-  to reflect, and light through glass is tinted but not focused (no
+  shadows ignore cut-outs; light through glass is tinted but not focused (no
   caustics); no per-polygon-selection limit on a tag.
 - **UVs**: no separate UV point selection, pins, soft selection, UV tiles
   past the first, or Align / Straighten tools; seams show in the UV Editor,
@@ -2821,8 +2877,12 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   deformers, …) and for the axes, handles, guides, SDS cage, n-gon lines and
   horizon; Default, Geometry Only and presets; the filter is not saved with the
   document.
-- **Lights**: the Square Spot, Area, Parallel and IES types, visible light, and
-  the per-light switches (no illumination, ambient, diffuse or specular only).
+- **Lights**: the Square Spot, Parallel and IES types, visible light (fog),
+  and the per-light switches (no illumination, ambient, diffuse or specular
+  only); an Area light's viewport shadow is not softened by its size.
+- **Sky and Environment**: no date, time and place for the sun, no clouds,
+  fog, rainbows, moon or stars; only latitude-longitude panoramas (no cube
+  maps); one surround at a time; parallel views keep their gradient.
 - **Interchange and rendering**: animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only); the
   Render Region (Alt+R) and a Render View that updates while you edit; several

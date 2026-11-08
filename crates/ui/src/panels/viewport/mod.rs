@@ -162,7 +162,7 @@ const STYLE_MENU: [(DisplayStyle, &str, &str); 2] = [
 ];
 
 /// The Filter menu: object types, then elements of the view.
-const FILTER_OBJECTS: [(FilterItem, &str); 8] = [
+const FILTER_OBJECTS: [(FilterItem, &str); 9] = [
     (FilterItem::Polygon, key("Polygon")),
     (FilterItem::Generator, key("Generator")),
     (FilterItem::SubdivisionSurface, key("Subdivision Surface")),
@@ -171,6 +171,7 @@ const FILTER_OBJECTS: [(FilterItem, &str); 8] = [
     (FilterItem::Effector, key("Effector")),
     (FilterItem::Camera, key("Camera")),
     (FilterItem::Light, key("Light")),
+    (FilterItem::Sky, key("Sky")),
 ];
 const FILTER_ELEMENTS: [(FilterItem, &str); 3] = [
     (FilterItem::Grid, key("World Grid")),
@@ -789,6 +790,14 @@ impl ViewportPanel {
             self.frame.display = self.display;
             self.frame.filter = self.filter;
             self.frame.effects = self.effects;
+            // An Environment's picture's light all round, once decoded.
+            self.frame.picture_ambient = self.evaluated.environment().and_then(|e| match e.surround {
+                grid4d_eval::Surround::Picture(picture) => {
+                    let id = picture.texture?;
+                    editor.textures.ambient(id).map(|ambient| (id, ambient))
+                }
+                grid4d_eval::Surround::Sky(_) => None,
+            });
             let start = Instant::now();
             self.frame
                 .extract_with_materials(&self.evaluated, Some(doc.scene.materials()), |id| {

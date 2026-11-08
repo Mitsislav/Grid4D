@@ -1,5 +1,7 @@
 use std::{collections::HashMap, ops::Range};
 
+use glam::Vec3;
+
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt as _;
 
@@ -14,6 +16,7 @@ use crate::{
     frame::UvKey,
     mesh::{TessellationScratch, tessellate},
     shaders,
+    sky::{Background, SkyPass, SkyUniform},
     textures::{TexelFormat, TextureLevel, Textures},
 };
 
@@ -46,8 +49,14 @@ struct CameraUniform {
     /// Selected face, hovered face and context edge opacity.
     alphas: [f32; 4],
     /// x: scene lights to use (0: the default light), y: ambient light with
-    /// scene lights, z: 1 to darken the ambient light by the view's occlusion.
+    /// scene lights, z: 1 to darken the ambient light by the view's occlusion,
+    /// w: 1 when a Sky or Environment gives the soft light (`ambient`).
     lighting: [f32; 4],
+    /// Rows: world directions → the frame `ambient` is in.
+    ambient_frame: [[f32; 4]; 3],
+    /// The surround's light all round: nine spherical-harmonic terms
+    /// (irradiance ÷ π) per colour.
+    ambient: [[f32; 4]; 9],
 }
 
 /// The grid plane and the parallel flag as the shaders read them from `light_dir.w`.
@@ -275,6 +284,8 @@ pub struct ViewportRenderer {
     ssao: Ssao,
     /// Texture pictures and the bind groups of textured materials.
     textures: Textures,
+    /// The background a Sky or an Environment shows.
+    sky: SkyPass,
     /// This frame's shadow faces to draw (0: no shadow) and whether it draws SSAO.
     shadow_faces: u32,
     ssao_on: bool,
@@ -462,6 +473,7 @@ impl ViewportRenderer {
             shadows,
             ssao,
             textures,
+            sky: SkyPass::new(device, target),
             shadow_faces: 0,
             ssao_on: false,
             meshes: HashMap::new(),
@@ -496,6 +508,19 @@ impl ViewportRenderer {
         self.ssao_on = frame.effects.ssao && matches!(self.fill, Fill::Lit | Fill::Quick);
         let style = &frame.component_style;
         let px = |n: u32| f32::from(u16::try_from(n).unwrap_or(u16::MAX));
+        // The surround's soft light in the lit modes.
+        let surround_light = frame.surround.filter(|_| self.fill == Fill::Lit);
+        let (ambient_frame, ambient) = surround_light.map_or(([[0.0; 4]; 3], [[0.0; 4]; 9]), |s| {
+            let rows = s.to_frame.transpose();
+            (
+                [
+                    rows.x_axis.extend(0.0).to_array(),
+                    rows.y_axis.extend(0.0).to_array(),
+                    rows.z_axis.extend(0.0).to_array(),
+                ],
+                s.ambient.shader_coefficients(),
+            )
+        });
         let uniform = CameraUniform {
             view_proj: frame.view_proj.to_cols_array_2d(),
             eye: frame.eye.extend(if self.encode_srgb { 1.0 } else { 0.0 }).to_array(),
@@ -535,10 +560,13 @@ impl ViewportRenderer {
                 },
                 SCENE_AMBIENT,
                 f32::from(u8::from(self.ssao_on)),
-                0.0,
+                f32::from(u8::from(surround_light.is_some())),
             ],
+            ambient_frame,
+            ambient,
         };
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+        self.prepare_sky(device, queue, frame, viewport);
 
         let mut rebind = false;
         if frame.lights.len() > self.light_capacity {
@@ -774,9 +802,45 @@ impl ViewportRenderer {
         queue.submit([encoder.finish()]);
     }
 
+    /// The background's uniform and picture: drawn behind a perspective
+    /// view in Gouraud and Quick shading when the surround shows.
+    fn prepare_sky(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FrameData, viewport: [u32; 2]) {
+        let background = frame.surround.map_or(Background::None, |s| s.background);
+        self.sky.on = background != Background::None && matches!(self.fill, Fill::Lit | Fill::Quick) && !frame.parallel;
+        if !self.sky.on {
+            return;
+        }
+        let picture = match background {
+            Background::Picture { texture, .. } => self
+                .textures
+                .view(texture)
+                .map(|(version, view, width)| (texture, version, view, width)),
+            Background::None | Background::Sky(_) | Background::Plain(_) => None,
+        };
+        // A picture's colour where it has one, else the plain grey.
+        let background = match (background, picture) {
+            (Background::Picture { intensity, .. }, None) => Background::Plain(Vec3::splat(0.5 * intensity)),
+            (background, _) => background,
+        };
+        // About one texel per pixel: the picture's level from the angle a
+        // pixel spans.
+        let mip = picture.map_or(0.0, |(_, _, _, width)| {
+            let pixel_angle = 2.0 * (1.0 / frame.proj.y_axis.y.max(1e-6)).atan()
+                / to_f32(usize::try_from(viewport[1]).unwrap_or(1).max(1));
+            let texels = f32::from(u16::try_from(width).unwrap_or(u16::MAX)) / std::f32::consts::TAU * pixel_angle;
+            texels.max(1.0).log2()
+        });
+        let uniform = SkyUniform::new(&background, frame.view_proj, frame.eye, self.encode_srgb, mip);
+        let bound = picture.map(|(id, version, view, _)| (id, version, view));
+        self.sky
+            .prepare(device, queue, &uniform, bound, self.textures.white_view());
+    }
+
     /// Records the view's draw calls into an open render pass; `ao` is the
     /// view's ambient occlusion (bind group 1).
     fn paint(&self, pass: &mut wgpu::RenderPass<'_>, ao: &wgpu::BindGroup) {
+        // The surround behind everything.
+        self.sky.draw(pass);
         pass.set_bind_group(0, &self.camera_bind_group, &[]);
         pass.set_bind_group(1, ao, &[]);
         pass.set_bind_group(2, self.textures.group(None), &[]);
@@ -1179,6 +1243,7 @@ mod tests {
             ("overlay.wgsl", shaders::OVERLAY),
             ("shadow.wgsl", shaders::SHADOW),
             ("ssao.wgsl", shaders::SSAO),
+            ("sky.wgsl", shaders::SKY),
         ] {
             let module =
                 naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(source)));

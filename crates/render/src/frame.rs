@@ -2,15 +2,16 @@ use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Affine2, Mat3, Mat4, Vec3};
-use grid4d_eval::{CurveHandle, EvaluatedLight, EvaluatedScene, MeshKey, Shading};
+use grid4d_eval::{Ambient, CurveHandle, EvaluatedLight, EvaluatedScene, MeshKey, Shading, SkyModel, Sun, Surround};
 use grid4d_geom::Component;
 use grid4d_scene::{
     AreaShape, Channel, Falloff, LightType, Material, MaterialId, Materials, MeshHandle, NodeId, ObjectKindTag,
-    Projection, TextureSlot,
+    Projection, TextureId, TextureSlot,
 };
 
 use crate::{
-    ComponentHit, ComponentStyle, DisplayMode, OrbitCamera, ViewEffects, ViewFilter, components::ComponentOverlay,
+    ComponentHit, ComponentStyle, DisplayMode, FilterItem, OrbitCamera, ViewEffects, ViewFilter,
+    components::ComponentOverlay, sky::SurroundFrame,
 };
 
 /// Per-instance GPU data. Layout must match `InstanceIn` in `shaders/mesh.wgsl`.
@@ -185,6 +186,19 @@ impl LightRaw {
         raw
     }
 
+    /// A Sky's sun: an Infinite light of its colour.
+    pub(crate) fn sun(sun: &Sun) -> Self {
+        let colour = sun.irradiance;
+        Self {
+            position: [0.0, 0.0, 0.0, 2.0],
+            direction: (-sun.direction).extend(-1.0).to_array(),
+            color: [colour.x, colour.y, colour.z, -1.0],
+            falloff: [0.0, 1.0, 0.0, 0.0],
+            area_x: [0.0; 4],
+            area_y: [0.0; 4],
+        }
+    }
+
     /// An area light's shape, and the most light it gives: what the shader
     /// needs to light from the shape's nearest point (see
     /// `docs/reference/render-lights-area.md`).
@@ -335,6 +349,14 @@ pub struct FrameData {
     pub component_style: ComponentStyle,
     /// The scene's visible lights; refilled (capacity kept) every frame.
     pub(crate) lights: Vec<LightRaw>,
+    /// A picture Environment's light all round (its harmonics in the
+    /// picture's own frame), set by whoever decodes the picture before
+    /// [`extract`](Self::extract); `None` while it is not known.
+    pub picture_ambient: Option<(TextureId, Ambient)>,
+    /// What surrounds the scene this frame.
+    pub(crate) surround: Option<SurroundFrame>,
+    /// The last Sky's harmonics (made again only when it changes).
+    sky_ambient: Option<(SkyModel, Ambient)>,
     /// Points, edges and polygons of the active object in a component mode.
     pub(crate) components: ComponentOverlay,
     /// One batch per mesh key seen recently; emptied (capacity kept) every frame.
@@ -374,6 +396,9 @@ impl FrameData {
             shadow_light: None,
             component_style: ComponentStyle::default(),
             lights: Vec::with_capacity(8),
+            picture_ambient: None,
+            surround: None,
+            sky_ambient: None,
             components: ComponentOverlay::default(),
             batches: Vec::with_capacity(16),
             batch_index: HashMap::with_capacity(16),
@@ -466,6 +491,23 @@ impl FrameData {
             .iter()
             .position(|l| l.shadow.casts())
             .map(|index| (index, scene.lights()[index].shadow.is_hard()));
+        // What surrounds the scene: its background (unless the view hides
+        // it) and its light; a Sky's sun lights like an Infinite light and
+        // casts the shadow when no light does.
+        self.surround = scene.environment().map(|environment| {
+            let shown = environment.visible && self.filter.shows(FilterItem::Sky);
+            SurroundFrame::new(environment, self.picture_ambient, &mut self.sky_ambient, shown)
+        });
+        let sun = scene.environment().and_then(|environment| match environment.surround {
+            Surround::Sky(model) => model.sun(),
+            Surround::Picture(_) => None,
+        });
+        if let Some(sun) = sun {
+            self.lights.push(LightRaw::sun(&sun));
+            if self.shadow_light.is_none() {
+                self.shadow_light = Some((self.lights.len() - 1, false));
+            }
+        }
         let mut bounds: Option<(Vec3, Vec3)> = None;
         // Objects, then clones (drawn, selected and filtered as their Cloner).
         let filter = self.filter;
@@ -738,8 +780,8 @@ mod tests {
         let mut frame = FrameData::new();
         frame.extract(&eval, |_| false);
         let all = frame.instance_count();
-        frame.filter.set(crate::FilterItem::Generator, false);
-        frame.filter.set(crate::FilterItem::Light, false);
+        frame.filter.set(FilterItem::Generator, false);
+        frame.filter.set(FilterItem::Light, false);
         frame.extract(&eval, |_| false);
         // Left: the camera marker (the demo's objects are all primitives).
         assert_eq!(frame.instance_count(), 1, "of {all}");
@@ -1184,9 +1226,29 @@ mod tests {
             "selected with the Cloner"
         );
         let mut hidden = ViewFilter::ALL;
-        hidden.set(crate::FilterItem::Generator, false);
+        hidden.set(FilterItem::Generator, false);
         frame.filter = hidden;
         frame.extract(&eval, |_| false);
         assert_eq!(frame.instance_count(), 0, "filtered with the Cloner");
+    }
+
+    #[test]
+    fn a_sky_lights_with_its_sun_and_shows_unless_filtered() {
+        let mut doc = Document::new("sky");
+        doc.scene.insert(Node::new("Cube", ObjectKindTag::Cube.default_kind()));
+        doc.scene.insert(Node::new("Sky", ObjectKindTag::Sky.default_kind()));
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let mut frame = FrameData::new();
+        frame.extract(&eval, |_| false);
+        assert_eq!(frame.lights().len(), 1, "its sun");
+        assert_eq!(frame.shadow_light, Some((0, false)), "casting the shadow");
+        let surround = frame.surround.unwrap();
+        assert!(matches!(surround.background, crate::sky::Background::Sky(_)));
+        assert!(surround.ambient.diffuse(Vec3::Y).y > 0.05, "light from above");
+        frame.filter.set(FilterItem::Sky, false);
+        frame.extract(&eval, |_| false);
+        assert_eq!(frame.surround.unwrap().background, crate::sky::Background::None);
+        assert_eq!(frame.lights().len(), 1, "hidden, it still lights");
     }
 }

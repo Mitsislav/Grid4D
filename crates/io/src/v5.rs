@@ -34,7 +34,7 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
-use grid4d_scene::AreaShape;
+use grid4d_scene::{AreaShape, Environment, Sky, SunPlacement};
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
     FrameRange, ImageFormat, Inherit, Interpolation, Key, Layer, LayerId, LayerSwitches, LightDetails, LightShadow,
@@ -320,7 +320,11 @@ impl OverridesDto {
                     render,
                     enabled,
                 } => dto.visibility = Some([*editor, *render, *enabled]),
-                Override::Parameters(kind) => dto.parameters = Some(KindDto::new(kind, "take", meshes)),
+                Override::Parameters(kind) => {
+                    let mut parameters = KindDto::new(kind, "take", meshes);
+                    parameters.link_texture(kind, &refs.textures);
+                    dto.parameters = Some(parameters);
+                }
                 Override::Tags(tags) => dto.tags = Some(tags.iter().map(|tag| TagDto::new(tag, refs)).collect()),
                 Override::DisplayColor(colour) => dto.display_color = Some(*colour),
             }
@@ -349,6 +353,7 @@ impl OverridesDto {
         self,
         ids: &[NodeId],
         materials: &[MaterialId],
+        textures: &[TextureId],
         meshes: &[MeshHandle],
     ) -> Result<Option<(NodeId, Vec<Override>)>, IoError> {
         let Some(&id) = ids.get(self.object) else {
@@ -370,7 +375,10 @@ impl OverridesDto {
             });
         }
         if let Some(kind) = self.parameters {
-            values.push(Override::Parameters(kind.into_kind(meshes, "take")?));
+            let texture = kind.texture_index();
+            let mut kind = kind.into_kind(meshes, "take")?;
+            link_texture(&mut kind, texture, textures);
+            values.push(Override::Parameters(kind));
         }
         if let Some(tags) = self.tags {
             values.push(Override::Tags(
@@ -1039,6 +1047,12 @@ enum ParamDto {
     Strength,
     Amount,
     Curvature,
+    /// A Sky's (version 5, step 16.3).
+    Elevation,
+    Azimuth,
+    Turbidity,
+    /// An Environment's (version 5, step 16.3).
+    PictureRotation,
     /// A plugin object's number, by its name (added in step 13.2):
     /// `{"plugin": "Phase"}`.
     Plugin(String),
@@ -1125,6 +1139,10 @@ impl From<Param> for ParamDto {
             Param::Object(ObjectParam::Strength) => Self::Strength,
             Param::Object(ObjectParam::Amount) => Self::Amount,
             Param::Object(ObjectParam::Curvature) => Self::Curvature,
+            Param::Object(ObjectParam::Elevation) => Self::Elevation,
+            Param::Object(ObjectParam::Azimuth) => Self::Azimuth,
+            Param::Object(ObjectParam::Turbidity) => Self::Turbidity,
+            Param::Object(ObjectParam::PictureRotation) => Self::PictureRotation,
             // Named by `ParamDto::new`, which has the object.
             Param::Object(ObjectParam::Plugin(_)) => Self::Plugin(String::new()),
         }
@@ -1185,6 +1203,10 @@ impl From<ParamDto> for Param {
             ParamDto::EndGrowth => Self::Object(ObjectParam::EndGrowth),
             ParamDto::Strength => Self::Object(ObjectParam::Strength),
             ParamDto::Amount => Self::Object(ObjectParam::Amount),
+            ParamDto::Elevation => Self::Object(ObjectParam::Elevation),
+            ParamDto::Azimuth => Self::Object(ObjectParam::Azimuth),
+            ParamDto::Turbidity => Self::Object(ObjectParam::Turbidity),
+            ParamDto::PictureRotation => Self::Object(ObjectParam::PictureRotation),
             ParamDto::Curvature => Self::Object(ObjectParam::Curvature),
             // Resolved by `ParamDto::into_param`; never reached from there.
             ParamDto::Plugin(_) => Self::Object(ObjectParam::Plugin(u8::MAX)),
@@ -1886,6 +1908,17 @@ impl From<PluginValueKindDto> for PluginValue {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum KindDto {
     Null,
+    /// A daylight sky (version 5, step 16.3).
+    Sky(SkyDto),
+    /// A picture all round (version 5, step 16.3): its texture by index in
+    /// `textures`.
+    Environment {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        texture: Option<usize>,
+        intensity: f32,
+        rotation: f32,
+        visible: bool,
+    },
     Cube {
         size: [f32; 3],
         segments: [u32; 3],
@@ -3073,6 +3106,74 @@ impl SplinePointsDto {
     }
 }
 
+/// How a Sky's sun is placed (version 5, step 16.3).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum SunPlacementDto {
+    #[default]
+    Object,
+    Angles,
+}
+
+/// A Sky's settings (version 5, step 16.3); angles in radians.
+#[derive(Debug, Serialize, Deserialize)]
+struct SkyDto {
+    sun_placement: SunPlacementDto,
+    elevation: f32,
+    azimuth: f32,
+    turbidity: f32,
+    intensity: f32,
+    sun: bool,
+    sun_size: f32,
+    sun_intensity: f32,
+    visible: bool,
+}
+
+impl SkyDto {
+    const fn new(sky: &Sky) -> Self {
+        Self {
+            sun_placement: match sky.placement {
+                SunPlacement::FromObject => SunPlacementDto::Object,
+                SunPlacement::Angles => SunPlacementDto::Angles,
+            },
+            elevation: sky.elevation,
+            azimuth: sky.azimuth,
+            turbidity: sky.turbidity,
+            intensity: sky.intensity,
+            sun: sky.sun,
+            sun_size: sky.sun_size,
+            sun_intensity: sky.sun_intensity,
+            visible: sky.visible,
+        }
+    }
+
+    /// Out-of-range values clamped.
+    fn into_sky(self) -> Sky {
+        Sky {
+            placement: match self.sun_placement {
+                SunPlacementDto::Object => SunPlacement::FromObject,
+                SunPlacementDto::Angles => SunPlacement::Angles,
+            },
+            elevation: self.elevation.clamp(Sky::MIN_ELEVATION, Sky::MAX_ELEVATION),
+            azimuth: self.azimuth,
+            turbidity: self.turbidity.clamp(Sky::MIN_TURBIDITY, Sky::MAX_TURBIDITY),
+            intensity: self.intensity.clamp(0.0, Sky::MAX_INTENSITY),
+            sun: self.sun,
+            sun_size: self.sun_size.clamp(Sky::MIN_SUN_SIZE, Sky::MAX_SUN_SIZE),
+            sun_intensity: self.sun_intensity.clamp(0.0, Sky::MAX_INTENSITY),
+            visible: self.visible,
+        }
+    }
+}
+
+/// Links an Environment `kind` read from a file to the texture at `index`
+/// of `textures` (none for an index the file lacks).
+fn link_texture(kind: &mut ObjectKind, index: Option<usize>, textures: &[TextureId]) {
+    if let ObjectKind::Environment(environment) = kind {
+        environment.texture = index.and_then(|i| textures.get(i).copied());
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum LightTypeDto {
@@ -3455,13 +3556,14 @@ fn read_takes(
     dto: TakesDto,
     ids: &[NodeId],
     materials: &[MaterialId],
+    textures: &[TextureId],
     meshes: &[MeshHandle],
 ) -> Result<(), IoError> {
     let objects = |list: Vec<OverridesDto>| -> Result<ObjectOverrides, IoError> {
         let mut out = ObjectOverrides::new();
         for overrides in list {
             overrides.check_finite()?;
-            if let Some((id, values)) = overrides.into_values(ids, materials, meshes)? {
+            if let Some((id, values)) = overrides.into_values(ids, materials, textures, meshes)? {
                 out.insert(id, values);
             }
         }
@@ -3695,7 +3797,9 @@ impl File {
                     _ => (None, Vec::new()),
                 });
                 let parent = object.parent;
-                let (data, object_tags) = object.into_data(&meshes)?;
+                let texture = object.kind.texture_index();
+                let (mut data, object_tags) = object.into_data(&meshes)?;
+                link_texture(&mut data.kind, texture, &texture_ids);
                 tags.push(object_tags);
                 Ok((parent, data))
             })
@@ -3752,7 +3856,7 @@ impl File {
             }
         }
         if let Some(takes) = takes {
-            read_takes(&mut doc, takes, &ids, &material_ids, &meshes)?;
+            read_takes(&mut doc, takes, &ids, &material_ids, &texture_ids, &meshes)?;
         }
         *doc.scene.textures_mut() = texture_table;
         let cache = simulation_cache.map(|dto| dto.into_cache(archive, &ids)).transpose()?;
@@ -3780,6 +3884,7 @@ impl ObjectDto {
                     *object = target.and_then(|id| refs.objects.get(&id).copied());
                     effectors.extend(links.iter().filter_map(|id| refs.objects.get(id).copied()));
                 }
+                kind.link_texture(&data.kind, &refs.textures);
                 kind
             },
             position: t.position.to_array(),
@@ -3852,9 +3957,32 @@ impl ObjectDto {
 }
 
 impl KindDto {
+    /// An Environment's texture index, as the file has it.
+    const fn texture_index(&self) -> Option<usize> {
+        match self {
+            Self::Environment { texture, .. } => *texture,
+            _ => None,
+        }
+    }
+
+    /// Writes an Environment's texture by its index in `textures`.
+    fn link_texture(&mut self, kind: &ObjectKind, textures: &HashMap<TextureId, usize>) {
+        if let (Self::Environment { texture, .. }, ObjectKind::Environment(environment)) = (self, kind) {
+            *texture = environment.texture.and_then(|id| textures.get(&id).copied());
+        }
+    }
+
     fn new(kind: &ObjectKind, object: &str, meshes: &mut MeshTable) -> Self {
         match *kind {
             ObjectKind::Null => Self::Null,
+            ObjectKind::Sky(sky) => Self::Sky(SkyDto::new(&sky)),
+            ObjectKind::Environment(environment) => Self::Environment {
+                // Written by the object, which has the texture table.
+                texture: None,
+                intensity: environment.intensity,
+                rotation: environment.rotation,
+                visible: environment.visible,
+            },
             ObjectKind::Plugin(ref plugin) => Self::Plugin {
                 plugin: plugin.type_id.clone(),
                 values: plugin
@@ -4251,6 +4379,19 @@ impl KindDto {
                 cap_segments,
             },
             Self::Camera { fov_y_deg } => ObjectKind::Camera { fov_y_deg },
+            Self::Sky(sky) => ObjectKind::Sky(sky.into_sky()),
+            // Its texture is linked by the caller, which has the table.
+            Self::Environment {
+                intensity,
+                rotation,
+                visible,
+                ..
+            } => ObjectKind::Environment(Environment {
+                texture: None,
+                intensity: intensity.clamp(0.0, Sky::MAX_INTENSITY),
+                rotation,
+                visible,
+            }),
             Self::Light {
                 color,
                 intensity,
@@ -4744,6 +4885,17 @@ impl KindDto {
                 }
                 numbers
             }
+            Self::Sky(ref sky) => vec![
+                sky.elevation,
+                sky.azimuth,
+                sky.turbidity,
+                sky.intensity,
+                sky.sun_size,
+                sky.sun_intensity,
+            ],
+            Self::Environment {
+                intensity, rotation, ..
+            } => vec![intensity, rotation],
         }
     }
 }

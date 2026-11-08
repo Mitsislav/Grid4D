@@ -219,6 +219,16 @@ impl Textures {
         }
     }
 
+    /// Picture `id` on the GPU: its version, its view and its width.
+    pub fn view(&self, id: TextureId) -> Option<(u64, &wgpu::TextureView, u32)> {
+        self.pictures.get(&id).map(|t| (t.version, &t.view, t.texture.width()))
+    }
+
+    /// The 1 × 1 white picture.
+    pub const fn white_view(&self) -> &wgpu::TextureView {
+        &self.white.view
+    }
+
     /// Whether picture `id` is on the GPU at `version`.
     pub fn has(&self, id: TextureId, version: u64) -> bool {
         self.pictures.get(&id).is_some_and(|t| t.version == version)

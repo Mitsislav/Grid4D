@@ -325,6 +325,106 @@ fn render_the_interface_for_review() {
     println!("pictures in {}", dir.display());
 }
 
+/// The manual's picture of a Sky: a still life under an afternoon sky in the
+/// viewport, the Sky selected (its settings in the Attribute Manager):
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored sky_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn sky_picture() {
+    use glam::Vec3;
+    use grid4d_scene::{Material, MaterialTag, Node, ObjectKind, Sky, SunPlacement, Tag};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::new("Afternoon");
+    let add = |doc: &mut Document, name: &str, color: [f32; 3], roughness: f32, metallic: f32| {
+        let mut m = Material::new(name);
+        (m.color, m.roughness, m.metallic) = (color, roughness, metallic);
+        doc.scene.materials_mut().insert(m)
+    };
+    let grey = add(&mut doc, "Grey", [0.55, 0.55, 0.55], 0.8, 0.0);
+    let red = add(&mut doc, "Red", [0.75, 0.08, 0.06], 0.3, 0.0);
+    let chrome = add(&mut doc, "Chrome", [0.95, 0.95, 0.95], 0.08, 1.0);
+    let gold = add(&mut doc, "Gold", [0.9, 0.7, 0.35], 0.3, 1.0);
+    let mut put = |name: &str, kind: ObjectKind, position: Vec3, material| {
+        let mut node = Node::new(name, kind).with_position(position);
+        node.data.tags = vec![Tag::Material(MaterialTag::new(Some(material)))];
+        doc.scene.insert(node);
+    };
+    put(
+        "Floor",
+        ObjectKind::Plane {
+            width: 1200.0,
+            depth: 1200.0,
+            width_segments: 1,
+            depth_segments: 1,
+        },
+        Vec3::ZERO,
+        grey,
+    );
+    put(
+        "Cube",
+        ObjectKind::Cube {
+            size: Vec3::splat(100.0),
+            segments: [1, 1, 1],
+        },
+        Vec3::new(-110.0, 50.0, 0.0),
+        red,
+    );
+    put(
+        "Sphere",
+        ObjectKind::Sphere {
+            radius: 55.0,
+            segments: 32,
+        },
+        Vec3::new(20.0, 55.0, 60.0),
+        chrome,
+    );
+    put(
+        "Torus",
+        ObjectKind::Torus {
+            ring_radius: 45.0,
+            pipe_radius: 15.0,
+            ring_segments: 32,
+            pipe_segments: 12,
+        },
+        Vec3::new(130.0, 15.0, -30.0),
+        gold,
+    );
+    let sky = doc.scene.insert(Node::new(
+        "Sky",
+        ObjectKind::Sky(Sky {
+            placement: SunPlacement::Angles,
+            elevation: 30f32.to_radians(),
+            azimuth: 310f32.to_radians(),
+            ..Sky::default()
+        }),
+    ));
+    // Seen from low down, through a camera, so the sky shows above the floor.
+    let eye = Vec3::new(-430.0, 120.0, -620.0);
+    let look = glam::camera::rh::view::look_at_mat4(eye, Vec3::new(20.0, 70.0, 0.0), Vec3::Y).inverse();
+    let camera = doc.scene.insert(
+        Node::new("Camera", ObjectKind::Camera { fov_y_deg: 40.0 })
+            .with_transform(grid4d_scene::Transform::from_matrix(&look)),
+    );
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    h.state_mut().editor.view_camera = Some(camera);
+    h.state_mut().editor.selection.set_single(sky);
+    h.run_steps(4);
+    // The Attribute Manager's Object tab (below the Object Manager's menu).
+    let tab = h
+        .get_all_by_label("Object")
+        .map(|node| node.rect())
+        .filter(|rect| rect.top() > SIZE[1] * 0.5)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    click(&mut h, tab.center());
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "sky-viewport");
+}
+
 /// The manual's picture of the Texture Manager: a few pictures (one embedded,
 /// one missing), in the Animate layout where the bottom pane is tall:
 ///

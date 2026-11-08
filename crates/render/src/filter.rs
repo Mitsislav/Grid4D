@@ -17,6 +17,8 @@ pub enum FilterItem {
     Effector,
     Camera,
     Light,
+    /// A Sky's or Environment's background (its light stays).
+    Sky,
     /// The grid.
     Grid,
     /// The axis triad in the corner.
@@ -25,7 +27,7 @@ pub enum FilterItem {
 }
 
 impl FilterItem {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Polygon,
         Self::Generator,
         Self::SubdivisionSurface,
@@ -34,6 +36,7 @@ impl FilterItem {
         Self::Effector,
         Self::Camera,
         Self::Light,
+        Self::Sky,
         Self::Grid,
         Self::WorldAxis,
         Self::Hud,
@@ -64,6 +67,7 @@ impl FilterItem {
             | ObjectKindTag::Plugin => Some(Self::Generator),
             ObjectKindTag::Camera => Some(Self::Camera),
             ObjectKindTag::Light => Some(Self::Light),
+            ObjectKindTag::Sky | ObjectKindTag::Environment => Some(Self::Sky),
             ObjectKindTag::Circle
             | ObjectKindTag::Rectangle
             | ObjectKindTag::Arc
@@ -95,6 +99,7 @@ impl FilterItem {
             Self::Spline => 1 << 8,
             Self::Deformer => 1 << 9,
             Self::Effector => 1 << 10,
+            Self::Sky => 1 << 11,
         }
     }
 }
@@ -109,7 +114,7 @@ impl ViewFilter {
     /// Everything shown.
     pub const ALL: Self = Self { hidden: 0 };
     /// Everything hidden.
-    pub const NONE: Self = Self { hidden: 0x7FF };
+    pub const NONE: Self = Self { hidden: 0xFFF };
 
     #[must_use]
     pub const fn shows(self, item: FilterItem) -> bool {

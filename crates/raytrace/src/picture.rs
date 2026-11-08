@@ -88,6 +88,15 @@ impl Picture {
         self.grey
     }
 
+    /// The texel at column `x`, row `y` (clamped into the picture), linear
+    /// RGBA.
+    #[must_use]
+    pub fn texel_at(&self, x: u32, y: u32) -> Vec4 {
+        let column = usize::try_from(x.min(self.width - 1)).unwrap_or(0);
+        let row = usize::try_from(y.min(self.height - 1)).unwrap_or(0);
+        self.texel(column, row)
+    }
+
     /// The texel at column `x`, row `y` (both in range), linear RGBA.
     fn texel(&self, x: usize, y: usize) -> Vec4 {
         let width = usize::from(u16::try_from(self.width).unwrap_or(u16::MAX));

@@ -9,6 +9,7 @@ use grid4d_eval::{Drawable, EvaluatedLight, EvaluatedScene, MaterialLayers, Mesh
 use grid4d_geom::{Bvh, PolyMesh, TriMesh, Triangulator, uv};
 use grid4d_scene::{Aabb, Falloff, LightShadow, LightType, MaterialId, Materials, NodeId, Projection};
 
+use crate::environment::EnvironmentLight;
 use crate::{
     RenderCamera,
     channels::Channels,
@@ -230,6 +231,8 @@ pub struct RenderScene {
     /// sampled).
     with_emitters: LightTable,
     areas_only: LightTable,
+    /// What surrounds the scene (a Sky or an Environment).
+    environment: Option<EnvironmentLight>,
     bounds: Option<(Vec3, Vec3)>,
 }
 
@@ -344,6 +347,9 @@ impl RenderScene {
             areas: evaluated.lights().iter().filter_map(AreaLight::new).collect(),
             with_emitters: LightTable::default(),
             areas_only: LightTable::default(),
+            environment: evaluated
+                .environment()
+                .map(|environment| EnvironmentLight::new(environment, texturing.map(|t| t.pictures))),
             bounds: b.bounds,
         }
         .with_light_tables()
@@ -537,6 +543,11 @@ impl RenderScene {
 
     pub(crate) fn lights(&self) -> &[Light] {
         &self.lights
+    }
+
+    /// What surrounds the scene.
+    pub(crate) const fn environment(&self) -> Option<&EnvironmentLight> {
+        self.environment.as_ref()
     }
 
     /// The area lights.

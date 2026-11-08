@@ -19,6 +19,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use grid4d_eval::Ambient;
 use grid4d_io::{Pixels, TextureImage};
 use grid4d_raytrace::{Picture, Pictures, Texels};
 use grid4d_scene::{ColorSpace, Texture, TextureId, TextureSource, Textures};
@@ -67,8 +68,9 @@ impl Input {
 #[derive(Debug)]
 enum State {
     Loading,
-    /// Decoded, and the full-size level as the path tracer reads it.
-    Ready(Arc<TextureImage>, Option<Arc<Picture>>),
+    /// Decoded, the full-size level as the path tracer reads it, and the
+    /// light it gives all round as an Environment.
+    Ready(Arc<TextureImage>, Option<Arc<Picture>>, Option<Ambient>),
     Missing,
     Failed(String),
 }
@@ -178,7 +180,7 @@ impl TextureCache {
             Some(entry) if entry.input.matches(&texture.source) && entry.color_space == texture.color_space => {
                 match &entry.state {
                     State::Loading => Status::Loading,
-                    State::Ready(image, _) => Status::Ready {
+                    State::Ready(image, ..) => Status::Ready {
                         image,
                         version: entry.version,
                     },
@@ -199,12 +201,22 @@ impl TextureCache {
             if let Some(entry) = self.entries.get(&id)
                 && entry.input.matches(&texture.source)
                 && entry.color_space == texture.color_space
-                && let State::Ready(_, Some(picture)) = &entry.state
+                && let State::Ready(_, Some(picture), _) = &entry.state
             {
                 pictures.insert(id, Arc::clone(picture));
             }
         }
         pictures
+    }
+
+    /// The light texture `id`'s picture gives all round as an Environment
+    /// (in the picture's own frame), once it is decoded.
+    #[must_use]
+    pub fn ambient(&self, id: TextureId) -> Option<Ambient> {
+        match self.entries.get(&id).map(|entry| &entry.state) {
+            Some(State::Ready(_, _, ambient)) => *ambient,
+            _ => None,
+        }
     }
 
     /// The version of the picture of texture `id` (changes with every
@@ -357,8 +369,12 @@ fn load(job: Job) -> Done {
         Err(err) => State::Failed(err.to_string()),
         Ok(bytes) => match grid4d_io::decode_texture(&bytes, color_space) {
             Ok(image) => {
-                let picture = render_picture(&image, color_space);
-                State::Ready(Arc::new(image), picture)
+                let picture = image
+                    .levels
+                    .first()
+                    .and_then(|level| render_picture(level, color_space));
+                let ambient = surround_ambient(&image, color_space);
+                State::Ready(Arc::new(image), picture, ambient)
             }
             Err(err) => State::Failed(err.to_string()),
         },
@@ -371,10 +387,26 @@ fn load(job: Job) -> Done {
     }
 }
 
-/// The full-size level of `image` as the path tracer reads it, sharing its
+/// The light `image` gives all round as an Environment's picture (see
+/// `docs/reference/render-environment.md`): its spherical harmonics, from
+/// the first level at most 256 texels wide (whose texels average the larger
+/// ones', so a small sun keeps its light).
+fn surround_ambient(image: &TextureImage, color_space: ColorSpace) -> Option<Ambient> {
+    let level = image
+        .levels
+        .iter()
+        .find(|level| level.width <= 256)
+        .or_else(|| image.levels.last())?;
+    let picture = render_picture(level, color_space)?;
+    let (width, height) = picture.size();
+    Some(Ambient::from_equirect(width, height, |x, y| {
+        picture.texel_at(x, y).truncate()
+    }))
+}
+
+/// A level of a decoded picture as the path tracer reads it, sharing its
 /// pixels.
-fn render_picture(image: &TextureImage, color_space: ColorSpace) -> Option<Arc<Picture>> {
-    let level = image.levels.first()?;
+fn render_picture(level: &grid4d_io::Level, color_space: ColorSpace) -> Option<Arc<Picture>> {
     let texels = match (&level.pixels, color_space) {
         (Pixels::Rgba8(bytes), ColorSpace::Srgb) => Texels::Srgb8(Arc::clone(bytes)),
         (Pixels::Rgba8(bytes), ColorSpace::Linear) => Texels::Linear8(Arc::clone(bytes)),

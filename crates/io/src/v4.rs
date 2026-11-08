@@ -82,6 +82,15 @@ const NEW_VALUES: &[NewValue] = &[
         field: "light_type",
         value: "area",
     },
+    // Step 16.3: the Sky and Environment objects.
+    NewValue {
+        field: "type",
+        value: "sky",
+    },
+    NewValue {
+        field: "type",
+        value: "environment",
+    },
 ];
 
 /// A version 4 `document.json`, already parsed, as version 5 (see the module

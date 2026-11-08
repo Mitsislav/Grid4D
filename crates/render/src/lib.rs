@@ -25,6 +25,7 @@ mod frame;
 mod gpu;
 mod mesh;
 mod picking;
+mod sky;
 mod snap;
 mod target;
 mod textures;
@@ -52,4 +53,5 @@ pub mod shaders {
     pub const OVERLAY: &str = include_str!("shaders/overlay.wgsl");
     pub const SHADOW: &str = include_str!("shaders/shadow.wgsl");
     pub const SSAO: &str = include_str!("shaders/ssao.wgsl");
+    pub const SKY: &str = include_str!("shaders/sky.wgsl");
 }

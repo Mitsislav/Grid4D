@@ -114,6 +114,8 @@ The `kind` of an object, by its `type`:
 | `capsule` | `radius`, `height`, `rotation_segments`, `height_segments`, `cap_segments` |
 | `camera` | `fov_y_deg` (vertical field of view, degrees) |
 | `light` | `color`, `intensity` (1 = 100 %); `light_type`: `omni` (default), `spot`, `infinite`; `details` (default: none): `use_inner`, `inner_angle_deg`, `outer_angle_deg`, `falloff` (`none`, `linear`, `inverse_square`), `radius`; `shadow`: `none` (default), `shadow_maps`, `raytraced`, `area`. Version 5 adds the `light_type` `area` and `area` (default: none — a rectangle 100 × 100 cm, not visible, one-sided): `shape` (`rectangle`, `disc`, `sphere`, `tube`), `size` ([Size X, Size Y], cm, 0.1 – 100 000), `visible`, `two_sided` (bools; false when absent) |
+| `sky` | Version 5: `sun_placement` (`angles`, `object`), `elevation`, `azimuth` (radians), `turbidity` (1.7 – 10), `intensity`, `sun_intensity` (1 = 100 %, 0 – 100), `sun` (bool), `sun_size` (× the real sun, 0.1 – 20), `visible` (to the camera) |
+| `environment` | Version 5: `texture` (index into `textures`; none: a uniform grey), `intensity` (1 = 100 %), `rotation` (radians), `visible` (to the camera) |
 | `polygon` | `mesh` (index into `meshes`); `selected`, `hidden` (component sets, below; default empty); `seams` (a component set with `edges` only: the UV seams; default none) |
 | `subdivision_surface` | `viewport_levels`, `render_levels`, `linear_pre` (0 – 6), `boundary` (`edge`, `edge_and_corner`) |
 | `extrude` | `offset`, `movement` (vector), `subdivision`; `direction`: `auto` (default), `x`, `y`, `z`, `custom`, `absolute`; `reverse_normals` (false), `hierarchical` (false), `start_cap` (true), `end_cap` (true), `cap_type`: `n_gons` (default), `triangles` |
@@ -240,7 +242,8 @@ Each track of `tracks`:
   `intensity`, `inner_angle`, `outer_angle`, `falloff_radius`, `offset`,
   `movement_x` … `movement_z`, `angle`, `rise`, `scaling`, `end_scale`,
   `end_rotation`, `start_growth`, `end_growth`, `strength`, `amount`,
-  `curvature`); or a plugin value by name, `{"plugin": "Phase"}`.
+  `curvature`; version 5: `elevation`, `azimuth`, `turbidity`,
+  `picture_rotation`); or a plugin value by name, `{"plugin": "Phase"}`.
 - `keys`, ascending by frame: `frame` (may be fractional), `value` (in the
   parameter's stored unit), `interpolation`: `spline` (default), `linear`,
   `step`; `tangents` (default: automatic): `left` and `right`, each
@@ -312,6 +315,7 @@ Phase 16; each step adds its row):
 |----------|-------|
 | the render settings' `clamp_indirect` and `emissive_lights` (bools, `true` when absent; also in takes' own and Main's render settings) | step 16.2 |
 | the `light` kind's `light_type` value `area`, and its `area` object (`shape`: `rectangle`, `disc`, `sphere`, `tube`; `size`: [x, y] cm; `visible`, `two_sided`: bools, false when absent) | step 16.2 |
+| the kinds `sky` and `environment`, and the track parameters `elevation`, `azimuth`, `turbidity`, `picture_rotation` | step 16.3 |
 
 A version 4 file is therefore read as a version 5 file with the version
 number changed, minus any field this table lists (version 4 readers ignore

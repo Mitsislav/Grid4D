@@ -41,21 +41,34 @@ fn colour() -> impl Strategy<Value = [f32; 3]> {
     (0.0f32..=1.0, 0.0f32..=1.0, 0.0f32..=1.0).prop_map(|(r, g, b)| [r, g, b])
 }
 
-/// A kind of object at its defaults, its keyable parameters set at random
-/// (within what the object accepts), or a plugin object with random values.
+/// The kinds of object version 4 has (version 5's get a strategy of their own).
+fn version_4_kinds() -> Vec<ObjectKindTag> {
+    ObjectKindTag::ALL
+        .into_iter()
+        .filter(|t| !matches!(t, ObjectKindTag::Sky | ObjectKindTag::Environment))
+        .collect()
+}
+
+/// A kind of object (one version 4 has) at its defaults, its keyable
+/// parameters set at random (within what the object accepts), or a plugin
+/// object with random values.
 fn kind() -> impl Strategy<Value = ObjectKind> {
-    let builtin = (0..ObjectKindTag::ALL.len(), prop::collection::vec(0.0f32..1.0, 8)).prop_map(|(i, values)| {
-        let mut kind = ObjectKindTag::ALL[i].default_kind();
-        for (param, v) in kind.params().into_iter().zip(values) {
-            let value = match param.unit() {
-                ParamUnit::Fraction => v,
-                ParamUnit::Radians => v * 3.0,
-                ParamUnit::Plain => 1.0 + v * 400.0,
-            };
-            kind.set_param(param, value);
-        }
-        kind
-    });
+    let builtin = (
+        prop::sample::select(version_4_kinds()),
+        prop::collection::vec(0.0f32..1.0, 8),
+    )
+        .prop_map(|(tag, values)| {
+            let mut kind = tag.default_kind();
+            for (param, v) in kind.params().into_iter().zip(values) {
+                let value = match param.unit() {
+                    ParamUnit::Fraction => v,
+                    ParamUnit::Radians => v * 3.0,
+                    ParamUnit::Plain => 1.0 + v * 400.0,
+                };
+                kind.set_param(param, value);
+            }
+            kind
+        });
     let plugin = (
         "[a-z]{1,8}\\.[a-z]{1,8}",
         -1000.0f32..1000.0,
@@ -317,6 +330,8 @@ proptest! {
         clamp_indirect in any::<bool>(),
         emissive_lights in any::<bool>(),
         area in prop::option::of((0usize..4, 1.0f32..500.0, 1.0f32..500.0, any::<bool>(), any::<bool>())),
+        sky in prop::option::of((any::<bool>(), -0.17f32..1.57, 0.0f32..6.0, 1.7f32..10.0, 0.0f32..5.0, any::<bool>(), 0.1f32..20.0, any::<bool>())),
+        environment in prop::option::of((any::<bool>(), 0.0f32..5.0, -6.0f32..6.0, any::<bool>())),
     ) {
         let mut doc = document(objects, Vec::new(), Vec::new());
         // Step 16.2: the light-transport switches, an area light.
@@ -340,13 +355,42 @@ proptest! {
                 },
             ));
         }
+        // Step 16.3: a Sky, an Environment (with a texture or none).
+        if let Some((angles, elevation, azimuth, turbidity, intensity, sun, sun_size, visible)) = sky {
+            doc.scene.insert(Node::new(
+                "Sky",
+                ObjectKind::Sky(grid4d_scene::Sky {
+                    placement: if angles { grid4d_scene::SunPlacement::Angles } else { grid4d_scene::SunPlacement::FromObject },
+                    elevation,
+                    azimuth,
+                    turbidity,
+                    intensity,
+                    sun,
+                    sun_size,
+                    sun_intensity: intensity * 0.5,
+                    visible,
+                }),
+            ));
+        }
+        if let Some((textured, intensity, rotation, visible)) = environment {
+            let texture = textured.then(|| {
+                doc.scene
+                    .textures_mut()
+                    .insert(grid4d_scene::Texture::linked(std::path::PathBuf::from("sky.hdr")))
+            });
+            doc.scene.insert(Node::new(
+                "Environment",
+                ObjectKind::Environment(grid4d_scene::Environment { texture, intensity, rotation, visible }),
+            ));
+        }
         let bytes = grid4d_io::to_bytes(&doc).unwrap();
         let loaded = grid4d_io::from_bytes(&bytes).unwrap();
         prop_assert_eq!(&loaded.render, &doc.render);
         prop_assert!(grid4d_io::to_bytes(&loaded).unwrap() == bytes);
         let as_v4 = grid4d_io::from_bytes(&labelled(&bytes, 4));
-        if area.is_some() {
-            // Grid4D 1.1 refused the Area light type: so does a version 4 file.
+        if area.is_some() || sky.is_some() || environment.is_some() {
+            // Grid4D 1.1 refused the Area light type and these kinds of
+            // object: so does a version 4 file.
             prop_assert!(as_v4.is_err());
         } else {
             let mut expected = doc.render;

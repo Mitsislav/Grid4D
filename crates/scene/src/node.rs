@@ -92,6 +92,11 @@ pub enum ObjectKind {
         details: LightDetails,
         shadow: LightShadow,
     },
+    /// A daylight sky with a sun around the scene
+    /// (`docs/reference/render-environment.md`).
+    Sky(crate::Sky),
+    /// A picture around the scene.
+    Environment(crate::Environment),
     /// An editable mesh (C4D's "Polygon Object"), in object space, with its
     /// selected and hidden components (they live in the object, like C4D's, so
     /// they are undoable and saved).
@@ -189,6 +194,8 @@ pub enum ObjectKindTag {
     Capsule,
     Camera,
     Light,
+    Sky,
+    Environment,
     Polygon,
     SubdivisionSurface,
     Extrude,
@@ -218,7 +225,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 36] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -230,6 +237,8 @@ impl ObjectKindTag {
         Self::Capsule,
         Self::Camera,
         Self::Light,
+        Self::Sky,
+        Self::Environment,
         Self::Polygon,
         Self::SubdivisionSurface,
         Self::Extrude,
@@ -311,6 +320,8 @@ impl ObjectKindTag {
             Self::Capsule => "Capsule",
             Self::Camera => "Camera",
             Self::Light => "Light",
+            Self::Sky => "Sky",
+            Self::Environment => "Environment",
             Self::Polygon => "Polygon",
             Self::SubdivisionSurface => "Subdivision Surface",
             Self::Extrude => "Extrude",
@@ -391,6 +402,10 @@ impl ObjectKindTag {
             },
             Self::Camera => ObjectKind::Camera { fov_y_deg: 40.0 },
             Self::Light => ObjectKind::light([1.0, 1.0, 1.0], 1.0),
+            // docs/reference/render-environment.md: a clear day, the sun 45° up.
+            Self::Sky => ObjectKind::Sky(crate::Sky::default()),
+            // No picture yet: a uniform grey.
+            Self::Environment => ObjectKind::Environment(crate::Environment::default()),
             // Empty, like C4D's Create ▸ Polygon Object.
             Self::Polygon => ObjectKind::polygon(MeshHandle::new(grid4d_geom::PolyMesh::new())),
             // The manual states no defaults: 2 / 3 levels are the long-standing
@@ -550,6 +565,8 @@ impl ObjectKind {
             Self::Capsule { .. } => ObjectKindTag::Capsule,
             Self::Camera { .. } => ObjectKindTag::Camera,
             Self::Light { .. } => ObjectKindTag::Light,
+            Self::Sky(_) => ObjectKindTag::Sky,
+            Self::Environment(_) => ObjectKindTag::Environment,
             Self::Polygon { .. } => ObjectKindTag::Polygon,
             Self::SubdivisionSurface { .. } => ObjectKindTag::SubdivisionSurface,
             Self::Extrude { .. } => ObjectKindTag::Extrude,
@@ -604,6 +621,8 @@ impl ObjectKind {
             | Self::Capsule { .. }
             | Self::Camera { .. }
             | Self::Light { .. }
+            | Self::Sky(_)
+            | Self::Environment(_)
             | Self::Polygon { .. }
             | Self::SplinePrimitive(_)
             | Self::Text(_)
@@ -617,6 +636,12 @@ impl ObjectKind {
             | Self::RandomEffector(_)
             | Self::Plugin(_) => 0,
         }
+    }
+
+    /// Surrounds the scene at infinity: a Sky or an Environment.
+    #[must_use]
+    pub const fn is_surround(&self) -> bool {
+        matches!(self, Self::Sky(_) | Self::Environment(_))
     }
 
     /// Reshapes its parent and the parent's subtree (see [`ObjectKindTag::DEFORMERS`]).
@@ -740,7 +765,10 @@ impl ObjectKind {
             | Self::Loft(_)
             | Self::Cloner { .. }
             // A plugin's mesh: evaluation knows its extent.
-            | Self::Plugin(_) => {
+            | Self::Plugin(_)
+            // At infinity: no extent.
+            | Self::Sky(_)
+            | Self::Environment(_) => {
                 return None;
             }
             Self::Cube { size, .. } => size * 0.5,
