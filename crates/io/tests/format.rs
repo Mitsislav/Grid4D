@@ -110,9 +110,13 @@ fn golden_with(mesh: grid4d_geom::PolyMesh) -> Document {
 }
 
 /// Everything a version 5 file can hold (see `docs/FILE_FORMAT.md`): version
-/// 4's, and what Phase 16 adds as it arrives (nothing yet in 16.1).
+/// 4's, and what Phase 16 adds as it arrives — the light-transport switches
+/// off (16.2).
 fn full_document() -> (Document, SimulationCache) {
-    full_v4_document()
+    let (mut doc, cache) = full_v4_document();
+    doc.render.clamp_indirect = false;
+    doc.render.emissive_lights = false;
+    (doc, cache)
 }
 
 /// Everything a version 4 file can hold, which 1.1 froze (`full_v4.g4d`; never

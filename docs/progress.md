@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 16 — Render quality (v1.2): in progress |
-| Last step done | 16.1 — Phase 16's specs, `.g4d` version 5 open, the render-time budget measured (2026-11-07) |
-| Next step | 16.2 — light transport (next-event estimation with MIS), emissive surfaces as lights, area lights |
-| Tests | 871 (and 6 ignored, run by hand: three timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy and rustfmt clean |
+| Last step done | 16.2a — Light transport: emitting surfaces sampled as lights with MIS, Clamp Indirect and Emissive Surfaces switches (2026-11-08) |
+| Next step | 16.2b — area lights (rectangle, disc, sphere, tube) in the scene, the file, the Attribute Manager, the viewport and the tracer |
+| Tests | 877 (and 6 ignored, run by hand: three timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2734,6 +2734,7 @@ risks R5 – R8 go with it.
 | Step | What was built | Tests |
 |------|----------------|-------|
 | 16.1 | Eight specs (the format version 5, area lights with light transport, linking and groups, the Sky and Environment, lens and shutter, passes and multi-layer OpenEXR, adaptive sampling and the denoiser, the Render Queue with the region and the interactive Render View, subsurface and displacement); `.g4d` version 5 written (version 4's module moved to `v5.rs`; `v4.rs` upgrades a version 4 `document.json` as JSON, dropping fields version 5 adds by place and refusing values it adds; version 3 goes through both upgrades); `FILE_FORMAT.md` for version 5, golden `demo_v5.g4d` / `full_v5.g4d`, the version 4 fixtures frozen and checked to read exactly as before, the property test relabels documents as version 4 too; the render-time budget measured on four reference scenes (`examples/budget.rs`, `docs/performance.md`) | 871 |
+| 16.2a | Light transport: emitting triangles in a table by power (four points' brightness × area), one sampled at every surface with a shadow ray (stopped by glass, which refracted paths cross instead), weighed against the material's own bounce by multiple importance sampling (the power heuristic; `Material::pdf`, the mixture of its lobes); Omni / Spot / Infinite unchanged, so scenes without emitters render exactly as in 1.1; Render Settings ▸ Sampling: Clamp Indirect and Emissive Surfaces Light the Scene (`.g4d` v5 `clamp_indirect`, `emissive_lights`; dropped from a v4 file); Greek; the manual's §20.1 with a before / after picture; the studio scene re-measured | 877 |
 
 **16.1 — Specs, the format version 5, the render-time budget**
 
@@ -2771,6 +2772,50 @@ risks R5 – R8 go with it.
   time, a 1280 × 720 render at 16 samples, and at 320 × 180 the time and
   error of 16, 64 and 256 samples against a 4096-sample render with another
   seed.
+
+**16.2a — Light transport: emitting surfaces as lights**
+
+*Problems and solutions:*
+- **A large step split in two.** 16.2 (light transport, emitting surfaces,
+  area lights in the scene, file, panels, viewport and tracer) is built as
+  16.2a (the tracer's light transport) and 16.2b (area lights).
+- **Not every light belongs in the table.** The plan put every light in one
+  table, one chosen per surface. Omni, Spot and Infinite lights cannot be
+  met by a ray, so multiple importance sampling has nothing to weigh for
+  them, and choosing one of a few would only add noise; they are sampled
+  each, as in 1.1. The table holds lights with a surface. A scene without
+  emitters draws the same random numbers in the same order, so both 1.1
+  reference pictures still match exactly.
+- **A third of the shadow rays stopped at the light itself.** The shadow
+  ray left the lifted point (off the surface, against self-hits) but kept
+  the direction from the unlifted one, so at grazing angles it met the
+  emitter's plane a fraction of a millimetre before its end and counted the
+  emitter as an obstacle: the floor got 80 % of its light. Found by
+  checking one point: the sampled irradiance was right, the traced pixel
+  was not. The ray now runs from the lifted point to a point lifted off the
+  emitter on its side.
+- **Light counted twice through glass.** A shadow ray towards a light passes
+  glass tinted (point lights cannot be reached by refraction); towards an
+  emitting surface it would add light that refracted paths also bring.
+  Such shadow rays stop at glass, and a test with a glass slab between a
+  panel and a floor checks that sampled and found light agree.
+- **The clamp made the two estimates differ.** Light found after a bounce is
+  capped (Clamp Indirect), light sampled directly at a surface is not, so a
+  bright panel looked brighter when sampled. Correct for the clamp's
+  purpose; the comparisons run unclamped, and the manual says what the
+  clamp costs.
+- **The pdf of a mixture.** A bounce picks a lobe (coat, glass, highlight,
+  matte) and then a direction; the density MIS needs is the mixture of
+  them all, each as often as it is picked. A test integrates it over the
+  sphere and compares with how often bounces reflect, for matte, metal,
+  coated and half-glass surfaces.
+- **Texts in a helper.** The translation test reads labels only from the
+  helpers it knows; the new check-box helper's texts are marked with
+  `key(…)`.
+- **Faster to clean, slower per sample.** A sample costs half as much again
+  (a shadow ray towards an emitter at every surface), but the studio scene
+  reaches 1.1's 256-sample cleanliness at 64 samples, in a third of the
+  time.
 
 ---
 

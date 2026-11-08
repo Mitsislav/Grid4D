@@ -50,6 +50,8 @@ fn demo() -> Image {
         bounces: 1,
         seed: 0,
         auto_light: true,
+        clamp_indirect: true,
+        emissive_lights: true,
     };
     render(&RenderScene::new(&evaluated), &camera, &options)
 }
@@ -208,6 +210,8 @@ fn textured() -> Image {
         bounces: 3,
         seed: 0,
         auto_light: false,
+        clamp_indirect: true,
+        emissive_lights: true,
     };
     let texturing = Texturing {
         materials: doc.scene.materials(),

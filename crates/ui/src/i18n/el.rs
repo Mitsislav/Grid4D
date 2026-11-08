@@ -315,6 +315,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Cap Segments", "Τμήματα καπακιού"),
     ("Caps", "Καπάκια"),
     ("Caps Type", "Τύπος καπακιών"),
+    (
+        "Caps light found after a bounce: fewer bright specks, slightly darker caustics",
+        "Περιορίζει το φως μετά από ανάκλαση: λιγότερες φωτεινές κουκκίδες, λίγο πιο σκοτεινές συγκεντρώσεις φωτός",
+    ),
     ("Capsule", "Κάψουλα"),
     ("Catmull-Clark (N-Gons)", "Catmull-Clark (ν-γωνα)"),
     ("Center", "Κέντρο"),
@@ -340,6 +344,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Choose where to save", "Επιλέξτε πού θα αποθηκευτεί"),
     ("Circle", "Κύκλος"),
+    ("Clamp Indirect", "Περιορισμός έμμεσου φωτός"),
     ("Clear", "Καθαρισμός"),
     ("Clear Override", "Καθαρισμός παράκαμψης"),
     ("Clear Recent", "Καθαρισμός πρόσφατων"),
@@ -552,6 +557,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Emission", "Εκπομπή"),
     ("Emission Strength", "Ένταση εκπομπής"),
     ("Emission Texture", "Υφή εκπομπής"),
+    (
+        "Emissive Surfaces Light the Scene",
+        "Οι επιφάνειες με εκπομπή φωτίζουν τη σκηνή",
+    ),
     ("Enable", "Ενεργοποίηση"),
     ("Enable / disable object", "Ενεργοποίηση / απενεργοποίηση αντικειμένου"),
     ("Enable Snapping", "Ενεργοποίηση έλξης"),
@@ -1695,6 +1704,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Subdivision U", "Υποδιαίρεση U"),
     ("Subdivision V", "Υποδιαίρεση V"),
     ("Subdivision Viewport", "Υποδιαίρεση προβολής"),
+    (
+        "Surfaces with Emission are sampled as lights: far less noise where they light the scene",
+        "Οι επιφάνειες με εκπομπή δειγματίζονται ως φώτα: πολύ λιγότερος θόρυβος όπου φωτίζουν τη σκηνή",
+    ),
     ("Sweep", "Σάρωση"),
     ("Switch Take", "Αλλαγή λήψης"),
     (

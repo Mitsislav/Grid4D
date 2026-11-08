@@ -309,6 +309,28 @@ proptest! {
         prop_assert!(grid4d_io::to_bytes(&as_v4).unwrap() == bytes, "version 4 read differently");
     }
 
+    /// What version 5 adds round-trips; labelled version 4, a file reads as
+    /// Grid4D 1.1 read it (the additions dropped, at their defaults).
+    #[test]
+    fn version_5_additions_round_trip_and_a_version_4_file_drops_them(
+        objects in prop::collection::vec(object(), 0..8),
+        clamp_indirect in any::<bool>(),
+        emissive_lights in any::<bool>(),
+    ) {
+        let mut doc = document(objects, Vec::new(), Vec::new());
+        // Step 16.2: the light-transport switches.
+        doc.render.clamp_indirect = clamp_indirect;
+        doc.render.emissive_lights = emissive_lights;
+        let bytes = grid4d_io::to_bytes(&doc).unwrap();
+        let loaded = grid4d_io::from_bytes(&bytes).unwrap();
+        prop_assert_eq!(&loaded.render, &doc.render);
+        prop_assert!(grid4d_io::to_bytes(&loaded).unwrap() == bytes);
+        let as_v4 = grid4d_io::from_bytes(&labelled(&bytes, 4)).unwrap();
+        let mut expected = doc.render;
+        (expected.clamp_indirect, expected.emissive_lights) = (true, true);
+        prop_assert_eq!(as_v4.render, expected);
+    }
+
     /// Written as version 3 (Grid4D 1.0) would have: the same document comes
     /// back. Every document the strategies make holds only what version 3
     /// holds; Phase 15's additions get strategies of their own.

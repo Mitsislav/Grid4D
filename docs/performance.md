@@ -136,6 +136,23 @@ What the numbers show:
   (the median split); rays through it cost about as much as the studio's
   per sample. The SAH build (16.7) is measured against both.
 
+### After step 16.2a (emitting surfaces sampled as lights)
+
+Measured on 2026-11-08, same machine. Only **studio** has an emitting
+surface (its panel); the other three scenes render exactly as before (same
+pictures, same times within measuring noise). The reference picture of the
+studio changed too: light from the panel after a bounce was capped before.
+
+| Scene | 1280 × 720, 16 samples | 16 samples: time / error | 64 | 256 | The 4096-sample reference |
+|-------|------------------------|--------------------------|----|-----|---------------------------|
+| studio, 16.1 | 3.0 s | 0.19 s / 24.2 | 0.79 s / 13.6 | 3.2 s / 7.16 | 52 s |
+| studio, 16.2a | 4.5 s | 0.29 s / 11.4 | 1.15 s / 6.19 | 4.8 s / 3.32 | 76 s |
+
+A sample costs half as much again (one more shadow ray at every surface of
+every path, towards the panel), but the error halves at every sample count:
+1.1's 256-sample cleanliness (7.16) is now reached at 64 samples, in about a
+third of the time (1.15 s against 3.2 s).
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

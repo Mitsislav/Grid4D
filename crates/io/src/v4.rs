@@ -53,9 +53,14 @@ struct Added {
     fields: &'static [&'static str],
 }
 
-/// Everything version 5 adds as fields, by step. Empty in 16.1: the format's
-/// version number is the only change so far.
-const ADDED: &[Added] = &[];
+/// Everything version 5 adds as fields, by step.
+const ADDED: &[Added] = &[
+    // Step 16.2: the two light-transport switches.
+    Added {
+        place: Place::Render,
+        fields: &["clamp_indirect", "emissive_lights"],
+    },
+];
 
 /// A value version 5 adds to a field that held one of a closed set (a `type`
 /// of object or tag, a light type): Grid4D 1.1 refused it, so it is an error
@@ -242,7 +247,7 @@ mod tests {
         });
         let v5 = upgrade(v4.clone()).unwrap();
         assert_eq!(v5["version"], 5);
-        assert_eq!(v5["document"], v4["document"], "nothing is added in 16.1");
+        assert_eq!(v5["document"], v4["document"], "nothing version 5 adds is in it");
         assert_eq!(v5["format"], "grid4d");
         assert_eq!(v5["meshes"], v4["meshes"]);
     }

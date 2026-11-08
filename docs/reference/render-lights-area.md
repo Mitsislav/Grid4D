@@ -15,8 +15,9 @@
 > renderer feature; the name and design here are our own. Written in our own
 > words.
 >
-> Covers implementation-plan steps **16.2** (light transport, emissive
-> surfaces, area lights) and **16.4** (linking and groups). Builds on
+> Covers implementation-plan steps **16.2** (built as 16.2a: light transport
+> and emissive surfaces; 16.2b: area lights) and **16.4** (linking and
+> groups). Builds on
 > [`object-light.md`](object-light.md) and [`render-engine.md`](render-engine.md);
 > the passes the groups feed are [`render-passes.md`](render-passes.md).
 
@@ -72,21 +73,33 @@ The Sky and Environment objects (16.3) have Group too.
 
 ### Light transport (16.2)
 
-- At every surface a path meets, **one light is chosen** from a table
-  weighted by each light's power (lights, emissive triangles, the sky or
-  environment), a point on it is sampled and a shadow ray tested; the
-  material's own reflection direction can also reach a light. Both ways are
-  weighted by **multiple importance sampling** (the power heuristic), so
-  small bright lights and large dim ones are both clean.
-- Omni, Spot and Infinite lights keep their 1.1 meaning: point-like (or the
-  small ball / half-degree disc of a soft shadow), never seen by the camera.
-  A document from 1.1 renders the **same picture once converged**; the noise
-  differs (the 1.1 reference pictures are compared within their tolerance,
-  or written again with the reason in the test).
+- **Lights with a surface** — emitting triangles now, area lights (16.2b),
+  the sky and environment (16.3) — are kept in **a table by power**; at
+  every surface a path meets, **one** of them is chosen from it, a point on
+  it sampled and a shadow ray tested. The material's own bounce can also
+  meet such a light. Both ways are weighted by **multiple importance
+  sampling** (the power heuristic), so small bright lights and large dim
+  ones are both clean.
+- **Omni, Spot and Infinite** lights keep their 1.1 meaning and sampling:
+  point-like (or the small ball / half-degree disc of a soft shadow), never
+  met by a ray, each sampled at every surface as before — MIS does not
+  apply to lights a bounce cannot find. A scene without emitting surfaces
+  therefore renders **exactly** as in 1.1 (the 1.1 reference pictures are
+  unchanged); one with them gives the same picture once converged, with far
+  less noise.
 - **Emissive surfaces** (Emission × Emission Strength, including pictures on
-  the Emission channel, averaged per triangle for the table) are lights:
-  their triangles join the table by power. Objects hidden in the renderer
-  emit nothing.
+  the Emission channel) are lights: each triangle's power is its area times
+  its emission's brightness (the mean of four points, so a picture counts
+  roughly; the light itself is read exactly where the sample lands). Objects
+  hidden in the renderer emit nothing. Emission is two-sided, as before.
+- **Glass and emitters**: shadow rays towards an emitting surface stop at
+  glass (unlike shadow rays towards lights, which pass it tinted): light
+  through glass from a surface is found by the paths that refract, so it is
+  never counted twice.
+- Each emitter sample costs a shadow ray at every surface of every path:
+  per sample, a scene with emitters renders about half as fast again, and
+  reaches a given cleanliness in about a third of the time (budget,
+  `docs/performance.md`).
 
 ### Area lights (16.2)
 
@@ -148,16 +161,20 @@ no separate diffuse / specular switches per light.
 
 ## Acceptance criteria
 
-- [ ] A 1.1 document renders the same picture once converged (reference
-      tests within tolerance, or rewritten with a stated reason).
-- [ ] NEE + MIS is unbiased: a white furnace test (a diffuse sphere inside a
-      uniformly emitting sphere) converges to the expected value; a small and
-      a large area light each converge to their analytic irradiance on a
-      plane.
+- [x] A 1.1 document renders the same picture once converged; without
+      emitting surfaces exactly the same (the 1.1 reference tests pass
+      unchanged).
+- [x] (16.2a) Sampling emitting surfaces is unbiased: a floor under a
+      glowing panel gets the same light sampled or found by bounces alone,
+      also behind a glass slab (no light counted twice), with a quarter of
+      the noise at 16 samples; the material's direction pdf integrates to
+      the share of bounces that reflect.
+- [ ] (16.2b) A small and a large area light each converge to their
+      analytic irradiance on a plane.
 - [ ] Each shape lights a plane as its geometry says (a disc's centre value,
       a sphere's inverse square, a one-sided light dark behind, two-sided lit
       both ways); resizing keeps the total light.
-- [ ] Emissive triangles light the scene; with the switch off the picture
+- [x] Emissive triangles light the scene; with the switch off the picture
       matches 1.1's behaviour.
 - [ ] A linked light lights only its objects (Include) or all but them
       (Exclude), children included; their shadows follow; dangling entries

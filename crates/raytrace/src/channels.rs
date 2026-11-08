@@ -58,6 +58,13 @@ impl Channels {
         self.picture(Channel::Normal).is_some()
     }
 
+    /// Whether it may give off light anywhere: an Emission value, or an
+    /// Emission picture with a strength.
+    pub(crate) fn can_emit(&self) -> bool {
+        let m = &self.material;
+        m.emitted().iter().any(|&v| v > 0.0) || (self.picture(Channel::Emission).is_some() && m.emission_strength > 0.0)
+    }
+
     /// Whether a Bump picture bends its shading (only without a Normal one).
     pub(crate) fn has_bump_map(&self) -> bool {
         !self.has_normal_map() && self.picture(Channel::Bump).is_some()

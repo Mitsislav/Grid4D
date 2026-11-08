@@ -132,6 +132,12 @@ pub struct RenderSettings {
     pub format: ImageFormat,
     /// How frame numbers join the file names of an animation's pictures.
     pub naming: FrameNaming,
+    /// Light found after a bounce is capped (fewer bright specks, slightly
+    /// darker caustics), as in Grid4D 1.0 – 1.1; off: unbiased, noisier.
+    pub clamp_indirect: bool,
+    /// Surfaces with Emission are sampled as lights; off: they glow and reach
+    /// others only through bounces, as in Grid4D 1.1.
+    pub emissive_lights: bool,
 }
 
 impl Default for RenderSettings {
@@ -150,6 +156,8 @@ impl Default for RenderSettings {
             alpha: false,
             format: ImageFormat::Png,
             naming: FrameNaming::Name0000,
+            clamp_indirect: true,
+            emissive_lights: true,
         }
     }
 }

@@ -335,6 +335,8 @@ fn options(scene: &Scene, width: u32, height: u32, samples: u32, seed: u32) -> R
         bounces: scene.bounces,
         seed,
         auto_light: true,
+        clamp_indirect: true,
+        emissive_lights: true,
     }
 }
 

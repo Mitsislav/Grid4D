@@ -154,6 +154,45 @@ impl Material {
         })
     }
 
+    /// The probability density (per solid angle) that [`Self::bounce`] sends
+    /// a path seen from `v` back along `l` (reflected, not refracted): the
+    /// mixture of its lobes, each as often as `bounce` picks it. Multiple
+    /// importance sampling weighs a light found along `l` against sampling
+    /// that light directly with it.
+    pub(crate) fn pdf(&self, n: Vec3, v: Vec3, l: Vec3, entering: bool) -> f32 {
+        let n_l = n.dot(l);
+        if n_l <= 0.0 {
+            return 0.0;
+        }
+        let n_v = n.dot(v).max(1e-4);
+        let h = (l + v).normalize_or(n);
+        let (n_h, v_h) = (n.dot(h).max(0.0), v.dot(h));
+        if v_h <= 0.0 {
+            return 0.0;
+        }
+        // A microfacet normal drawn with density D·(n·h), reflected.
+        let lobe = |alpha: f32| ggx(n_h, alpha) * n_h / (4.0 * v_h);
+        let mut rest = 1.0;
+        let mut pdf = 0.0;
+        if self.coat > 0.0 {
+            let p_coat = (self.coat * schlick1(COAT_F0, n_v)).clamp(0.0, 0.95);
+            pdf += p_coat * lobe(self.coat_alpha);
+            rest = 1.0 - p_coat;
+        }
+        if self.glass > 0.0 {
+            let eta = if entering { 1.0 / self.ior } else { self.ior };
+            pdf += rest * self.glass * fresnel_dielectric(v_h, eta) * lobe(self.alpha);
+            rest *= 1.0 - self.glass;
+        }
+        let specular = luminance(schlick(self.f0, n_v));
+        let diffuse = luminance(self.diffuse);
+        if specular + diffuse > 0.0 {
+            let p_specular = (specular / (specular + diffuse)).clamp(0.05, 0.95);
+            pdf += rest * (p_specular * lobe(self.alpha) + (1.0 - p_specular) * n_l / PI);
+        }
+        pdf
+    }
+
     /// The glass part: reflected or refracted about a microfacet normal, as
     /// often as Fresnel says.
     fn glass_bounce(&self, n: Vec3, v: Vec3, entering: bool, rng: &mut Rng) -> Option<Bounce> {
@@ -327,7 +366,7 @@ fn schlick1(f0: f32, cos: f32) -> f32 {
     f0 + (1.0 - f0) * (1.0 - cos).clamp(0.0, 1.0).powi(5)
 }
 
-fn luminance(c: Vec3) -> f32 {
+pub(crate) fn luminance(c: Vec3) -> f32 {
     c.dot(Vec3::new(0.2126, 0.7152, 0.0722))
 }
 
@@ -442,6 +481,51 @@ mod tests {
             .filter(|b| b.weight.x > 0.0)
             .count();
         assert!(reflected > 0, "some paths take the coat");
+    }
+
+    #[test]
+    fn the_pdf_matches_where_bounces_go() {
+        // Over the sphere of directions, the pdf integrates to the share of
+        // bounces that reflect (some microfacet samples end below the
+        // surface and stop): estimated with even directions on one side and
+        // counted from `bounce` on the other.
+        let v = Vec3::new(0.3, 1.0, 0.1).normalize();
+        let mut coated = Surface::plain(Vec3::new(0.6, 0.3, 0.2), 0.4, 0.0, Vec3::ZERO);
+        coated.clearcoat = 0.7;
+        let mut glassy = Surface::plain(Vec3::ONE, 0.3, 0.0, Vec3::ZERO);
+        glassy.transmission = 0.5;
+        for surface in [
+            Surface::plain(Vec3::splat(0.8), 1.0, 0.0, Vec3::ZERO),
+            Surface::plain(Vec3::new(0.9, 0.7, 0.3), 0.3, 1.0, Vec3::ZERO),
+            coated,
+            glassy,
+        ] {
+            let material = Material::new(&surface);
+            let mut rng = Rng::new(5, 6, 7, 8);
+            let count = 200_000;
+            let integral = (0..count)
+                .map(|_| {
+                    // Even over the sphere: 4π per sample.
+                    let z = rng.next_f32() * 2.0 - 1.0;
+                    let phi = rng.next_f32() * std::f32::consts::TAU;
+                    let r = (1.0 - z * z).max(0.0).sqrt();
+                    let l = Vec3::new(r * phi.cos(), z, r * phi.sin());
+                    material.pdf(Vec3::Y, v, l, true)
+                })
+                .sum::<f32>()
+                * 4.0
+                * PI
+                / count as f32;
+            let reflected = (0..count)
+                .filter_map(|_| material.bounce(Vec3::Y, v, true, &mut rng))
+                .filter(|b| !b.through)
+                .count() as f32
+                / count as f32;
+            assert!(
+                (integral - reflected).abs() < 0.03,
+                "{surface:?}: pdf integrates to {integral}, bounces reflect {reflected}"
+            );
+        }
     }
 
     #[test]

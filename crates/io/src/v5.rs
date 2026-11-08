@@ -808,6 +808,12 @@ struct RenderDto {
     /// Added with step 8.5; `name0000` when absent.
     #[serde(default, skip_serializing_if = "FrameNamingDto::is_default")]
     naming: FrameNamingDto,
+    /// Added in version 5 (step 16.2): on when absent.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    clamp_indirect: bool,
+    /// Added in version 5 (step 16.2): on when absent.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    emissive_lights: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -875,6 +881,8 @@ impl RenderDto {
             alpha,
             format,
             naming,
+            clamp_indirect,
+            emissive_lights,
         } = *settings;
         Some(Self {
             width,
@@ -901,6 +909,8 @@ impl RenderDto {
                 FrameNaming::NameDot0000 => FrameNamingDto::NameDot0000,
                 FrameNaming::NameUnderscore0000 => FrameNamingDto::NameUnderscore0000,
             },
+            clamp_indirect,
+            emissive_lights,
         })
     }
 
@@ -930,6 +940,8 @@ impl RenderDto {
                 FrameNamingDto::NameDot0000 => FrameNaming::NameDot0000,
                 FrameNamingDto::NameUnderscore0000 => FrameNaming::NameUnderscore0000,
             },
+            clamp_indirect: self.clamp_indirect,
+            emissive_lights: self.emissive_lights,
         }
         .validated()
     }
@@ -6199,10 +6211,33 @@ mod tests {
             alpha: true,
             format: ImageFormat::Exr,
             naming: FrameNaming::NameDot0000,
+            clamp_indirect: false,
+            emissive_lights: false,
         };
         assert_eq!(round_trip(&doc).render, doc.render);
         doc.render.frames = FrameRange::All;
         assert_eq!(round_trip(&doc).render, doc.render);
+    }
+
+    /// The light-transport switches (version 5, step 16.2) are written only
+    /// when off; files without them read them as on.
+    #[test]
+    fn the_light_transport_switches_are_written_only_when_off() {
+        let mut doc = Document::new("t");
+        doc.render.samples = 64;
+        let json = document_json(&doc);
+        assert!(!json.contains("clamp_indirect") && !json.contains("emissive_lights"));
+        let loaded = from_bytes(&archive(&[(DOCUMENT_ENTRY, json.as_bytes())])).unwrap();
+        assert!(loaded.render.clamp_indirect && loaded.render.emissive_lights);
+        doc.render.clamp_indirect = false;
+        let json = document_json(&doc);
+        assert!(json.contains("\"clamp_indirect\": false") && !json.contains("emissive_lights"));
+        assert_eq!(round_trip(&doc).render, doc.render);
+        // A version 4 file that carries them reads as Grid4D 1.1 read it:
+        // without them (on).
+        let older = json.replacen("\"version\": 5", "\"version\": 4", 1);
+        let loaded = from_bytes(&archive(&[(DOCUMENT_ENTRY, older.as_bytes())])).unwrap();
+        assert!(loaded.render.clamp_indirect);
     }
 
     /// Files written in step 8.2 have no format or naming: the defaults.

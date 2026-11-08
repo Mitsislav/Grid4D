@@ -252,7 +252,9 @@ Each track of `tracks`:
 `{"manual": {"from": …, "to": …}}`), `frame_step`, `samples`, `bounces`,
 `auto_light`, `save`, `output` (a path), `alpha`, `format`: `png` (default),
 `exr`; `naming`: `name0000` (default), `name_dot0000`,
-`name_underscore0000`.
+`name_underscore0000`. Version 5 adds `clamp_indirect` (light after a bounce
+capped) and `emissive_lights` (surfaces with Emission sampled as lights),
+both `true` when absent.
 
 ### Takes
 
@@ -308,7 +310,7 @@ Phase 16; each step adds its row):
 
 | Addition | Since |
 |----------|-------|
-| nothing yet but the version number | step 16.1 |
+| the render settings' `clamp_indirect` and `emissive_lights` (bools, `true` when absent; also in takes' own and Main's render settings) | step 16.2 |
 
 A version 4 file is therefore read as a version 5 file with the version
 number changed, minus any field this table lists (version 4 readers ignore

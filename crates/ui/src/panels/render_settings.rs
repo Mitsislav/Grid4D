@@ -414,7 +414,28 @@ fn sampling_page(ui: &mut Ui, s: &mut RenderSettings) {
             )
             .on_hover_text(tr("How often light bounces between surfaces (0: direct light only)"));
             ui.end_row();
+            check(
+                ui,
+                key("Clamp Indirect"),
+                &mut s.clamp_indirect,
+                key("Caps light found after a bounce: fewer bright specks, slightly darker caustics"),
+            );
+            check(
+                ui,
+                key("Emissive Surfaces Light the Scene"),
+                &mut s.emissive_lights,
+                key("Surfaces with Emission are sampled as lights: far less noise where they light the scene"),
+            );
         });
+}
+
+/// A labelled check box in a page's grid, named for screen readers.
+fn check(ui: &mut Ui, label: &str, value: &mut bool, hint: &str) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let field = ui.checkbox(value, "").on_hover_text(tr(hint));
+    ui.ctx()
+        .accesskit_node_builder(field.id, |node| node.set_label(tr(label)));
+    ui.end_row();
 }
 
 fn options_page(ui: &mut Ui, s: &mut RenderSettings) {
@@ -423,10 +444,12 @@ fn options_page(ui: &mut Ui, s: &mut RenderSettings) {
         .num_columns(2)
         .spacing([6.0, 4.0])
         .show(ui, |ui| {
-            attr_label(ui, "Auto Light", LABEL_WIDTH);
-            ui.checkbox(&mut s.auto_light, "")
-                .on_hover_text(tr("Light a scene that has no lights"));
-            ui.end_row();
+            check(
+                ui,
+                key("Auto Light"),
+                &mut s.auto_light,
+                key("Light a scene that has no lights"),
+            );
         });
 }
 

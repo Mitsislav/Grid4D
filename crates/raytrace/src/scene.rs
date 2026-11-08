@@ -144,6 +144,8 @@ impl Bend {
 /// Where a ray met a surface.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Hit {
+    /// The triangle met (its index in the scene).
+    pub triangle: usize,
     pub position: Vec3,
     /// The triangle's own normal (unit; its front, counter-clockwise side).
     pub geometric: Vec3,
@@ -216,7 +218,34 @@ pub struct RenderScene {
     tangents: Vec<Vec4>,
     aspect: f32,
     lights: Vec<Light>,
+    emitters: Emitters,
     bounds: Option<(Vec3, Vec3)>,
+}
+
+/// The triangles that give off light, chosen by their power: what next-event
+/// estimation samples besides the lights (see
+/// `docs/reference/render-lights-area.md`).
+#[derive(Debug, Default)]
+struct Emitters {
+    /// Emitting triangles, in the scene's order.
+    triangles: Vec<u32>,
+    /// The running sum of their shares of the total power, ending at 1.
+    cumulative: Vec<f32>,
+    /// Per triangle of the scene, the chance that it is chosen (empty when
+    /// nothing emits).
+    chance: Vec<f32>,
+}
+
+/// A point chosen on an emitting triangle.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct EmitterSample {
+    pub triangle: usize,
+    pub position: Vec3,
+    /// The triangle's unit normal (either side: emission is two-sided).
+    pub normal: Vec3,
+    /// The chance of this point per unit of area: the triangle's chance
+    /// divided by its area.
+    pub density: f32,
 }
 
 /// What the build keeps between objects.
@@ -320,8 +349,80 @@ impl RenderScene {
             tangents: b.tangents,
             aspect: texturing.map_or(1.0, |t| t.aspect),
             lights: evaluated.lights().iter().map(Light::new).collect(),
+            emitters: Emitters::default(),
             bounds: b.bounds,
         }
+        .with_emitters()
+    }
+
+    /// The scene with its table of emitting triangles: each by its power,
+    /// its area times the brightness of its emission (the mean of four
+    /// points, so pictures on Emission count roughly).
+    fn with_emitters(mut self) -> Self {
+        const POINTS: [Vec3; 4] = [
+            Vec3::new(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0),
+            Vec3::new(0.6, 0.2, 0.2),
+            Vec3::new(0.2, 0.6, 0.2),
+            Vec3::new(0.2, 0.2, 0.6),
+        ];
+        let mut powers = Vec::new();
+        for (index, object) in self.objects.iter().enumerate() {
+            let can_emit = if object.layers.0 == object.layers.1 {
+                object.plain.emission.max_element() > 0.0
+            } else {
+                self.layers
+                    .get(object.layers.0..object.layers.1)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|layer| self.materials.get(layer.material))
+                    .any(Channels::can_emit)
+            };
+            if !can_emit {
+                continue;
+            }
+            let end = self
+                .objects
+                .get(index + 1)
+                .map_or(self.object_of.len(), |next| next.first_triangle);
+            for triangle in object.first_triangle..end {
+                let Some(corners) = self.triangles.points().get(triangle * 3..triangle * 3 + 3) else {
+                    continue;
+                };
+                let area = (corners[1] - corners[0]).cross(corners[2] - corners[0]).length() * 0.5;
+                let brightness = POINTS
+                    .iter()
+                    .map(|w| corners[0] * w.x + corners[1] * w.y + corners[2] * w.z)
+                    .map(|p| crate::shade::luminance(self.emission_at(triangle, p)))
+                    .sum::<f32>()
+                    / 4.0;
+                let power = area * brightness;
+                if power > 0.0 && power.is_finite() {
+                    powers.push((triangle, power));
+                }
+            }
+        }
+        let total: f32 = powers.iter().map(|&(_, p)| p).sum();
+        if powers.is_empty() || total <= 0.0 || !total.is_finite() {
+            return self;
+        }
+        let mut chance = vec![0.0; self.object_of.len()];
+        let mut running = 0.0;
+        for &(triangle, power) in &powers {
+            let share = power / total;
+            if let Some(c) = chance.get_mut(triangle) {
+                *c = share;
+            }
+            running += share;
+            self.emitters.cumulative.push(running);
+            self.emitters
+                .triangles
+                .push(u32::try_from(triangle).unwrap_or(u32::MAX));
+        }
+        if let Some(last) = self.emitters.cumulative.last_mut() {
+            *last = 1.0;
+        }
+        self.emitters.chance = chance;
+        self
     }
 }
 
@@ -453,6 +554,57 @@ impl RenderScene {
         &self.lights
     }
 
+    /// Whether any surface gives off light.
+    pub(crate) fn has_emitters(&self) -> bool {
+        !self.emitters.triangles.is_empty()
+    }
+
+    /// The chance that [`Self::sample_emitter`] chooses `triangle` (0 for one
+    /// that does not emit).
+    pub(crate) fn emitter_chance(&self, triangle: usize) -> f32 {
+        self.emitters.chance.get(triangle).copied().unwrap_or(0.0)
+    }
+
+    /// A point on an emitting triangle, the triangle chosen by its power
+    /// (`u`) and the point evenly over it (`s`, `t`); `None` without
+    /// emitters.
+    pub(crate) fn sample_emitter(&self, u: f32, s: f32, t: f32) -> Option<EmitterSample> {
+        let cumulative = &self.emitters.cumulative;
+        let last = cumulative.len().checked_sub(1)?;
+        let index = cumulative.partition_point(|&c| c <= u).min(last);
+        let triangle = usize::try_from(*self.emitters.triangles.get(index)?).ok()?;
+        let corners = self.triangles.points().get(triangle * 3..triangle * 3 + 3)?;
+        let cross = (corners[1] - corners[0]).cross(corners[2] - corners[0]);
+        let area = cross.length() * 0.5;
+        if area <= f32::MIN_POSITIVE {
+            return None;
+        }
+        // Even over the triangle: the square root folds the unit square onto it.
+        let r = s.sqrt();
+        let (a, b) = (1.0 - r, r * (1.0 - t));
+        let position = corners[0] * a + corners[1] * b + corners[2] * (1.0 - a - b);
+        Some(EmitterSample {
+            triangle,
+            position,
+            normal: cross / (2.0 * area),
+            density: self.emitter_chance(triangle) / area,
+        })
+    }
+
+    /// The area of `triangle`.
+    pub(crate) fn triangle_area(&self, triangle: usize) -> f32 {
+        self.triangles
+            .points()
+            .get(triangle * 3..triangle * 3 + 3)
+            .map_or(0.0, |c| (c[1] - c[0]).cross(c[2] - c[0]).length() * 0.5)
+    }
+
+    /// The light `triangle` gives off at `position` (none where it is cut out).
+    pub(crate) fn emission_at(&self, triangle: usize, position: Vec3) -> Vec3 {
+        self.surface_at(triangle, position)
+            .map_or(Vec3::ZERO, |(surface, _)| surface.emission)
+    }
+
     /// The nearest surface the ray `origin + t · dir` meets (passing where
     /// surfaces are cut out).
     pub(crate) fn intersect(&self, origin: Vec3, dir: Vec3) -> Option<Hit> {
@@ -471,8 +623,10 @@ impl RenderScene {
 
     /// How much light passes along `origin + t · dir` before `distance`:
     /// none through an opaque surface, all where surfaces are cut out,
-    /// tinted through transmitting ones.
-    pub(crate) fn transmittance(&self, origin: Vec3, dir: Vec3, distance: f32) -> Vec3 {
+    /// tinted through transmitting ones when `through_glass` (lights: their
+    /// light cannot reach by refraction), none otherwise (emitting surfaces:
+    /// paths refracted through the glass find them).
+    pub(crate) fn transmittance(&self, origin: Vec3, dir: Vec3, distance: f32, through_glass: bool) -> Vec3 {
         let mut start = origin;
         let mut left = distance;
         let mut passed = Vec3::ONE;
@@ -488,7 +642,7 @@ impl RenderScene {
             };
             let position = start + dir * hit.t;
             if let Some((surface, _)) = self.surface_at(triangle, position) {
-                let through = surface.transmitted();
+                let through = if through_glass { surface.transmitted() } else { 0.0 };
                 if through <= 0.0 {
                     return Vec3::ZERO;
                 }
@@ -614,6 +768,7 @@ impl RenderScene {
         let shading =
             (normals[0] * weights.x + normals[1] * weights.y + normals[2] * weights.z).normalize_or(geometric);
         Some(Hit {
+            triangle,
             position,
             geometric,
             shading,
@@ -676,8 +831,8 @@ mod tests {
         assert!(hit.position.abs_diff_eq(Vec3::new(10.0, 200.0, 20.0), 1e-3));
         assert!(hit.geometric.y.abs() > 0.999 && hit.shading.abs_diff_eq(Vec3::Y, 1e-4));
         let above = Vec3::new(10.0, 500.0, 20.0);
-        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 400.0), Vec3::ZERO);
-        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 250.0), Vec3::ONE);
+        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 400.0, true), Vec3::ZERO);
+        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 250.0, true), Vec3::ONE);
     }
 
     #[test]
@@ -737,9 +892,9 @@ mod tests {
         let scene = RenderScene::textured(&eval, &texturing);
         let (solid, cut) = (Vec3::new(-50.0, 100.0, 0.0), Vec3::new(50.0, 100.0, 0.0));
         assert!(scene.intersect(solid, Vec3::NEG_Y).is_some());
-        assert_eq!(scene.transmittance(solid, Vec3::NEG_Y, 200.0), Vec3::ZERO);
+        assert_eq!(scene.transmittance(solid, Vec3::NEG_Y, 200.0, true), Vec3::ZERO);
         assert!(scene.intersect(cut, Vec3::NEG_Y).is_none(), "cut out");
-        assert_eq!(scene.transmittance(cut, Vec3::NEG_Y, 200.0), Vec3::ONE);
+        assert_eq!(scene.transmittance(cut, Vec3::NEG_Y, 200.0, true), Vec3::ONE);
         // Without materials it is whole.
         assert!(RenderScene::new(&eval).intersect(cut, Vec3::NEG_Y).is_some());
     }

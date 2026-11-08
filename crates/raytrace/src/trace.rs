@@ -1,21 +1,30 @@
 //! The path tracer: per pixel, samples of paths from the camera that pick up
 //! the lights' light at every surface they meet.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::{
+    f32::consts::PI,
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+};
 
 use glam::Vec3;
 use grid4d_scene::{Falloff, LightShadow, LightType, RenderSettings};
 use rayon::prelude::*;
 
-use crate::{Image, RenderCamera, RenderScene, sample::Rng, scene::Light, shade::Material};
+use crate::{
+    Image, RenderCamera, RenderScene,
+    sample::Rng,
+    scene::{Hit, Light},
+    shade::Material,
+};
 
 /// The largest picture side, in pixels.
 const MAX_SIZE: u32 = 16_384;
 /// The most samples per pixel.
 const MAX_SAMPLES: u32 = 4096;
 /// Light picked up after a bounce is capped at this (per colour channel and
-/// light): a bounce that lands on a sharp highlight would otherwise leave bright
-/// specks ("fireflies") that take thousands of samples to average out.
+/// light) while [`RenderOptions::clamp_indirect`] is on: a bounce that lands
+/// on a sharp highlight would otherwise leave bright specks ("fireflies")
+/// that take thousands of samples to average out.
 const BOUNCE_CAP: f32 = 2.0;
 
 /// How a picture is rendered.
@@ -33,6 +42,12 @@ pub struct RenderOptions {
     /// A scene without lights is lit by the automatic light (over the camera's
     /// shoulder, no shadows); otherwise it stays dark but for luminance.
     pub auto_light: bool,
+    /// Light found after a bounce is capped (fewer specks, darker caustics).
+    pub clamp_indirect: bool,
+    /// Surfaces that give off light are sampled as lights (with multiple
+    /// importance sampling); off: they light others only when a bounce
+    /// happens to meet them, as in Grid4D 1.1.
+    pub emissive_lights: bool,
 }
 
 impl Default for RenderOptions {
@@ -44,6 +59,8 @@ impl Default for RenderOptions {
             bounces: 2,
             seed: 0,
             auto_light: true,
+            clamp_indirect: true,
+            emissive_lights: true,
         }
     }
 }
@@ -58,6 +75,8 @@ impl From<&RenderSettings> for RenderOptions {
             bounces: settings.bounces,
             seed: 0,
             auto_light: settings.auto_light,
+            clamp_indirect: settings.clamp_indirect,
+            emissive_lights: settings.emissive_lights,
         }
     }
 }
@@ -166,6 +185,8 @@ impl Progressive {
             height: self.height,
             bounces: options.bounces,
             seed: options.seed,
+            clamp: options.clamp_indirect,
+            emitters: options.emissive_lights && scene.has_emitters(),
         };
         let row_length = usize::try_from(self.width).unwrap_or(1);
         let pass = u64::from(last - first);
@@ -214,6 +235,10 @@ struct Job<'a> {
     height: u32,
     bounces: u32,
     seed: u32,
+    /// Light after a bounce is capped.
+    clamp: bool,
+    /// Emitting surfaces are sampled as lights (and there are some).
+    emitters: bool,
 }
 
 impl Job<'_> {
@@ -242,6 +267,11 @@ impl Job<'_> {
     fn trace(&self, mut origin: Vec3, mut dir: Vec3, rng: &mut Rng) -> Option<Vec3> {
         let mut radiance = Vec3::ZERO;
         let mut throughput = Vec3::ONE;
+        // The density with which the last bounce chose `dir` (reflected
+        // paths only): an emitter it meets is weighed against having been
+        // sampled directly from there. `None` for the camera ray and for
+        // refracted paths, which direct sampling cannot reproduce.
+        let mut last_pdf: Option<f32> = None;
         for depth in 0..=self.bounces {
             let Some(hit) = self.scene.intersect(origin, dir) else {
                 if depth == 0 {
@@ -272,7 +302,17 @@ impl Job<'_> {
                 n = bent;
             }
             let material = Material::new(&hit.surface);
-            radiance += capped(throughput * hit.surface.emission, depth);
+            if hit.surface.emission.max_element() > 0.0 {
+                let weight = match last_pdf {
+                    Some(bsdf) if self.emitters => {
+                        let distance2 = (hit.position - origin).length_squared();
+                        let light = self.emitter_density(hit.triangle, geometric.dot(v), distance2);
+                        power_heuristic(bsdf, light)
+                    }
+                    _ => 1.0,
+                };
+                radiance += self.capped(throughput * hit.surface.emission * weight, depth);
+            }
 
             let lift = offset(hit.position);
             let lifted = hit.position + geometric * lift;
@@ -286,14 +326,18 @@ impl Job<'_> {
                 }
                 let passed = if light.shadow.casts() {
                     self.scene
-                        .transmittance(lifted, incoming.direction, incoming.distance - lift)
+                        .transmittance(lifted, incoming.direction, incoming.distance - lift, true)
                 } else {
                     Vec3::ONE
                 };
                 if passed.max_element() <= 0.0 {
                     continue;
                 }
-                radiance += capped(throughput * reflected * incoming.strength * passed, depth);
+                radiance += self.capped(throughput * reflected * incoming.strength * passed, depth);
+            }
+            if self.emitters {
+                let direct = self.sample_emitters(&hit, &material, n, v, geometric, lifted, entering, rng);
+                radiance += self.capped(throughput * direct, depth);
             }
 
             if depth == self.bounces {
@@ -312,6 +356,7 @@ impl Job<'_> {
             if throughput.max_element() <= 1e-4 {
                 break;
             }
+            last_pdf = (self.emitters && !bounce.through).then(|| material.pdf(n, v, bounce.direction, entering));
             origin = if bounce.through {
                 hit.position - geometric * lift
             } else {
@@ -321,15 +366,105 @@ impl Job<'_> {
         }
         Some(radiance)
     }
+
+    /// One sample of the light that emitting surfaces send to `hit` and that
+    /// it reflects towards `v`, weighed against finding the same light by a
+    /// bounce (the power heuristic).
+    #[expect(clippy::too_many_arguments, reason = "the hit's frame, as the loop has it")]
+    fn sample_emitters(
+        &self,
+        hit: &Hit,
+        material: &Material,
+        n: Vec3,
+        v: Vec3,
+        geometric: Vec3,
+        lifted: Vec3,
+        entering: bool,
+        rng: &mut Rng,
+    ) -> Vec3 {
+        let (u, s, t) = (rng.next_f32(), rng.next_f32(), rng.next_f32());
+        let Some(sample) = self.scene.sample_emitter(u, s, t) else {
+            return Vec3::ZERO;
+        };
+        if sample.triangle == hit.triangle {
+            return Vec3::ZERO;
+        }
+        let to_light = sample.position - hit.position;
+        let distance2 = to_light.length_squared();
+        if distance2 <= f32::MIN_POSITIVE {
+            return Vec3::ZERO;
+        }
+        let distance = distance2.sqrt();
+        let l = to_light / distance;
+        let cos_light = sample.normal.dot(l).abs();
+        if cos_light <= 1e-6 || l.dot(geometric) <= 0.0 {
+            return Vec3::ZERO;
+        }
+        let reflected = material.reflect(n, v, l);
+        if reflected.max_element() <= 0.0 {
+            return Vec3::ZERO;
+        }
+        let emitted = self.scene.emission_at(sample.triangle, sample.position);
+        if emitted.max_element() <= 0.0 {
+            return Vec3::ZERO;
+        }
+        // Up to the emitter, not into it: from the lifted point to one lifted
+        // off the emitter on this side (a ray from the lifted point along `l`
+        // would meet the emitter's plane before `distance` at grazing angles).
+        // Glass blocks: paths refracted through it find the light themselves.
+        let facing = if sample.normal.dot(l) > 0.0 {
+            -sample.normal
+        } else {
+            sample.normal
+        };
+        let end = sample.position + facing * offset(sample.position);
+        let shadow = end - lifted;
+        let reach = shadow.length();
+        if reach <= f32::MIN_POSITIVE {
+            return Vec3::ZERO;
+        }
+        let passed = self.scene.transmittance(lifted, shadow / reach, reach, false);
+        if passed.max_element() <= 0.0 {
+            return Vec3::ZERO;
+        }
+        // The chance of this direction: per area, turned into per solid angle.
+        let light_pdf = sample.density * distance2 / cos_light;
+        let weight = power_heuristic(light_pdf, material.pdf(n, v, l, entering));
+        // `reflect` is the reflectance × π × n·l.
+        reflected * emitted * passed * (weight / (PI * light_pdf))
+    }
+
+    /// The density per solid angle with which direct sampling picks the point
+    /// of `triangle` seen at `distance2` (squared) and at cosine `cos` to its
+    /// normal.
+    fn emitter_density(&self, triangle: usize, cos: f32, distance2: f32) -> f32 {
+        let area = self.scene.triangle_area(triangle);
+        let cos = cos.abs();
+        if area <= f32::MIN_POSITIVE || cos <= 1e-6 {
+            return 0.0;
+        }
+        self.scene.emitter_chance(triangle) / area * distance2 / cos
+    }
+
+    /// `light` as is when seen directly (`depth` 0), capped after a bounce
+    /// while the clamp is on.
+    fn capped(&self, light: Vec3, depth: u32) -> Vec3 {
+        if depth == 0 || !self.clamp {
+            light
+        } else {
+            light.min(Vec3::splat(BOUNCE_CAP))
+        }
+    }
 }
 
-/// `light` as is when seen directly (`depth` 0), capped after a bounce.
-fn capped(light: Vec3, depth: u32) -> Vec3 {
-    if depth == 0 {
-        light
-    } else {
-        light.min(Vec3::splat(BOUNCE_CAP))
+/// The power heuristic's weight for a sample drawn with density `own`
+/// against another strategy that would draw it with density `other`.
+fn power_heuristic(own: f32, other: f32) -> f32 {
+    let (a, b) = (own * own, other * other);
+    if a + b <= 0.0 || !(a + b).is_finite() {
+        return if own > 0.0 { 1.0 } else { 0.0 };
     }
+    a / (a + b)
 }
 
 /// The light a scene without lights is lit by: from over the camera's
@@ -391,6 +526,8 @@ mod tests {
             bounces,
             seed: 0,
             auto_light: true,
+            clamp_indirect: true,
+            emissive_lights: true,
         }
     }
 
@@ -513,6 +650,148 @@ mod tests {
         assert_eq!(at(&image, 0.0, 0.0), [1.0, 0.5, 0.0, 1.0], "luminance needs no light");
     }
 
+    /// A white matte floor under a glowing panel (100 cm square, 150 cm up
+    /// at x = 150, facing every way), no lights.
+    fn panel_scene(emission: f32) -> Document {
+        let mut doc = Document::new("panel");
+        let mut white = SceneMaterial::new("White");
+        (white.color, white.roughness) = ([1.0; 3], 1.0);
+        let white = doc.scene.materials_mut().insert(white);
+        let mut floor = Node::new(
+            "Floor",
+            ObjectKind::Plane {
+                width: 400.0,
+                depth: 400.0,
+                width_segments: 1,
+                depth_segments: 1,
+            },
+        );
+        floor.data.tags = vec![Tag::Material(MaterialTag::new(Some(white)))];
+        doc.scene.insert(floor);
+        let mut glow = SceneMaterial::new("Glow");
+        (glow.color, glow.emission) = ([0.0; 3], [emission; 3]);
+        let glow = doc.scene.materials_mut().insert(glow);
+        let mut panel = Node::new(
+            "Panel",
+            ObjectKind::Plane {
+                width: 100.0,
+                depth: 100.0,
+                width_segments: 1,
+                depth_segments: 1,
+            },
+        )
+        .with_position(Vec3::new(150.0, 150.0, 0.0));
+        panel.data.tags = vec![Tag::Material(MaterialTag::new(Some(glow)))];
+        doc.scene.insert(panel);
+        doc
+    }
+
+    /// The red values of the floor's pixels between x = −150 and −50.
+    fn floor_values(image: &Image) -> Vec<f32> {
+        (0..60u32)
+            .flat_map(|y| (0..60u32).map(move |x| (x, y)))
+            .filter(|&(x, y)| (15..25).contains(&x) && (20..40).contains(&y))
+            .filter_map(|(x, y)| image.pixel(x, y))
+            .map(|p| p[0])
+            .collect()
+    }
+
+    fn mean_and_spread(values: &[f32]) -> (f32, f32) {
+        let n = values.len() as f32;
+        let mean = values.iter().sum::<f32>() / n;
+        let variance = values.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / n;
+        (mean, variance.sqrt())
+    }
+
+    #[test]
+    fn emitting_surfaces_light_the_same_sampled_or_found() {
+        let scene = scene_of(&panel_scene(4.0));
+        let options = |samples, emissive_lights| RenderOptions {
+            auto_light: false,
+            emissive_lights,
+            // Unclamped: the panel's light, capped after a bounce, would
+            // otherwise differ between the two ways of finding it.
+            clamp_indirect: false,
+            ..options(60, samples, 1)
+        };
+        // Found only by bounces (1.1): unbiased but noisy; many samples.
+        let (found, _) = mean_and_spread(&floor_values(&render(&scene, &top_camera(), &options(1024, false))));
+        let (sampled, _) = mean_and_spread(&floor_values(&render(&scene, &top_camera(), &options(64, true))));
+        assert!(found > 0.01, "the panel lights the floor: {found}");
+        assert!(
+            (sampled - found).abs() < found * 0.05,
+            "the same light either way: {sampled} vs {found}"
+        );
+        // At the same samples, sampling the panel is far less noisy.
+        let (_, noisy) = mean_and_spread(&floor_values(&render(&scene, &top_camera(), &options(16, false))));
+        let (_, clean) = mean_and_spread(&floor_values(&render(&scene, &top_camera(), &options(16, true))));
+        assert!(clean * 4.0 < noisy, "{clean} vs {noisy}");
+        // The panel itself shows its emission, weighted or not.
+        let image = render(&scene, &top_camera(), &options(4, true));
+        assert!((at(&image, 150.0, 0.0)[0] - 4.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn glass_hides_an_emitter_from_direct_sampling_but_not_from_paths() {
+        // A glass slab between the panel and the floor: shadow rays to the
+        // panel stop at it (refracted paths bring that light), so sampling
+        // still agrees with paths alone.
+        let mut doc = panel_scene(4.0);
+        let mut glass = SceneMaterial::new("Glass");
+        (glass.color, glass.roughness, glass.transmission) = ([1.0; 3], 0.05, 1.0);
+        let glass = doc.scene.materials_mut().insert(glass);
+        let mut slab = Node::new(
+            "Slab",
+            ObjectKind::Cube {
+                size: Vec3::new(160.0, 10.0, 160.0),
+                segments: [1, 1, 1],
+            },
+        )
+        .with_position(Vec3::new(150.0, 120.0, 0.0));
+        slab.data.tags = vec![Tag::Material(MaterialTag::new(Some(glass)))];
+        doc.scene.insert(slab);
+        let scene = scene_of(&doc);
+        let options = |samples, emissive_lights| RenderOptions {
+            auto_light: false,
+            emissive_lights,
+            // Unclamped: the panel's light, capped after a bounce, would
+            // otherwise differ between the two ways of finding it.
+            clamp_indirect: false,
+            ..options(60, samples, 4)
+        };
+        let (found, _) = mean_and_spread(&floor_values(&render(&scene, &top_camera(), &options(1024, false))));
+        let (sampled, _) = mean_and_spread(&floor_values(&render(&scene, &top_camera(), &options(1024, true))));
+        assert!(
+            (sampled - found).abs() < found * 0.08,
+            "no light counted twice: {sampled} vs {found}"
+        );
+    }
+
+    #[test]
+    fn the_indirect_clamp_caps_only_light_after_a_bounce() {
+        let doc = Document::new("t");
+        let scene = scene_of(&doc);
+        let camera = top_camera();
+        let job = |clamp| Job {
+            scene: &scene,
+            lights: &[],
+            camera: &camera,
+            width: 1,
+            height: 1,
+            bounces: 1,
+            seed: 0,
+            clamp,
+            emitters: false,
+        };
+        let bright = Vec3::splat(50.0);
+        assert_eq!(job(true).capped(bright, 0), bright, "seen directly");
+        assert_eq!(job(true).capped(bright, 1), Vec3::splat(BOUNCE_CAP));
+        assert_eq!(job(false).capped(bright, 1), bright, "unclamped");
+        assert!((power_heuristic(1.0, 1.0) - 0.5).abs() < 1e-6);
+        assert_eq!(power_heuristic(2.0, 0.0), 1.0);
+        assert_eq!(power_heuristic(0.0, 0.0), 0.0);
+    }
+
     #[test]
     fn options_come_from_the_render_settings() {
         let settings = RenderSettings {
@@ -521,6 +800,8 @@ mod tests {
             samples: 7,
             bounces: 3,
             auto_light: false,
+            clamp_indirect: false,
+            emissive_lights: false,
             ..RenderSettings::default()
         };
         assert_eq!(
@@ -532,12 +813,20 @@ mod tests {
                 bounces: 3,
                 seed: 0,
                 auto_light: false,
+                clamp_indirect: false,
+                emissive_lights: false,
             }
         );
         let defaults = RenderOptions::from(&RenderSettings::default());
         assert_eq!(
-            (defaults.samples, defaults.bounces, defaults.auto_light),
-            (16, 2, true),
+            (
+                defaults.samples,
+                defaults.bounces,
+                defaults.auto_light,
+                defaults.clamp_indirect,
+                defaults.emissive_lights
+            ),
+            (16, 2, true, true, true),
             "the same quality as the renderer's own defaults"
         );
     }

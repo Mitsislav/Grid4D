@@ -2406,6 +2406,14 @@ how many frames and the first file's name.
 |---------|---------|
 | Samples | samples per pixel (16 by default, up to 4096): more give smoother edges and less noise in soft shadows and reflections, and take longer |
 | Bounces | how often light bounces between surfaces (2 by default; 0: direct light only) |
+| Clamp Indirect | on (the default): light that arrives after a bounce is capped, which keeps bright specks out of the picture at the cost of slightly darker reflections of very bright things; off: exact, but noisier |
+| Emissive Surfaces Light the Scene | on (the default): surfaces whose material has **Emission** light the scene like lights — a glowing panel, a neon tube, a screen; off: they still glow, but light other surfaces only when a bounce happens to meet them, which is much noisier |
+
+Glowing surfaces are real light sources in renders: a large panel with
+Emission gives soft light and soft shadows, and the brighter or larger it is,
+the more of the scene's light it gives.
+
+![The same 16-sample render with a glowing panel out of view on the left: Emissive Surfaces Light the Scene off (left: light found only by chance, speckled) and on (right: the panel sampled as a light)](images/manual/render-emissive-lights.png)
 
 **Options**
 

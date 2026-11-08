@@ -71,6 +71,8 @@ pub fn render_preview(material: &Material, pictures: &Pictures) -> Image {
         bounces: 2,
         seed: 0,
         auto_light: false,
+        clamp_indirect: true,
+        emissive_lights: true,
     };
     let render = |doc: &Document| {
         let mut evaluated = EvaluatedScene::for_render();

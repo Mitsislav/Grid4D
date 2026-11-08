@@ -11,10 +11,16 @@ Grid4D 1.2 in development: render quality (planned: area lights, a sky and
 HDR surroundings, depth of field and motion blur, render passes, adaptive
 sampling and a denoiser, a render queue).
 
-- **Files** — documents are saved in `.g4d` format version 5. It holds
-  nothing new yet; Grid4D 1.2's features will add to it until 1.2 is
-  released. Every earlier file opens unchanged; Grid4D 1.1 cannot open
-  version 5 files and says they come from a newer Grid4D.
+- **Glowing surfaces light the scene** — in renders, surfaces whose
+  material has Emission are now real light sources, sampled like lights:
+  soft light from a glowing panel or screen with far less noise. Render
+  Settings ▸ Sampling gains *Emissive Surfaces Light the Scene* and *Clamp
+  Indirect* (both on; off gives 1.1's behaviour). Scenes without glowing
+  surfaces render exactly as before.
+- **Files** — documents are saved in `.g4d` format version 5, which holds
+  Grid4D 1.2's additions as they come. Every earlier file opens unchanged;
+  Grid4D 1.1 cannot open version 5 files and says they come from a newer
+  Grid4D.
 
 ## [1.1.0] - 2026-11-07
 
