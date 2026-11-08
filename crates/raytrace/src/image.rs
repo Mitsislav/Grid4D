@@ -7,6 +7,8 @@ pub struct Image {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<[f32; 4]>,
+    /// The render passes asked for, beside the picture.
+    pub passes: Vec<crate::PassLayer>,
 }
 
 impl Image {
@@ -18,6 +20,7 @@ impl Image {
             width,
             height,
             pixels: vec![[0.0; 4]; count],
+            passes: Vec::new(),
         }
     }
 
@@ -63,7 +66,7 @@ impl Image {
 }
 
 /// The sRGB transfer curve, input clamped to 0…1.
-fn linear_to_srgb(c: f32) -> f32 {
+pub(crate) fn linear_to_srgb(c: f32) -> f32 {
     let c = c.clamp(0.0, 1.0);
     if c <= 0.003_130_8 {
         c * 12.92
@@ -73,7 +76,7 @@ fn linear_to_srgb(c: f32) -> f32 {
 }
 
 /// 0…1 to 0…255, rounded.
-fn to_byte(value: f32) -> u8 {
+pub(crate) fn to_byte(value: f32) -> u8 {
     // Exact: a whole number in 0…255 after the clamp and rounding.
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }

@@ -166,6 +166,14 @@ that light): **demo** renders exactly as before (same errors, same time);
 | studio, 16.2a | 4.5 s | 0.29 s / 11.4 | 1.15 s / 6.19 | 4.8 s / 3.32 | 76 s |
 | studio, 16.3 | 4.5 s | 0.31 s / 11.4 | 1.24 s / 6.20 | 5.0 s / 3.32 | 81 s |
 
+### After step 16.6 (render passes)
+
+Measured on 2026-11-09, same machine, without passes (as every render
+before 16.6): the pictures are bit for bit the same (same errors) and the
+times are those of 16.3 within measuring noise (studio: 0.31 s / 11.4,
+1.22 s / 6.20, 5.0 s / 3.32 at 16, 64 and 256 samples; demo 18 / 69 /
+261 ms). Passes are gathered only when chosen.
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

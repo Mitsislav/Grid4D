@@ -123,6 +123,16 @@ fn full_document() -> (Document, SimulationCache) {
     // sphere and a bladed aperture.
     doc.render.motion_blur = true;
     doc.render.segments = 5;
+    // Step 16.6: render passes, PNG passes as files of their own.
+    doc.render.passes = [
+        grid4d_scene::Pass::Depth,
+        grid4d_scene::Pass::DiffuseDirect,
+        grid4d_scene::Pass::ObjectId,
+        grid4d_scene::Pass::LightGroups,
+    ]
+    .into_iter()
+    .collect();
+    doc.render.png_passes = grid4d_scene::PngPasses::OneFilePerPass;
     let sphere = doc.scene.iter().find(|(_, n)| n.data.name == "Sphere").unwrap().0;
     doc.scene.insert(Node::new(
         "Lens Camera",

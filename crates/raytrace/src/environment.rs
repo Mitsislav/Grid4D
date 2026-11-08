@@ -162,6 +162,8 @@ pub(crate) struct EnvironmentLight {
     sun: Option<Sun>,
     /// The chance of sampling the sun rather than the rest.
     sun_chance: f32,
+    /// Its light group (0: none).
+    pub group: u16,
 }
 
 impl EnvironmentLight {
@@ -217,6 +219,7 @@ impl EnvironmentLight {
             table,
             sun,
             sun_chance,
+            group: environment.group,
         }
     }
 
@@ -365,6 +368,7 @@ mod tests {
     fn environment(surround: Surround) -> EvaluatedEnvironment {
         EvaluatedEnvironment {
             id: NodeId::default(),
+            group: 0,
             visible: true,
             surround,
         }

@@ -14,9 +14,10 @@ use crate::{
     Image, RenderCamera, RenderScene,
     environment::EnvironmentLight,
     lights::{Entry, LightTable},
+    passes::{First, Layout, Part, Split},
     sample::Rng,
     scene::{Hit, Light},
-    shade::Material,
+    shade::{Lobe, Material},
 };
 
 /// The largest picture side, in pixels.
@@ -127,6 +128,12 @@ pub struct Progressive {
     /// Per pixel: the sum of its samples' colours, and how many met a surface.
     sums: Vec<[f32; 4]>,
     samples: u32,
+    /// The render passes asked for: where their sums sit in `extra`, a
+    /// pixel's `layout.stride` floats after another; and the light groups'
+    /// names.
+    layout: Option<Layout>,
+    extra: Vec<f32>,
+    groups: Vec<String>,
 }
 
 impl Progressive {
@@ -141,7 +148,23 @@ impl Progressive {
             height,
             sums: vec![[0.0; 4]; count],
             samples: 0,
+            layout: None,
+            extra: Vec::new(),
+            groups: Vec::new(),
         }
+    }
+
+    /// No samples yet, at the size of `options`, gathering `passes` of
+    /// `scene` beside the picture (see `docs/reference/render-passes.md`).
+    #[must_use]
+    pub fn with_passes(options: &RenderOptions, passes: grid4d_scene::Passes, scene: &RenderScene) -> Self {
+        let mut progressive = Self::new(options);
+        progressive.layout = Layout::new(passes, scene.light_groups().len());
+        if let Some(layout) = &progressive.layout {
+            progressive.extra = vec![0.0; progressive.sums.len() * layout.stride];
+        }
+        progressive.groups = scene.light_groups().to_vec();
+        progressive
     }
 
     /// Samples per pixel so far.
@@ -192,21 +215,49 @@ impl Progressive {
             clamp: options.clamp_indirect,
             table: scene.light_table(options.emissive_lights),
             moving: scene.is_moving() || camera.end.is_some(),
+            layout: self.layout.as_ref(),
         };
         let row_length = usize::try_from(self.width).unwrap_or(1);
         let pass = u64::from(last - first);
-        self.sums
-            .par_chunks_mut(row_length)
-            .zip(0..self.height)
-            .for_each(|(row, y)| {
-                if control.is_cancelled() {
-                    return;
+        match &self.layout {
+            None => {
+                self.sums
+                    .par_chunks_mut(row_length)
+                    .zip(0..self.height)
+                    .for_each(|(row, y)| {
+                        if control.is_cancelled() {
+                            return;
+                        }
+                        for (sum, x) in row.iter_mut().zip(0..self.width) {
+                            job.add_samples(x, y, first..last, sum, &mut []);
+                        }
+                        control.progress.fetch_add(pass, Ordering::Relaxed);
+                    });
+            }
+            Some(layout) => {
+                let stride = layout.stride;
+                // The passes' sums row by row beside the picture's (a
+                // layout of no floats still needs a chunk per row).
+                let extra_row = (row_length * stride).max(1);
+                if self.extra.is_empty() {
+                    self.extra = vec![0.0; extra_row * usize::try_from(self.height).unwrap_or(0)];
                 }
-                for (sum, x) in row.iter_mut().zip(0..self.width) {
-                    job.add_samples(x, y, first..last, sum);
-                }
-                control.progress.fetch_add(pass, Ordering::Relaxed);
-            });
+                self.sums
+                    .par_chunks_mut(row_length)
+                    .zip(self.extra.par_chunks_mut(extra_row))
+                    .zip(0..self.height)
+                    .for_each(|((row, extra), y)| {
+                        if control.is_cancelled() {
+                            return;
+                        }
+                        for (i, (sum, x)) in row.iter_mut().zip(0..self.width).enumerate() {
+                            let slots = extra.get_mut(i * stride..(i + 1) * stride).unwrap_or(&mut []);
+                            job.add_samples(x, y, first..last, sum, slots);
+                        }
+                        control.progress.fetch_add(pass, Ordering::Relaxed);
+                    });
+            }
+        }
         if control.is_cancelled() {
             return false;
         }
@@ -226,6 +277,10 @@ impl Progressive {
         for (pixel, &[r, g, b, covered]) in image.pixels.iter_mut().zip(&self.sums) {
             let colour = Vec3::new(r, g, b) / n;
             *pixel = [colour.x, colour.y, colour.z, covered / n];
+        }
+        if let Some(layout) = &self.layout {
+            let extra: &[f32] = if layout.stride == 0 { &[] } else { &self.extra };
+            image.passes = layout.layers(&self.sums, extra, self.samples, &self.groups);
         }
         image
     }
@@ -248,12 +303,63 @@ struct Job<'a> {
     /// The scene or the camera moves over the shutter interval: each sample
     /// gets a moment of it.
     moving: bool,
+    /// The render passes asked for.
+    layout: Option<&'a Layout>,
+}
+
+/// One sample's light as it is gathered: the total, and the passes' split
+/// when they are asked for.
+struct Gather<'a> {
+    radiance: Vec3,
+    split: Option<&'a mut Split>,
+}
+
+impl Gather<'_> {
+    fn add(&mut self, part: Part, group: u16, light: Vec3) {
+        self.radiance += light;
+        if let Some(split) = self.split.as_deref_mut() {
+            split.add(part, group, light);
+        }
+    }
+
+    /// Light a surface reflects straight from a light: `diffuse` of it the
+    /// matte layer's (Diffuse Direct), the rest glossy (Specular Direct).
+    fn add_direct(&mut self, group: u16, light: Vec3, diffuse: Vec3) {
+        self.radiance += light;
+        if let Some(split) = self.split.as_deref_mut() {
+            split.add(Part::DiffuseDirect, group, diffuse);
+            split.add(Part::SpecularDirect, group, light - diffuse);
+        }
+    }
+}
+
+/// Where light found by a ray after the first bounce goes: straight from a
+/// light when it is that bounce's own ray (`depth` 1), else after bounces;
+/// diffuse, glossy or through glass by the first bounce's `lobe`.
+const fn found_part(depth: u32, lobe: Option<Lobe>) -> Part {
+    match (lobe, depth <= 1) {
+        (Some(Lobe::Transmission), _) => Part::Transmission,
+        (Some(Lobe::Specular), true) => Part::SpecularDirect,
+        (Some(Lobe::Specular), false) => Part::SpecularIndirect,
+        (_, true) => Part::DiffuseDirect,
+        (_, false) => Part::DiffuseIndirect,
+    }
+}
+
+/// Where light sampled from a light at a surface after the first bounce
+/// goes, by the first bounce's `lobe`.
+const fn sampled_part(lobe: Option<Lobe>) -> Part {
+    match lobe {
+        Some(Lobe::Transmission) => Part::Transmission,
+        Some(Lobe::Specular) => Part::SpecularIndirect,
+        Some(Lobe::Diffuse) | None => Part::DiffuseIndirect,
+    }
 }
 
 impl Job<'_> {
     /// Adds samples `samples` of pixel (`x`, `y`) to `sum`: their colours, and
     /// one per sample that met a surface.
-    fn add_samples(&self, x: u32, y: u32, samples: std::ops::Range<u32>, sum: &mut [f32; 4]) {
+    fn add_samples(&self, x: u32, y: u32, samples: std::ops::Range<u32>, sum: &mut [f32; 4], slots: &mut [f32]) {
         let (w, h) = (to_f32(self.width), to_f32(self.height));
         let aspect = w / h;
         for sample in samples {
@@ -267,19 +373,36 @@ impl Job<'_> {
             let time = if self.moving { rng.next_f32() } else { 0.0 };
             let aperture = self.camera.lens.map(|_| (rng.next_f32(), rng.next_f32()));
             let (origin, dir) = self.camera.sample_ray(px, py, aspect, time, aperture);
-            if let Some(radiance) = self.trace(origin, dir, time, &mut rng) {
+            let mut split = self.layout.map(|_| Split::default());
+            if let Some(radiance) = self.trace(origin, dir, time, &mut rng, split.as_mut()) {
                 sum[0] += radiance.x;
                 sum[1] += radiance.y;
                 sum[2] += radiance.z;
                 sum[3] += 1.0;
+            }
+            if let (Some(layout), Some(split)) = (self.layout, split) {
+                layout.add(slots, &split);
             }
         }
     }
 
     /// The light coming back along one path; `None` if the first ray meets no
     /// surface (background).
-    fn trace(&self, mut origin: Vec3, mut dir: Vec3, time: f32, rng: &mut Rng) -> Option<Vec3> {
-        let mut radiance = Vec3::ZERO;
+    fn trace(
+        &self,
+        mut origin: Vec3,
+        mut dir: Vec3,
+        time: f32,
+        rng: &mut Rng,
+        split: Option<&mut Split>,
+    ) -> Option<Vec3> {
+        let wants_split = split.is_some();
+        let mut gather = Gather {
+            radiance: Vec3::ZERO,
+            split,
+        };
+        // The part of the first surface the path went on through (passes).
+        let mut first_lobe: Option<Lobe> = None;
         let mut throughput = Vec3::ONE;
         // The density with which the last bounce chose `dir` (reflected
         // paths only): a light with a surface it meets is weighed against
@@ -306,8 +429,13 @@ impl Job<'_> {
                 .map_or(f32::INFINITY, |hit| (hit.position - origin).length());
             // A visible area light in front of the surface: its light, and
             // the path ends there (its shape is opaque).
-            if let Some(seen) = self.area_seen(origin, dir, reach, depth, last_pdf, from) {
-                radiance += self.capped(throughput * seen, depth);
+            if let Some((seen, group)) = self.area_seen(origin, dir, reach, depth, last_pdf, from) {
+                let part = if depth == 0 {
+                    Part::Emission
+                } else {
+                    found_part(depth, first_lobe)
+                };
+                gather.add(part, group, self.capped(throughput * seen, depth));
                 break;
             }
             let Some(hit) = hit else {
@@ -319,12 +447,20 @@ impl Job<'_> {
                 };
                 if depth == 0 {
                     // The background: the surround, or transparent.
-                    return environment.visible.then(|| environment.radiance(dir));
+                    if !environment.visible {
+                        return None;
+                    }
+                    gather.add(Part::Background, environment.group, environment.radiance(dir));
+                    return Some(gather.radiance);
                 }
                 // Found by a bounce: weighed against having been sampled
                 // directly (refracted paths cannot be).
                 let weight = last_pdf.map_or(1.0, |bsdf| power_heuristic(bsdf, environment.density(dir)));
-                radiance += self.capped(throughput * environment.radiance(dir) * weight, depth);
+                gather.add(
+                    found_part(depth, first_lobe),
+                    environment.group,
+                    self.capped(throughput * environment.radiance(dir) * weight, depth),
+                );
                 break;
             };
             let v = -dir;
@@ -350,6 +486,21 @@ impl Job<'_> {
                 n = bent;
             }
             let material = Material::new(&hit.surface);
+            if depth == 0
+                && let Some(split) = gather.split.as_deref_mut()
+            {
+                let eye = self.camera.world_at(time);
+                let forward = -eye.z_axis.truncate().normalize_or(Vec3::Z);
+                let (object, material_id) = self.scene.ids_of(hit.triangle);
+                split.first = Some(First {
+                    depth: (hit.position - eye.w_axis.truncate()).dot(forward),
+                    normal: n,
+                    position: hit.position,
+                    albedo: hit.surface.color,
+                    object,
+                    material: material_id,
+                });
+            }
             if hit.surface.emission.max_element() > 0.0 {
                 let weight = match last_pdf {
                     Some(bsdf) => {
@@ -365,11 +516,19 @@ impl Job<'_> {
                     }
                     None => 1.0,
                 };
-                radiance += self.capped(throughput * hit.surface.emission * weight, depth);
+                let part = if depth == 0 {
+                    Part::Emission
+                } else {
+                    found_part(depth, first_lobe)
+                };
+                gather.add(part, 0, self.capped(throughput * hit.surface.emission * weight, depth));
             }
             if completing {
                 break;
             }
+            // Light sampled at this surface: straight from the lights at the
+            // first one (split diffuse and glossy), after bounces beyond.
+            let direct = depth == 0 && wants_split;
 
             let lift = offset(hit.position);
             let lifted = hit.position + geometric * lift;
@@ -399,26 +558,42 @@ impl Job<'_> {
                 if passed.max_element() <= 0.0 {
                     continue;
                 }
-                radiance += self.capped(throughput * reflected * incoming.strength * passed, depth);
+                let light_out = self.capped(throughput * reflected * incoming.strength * passed, depth);
+                if direct {
+                    let diffuse =
+                        throughput * material.reflect_diffuse(n, v, incoming.direction) * incoming.strength * passed;
+                    gather.add_direct(light.group, light_out, diffuse);
+                } else {
+                    gather.add(sampled_part(first_lobe), light.group, light_out);
+                }
             }
             if !self.table.is_empty() {
-                let direct = self.sample_surface_lights(&hit, &material, n, v, geometric, lifted, entering, rng);
-                radiance += self.capped(throughput * direct, depth);
+                let lit = self.sample_surface_lights(&hit, &material, n, v, geometric, lifted, entering, rng, direct);
+                let light_out = self.capped(throughput * lit.total, depth);
+                if direct {
+                    gather.add_direct(lit.group, light_out, throughput * lit.diffuse);
+                } else {
+                    gather.add(sampled_part(first_lobe), lit.group, light_out);
+                }
             }
             if let Some(environment) = self.scene.environment() {
-                let direct = sample_environment(
+                let lit = sample_environment(
                     self.scene,
                     environment,
                     &material,
-                    n,
-                    v,
-                    geometric,
+                    (n, v, geometric),
                     lifted,
                     entering,
                     time,
                     rng,
+                    direct,
                 );
-                radiance += self.capped(throughput * direct, depth);
+                let light_out = self.capped(throughput * lit.total, depth);
+                if direct {
+                    gather.add_direct(environment.group, light_out, throughput * lit.diffuse);
+                } else {
+                    gather.add(sampled_part(first_lobe), environment.group, light_out);
+                }
             }
 
             if depth == self.bounces && !sampling {
@@ -434,6 +609,9 @@ impl Job<'_> {
                 break;
             }
             throughput *= bounce.weight;
+            if depth == 0 {
+                first_lobe = Some(bounce.lobe);
+            }
             if throughput.max_element() <= 1e-4 {
                 break;
             }
@@ -446,7 +624,7 @@ impl Job<'_> {
             dir = bounce.direction;
             from = Some(hit.triangle);
         }
-        Some(radiance)
+        Some(gather.radiance)
     }
 
     /// The light of the nearest visible area light the ray meets before
@@ -462,7 +640,7 @@ impl Job<'_> {
         depth: u32,
         last_pdf: Option<f32>,
         from: Option<usize>,
-    ) -> Option<Vec3> {
+    ) -> Option<(Vec3, u16)> {
         let (index, light, t, normal) = self
             .scene
             .areas()
@@ -472,10 +650,10 @@ impl Job<'_> {
             .filter_map(|(i, light)| light.intersect(origin, dir, reach).map(|(t, n)| (i, light, t, n)))
             .min_by(|a, b| a.2.total_cmp(&b.2))?;
         let Some(cos) = light.emits(normal, -dir) else {
-            return Some(Vec3::ZERO);
+            return Some((Vec3::ZERO, light.group));
         };
         if from.is_some_and(|triangle| !self.scene.lit_by(triangle, light.link)) {
-            return Some(Vec3::ZERO);
+            return Some((Vec3::ZERO, light.group));
         }
         let weight = match last_pdf {
             // Lights that are not weighed are found only by direct sampling
@@ -489,7 +667,7 @@ impl Job<'_> {
             None if depth > 0 && !light.weighed() => 0.0,
             None => 1.0,
         };
-        Some(light.radiance * weight)
+        Some((light.radiance * weight, light.group))
     }
 
     /// One sample of the light that lights with a surface (area lights,
@@ -507,30 +685,31 @@ impl Job<'_> {
         lifted: Vec3,
         entering: bool,
         rng: &mut Rng,
-    ) -> Vec3 {
+        diffuse: bool,
+    ) -> Lit {
         let (u, s, t) = (rng.next_f32(), rng.next_f32(), rng.next_f32());
         let Some(sample) = self
             .scene
             .sample_surface_light(self.table, hit.position, (u, s, t), hit.time)
         else {
-            return Vec3::ZERO;
+            return Lit::NONE;
         };
         if sample.source == Entry::Triangle(u32::try_from(hit.triangle).unwrap_or(u32::MAX)) {
-            return Vec3::ZERO;
+            return Lit::NONE;
         }
         let point = sample.point;
         let to_light = point.position - hit.position;
         let distance2 = to_light.length_squared();
         if distance2 <= f32::MIN_POSITIVE {
-            return Vec3::ZERO;
+            return Lit::NONE;
         }
         let l = to_light / distance2.sqrt();
         if l.dot(geometric) <= 0.0 {
-            return Vec3::ZERO;
+            return Lit::NONE;
         }
         // What the light gives off towards the surface, whether bounces can
         // find it, whether things in the way stop it.
-        let (emitted, cos_light, weighed, shadowed, link) = match sample.source {
+        let (emitted, cos_light, weighed, shadowed, link, group) = match sample.source {
             Entry::Triangle(triangle) => {
                 let cos = point.normal.dot(l).abs();
                 let triangle = usize::try_from(triangle).unwrap_or(usize::MAX);
@@ -540,27 +719,35 @@ impl Job<'_> {
                     true,
                     true,
                     None,
+                    0,
                 )
             }
             Entry::Area(index) => {
                 let Some(light) = usize::try_from(index).ok().and_then(|i| self.scene.areas().get(i)) else {
-                    return Vec3::ZERO;
+                    return Lit::NONE;
                 };
                 if !self.scene.lit_by(hit.triangle, light.link) {
-                    return Vec3::ZERO;
+                    return Lit::NONE;
                 }
                 let Some(cos) = light.emits(point.normal, -l) else {
-                    return Vec3::ZERO;
+                    return Lit::NONE;
                 };
-                (light.radiance, cos, light.weighed(), light.shadow.casts(), light.link)
+                (
+                    light.radiance,
+                    cos,
+                    light.weighed(),
+                    light.shadow.casts(),
+                    light.link,
+                    light.group,
+                )
             }
         };
         if cos_light <= 1e-6 || emitted.max_element() <= 0.0 {
-            return Vec3::ZERO;
+            return Lit::NONE;
         }
         let reflected = material.reflect(n, v, l);
         if reflected.max_element() <= 0.0 {
-            return Vec3::ZERO;
+            return Lit::NONE;
         }
         let passed = if shadowed {
             // Up to the light, not into it: from the lifted point to one
@@ -578,7 +765,7 @@ impl Job<'_> {
             let shadow = end - lifted;
             let reach = shadow.length();
             if reach <= f32::MIN_POSITIVE {
-                return Vec3::ZERO;
+                return Lit::NONE;
             }
             self.scene
                 .transmittance(lifted, shadow / reach, reach, !weighed, link, hit.time)
@@ -586,7 +773,7 @@ impl Job<'_> {
             Vec3::ONE
         };
         if passed.max_element() <= 0.0 {
-            return Vec3::ZERO;
+            return Lit::NONE;
         }
         // The chance of this direction: per area, turned into per solid angle.
         let light_pdf = point.density * distance2 / cos_light;
@@ -596,7 +783,16 @@ impl Job<'_> {
             1.0
         };
         // `reflect` is the reflectance × π × n·l.
-        reflected * emitted * passed * (weight / (PI * light_pdf))
+        let factor = emitted * passed * (weight / (PI * light_pdf));
+        Lit {
+            total: reflected * factor,
+            diffuse: if diffuse {
+                material.reflect_diffuse(n, v, l) * factor
+            } else {
+                Vec3::ZERO
+            },
+            group,
+        }
     }
 
     /// The density per solid angle with which direct sampling picks the point
@@ -629,32 +825,57 @@ fn sample_environment(
     scene: &RenderScene,
     environment: &EnvironmentLight,
     material: &Material,
-    n: Vec3,
-    v: Vec3,
-    geometric: Vec3,
+    (n, v, geometric): (Vec3, Vec3, Vec3),
     lifted: Vec3,
     entering: bool,
     time: f32,
     rng: &mut Rng,
-) -> Vec3 {
+    diffuse: bool,
+) -> Lit {
     let (u, s, t) = (rng.next_f32(), rng.next_f32(), rng.next_f32());
     let Some((l, light, density)) = environment.sample(u, s, t) else {
-        return Vec3::ZERO;
+        return Lit::NONE;
     };
     if l.dot(geometric) <= 0.0 || light.max_element() <= 0.0 {
-        return Vec3::ZERO;
+        return Lit::NONE;
     }
     let reflected = material.reflect(n, v, l);
     if reflected.max_element() <= 0.0 {
-        return Vec3::ZERO;
+        return Lit::NONE;
     }
     // Out to infinity; glass stops it (refracted paths bring its light).
     let passed = scene.transmittance(lifted, l, f32::INFINITY, false, None, time);
     if passed.max_element() <= 0.0 {
-        return Vec3::ZERO;
+        return Lit::NONE;
     }
     let weight = power_heuristic(density, material.pdf(n, v, l, entering));
-    reflected * light * passed * (weight / (PI * density))
+    let factor = light * passed * (weight / (PI * density));
+    Lit {
+        total: reflected * factor,
+        diffuse: if diffuse {
+            material.reflect_diffuse(n, v, l) * factor
+        } else {
+            Vec3::ZERO
+        },
+        group: environment.group,
+    }
+}
+
+/// Light a sample drew from a light at a surface: all it reflects, the
+/// matte layer's share (when the passes ask for it) and the light's group.
+#[derive(Clone, Copy, Debug)]
+struct Lit {
+    total: Vec3,
+    diffuse: Vec3,
+    group: u16,
+}
+
+impl Lit {
+    const NONE: Self = Self {
+        total: Vec3::ZERO,
+        diffuse: Vec3::ZERO,
+        group: 0,
+    };
 }
 
 /// The power heuristic's weight for a sample drawn with density `own`
@@ -683,6 +904,7 @@ fn automatic_light(camera: &RenderCamera) -> Light {
         radius: 1.0,
         shadow: LightShadow::None,
         link: None,
+        group: 0,
     }
 }
 
@@ -1144,6 +1366,7 @@ mod tests {
             clamp,
             table: &table,
             moving: false,
+            layout: None,
         };
         let bright = Vec3::splat(50.0);
         assert_eq!(job(true).capped(bright, 0), bright, "seen directly");
@@ -1862,5 +2085,158 @@ mod tests {
         // A changing number of triangles: that object stays put.
         let (_, still) = RenderScene::moving(vec![at(0.0), scene_of(&Document::new("empty"))], 0);
         assert_eq!(still, 1);
+    }
+
+    /// Renders `doc` with every pass through `camera`.
+    fn with_passes(doc: &Document, camera: &RenderCamera, options: &RenderOptions) -> Image {
+        let scene = textured_scene(doc, &Pictures::new(), *camera, &[]);
+        let all: grid4d_scene::Passes = grid4d_scene::Pass::ALL.into_iter().collect();
+        let mut progressive = Progressive::with_passes(options, all, &scene);
+        progressive.add_samples(&scene, camera, options, u32::MAX, &RenderControl::default());
+        progressive.image()
+    }
+
+    fn layer<'a>(image: &'a Image, name: &str) -> &'a crate::PassLayer {
+        image
+            .passes
+            .iter()
+            .find(|l| l.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+    }
+
+    /// A scene with every kind of light path: a glass ball, a coated cube, a
+    /// glowing panel and a lit floor under a Sky, with a light in a group.
+    fn every_path() -> Document {
+        let mut doc = floor_scene(LightShadow::Raytraced);
+        let sun = doc.scene.iter().find(|(_, n)| n.data.name == "Sun").unwrap().0;
+        if let ObjectKind::Light { group, .. } = &mut doc.scene.get_mut(sun).unwrap().data.kind {
+            *group = "Key".to_owned();
+        }
+        let mut glass = SceneMaterial::new("Glass");
+        (glass.color, glass.transmission, glass.roughness) = ([0.9, 0.95, 1.0], 1.0, 0.05);
+        let glass = doc.scene.materials_mut().insert(glass);
+        let mut ball = Node::new(
+            "Ball",
+            ObjectKind::Sphere {
+                radius: 50.0,
+                segments: 24,
+            },
+        )
+        .with_position(Vec3::new(100.0, 50.0, 60.0));
+        ball.data.tags = vec![Tag::Material(MaterialTag::new(Some(glass)))];
+        doc.scene.insert(ball);
+        let mut coat = SceneMaterial::new("Coat");
+        (coat.color, coat.clearcoat, coat.roughness) = ([0.8, 0.1, 0.1], 1.0, 0.6);
+        let coat = doc.scene.materials_mut().insert(coat);
+        let cube = doc.scene.iter().find(|(_, n)| n.data.name == "Cube").unwrap().0;
+        doc.scene.get_mut(cube).unwrap().data.tags = vec![Tag::Material(MaterialTag::new(Some(coat)))];
+        let mut glow = SceneMaterial::new("Glow");
+        (glow.color, glow.emission) = ([0.0; 3], [2.0, 1.5, 1.0]);
+        let glow = doc.scene.materials_mut().insert(glow);
+        let mut panel = Node::new(
+            "Panel",
+            ObjectKind::Plane {
+                width: 60.0,
+                depth: 60.0,
+                width_segments: 1,
+                depth_segments: 1,
+            },
+        )
+        .with_position(Vec3::new(0.0, 10.0, -120.0));
+        panel.data.tags = vec![Tag::Material(MaterialTag::new(Some(glow)))];
+        doc.scene.insert(panel);
+        let sky = grid4d_scene::Sky {
+            group: "Daylight".to_owned(),
+            ..grid4d_scene::Sky::default()
+        };
+        doc.scene.insert(Node::new("Sky", ObjectKind::Sky(sky)));
+        doc
+    }
+
+    #[test]
+    fn the_lighting_passes_and_the_group_passes_add_up_to_the_picture() {
+        let doc = every_path();
+        let options = options(40, 16, 3);
+        let image = with_passes(&doc, &top_camera(), &options);
+        let lighting = [
+            "Emission",
+            "Background",
+            "DiffuseDirect",
+            "DiffuseIndirect",
+            "SpecularDirect",
+            "SpecularIndirect",
+            "Transmission",
+        ];
+        let groups = ["Group.Default", "Group.Key", "Group.Daylight"];
+        for names in [&lighting[..], &groups[..]] {
+            let layers: Vec<_> = names.iter().map(|n| layer(&image, n)).collect();
+            for (i, pixel) in image.pixels.iter().enumerate() {
+                for (c, &beauty) in pixel.iter().take(3).enumerate() {
+                    let sum: f32 = layers.iter().map(|l| l.values[i * 3 + c]).sum();
+                    assert!(
+                        (sum - beauty).abs() <= 1e-3 * beauty.abs().max(1.0),
+                        "{names:?} pixel {i}: {sum} vs {beauty}"
+                    );
+                }
+            }
+        }
+        // Each kind of light shows somewhere.
+        for name in lighting.iter().chain(&groups) {
+            assert!(layer(&image, name).values.iter().any(|&v| v > 1e-3), "{name} is empty");
+        }
+    }
+
+    #[test]
+    fn data_passes_show_the_first_surface() {
+        let doc = floor_scene(LightShadow::None);
+        let image = with_passes(&doc, &top_camera(), &options(60, 4, 1));
+        // Pixel over the floor at (150, 0): 1000 cm below the camera.
+        let px = |x: f32, z: f32| -> usize {
+            let col = ((x / 300.0 + 1.0) * 30.0).floor() as usize;
+            let row = ((z / 300.0 + 1.0) * 30.0).floor() as usize;
+            row * 60 + col
+        };
+        let i = px(150.0, 0.0);
+        let depth = layer(&image, "Depth").values[i];
+        assert!((depth - 1000.0).abs() < 0.1, "{depth}");
+        let normal = &layer(&image, "Normal").values[i * 3..i * 3 + 3];
+        assert!((normal[1] - 1.0).abs() < 1e-4, "{normal:?}");
+        let position = &layer(&image, "Position").values[i * 3..i * 3 + 3];
+        assert!(
+            position[1].abs() < 1e-3 && (position[0] - 150.0).abs() < 6.0,
+            "{position:?}"
+        );
+        // The cube's top is 100 cm nearer.
+        let top = layer(&image, "Depth").values[px(-100.0, 0.0)];
+        assert!((top - 900.0).abs() < 0.1, "{top}");
+        // Outside the floor nothing: the largest depth, no object.
+        let outside = px(290.0, 290.0);
+        assert_eq!(layer(&image, "Depth").values[outside], f32::MAX);
+        assert_eq!(layer(&image, "ObjectID").values[outside], 0.0);
+        // Objects get their own IDs, named by the scene.
+        let (floor, cube) = (
+            layer(&image, "ObjectID").values[i],
+            layer(&image, "ObjectID").values[px(-100.0, 0.0)],
+        );
+        assert!(floor > 0.0 && cube > 0.0 && floor != cube);
+        let scene = scene_of(&doc);
+        let named: Vec<u32> = scene.object_ids().iter().map(|&(id, _)| id).collect();
+        assert!(named.contains(&(floor as u32)) && named.contains(&(cube as u32)));
+        // Alpha is the coverage.
+        assert_eq!(layer(&image, "Alpha").values[i], 1.0);
+        assert_eq!(layer(&image, "Alpha").values[outside], 0.0);
+    }
+
+    #[test]
+    fn passes_change_nothing_in_the_picture() {
+        let doc = every_path();
+        let options = options(30, 8, 2);
+        let plain = render(
+            &textured_scene(&doc, &Pictures::new(), top_camera(), &[]),
+            &top_camera(),
+            &options,
+        );
+        let with = with_passes(&doc, &top_camera(), &options);
+        assert_eq!(plain.pixels, with.pixels);
     }
 }

@@ -34,7 +34,9 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
-use grid4d_scene::{AreaShape, Environment, Lens, LinkMode, Linking, ShutterPosition, Sky, SunPlacement};
+use grid4d_scene::{
+    AreaShape, Environment, Lens, LinkMode, Linking, Pass, PngPasses, ShutterPosition, Sky, SunPlacement,
+};
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
     FrameRange, ImageFormat, Inherit, Interpolation, Key, Layer, LayerId, LayerSwitches, LightDetails, LightShadow,
@@ -832,6 +834,96 @@ struct RenderDto {
     /// Added in version 5 (step 16.5): 3 when absent.
     #[serde(default = "three", skip_serializing_if = "is_three")]
     segments: u32,
+    /// Added in version 5 (step 16.6): the render passes; none when absent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    passes: Vec<PassDto>,
+    /// Added in version 5 (step 16.6): `beauty_only` when absent.
+    #[serde(default, skip_serializing_if = "PngPassesDto::is_beauty_only")]
+    png_passes: PngPassesDto,
+}
+
+/// A render pass (version 5, step 16.6).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum PassDto {
+    Alpha,
+    Depth,
+    Normal,
+    Position,
+    Albedo,
+    Emission,
+    Background,
+    DiffuseDirect,
+    DiffuseIndirect,
+    SpecularDirect,
+    SpecularIndirect,
+    Transmission,
+    ObjectId,
+    MaterialId,
+    LightGroups,
+}
+
+impl From<Pass> for PassDto {
+    fn from(pass: Pass) -> Self {
+        match pass {
+            Pass::Alpha => Self::Alpha,
+            Pass::Depth => Self::Depth,
+            Pass::Normal => Self::Normal,
+            Pass::Position => Self::Position,
+            Pass::Albedo => Self::Albedo,
+            Pass::Emission => Self::Emission,
+            Pass::Background => Self::Background,
+            Pass::DiffuseDirect => Self::DiffuseDirect,
+            Pass::DiffuseIndirect => Self::DiffuseIndirect,
+            Pass::SpecularDirect => Self::SpecularDirect,
+            Pass::SpecularIndirect => Self::SpecularIndirect,
+            Pass::Transmission => Self::Transmission,
+            Pass::ObjectId => Self::ObjectId,
+            Pass::MaterialId => Self::MaterialId,
+            Pass::LightGroups => Self::LightGroups,
+        }
+    }
+}
+
+impl From<PassDto> for Pass {
+    fn from(pass: PassDto) -> Self {
+        match pass {
+            PassDto::Alpha => Self::Alpha,
+            PassDto::Depth => Self::Depth,
+            PassDto::Normal => Self::Normal,
+            PassDto::Position => Self::Position,
+            PassDto::Albedo => Self::Albedo,
+            PassDto::Emission => Self::Emission,
+            PassDto::Background => Self::Background,
+            PassDto::DiffuseDirect => Self::DiffuseDirect,
+            PassDto::DiffuseIndirect => Self::DiffuseIndirect,
+            PassDto::SpecularDirect => Self::SpecularDirect,
+            PassDto::SpecularIndirect => Self::SpecularIndirect,
+            PassDto::Transmission => Self::Transmission,
+            PassDto::ObjectId => Self::ObjectId,
+            PassDto::MaterialId => Self::MaterialId,
+            PassDto::LightGroups => Self::LightGroups,
+        }
+    }
+}
+
+/// How passes are saved with PNG (version 5, step 16.6).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum PngPassesDto {
+    #[default]
+    BeautyOnly,
+    OneFilePerPass,
+}
+
+impl PngPassesDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_beauty_only(&self) -> bool {
+        *self == Self::BeautyOnly
+    }
 }
 
 const fn three() -> u32 {
@@ -915,6 +1007,8 @@ impl RenderDto {
             emissive_lights,
             motion_blur,
             segments,
+            passes,
+            png_passes,
         } = *settings;
         Some(Self {
             width,
@@ -945,6 +1039,11 @@ impl RenderDto {
             emissive_lights,
             motion_blur,
             segments,
+            passes: passes.iter().map(PassDto::from).collect(),
+            png_passes: match png_passes {
+                PngPasses::BeautyOnly => PngPassesDto::BeautyOnly,
+                PngPasses::OneFilePerPass => PngPassesDto::OneFilePerPass,
+            },
         })
     }
 
@@ -978,6 +1077,11 @@ impl RenderDto {
             emissive_lights: self.emissive_lights,
             motion_blur: self.motion_blur,
             segments: self.segments,
+            passes: self.passes.into_iter().map(Pass::from).collect(),
+            png_passes: match self.png_passes {
+                PngPassesDto::BeautyOnly => PngPasses::BeautyOnly,
+                PngPassesDto::OneFilePerPass => PngPasses::OneFilePerPass,
+            },
         }
         .validated()
     }
@@ -6737,6 +6841,10 @@ mod tests {
             emissive_lights: false,
             motion_blur: true,
             segments: 6,
+            passes: [Pass::Depth, Pass::DiffuseDirect, Pass::LightGroups]
+                .into_iter()
+                .collect(),
+            png_passes: PngPasses::OneFilePerPass,
         };
         assert_eq!(round_trip(&doc).render, doc.render);
         doc.render.frames = FrameRange::All;

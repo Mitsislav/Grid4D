@@ -69,6 +69,11 @@ const ADDED: &[Added] = &[
         place: Place::Render,
         fields: &["motion_blur", "segments"],
     },
+    // Step 16.6: render passes.
+    Added {
+        place: Place::Render,
+        fields: &["passes", "png_passes"],
+    },
     Added {
         place: Place::Kind("camera"),
         fields: &["lens"],

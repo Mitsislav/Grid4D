@@ -19,6 +19,7 @@ mod channels;
 mod environment;
 mod image;
 mod lights;
+mod passes;
 mod picture;
 mod sample;
 mod scene;
@@ -27,6 +28,7 @@ mod trace;
 
 pub use camera::{CameraProjection, RenderCamera, ThinLens};
 pub use image::Image;
+pub use passes::PassLayer;
 pub use picture::{Picture, Pictures, Texels};
 pub use scene::{RenderScene, Texturing};
 pub use trace::{Progressive, RenderControl, RenderOptions, render};

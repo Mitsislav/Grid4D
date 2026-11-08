@@ -75,6 +75,8 @@ pub(crate) struct Light {
     pub shadow: LightShadow,
     /// Its bit in the objects' `unlit` masks (`None`: it lights everything).
     pub link: Option<u8>,
+    /// Its light group (0: none).
+    pub group: u16,
 }
 
 impl Light {
@@ -97,6 +99,7 @@ impl Light {
             radius: details.radius,
             shadow: light.shadow,
             link: light.link,
+            group: light.group,
         }
     }
 }
@@ -250,6 +253,9 @@ struct Object {
     first_triangle: usize,
     /// The linked lights that do not light it (bits by their `link`).
     unlit: u64,
+    /// Render passes: its object ID and its top material's ID (0: none).
+    object_id: u32,
+    material_id: u32,
 }
 
 /// Everything a render needs from the scene, built once per render.
@@ -281,6 +287,10 @@ pub struct RenderScene {
     bounds: Option<(Vec3, Vec3)>,
     /// The triangles over the shutter interval; `None`: they stand still.
     motion: Option<Motion>,
+    /// Render passes: the object IDs in use and the objects they name.
+    object_ids: Vec<(u32, NodeId)>,
+    /// The light groups' names (a light's `group` n names entry n − 1).
+    light_groups: Vec<String>,
 }
 
 /// A point chosen on a light with a surface.
@@ -306,6 +316,8 @@ struct Build {
     triangulator: Triangulator,
     tri: TriMesh,
     corner_tangents: Vec<Vec4>,
+    /// Render passes: the object IDs in use and their objects.
+    object_ids: Vec<(u32, NodeId)>,
 }
 
 /// One object to add: its mesh at unit size and how it is drawn.
@@ -316,6 +328,7 @@ struct Part<'a> {
     bounds: Option<Aabb>,
     layers: MaterialLayers,
     unlit: u64,
+    object_id: u32,
 }
 
 impl RenderScene {
@@ -338,16 +351,29 @@ impl RenderScene {
 
     fn build(evaluated: &EvaluatedScene, texturing: Option<&Texturing<'_>>) -> Self {
         let mut b = Build::default();
+        // Object IDs (render passes): the place in the evaluated order + 1;
+        // clones take their Cloner's.
+        let place: HashMap<NodeId, u32> = evaluated
+            .nodes()
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.id, u32::try_from(i + 1).unwrap_or(u32::MAX)))
+            .collect();
+        let id_of = |id: NodeId| place.get(&id).copied().unwrap_or(0);
         // Objects, then clones.
         let objects = evaluated
             .nodes()
             .iter()
-            .map(|n| (n.world, n.drawable, n.bounds, n.materials, n.unlit));
+            .map(|n| (n.world, n.drawable, n.bounds, n.materials, n.unlit, n.id));
         let clones = evaluated
             .instances()
             .iter()
-            .map(|c| (c.world, c.drawable, c.bounds, c.materials, c.unlit));
-        for (world, drawable, bounds, layers, unlit) in objects.chain(clones) {
+            .map(|c| (c.world, c.drawable, c.bounds, c.materials, c.unlit, c.owner));
+        let mut named = std::collections::HashSet::new();
+        for (world, drawable, bounds, layers, unlit, owner) in objects.chain(clones) {
+            if drawable.is_some_and(|d| !d.marker) && named.insert(owner) {
+                b.object_ids.push((id_of(owner), owner));
+            }
             let Some(draw) = drawable.filter(|d| !d.marker) else {
                 continue;
             };
@@ -372,6 +398,7 @@ impl RenderScene {
                 bounds,
                 layers,
                 unlit,
+                object_id: id_of(owner),
             };
             b.add(evaluated, &part, texturing);
         }
@@ -401,6 +428,8 @@ impl RenderScene {
                 .map(|environment| EnvironmentLight::new(environment, texturing.map(|t| t.pictures))),
             bounds: b.bounds,
             motion: None,
+            object_ids: b.object_ids,
+            light_groups: evaluated.light_groups().to_vec(),
         }
         .with_light_tables()
     }
@@ -472,6 +501,28 @@ impl RenderScene {
         }
         scene.motion = Some(Motion { points, normals });
         (scene, still.iter().filter(|s| **s).count())
+    }
+
+    /// The object IDs of the Object ID pass and the objects they name (a
+    /// Cloner's for its clones).
+    #[must_use]
+    pub fn object_ids(&self) -> &[(u32, NodeId)] {
+        &self.object_ids
+    }
+
+    /// The light groups' names, as the Light Groups pass names its layers
+    /// (`Group.<name>`, after `Group.Default`).
+    #[must_use]
+    pub fn light_groups(&self) -> &[String] {
+        &self.light_groups
+    }
+
+    /// `triangle`'s object's IDs: (object, material).
+    pub(crate) fn ids_of(&self, triangle: usize) -> (u32, u32) {
+        self.object_of
+            .get(triangle)
+            .and_then(|&o| self.objects.get(usize::try_from(o).ok()?))
+            .map_or((0, 0), |o| (o.object_id, o.material_id))
     }
 
     /// Whether the triangles move over the shutter interval.
@@ -684,6 +735,14 @@ impl Build {
             layers: (layer_start, self.layers.len()),
             first_triangle,
             unlit: part.unlit,
+            object_id: part.object_id,
+            material_id: texturing
+                .and_then(|t| {
+                    let top = evaluated.material_layers(part.layers).last()?;
+                    let place = t.materials.ids().iter().position(|&m| m == top.material)?;
+                    u32::try_from(place + 1).ok()
+                })
+                .unwrap_or(0),
         });
     }
 }
@@ -1069,6 +1128,54 @@ mod tests {
         assert_eq!(scene.triangle_count(), 8 * 12, "eight cubes");
         let (min, max) = scene.bounds().unwrap();
         assert!(min.x < -400.0 && max.x > 400.0, "around the ring: {min} {max}");
+    }
+
+    #[test]
+    fn clones_take_their_cloners_id_and_materials_their_place() {
+        use grid4d_geom::cloner::Cloner;
+        use grid4d_scene::{Material, MaterialTag, Tag};
+        let mut doc = Document::new("ids");
+        let red = doc.scene.materials_mut().insert(Material::new("Red"));
+        let blue = doc.scene.materials_mut().insert(Material::new("Blue"));
+        let mut plane = Node::new("Plane", ObjectKindTag::Plane.default_kind());
+        plane.data.tags = vec![Tag::Material(MaterialTag::new(Some(blue)))];
+        doc.scene.insert(plane);
+        let mut cloner = Node::new("Cloner", ObjectKind::cloner(Cloner::default()));
+        cloner.data.tags = vec![Tag::Material(MaterialTag::new(Some(red)))];
+        let cloner = doc.scene.insert(cloner);
+        doc.scene
+            .insert_child(cloner, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        let mut eval = EvaluatedScene::for_render();
+        eval.update(&doc.scene);
+        let pictures = Pictures::new();
+        let texturing = Texturing {
+            materials: doc.scene.materials(),
+            pictures: &pictures,
+            camera: RenderCamera::framing(Vec3::splat(-1.0), Vec3::ONE, 1.0),
+            aspect: 1.0,
+            cameras: &[],
+        };
+        let scene = RenderScene::textured(&eval, &texturing);
+        let id_of = |node| scene.object_ids().iter().find(|&&(_, n)| n == node).map(|&(id, _)| id);
+        let cloner_id = id_of(cloner).unwrap();
+        let mut seen = Vec::new();
+        for triangle in 0..scene.triangle_count() {
+            let ids = scene.ids_of(triangle);
+            if !seen.contains(&ids) {
+                seen.push(ids);
+            }
+        }
+        seen.sort_unstable();
+        // The plane (Blue, second in the Material Manager) and every clone
+        // as the Cloner (Red, first).
+        let plane = seen.iter().find(|&&(id, _)| id != cloner_id).unwrap().0;
+        let mut expected = vec![(plane, 2), (cloner_id, 1)];
+        expected.sort_unstable();
+        assert_eq!(seen, expected);
+        // Without materials, no material IDs.
+        let plain = RenderScene::new(&eval);
+        assert!((0..plain.triangle_count()).all(|t| plain.ids_of(t).1 == 0));
     }
 
     #[test]

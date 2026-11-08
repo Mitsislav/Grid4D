@@ -62,32 +62,82 @@ const HALF_MAX: f32 = 65_504.0;
 /// floats (R, G, B and, with [`Channels::Rgba`], A), ZIP-compressed in blocks of
 /// 16 lines. Values beyond the 16-bit range are clamped; NaN becomes 0.
 pub fn exr_bytes(width: u32, height: u32, channels: Channels, pixels: &[[f32; 4]]) -> Result<Vec<u8>, IoError> {
+    exr_layers_bytes(width, height, &exr_beauty(channels, pixels), &[])
+}
+
+/// One channel of an OpenEXR file: its name (`R`, `Depth.Z`, `Group.Key.R`
+/// …), whether it is stored as a 32-bit float (else a 16-bit one), and a
+/// value per pixel, rows from the top.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExrChannel {
+    pub name: String,
+    pub float: bool,
+    pub values: Vec<f32>,
+}
+
+/// The picture's own channels for [`exr_layers_bytes`] (R, G, B and, with
+/// [`Channels::Rgba`], A, as 16-bit floats), from linear, premultiplied
+/// RGBA `pixels`.
+#[must_use]
+pub fn exr_beauty(channels: Channels, pixels: &[[f32; 4]]) -> Vec<ExrChannel> {
+    let names: &[(&str, usize)] = match channels {
+        Channels::Rgb => &[("R", 0), ("G", 1), ("B", 2)],
+        Channels::Rgba => &[("R", 0), ("G", 1), ("B", 2), ("A", 3)],
+    };
+    names
+        .iter()
+        .map(|&(name, i)| ExrChannel {
+            name: name.to_owned(),
+            float: false,
+            values: pixels.iter().map(|p| p[i]).collect(),
+        })
+        .collect()
+}
+
+/// The OpenEXR file of a `width` × `height` picture of `channels` (one
+/// part, scanlines, ZIP-compressed in blocks of 16 lines, channels in the
+/// format's byte order of names), with string attributes `attributes`
+/// (name, text). 16-bit values beyond their range are clamped; NaN becomes 0.
+pub fn exr_layers_bytes(
+    width: u32,
+    height: u32,
+    channels: &[ExrChannel],
+    attributes: &[(&str, &str)],
+) -> Result<Vec<u8>, IoError> {
     let too_large = || IoError::Invalid(format!("a {width} × {height} picture is too large for OpenEXR"));
     let count = u64::from(width) * u64::from(height);
-    if u64::try_from(pixels.len()).ok() != Some(count) || count == 0 {
+    if count == 0 || channels.is_empty() {
         return Err(IoError::Invalid(format!(
-            "a {width} × {height} picture needs {count} pixels, not {}",
-            pixels.len()
+            "a {width} × {height} picture has nothing to save"
+        )));
+    }
+    if let Some(channel) = channels
+        .iter()
+        .find(|c| u64::try_from(c.values.len()).ok() != Some(count))
+    {
+        return Err(IoError::Invalid(format!(
+            "channel {} of a {width} × {height} picture needs {count} values, not {}",
+            channel.name,
+            channel.values.len()
         )));
     }
     let row_length = usize::try_from(width).map_err(|_| too_large())?;
+    let rows = usize::try_from(height).map_err(|_| too_large())?;
     let max_x = i32::try_from(width - 1).map_err(|_| too_large())?;
     let max_y = i32::try_from(height - 1).map_err(|_| too_large())?;
-    // Channels in alphabetical order, as the format stores them, with their
-    // index in a pixel.
-    let order: &[(&str, usize)] = match channels {
-        Channels::Rgb => &[("B", 2), ("G", 1), ("R", 0)],
-        Channels::Rgba => &[("A", 3), ("B", 2), ("G", 1), ("R", 0)],
-    };
+    // Channels in byte order of their names, as the format stores them.
+    let mut order: Vec<&ExrChannel> = channels.iter().collect();
+    order.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
 
     let mut out = vec![0x76, 0x2f, 0x31, 0x01];
     // Version 2: a single-part scanline file.
     out.extend(2u32.to_le_bytes());
     let mut list = Vec::new();
-    for (name, _) in order {
-        list.extend(name.as_bytes());
+    for channel in &order {
+        list.extend(channel.name.as_bytes());
         list.push(0);
-        list.extend(1i32.to_le_bytes()); // HALF
+        // FLOAT or HALF.
+        list.extend(if channel.float { 2i32 } else { 1i32 }.to_le_bytes());
         list.extend([0; 4]); // pLinear, reserved
         list.extend(1i32.to_le_bytes()); // x sampling
         list.extend(1i32.to_le_bytes()); // y sampling
@@ -98,6 +148,9 @@ pub fn exr_bytes(width: u32, height: u32, channels: Channels, pixels: &[[f32; 4]
     attribute(&mut out, "compression", "compression", &[3]); // ZIP, 16 lines
     attribute(&mut out, "dataWindow", "box2i", &window);
     attribute(&mut out, "displayWindow", "box2i", &window);
+    for &(name, text) in attributes {
+        attribute(&mut out, name, "string", text.as_bytes());
+    }
     attribute(&mut out, "lineOrder", "lineOrder", &[0]); // increasing y
     attribute(&mut out, "pixelAspectRatio", "float", &1f32.to_le_bytes());
     attribute(&mut out, "screenWindowCenter", "v2f", &[0; 8]);
@@ -105,18 +158,25 @@ pub fn exr_bytes(width: u32, height: u32, channels: Channels, pixels: &[[f32; 4]
     out.push(0);
 
     // The offset of every block, filled in as the blocks are written.
-    let blocks = pixels.chunks(row_length * EXR_BLOCK_LINES);
+    let block_count = rows.div_ceil(EXR_BLOCK_LINES);
     let table = out.len();
-    out.resize(table + blocks.len() * 8, 0);
+    out.resize(table + block_count * 8, 0);
     let (mut raw, mut shuffled) = (Vec::new(), Vec::new());
-    for (index, block) in blocks.enumerate() {
+    for index in 0..block_count {
         let offset = u64::try_from(out.len()).map_err(|_| too_large())?;
         out[table + index * 8..table + index * 8 + 8].copy_from_slice(&offset.to_le_bytes());
         raw.clear();
-        for row in block.chunks(row_length) {
-            for &(_, channel) in order {
-                for pixel in row {
-                    raw.extend(half::f16::from_f32(finite_half(pixel[channel])).to_le_bytes());
+        for row in index * EXR_BLOCK_LINES..((index + 1) * EXR_BLOCK_LINES).min(rows) {
+            for channel in &order {
+                let line = &channel.values[row * row_length..(row + 1) * row_length];
+                if channel.float {
+                    for &value in line {
+                        raw.extend(value.to_le_bytes());
+                    }
+                } else {
+                    for &value in line {
+                        raw.extend(half::f16::from_f32(finite_half(value)).to_le_bytes());
+                    }
                 }
             }
         }
@@ -128,6 +188,18 @@ pub fn exr_bytes(width: u32, height: u32, channels: Channels, pixels: &[[f32; 4]
         out.extend_from_slice(&data);
     }
     Ok(out)
+}
+
+/// Saves a picture with more channels (see [`exr_layers_bytes`]) to `path`,
+/// atomically like documents.
+pub fn save_exr_layers(
+    path: &Path,
+    width: u32,
+    height: u32,
+    channels: &[ExrChannel],
+    attributes: &[(&str, &str)],
+) -> Result<(), IoError> {
+    write_atomic(path, &exr_layers_bytes(width, height, channels, attributes)?)
 }
 
 /// Saves a picture (see [`exr_bytes`]) to `path`, atomically like documents.
@@ -286,5 +358,37 @@ mod tests {
         let pixels = vec![[0.5, 0.5, 0.5, 1.0]; 256 * 64];
         let bytes = exr_bytes(256, 64, Channels::Rgba, &pixels).unwrap();
         assert!(bytes.len() < 256 * 64 * 8 / 20, "{} bytes", bytes.len());
+    }
+
+    #[test]
+    fn layered_exr_files_hold_half_and_float_channels_and_text() {
+        let (width, height) = (5, 3);
+        let pixels = sample(width, height);
+        let mut channels = exr_beauty(Channels::Rgba, &pixels);
+        let depth: Vec<f32> = (0..15u8).map(|i| 1000.25 + f32::from(i)).collect();
+        channels.push(ExrChannel {
+            name: "Depth.Z".to_owned(),
+            float: true,
+            values: depth.clone(),
+        });
+        channels.push(ExrChannel {
+            name: "Group.Key.R".to_owned(),
+            float: false,
+            values: vec![0.5; 15],
+        });
+        let text = "1 = Cube\n2 = Ball";
+        let bytes = exr_layers_bytes(width, height, &channels, &[("grid4d/objects", text)]).unwrap();
+        let (_, read) = decode(bytes.clone());
+        let names: Vec<&str> = read.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["A", "B", "Depth.Z", "G", "Group.Key.R", "R"]);
+        let depth_read = &read.iter().find(|(n, _)| n == "Depth.Z").unwrap().1;
+        assert_eq!(depth_read, &depth, "32-bit floats exactly");
+        // The attribute is there, as text.
+        assert!(bytes.windows(text.len()).any(|w| w == text.as_bytes()));
+        // The picture alone is the same file as before.
+        assert_eq!(
+            exr_layers_bytes(width, height, &exr_beauty(Channels::Rgba, &pixels), &[]).unwrap(),
+            exr_bytes(width, height, Channels::Rgba, &pixels).unwrap()
+        );
     }
 }

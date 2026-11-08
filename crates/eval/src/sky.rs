@@ -384,6 +384,8 @@ pub enum Surround {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EvaluatedEnvironment {
     pub id: NodeId,
+    /// Its light group (see `EvaluatedScene::light_groups`; 0: none).
+    pub group: u16,
     /// Camera rays that miss everything see it.
     pub visible: bool,
     pub surround: Surround,

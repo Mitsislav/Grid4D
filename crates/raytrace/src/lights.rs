@@ -39,6 +39,8 @@ pub(crate) struct AreaLight {
     pub area: f32,
     /// Its bit in the objects' `unlit` masks (`None`: it lights everything).
     pub link: Option<u8>,
+    /// Its light group (0: none).
+    pub group: u16,
 }
 
 /// A point chosen on a light with a surface.
@@ -103,6 +105,7 @@ impl AreaLight {
             radiance: Vec3::from(light.color) * scale,
             area,
             link: light.link,
+            group: light.group,
         })
     }
 
@@ -380,6 +383,7 @@ mod tests {
     fn area(shape: AreaShape, size: [f32; 2]) -> AreaLight {
         let light = EvaluatedLight {
             id: NodeId::default(),
+            group: 0,
             light_type: LightType::Area,
             position: Vec3::new(0.0, 100.0, 0.0),
             direction: Vec3::NEG_Y,

@@ -415,6 +415,18 @@ fn still_life_render(doc: &Document, pictures: &Pictures) -> Image {
 
 /// Renders `doc` from a camera above the front left, with `pictures`.
 fn still_life_at(doc: &Document, pictures: &Pictures, width: u32, height: u32, samples: u32) -> Image {
+    let (scene, camera, options) = still_life_view(doc, pictures, width, height, samples);
+    render(&scene, &camera, &options)
+}
+
+/// The still life's render scene, camera and options.
+fn still_life_view(
+    doc: &Document,
+    pictures: &Pictures,
+    width: u32,
+    height: u32,
+    samples: u32,
+) -> (RenderScene, RenderCamera, RenderOptions) {
     let mut eval = EvaluatedScene::for_render();
     eval.update(&doc.scene);
     // Low and close: the shapes, the floor's edge far away and the sky.
@@ -444,7 +456,7 @@ fn still_life_at(doc: &Document, pictures: &Pictures, width: u32, height: u32, s
         aspect: f32::from(u16::try_from(width).unwrap()) / f32::from(u16::try_from(height).unwrap()),
         cameras: &[],
     };
-    render(&RenderScene::textured(&eval, &texturing), &camera, &options)
+    (RenderScene::textured(&eval, &texturing), camera, options)
 }
 
 /// The still life under a clear afternoon Sky, the sun 35° up in the
@@ -788,5 +800,59 @@ fn lens_and_shutter_for_the_manual() {
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.write_header().unwrap().write_image_data(&both).unwrap();
+    println!("{}", path.display());
+}
+
+/// The manual's picture of render passes (`render-passes.png`, before it is
+/// reduced to 256 colours): the daylight still life and seven of its passes.
+///
+/// `GRID4D_MANUAL_PICTURES=<folder> cargo test --release -p grid4d-raytrace --test reference -- --ignored passes`
+#[test]
+#[ignore = "renders a picture for the manual"]
+fn passes_for_the_manual() {
+    use grid4d_raytrace::{Progressive, RenderControl};
+    use grid4d_scene::Pass;
+    let dir = std::env::var_os("GRID4D_MANUAL_PICTURES").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let (w, h) = (240u32, 135u32);
+    let (doc, pictures) = daylight_scene();
+    let (scene, camera, options) = still_life_view(&doc, &pictures, w, h, 128);
+    let shown = [
+        Pass::DiffuseDirect,
+        Pass::SpecularIndirect,
+        Pass::Background,
+        Pass::Albedo,
+        Pass::Depth,
+        Pass::Normal,
+        Pass::ObjectId,
+    ];
+    let mut progressive = Progressive::with_passes(&options, shown.into_iter().collect(), &scene);
+    progressive.add_samples(&scene, &camera, &options, u32::MAX, &RenderControl::default());
+    let image = progressive.image();
+    let mut tiles = vec![image.to_rgb8()];
+    for pass in &shown {
+        tiles.push(image.passes.iter().find(|l| l.name == pass.name()).unwrap().to_rgb8());
+    }
+    // Four across, two down, a 4-pixel gap.
+    let gap = 4usize;
+    let (tw, th) = (usize::try_from(w).unwrap(), usize::try_from(h).unwrap());
+    let (width, height) = (tw * 4 + gap * 3, th * 2 + gap);
+    let mut out = vec![255u8; width * height * 3];
+    for (n, tile) in tiles.iter().enumerate() {
+        let (x0, y0) = ((n % 4) * (tw + gap), (n / 4) * (th + gap));
+        for y in 0..th {
+            let row = &tile[y * tw * 3..(y + 1) * tw * 3];
+            let start = ((y0 + y) * width + x0) * 3;
+            out[start..start + tw * 3].copy_from_slice(row);
+        }
+    }
+    let path = dir.join("render-passes.png");
+    let mut encoder = png::Encoder::new(
+        BufWriter::new(File::create(&path).unwrap()),
+        u32::try_from(width).unwrap(),
+        u32::try_from(height).unwrap(),
+    );
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().unwrap().write_image_data(&out).unwrap();
     println!("{}", path.display());
 }

@@ -25,7 +25,9 @@ use grid4d_raytrace::{
     ThinLens,
 };
 use grid4d_render::OrbitCamera;
-use grid4d_scene::{Document, ImageFormat, Lens, NodeId, ObjectKind, ObjectKindTag, RenderSettings, Scene};
+use grid4d_scene::{
+    Document, ImageFormat, Lens, NodeId, ObjectKind, ObjectKindTag, Pass, Passes, RenderSettings, Scene,
+};
 use grid4d_sim::Replay;
 
 /// The history's pictures may take this much memory together; older ones go first.
@@ -69,6 +71,12 @@ impl Output {
     pub fn alpha(&self) -> bool {
         self.settings.alpha
     }
+
+    /// How passes are saved with PNG.
+    #[must_use]
+    pub fn png_passes(&self) -> grid4d_scene::PngPasses {
+        self.settings.png_passes
+    }
 }
 
 /// Where a render's pictures go.
@@ -84,7 +92,12 @@ pub struct FinishedFrame {
     /// The render it belongs to.
     pub number: u32,
     pub frame: i32,
+    /// The picture and its passes.
     pub image: Image,
+    /// What the Object ID and Material ID passes' numbers name: `id = name`
+    /// lines (empty without those passes).
+    pub objects: String,
+    pub materials: String,
 }
 
 /// One render of the session: its pixels so far and how it was made.
@@ -116,6 +129,10 @@ pub struct Picture {
     pub note: String,
     /// Changes with every new pass (the viewer re-uploads its texture).
     pub version: u64,
+    /// The render passes of the last finished frame.
+    pub passes: Vec<grid4d_raytrace::PassLayer>,
+    /// The pass shown instead of the picture (an index into `passes`).
+    pub pass: Option<usize>,
 }
 
 impl Picture {
@@ -129,6 +146,19 @@ impl Picture {
         }
     }
 
+    /// The pixels shown: the picture's ([`Self::pixels`]), or the shown
+    /// pass mapped to 8-bit RGB.
+    #[must_use]
+    pub fn shown_pixels(&self) -> (std::borrow::Cow<'_, [u8]>, grid4d_io::Channels) {
+        match self.pass.and_then(|i| self.passes.get(i)) {
+            Some(layer) => (std::borrow::Cow::Owned(layer.to_rgb8()), grid4d_io::Channels::Rgb),
+            None => {
+                let (pixels, channels) = self.pixels();
+                (std::borrow::Cow::Borrowed(pixels), channels)
+            }
+        }
+    }
+
     /// Whether there is anything to show or save yet.
     #[must_use]
     pub fn has_pixels(&self) -> bool {
@@ -136,7 +166,7 @@ impl Picture {
     }
 
     fn bytes(&self) -> usize {
-        self.rgba.len() + self.rgb.len()
+        self.rgba.len() + self.rgb.len() + self.passes.iter().map(|p| p.values.len() * 4).sum::<usize>()
     }
 }
 
@@ -150,7 +180,12 @@ enum Update {
         frame: i32,
     },
     /// Every sample of `frame` is in.
-    Frame { frame: i32, image: Image },
+    Frame {
+        frame: i32,
+        image: Image,
+        objects: String,
+        materials: String,
+    },
     /// The render ended (stopped: cancelled before the last pass).
     Done { stopped: bool },
 }
@@ -271,6 +306,7 @@ impl Job {
             options,
             replay,
             segments,
+            passes,
         } = look;
         let control = Arc::new(RenderControl::default());
         let (sender, updates) = mpsc::channel();
@@ -285,7 +321,7 @@ impl Job {
                     frames: &frames,
                     eye,
                 };
-                work(&input, &options, segments, replay, &worker_control, &sender);
+                work(&input, &options, (segments, passes), replay, &worker_control, &sender);
             });
         if let Err(err) = spawned {
             log::error!("could not start the render thread: {err}");
@@ -329,12 +365,28 @@ impl Job {
                     picture.version += 1;
                     changed = true;
                 }
-                Update::Frame { frame, image } => {
+                Update::Frame {
+                    frame,
+                    image,
+                    objects,
+                    materials,
+                } => {
                     picture.frames_done += 1;
+                    // The frame's passes for the viewer (a new texture only
+                    // when they show something new).
+                    if picture.passes != image.passes {
+                        picture.passes.clone_from(&image.passes);
+                        if picture.pass.is_some_and(|i| i >= picture.passes.len()) {
+                            picture.pass = None;
+                        }
+                        picture.version += 1;
+                    }
                     finished.push(FinishedFrame {
                         number: self.number,
                         frame,
                         image,
+                        objects,
+                        materials,
                     });
                 }
                 Update::Done { stopped } => {
@@ -434,6 +486,18 @@ impl Renders {
             .or_else(|| self.history.last())
     }
 
+    /// Shows pass `pass` of the shown picture (an index into its passes;
+    /// `None`: the picture itself).
+    pub fn show_pass(&mut self, pass: Option<usize>) {
+        let number = self.shown.or_else(|| self.history.last().map(|p| p.number));
+        if let Some(picture) = self.history.iter_mut().find(|p| Some(p.number) == number)
+            && picture.pass != pass
+        {
+            picture.pass = pass.filter(|&i| i < picture.passes.len());
+            picture.version += 1;
+        }
+    }
+
     #[must_use]
     pub fn picture(&self, number: u32) -> Option<&Picture> {
         self.history.iter().find(|p| p.number == number)
@@ -495,6 +559,8 @@ impl Renders {
                 options,
                 replay,
                 segments: settings.motion_blur.then_some(settings.segments),
+                // The Render View shows the picture only.
+                passes: Passes::NONE,
             },
         );
         let picture = Picture {
@@ -519,6 +585,8 @@ impl Renders {
             target: SaveTarget::Nowhere(crate::i18n::key("The Render View is not saved.")),
             note: String::new(),
             version: 0,
+            passes: Vec::new(),
+            pass: None,
         };
         self.view = Some(ViewRender { key, picture, job });
     }
@@ -569,6 +637,8 @@ impl Renders {
             target: save_target(&settings, document, numbered),
             note: String::new(),
             version: 0,
+            passes: Vec::new(),
+            pass: None,
         });
         self.shown = None;
 
@@ -584,6 +654,7 @@ impl Renders {
                 options,
                 replay,
                 segments: settings.motion_blur.then_some(settings.segments),
+                passes: settings.passes,
             },
         );
         if job.is_none() {
@@ -748,6 +819,8 @@ struct Look {
     options: RenderOptions,
     replay: Option<Replay>,
     segments: Option<u32>,
+    /// The render passes gathered beside the picture.
+    passes: Passes,
 }
 
 /// What a render worker renders: the scene, its texture pictures, its frames
@@ -794,7 +867,7 @@ fn aspect(options: &RenderOptions) -> f32 {
 fn work(
     input: &Input<'_>,
     options: &RenderOptions,
-    segments: Option<u32>,
+    (segments, passes): (Option<u32>, Passes),
     mut replay: Option<Replay>,
     control: &RenderControl,
     sender: &Sender<Update>,
@@ -848,7 +921,7 @@ fn work(
             end: (last.world != first.world).then_some(last.world),
             ..placements[base]
         };
-        let mut progressive = Progressive::new(options);
+        let mut progressive = Progressive::with_passes(options, passes, &render_scene);
         while !progressive.is_complete(options) {
             // 1, 1, 2, 4, … samples: a first picture at once, then fewer updates.
             let pass = progressive.samples().clamp(1, MAX_PASS);
@@ -868,7 +941,37 @@ fn work(
             }
         }
         let image = progressive.image();
-        if sender.send(Update::Frame { frame, image }).is_err() {
+        // What the ID passes' numbers name.
+        let objects = if passes.contains(Pass::ObjectId) {
+            render_scene
+                .object_ids()
+                .iter()
+                .filter_map(|&(id, node)| Some(format!("{id} = {}", scene.get(node)?.data.name)))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            String::new()
+        };
+        let materials = if passes.contains(Pass::MaterialId) {
+            scene
+                .materials()
+                .iter()
+                .enumerate()
+                .map(|(i, (_, m))| format!("{} = {}", i + 1, m.name))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            String::new()
+        };
+        if sender
+            .send(Update::Frame {
+                frame,
+                image,
+                objects,
+                materials,
+            })
+            .is_err()
+        {
             return;
         }
     }
@@ -1131,6 +1234,8 @@ pub(crate) mod tests {
                 target: SaveTarget::Nowhere(""),
                 note: String::new(),
                 version: 1,
+                passes: Vec::new(),
+                pass: None,
             });
         }
         renders.shown = Some(1);

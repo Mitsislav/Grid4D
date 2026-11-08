@@ -113,6 +113,34 @@ impl PictureViewerPanel {
             {
                 editor.commands.push(EditorCommand::SaveRenderAs);
             }
+            // The render's passes, when it has any.
+            let passes = editor
+                .renders
+                .shown_picture()
+                .map(|p| (p.pass, p.passes.iter().map(|l| l.name.clone()).collect::<Vec<_>>()));
+            if let Some((shown, names)) = passes.filter(|(_, names)| !names.is_empty()) {
+                ui.separator();
+                let mut chosen = shown;
+                let text = shown
+                    .and_then(|i| names.get(i))
+                    .map_or_else(|| tr("Picture").to_owned(), |n| pass_label(n));
+                let combo = egui::ComboBox::from_id_salt("grid4d.picture_viewer.pass")
+                    .selected_text(text)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut chosen, None, tr("Picture"));
+                        for (i, name) in names.iter().enumerate() {
+                            ui.selectable_value(&mut chosen, Some(i), pass_label(name));
+                        }
+                    });
+                let id = combo.response.id;
+                combo
+                    .response
+                    .on_hover_text(tr("The render pass shown (data passes mapped to colours)"));
+                ui.ctx().accesskit_node_builder(id, |node| node.set_label(tr("Pass")));
+                if chosen != shown {
+                    editor.renders.show_pass(chosen);
+                }
+            }
             ui.separator();
             if ui.add(Button::selectable(self.zoom.is_none(), tr("Fit"))).clicked() {
                 (self.zoom, self.pan) = (None, Vec2::ZERO);
@@ -217,10 +245,10 @@ impl PictureViewerPanel {
                 usize::try_from(picture.width).unwrap_or(0),
                 usize::try_from(picture.height).unwrap_or(0),
             ];
-            let image = if picture.alpha {
-                ColorImage::from_rgba_unmultiplied(size, &picture.rgba)
-            } else {
-                ColorImage::from_rgb(size, &picture.rgb)
+            let (pixels, channels) = picture.shown_pixels();
+            let image = match channels {
+                grid4d_io::Channels::Rgba => ColorImage::from_rgba_unmultiplied(size, &pixels),
+                grid4d_io::Channels::Rgb => ColorImage::from_rgb(size, &pixels),
             };
             // Enlarged pictures show their pixels; reduced ones are smoothed.
             let options = TextureOptions {
@@ -246,6 +274,19 @@ impl PictureViewerPanel {
             .as_ref()
             .map_or_else(egui::TextureId::default, |s| s.texture.id())
     }
+}
+
+/// A pass's name as the menu shows it: the pass's own label, a light
+/// group's as "Light Group: name".
+fn pass_label(name: &str) -> String {
+    if let Some(group) = name.strip_prefix("Group.") {
+        let group = if group == "Default" { tr("Default") } else { group };
+        return trf("Light Group: {0}", &[&group]);
+    }
+    grid4d_scene::Pass::ALL
+        .into_iter()
+        .find(|p| p.name() == name)
+        .map_or_else(|| name.to_owned(), |p| tr(p.label()).to_owned())
 }
 
 /// The session's pictures, newest first; a click shows one.

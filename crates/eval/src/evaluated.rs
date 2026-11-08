@@ -129,6 +129,8 @@ impl Purpose {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EvaluatedLight {
     pub id: NodeId,
+    /// Its light group (see [`EvaluatedScene::light_groups`]; 0: none).
+    pub group: u16,
     pub light_type: LightType,
     /// World position.
     pub position: Vec3,
@@ -183,6 +185,10 @@ pub struct EvaluatedScene {
     lights: Vec<EvaluatedLight>,
     /// The topmost visible Sky or Environment.
     environment: Option<crate::EvaluatedEnvironment>,
+    /// The light groups' names met so far (a light's `group` is an index
+    /// into it + 1). Never shrinks, so an evaluation allocates only when a
+    /// new name appears.
+    light_groups: Vec<String>,
     /// The meshes of the visible polygon objects as shown (hidden polygons left
     /// out), for drawing and picking.
     meshes: HashMap<MeshId, MeshHandle>,
@@ -666,8 +672,13 @@ impl EvaluatedScene {
             else {
                 continue;
             };
+            let group = match &*kind {
+                ObjectKind::Light { group, .. } => group_index(&mut self.light_groups, group),
+                _ => 0,
+            };
             self.lights.push(EvaluatedLight {
                 id: node.id,
+                group,
                 light_type,
                 position: node.world.w_axis.truncate(),
                 direction: node.world.transform_vector3(Vec3::NEG_Z).normalize_or(Vec3::NEG_Z),
@@ -688,11 +699,13 @@ impl EvaluatedScene {
             match &*kind {
                 ObjectKind::Sky(sky) => Some(crate::EvaluatedEnvironment {
                     id: node.id,
+                    group: group_index(&mut self.light_groups, &sky.group),
                     visible: sky.visible,
                     surround: crate::Surround::Sky(crate::SkyModel::new(sky, axes.z_axis)),
                 }),
                 ObjectKind::Environment(environment) => Some(crate::EvaluatedEnvironment {
                     id: node.id,
+                    group: group_index(&mut self.light_groups, &environment.group),
                     visible: environment.visible,
                     surround: crate::Surround::Picture(crate::PictureSurround::new(
                         environment,
@@ -741,6 +754,13 @@ impl EvaluatedScene {
     #[must_use]
     pub fn lights(&self) -> &[EvaluatedLight] {
         &self.lights
+    }
+
+    /// The light groups' names: a light's (or surround's) `group` `n` (from
+    /// 1) names `light_groups()[n - 1]`; 0 is no group.
+    #[must_use]
+    pub fn light_groups(&self) -> &[String] {
+        &self.light_groups
     }
 
     /// What surrounds the scene: the topmost visible Sky or Environment in
@@ -1202,6 +1222,19 @@ struct Generated {
     mesh: MeshHandle,
     /// The scene revision of the last update that used it.
     seen: u64,
+}
+
+/// The number (from 1) of light group `name` in `groups`, added when new; 0
+/// for no group (an empty name).
+fn group_index(groups: &mut Vec<String>, name: &str) -> u16 {
+    if name.is_empty() {
+        return 0;
+    }
+    let index = groups.iter().position(|g| g == name).unwrap_or_else(|| {
+        groups.push(name.to_owned());
+        groups.len() - 1
+    });
+    u16::try_from(index + 1).unwrap_or(0)
 }
 
 /// Gives each light that lights only some objects a bit (the first

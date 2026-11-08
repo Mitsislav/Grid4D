@@ -26,6 +26,19 @@ pub(crate) struct Bounce {
     pub weight: Vec3,
     /// Through the surface (refracted) rather than back from it.
     pub through: bool,
+    /// The part of the surface it came from (render passes).
+    pub lobe: Lobe,
+}
+
+/// The part of a surface's reflection a bounce took (render passes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Lobe {
+    /// The matte layer.
+    Diffuse,
+    /// A highlight, a mirror, glass's reflection or the clear coat.
+    Specular,
+    /// Through glass.
+    Transmission,
 }
 
 /// A surface's reflection, ready to evaluate: an opaque part (a diffuse
@@ -107,6 +120,23 @@ impl Material {
         reflected
     }
 
+    /// The matte layer's share of [`Self::reflect`]: the rest is its
+    /// highlight, glass reflection and coat (render passes).
+    pub(crate) fn reflect_diffuse(&self, n: Vec3, v: Vec3, l: Vec3) -> Vec3 {
+        let n_l = n.dot(l);
+        if n_l <= 0.0 {
+            return Vec3::ZERO;
+        }
+        let mut diffuse = self.diffuse * n_l;
+        if self.glass > 0.0 {
+            diffuse *= 1.0 - self.glass;
+        }
+        if self.coat > 0.0 {
+            diffuse *= 1.0 - self.coat * schlick1(COAT_F0, n.dot(v).max(1e-4));
+        }
+        diffuse
+    }
+
     /// Where a path seen from `v` goes next (`entering`: the ray met the
     /// surface's front, so a refracted path goes into the object); `None`
     /// when it ends.
@@ -124,6 +154,7 @@ impl Material {
                     direction: l,
                     weight: Vec3::splat(weight * fresnel * self.coat / p_coat),
                     through: false,
+                    lobe: Lobe::Specular,
                 });
             }
             scale = (1.0 - reflects) / (1.0 - p_coat);
@@ -140,17 +171,18 @@ impl Material {
             return None;
         }
         let p_specular = (specular / (specular + diffuse)).clamp(0.05, 0.95);
-        let (direction, weight) = if rng.next_f32() < p_specular {
+        let (direction, weight, lobe) = if rng.next_f32() < p_specular {
             let (l, weight, v_h) = mirror(n, v, self.alpha, rng)?;
-            (l, schlick(self.f0, v_h) * weight / p_specular)
+            (l, schlick(self.f0, v_h) * weight / p_specular, Lobe::Specular)
         } else {
             let l = cosine_hemisphere(n, rng.next_f32(), rng.next_f32());
-            (l, self.diffuse / (1.0 - p_specular))
+            (l, self.diffuse / (1.0 - p_specular), Lobe::Diffuse)
         };
         Some(Bounce {
             direction,
             weight: weight * scale,
             through: false,
+            lobe,
         })
     }
 
@@ -216,6 +248,7 @@ impl Material {
                 direction: l,
                 weight: Vec3::splat(weight),
                 through: false,
+                lobe: Lobe::Specular,
             });
         }
         let cos_t = (1.0 - eta * eta * (1.0 - v_h * v_h)).max(0.0).sqrt();
@@ -229,6 +262,7 @@ impl Material {
             direction: l,
             weight: self.tint * weight,
             through: true,
+            lobe: Lobe::Transmission,
         })
     }
 }
@@ -551,6 +585,7 @@ mod tests {
             radius: 200.0,
             shadow: LightShadow::None,
             link: None,
+            group: 0,
         };
         let mut rng = Rng::new(0, 0, 0, 0);
         let below = spot.arriving(Vec3::ZERO, &mut rng).unwrap();

@@ -6,7 +6,9 @@
 //! through [`LiveEdit`].
 
 use egui::{Button, ComboBox, DragValue, Frame, Grid, Id, RichText, TextEdit, Ui, Window};
-use grid4d_scene::{Document, FrameNaming, FrameRange, ImageFormat, RenderSettings, SceneEdit, TimeState};
+use grid4d_scene::{
+    Document, FrameNaming, FrameRange, ImageFormat, Pass, PngPasses, RenderSettings, SceneEdit, TimeState,
+};
 
 use crate::i18n::{key, tr, trf};
 use crate::{
@@ -43,11 +45,12 @@ pub enum Page {
     Output,
     Save,
     Sampling,
+    Passes,
     Options,
 }
 
 impl Page {
-    pub const ALL: [Self; 4] = [Self::Output, Self::Save, Self::Sampling, Self::Options];
+    pub const ALL: [Self; 5] = [Self::Output, Self::Save, Self::Sampling, Self::Passes, Self::Options];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
@@ -55,6 +58,7 @@ impl Page {
             Self::Output => "Output",
             Self::Save => "Save",
             Self::Sampling => "Sampling",
+            Self::Passes => "Passes",
             Self::Options => "Options",
         }
     }
@@ -125,6 +129,7 @@ impl RenderSettingsPanel {
                             }
                             Page::Save => save_page(ui, render, time, editor),
                             Page::Sampling => sampling_page(ui, render),
+                            Page::Passes => passes_page(ui, render),
                             Page::Options => options_page(ui, render),
                         }
                     });
@@ -459,6 +464,61 @@ fn check(ui: &mut Ui, label: &str, value: &mut bool, hint: &str) {
     ui.end_row();
 }
 
+/// The render passes saved beside the picture
+/// (`docs/reference/render-passes.md`).
+fn passes_page(ui: &mut Ui, s: &mut RenderSettings) {
+    section_heading(ui, "Passes");
+    ui.label(
+        RichText::new(tr(
+            "Pieces of the picture for compositing: with OpenEXR all in one file, with PNG one file each.",
+        ))
+        .size(11.0)
+        .color(p().text_dim),
+    );
+    Grid::new("grid4d.render.passes")
+        .num_columns(2)
+        .spacing([6.0, 4.0])
+        .show(ui, |ui| {
+            for pass in Pass::ALL {
+                let mut on = s.passes.contains(pass);
+                check(ui, pass.label(), &mut on, pass_hint(pass));
+                s.passes.set(pass, on);
+            }
+            attr_label(ui, "PNG Passes", LABEL_WIDTH);
+            let combo = ComboBox::from_id_salt("grid4d.render.png_passes")
+                .selected_text(tr(s.png_passes.label()))
+                .show_ui(ui, |ui| {
+                    for option in PngPasses::ALL {
+                        ui.selectable_value(&mut s.png_passes, option, tr(option.label()));
+                    }
+                });
+            ui.ctx()
+                .accesskit_node_builder(combo.response.id, |node| node.set_label(tr("PNG Passes")));
+            ui.end_row();
+        });
+}
+
+/// What a pass holds (its row's hint).
+const fn pass_hint(pass: Pass) -> &'static str {
+    match pass {
+        Pass::Alpha => key("Coverage: how much of each pixel objects fill"),
+        Pass::Depth => key("Distance from the camera along its view, in cm"),
+        Pass::Normal => key("Which way the surface faces, in world space"),
+        Pass::Position => key("Where the surface is, in world space"),
+        Pass::Albedo => key("The surface's own colour, unlit"),
+        Pass::Emission => key("Light given off by glowing surfaces and visible lights"),
+        Pass::Background => key("The Sky or Environment seen directly"),
+        Pass::DiffuseDirect => key("Matte reflection straight from the lights"),
+        Pass::DiffuseIndirect => key("Matte reflection of light that has bounced"),
+        Pass::SpecularDirect => key("Glossy reflection straight from the lights"),
+        Pass::SpecularIndirect => key("Glossy reflection of light that has bounced"),
+        Pass::Transmission => key("Light through glass"),
+        Pass::ObjectId => key("A number per object (the file names them)"),
+        Pass::MaterialId => key("A number per material (the file names them)"),
+        Pass::LightGroups => key("The light of each light group apart, and of lights in none"),
+    }
+}
+
 fn options_page(ui: &mut Ui, s: &mut RenderSettings) {
     section_heading(ui, "Options");
     Grid::new("grid4d.render.options")
@@ -570,9 +630,9 @@ mod tests {
         };
         frame(&ctx, &mut panel, &mut doc, &mut editor, Vec::new());
 
-        // Tab past the close button, the title bar and the four page buttons to
+        // Tab past the close button, the title bar and the five page buttons to
         // the Samples field, type 64, Enter.
-        for _ in 0..7 {
+        for _ in 0..8 {
             frame(
                 &ctx,
                 &mut panel,
@@ -633,13 +693,13 @@ mod tests {
         editor.show_render_settings = true;
         let mut panel = RenderSettingsPanel::default();
 
-        // Close, title, four pages, Preset, then Width.
-        type_into(&ctx, &mut panel, &mut doc, &mut editor, 8, "1920");
+        // Close, title, five pages, Preset, then Width.
+        type_into(&ctx, &mut panel, &mut doc, &mut editor, 9, "1920");
         assert_eq!((doc.render.width, doc.render.height), (1920, 1080), "16:9 kept");
         assert_eq!(editor.history.undo_len(), 1, "one step for both sides");
 
         // … Height, Lock Ratio, Frame Range, then From: the range becomes Manual.
-        type_into(&ctx, &mut panel, &mut doc, &mut editor, 12, "5");
+        type_into(&ctx, &mut panel, &mut doc, &mut editor, 13, "5");
         assert_eq!(doc.render.frames, FrameRange::Manual { from: 5, to: 5 });
         assert_eq!(editor.history.undo_len(), 2);
     }

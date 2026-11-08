@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 16 — Render quality (v1.2): in progress |
-| Last step done | 16.5 — lens and shutter: depth of field (thin lens, round or bladed aperture, focus object) and motion blur (moments of the shutter, moving camera, simulations between frames) (2026-11-08) |
-| Next step | 16.6 — render passes and multi-layer OpenEXR, light-group passes |
-| Tests | 923 (and 10 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment and lens render pictures), all passing; clippy and rustfmt clean |
+| Last step done | 16.6 — render passes: Alpha, Depth, Normal, Position, Albedo, seven lighting passes that add up to the picture, Object and Material IDs, light-group passes; multi-layer OpenEXR, PNG per pass, the Picture Viewer's Pass menu (2026-11-09) |
+| Next step | 16.7 — adaptive sampling and the denoiser |
+| Tests | 932 (and 11 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens and passes render pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2737,6 +2737,7 @@ risks R5 – R8 go with it.
 | 16.2a | Light transport: emitting triangles in a table by power (four points' brightness × area), one sampled at every surface with a shadow ray (stopped by glass, which refracted paths cross instead), weighed against the material's own bounce by multiple importance sampling (the power heuristic; `Material::pdf`, the mixture of its lobes); Omni / Spot / Infinite unchanged, so scenes without emitters render exactly as in 1.1; Render Settings ▸ Sampling: Clamp Indirect and Emissive Surfaces Light the Scene (`.g4d` v5 `clamp_indirect`, `emissive_lights`; dropped from a v4 file); Greek; the manual's §20.1 with a before / after picture; the studio scene re-measured | 877 |
 | 16.3 | The Sky and Environment objects (`ObjectKind::{Sky, Environment}`, `SunPlacement`; Elevation, Azimuth, Turbidity, Intensity, Rotation animate): the Preetham daylight model and the sun's colour from Rayleigh and haze transmittance (`grid4d-eval::sky`, pure; 1.0 = 100 000 lux), the topmost visible one chosen by evaluation; in the tracer the surround met by rays and sampled as a light — the sun as a disc, the rest by importance over an equirectangular table (`environment.rs`) — with MIS, Auto Light off, and the last bounce followed one ray further for lights sampled directly; in the viewport a background pass (`sky.wgsl`) behind perspective views and spherical-harmonic ambient light in Gouraud shading (a Sky's made when it changes, a picture's on the texture loader's thread), the sun as an Infinite light with the view's shadow; View ▸ Filter ▸ Sky; `.g4d` v5 kinds `sky` / `environment` (refused in a version 4 file); the Attribute Manager's rows and the "Not used" note; Create ▸ Sky / Environment, icons, Greek; two reference pictures (daylight, a panorama-lit still life); the manual's §4.2 | 908 |
 | 16.5 | Lens and shutter: `Lens` on cameras (depth of field, focus distance or object, F-Stop, blades and their turn, shutter length and position; focus, F-Stop and blade turn animate) and Render Settings ▸ Motion Blur with Segments; in the tracer a thin lens (`ThinLens`: a real-sized aperture, round or bladed) and motion blur — the scene evaluated at moments of the shutter (`RenderScene::moving`: corners and normals per moment, blended at each sample's time; `Bvh::build_swept` / `raycast_by`), a moving camera, simulations blended between cached frames (`Replay::overrides_at`); time and aperture drawn only when used, so other renders are unchanged; the camera's focus plane in the viewport; `.g4d` v5 `lens`, `motion_blur`, `segments` (stripped from a version 4 file); the Attribute Manager's Lens rows, the Sampling page's rows; Greek; two reference pictures; the manual's §3.1 and §20.1 | 923 |
+| 16.6 | Render passes: `RenderSettings::passes` (a set of `Pass`) and `png_passes`; in the tracer each bounce names its lobe and each contribution goes to Emission, Background, Diffuse / Specular Direct / Indirect or Transmission and to its light group, data passes (depth, normal, position, albedo) from the first hit, Object / Material IDs by a running majority vote (`passes.rs`: a `Layout` of only the chosen passes' floats per pixel; `Progressive::with_passes`, `Image::passes`); renders without passes unchanged bit for bit; multi-channel OpenEXR (`save_exr_layers`: half and float channels, the IDs' names as string attributes; the single-layer writer goes through it unchanged); PNG One File per Pass; the Render Settings' Passes page, the Picture Viewer's Pass menu; `.g4d` v5 `passes`, `png_passes` (stripped from a version 4 file); Greek; the manual's §20.1 and §20.2 with a picture of seven passes (an ignored test renders it) | 932 |
 | 16.4 | Light linking and the light-group name: `Linking { mode: Exclude / Include, objects }` and `group` on lights (`group` on the Sky and Environment too); evaluation gives each linked light a bit (the first 64) and every object and clone a mask of the linked lights that skip it (`link_lights`, allocation-free); renders skip those lights and let their shadow rays through such objects (`RenderScene::lit_by`); the viewport carries the mask in `InstanceRaw::normal`'s free `w`s (24 bits each), each light its bit (`LightRaw` 112 bytes) and the shadow pass the key light's; `.g4d` v5 `linking` (object indices) and `group` (stripped from a version 4 file); Merge keeps links and, newly, an Environment's picture; the Attribute Manager's Linking, Objects and Light Group rows; Greek; the manual's §4.1 with a picture | 912 |
 | 16.2b | Area lights: `LightType::Area` and `AreaShape` (Rectangle, Disc, Sphere, Tube) with Size X / Y (animatable as `Size . X / Y`), Visible in Render and Two-Sided in `LightDetails`; `.g4d` v5 `light_type: "area"` and an `area` object (a version 4 file with them is refused / stripped); the Attribute Manager's rows; glTF export as a wide spot or a point; in the tracer one power table for area lights and emitting triangles (`lights.rs`: `AreaLight`, `LightTable`), a Sphere sampled over the cone it fills and a Tube over its facing half, visible lights seen by camera rays and bounces with MIS, others sampled only; brightness matched to an Omni light with Inverse Square falloff at 500 cm; in the viewport the shapes as lines and an approximate light from the shape's nearest point (`LightRaw` 96 bytes); a third reference picture; Greek; the manual's §4.1 with a render | 887 |
 
@@ -2915,6 +2916,36 @@ risks R5 – R8 go with it.
 - **The Greek table's long entries, again.** New entries landed after a
   multi-line one; the table is now re-sorted by a script that reads both
   forms.
+
+**16.6 — Render passes**
+
+*Problems and solutions:*
+- **Passes must not change the picture.** Splitting direct light into its
+  diffuse and glossy shares needs the diffuse term on its own; it is worked
+  out only when a pass wants it, from the same numbers as the total, which
+  stays computed exactly as before. A test renders a scene with every kind
+  of path with and without passes and compares the pixels bit for bit.
+- **Do the passes add up?** Each contribution is put in one category at
+  the moment it is added — by the depth it arrives at and the kind of the
+  first bounce (matte, glossy, through glass) — so nothing is counted twice
+  or lost. A test with glass, a clear-coated cube, a glowing panel, a Sky
+  and a light in a group checks that the seven lighting passes, and the
+  group passes, each sum to the picture.
+- **IDs cannot be averaged.** Averaging object numbers at an edge invents
+  a third object. Each pixel keeps a running majority vote (a leader and its
+  margin, two floats): the result is the ID more than half the samples met,
+  whenever there is one, and costs nothing per sample.
+- **Memory only for what is asked.** Every pass would be ~30 floats per
+  pixel; the layout holds only the chosen passes, laid out once per render,
+  and a render without passes allocates nothing extra.
+- **An EXR reader's order.** OpenEXR wants channels sorted by name; the
+  picture's `R G B A` sort among `Depth.Z` and the rest, and the writer
+  sorts them all (the `exr` crate reads the file back in a test).
+- **Clones and IDs.** Clones have no node of their own; they take their
+  Cloner's ID, which is also what selecting one in the viewport picks.
+- **The Picture Viewer redrew too often.** Each finished frame bumped the
+  picture's version even with no passes, re-uploading the texture once
+  more; it now changes only when the passes do.
 
 **16.5 — Lens and shutter**
 

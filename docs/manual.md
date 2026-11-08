@@ -2474,7 +2474,7 @@ renders as its channel's value.
 **Render ▸ Edit Render Settings…**, **Ctrl+B** or the gear button in the
 toolbar opens the **Render Settings** window. It stays open while you work;
 close it with its **×**, Ctrl+B or the gear button again. Pick a page on its
-left: **Output**, **Save**, **Sampling** or **Options**.
+left: **Output**, **Save**, **Sampling**, **Passes** or **Options**.
 
 ![The Output page: a 1920 × 1080 picture with Lock Ratio on, all frames of the document](images/manual/render-settings-output.png)
 
@@ -2528,6 +2528,46 @@ the more of the scene's light it gives.
 
 ![The same 16-sample render with a glowing panel out of view on the left: Emissive Surfaces Light the Scene off (left: light found only by chance, speckled) and on (right: the panel sampled as a light)](images/manual/render-emissive-lights.png)
 
+**Passes**
+
+Passes are pieces of the picture saved beside it for compositing: how much
+of the light is direct or bounced, matte or glossy, which light group it
+came from, how far each pixel is, which object it shows. Tick the ones you
+want; nothing is gathered for the others.
+
+| Pass | What it holds |
+|------|---------------|
+| Alpha | how much of each pixel objects cover |
+| Depth | the distance from the camera along its view, in cm |
+| Normal | which way the surface faces, in world space |
+| Position | where the surface is, in world space (cm) |
+| Albedo | the surface's own colour, without light |
+| Emission | light from glowing surfaces and from lights seen in the render |
+| Background | the Sky or Environment seen directly |
+| Diffuse Direct, Diffuse Indirect | matte reflection of light straight from the lights, and of light that has bounced |
+| Specular Direct, Specular Indirect | glossy reflection and clear coat, likewise |
+| Transmission | light seen through glass |
+| Object ID, Material ID | a number per object (clones take their Cloner's) or per material; 0 where there is none |
+| Light Groups | one pass per light group ([§4.1](#41-lights)), and **Default** for lights in none |
+
+The seven lighting passes, from Emission to Transmission, **add up to the
+picture**, and so do the light-group passes: brighten one in a compositor
+and only that part of the light changes.
+
+Where they go depends on the Save page's Format:
+
+- **OpenEXR**: every pass goes into the same file, after the picture's own
+  R, G, B (and A): `Depth.Z`, `Normal.X`, `DiffuseDirect.R`,
+  `Group.Key.R`, … The file also lists which number is which object and
+  material (`3 = Cube`), for compositors that read it.
+- **PNG**: with **PNG Passes** on **One File per Pass**, each pass is saved
+  beside the picture as `<name>_<pass>.png` (`shot0012_Depth.png`); data
+  passes become colours — depth from near white to far dark, normals as
+  colours, each ID its own colour. **Picture Only** (the default) saves no
+  passes.
+
+![Passes of one render of a still life under a Sky. Top: the picture, Diffuse Direct, Specular Indirect (the chrome ball reflecting the scene) and Background (the sky alone). Bottom: Albedo, Depth (near is light), Normal and Object ID](images/manual/render-passes.png)
+
 **Options**
 
 | Setting | Meaning |
@@ -2563,6 +2603,11 @@ folder is made if needed), as PNG or OpenEXR, with transparency if Alpha Channel
 is on. The line at the bottom says where it went, or why it was not saved — Save
 off, no file, or a file next to a document that was never saved. Stopped renders
 are not saved. **Save As…** saves the shown picture anywhere, as PNG.
+
+**Passes**: a render with passes ([§20.1](#201-render-settings)) gets a
+**Pass** menu in the viewer's toolbar: pick a pass to see it in place of the
+picture (data passes shown as colours, as in PNG passes), **Picture** to go
+back. Save As… saves what is shown. The Render View shows the picture only.
 
 **Animations**: each frame is saved the moment it is finished, as a numbered
 file (`shot0000.png`, `shot0001.png`, … by the Name setting), so a stopped

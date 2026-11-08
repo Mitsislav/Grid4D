@@ -143,6 +143,184 @@ pub struct RenderSettings {
     /// How many moments of the shutter interval are evaluated
     /// ([`Self::MIN_SEGMENTS`] … [`Self::MAX_SEGMENTS`]).
     pub segments: u32,
+    /// The render passes written beside the picture (see
+    /// `docs/reference/render-passes.md`).
+    pub passes: Passes,
+    /// With PNG: the picture only, or a file per pass beside it.
+    pub png_passes: PngPasses,
+}
+
+/// A render pass: a piece of the picture for compositing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Pass {
+    /// Coverage.
+    Alpha,
+    /// Distance from the camera along its axis (cm).
+    Depth,
+    /// The shading normal (world).
+    Normal,
+    /// The world position of the first hit (cm).
+    Position,
+    /// The surface's base colour.
+    Albedo,
+    /// Light given off by surfaces seen (and visible lights).
+    Emission,
+    /// The Sky or Environment seen directly.
+    Background,
+    DiffuseDirect,
+    DiffuseIndirect,
+    SpecularDirect,
+    SpecularIndirect,
+    /// Light through glass.
+    Transmission,
+    /// The object most of a pixel's samples met.
+    ObjectId,
+    /// Its material.
+    MaterialId,
+    /// One pass per light group in use, and Default.
+    LightGroups,
+}
+
+impl Pass {
+    pub const ALL: [Self; 15] = [
+        Self::Alpha,
+        Self::Depth,
+        Self::Normal,
+        Self::Position,
+        Self::Albedo,
+        Self::Emission,
+        Self::Background,
+        Self::DiffuseDirect,
+        Self::DiffuseIndirect,
+        Self::SpecularDirect,
+        Self::SpecularIndirect,
+        Self::Transmission,
+        Self::ObjectId,
+        Self::MaterialId,
+        Self::LightGroups,
+    ];
+
+    /// The lighting passes, which add up to the picture.
+    pub const LIGHTING: [Self; 7] = [
+        Self::Emission,
+        Self::Background,
+        Self::DiffuseDirect,
+        Self::DiffuseIndirect,
+        Self::SpecularDirect,
+        Self::SpecularIndirect,
+        Self::Transmission,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Alpha => "Alpha",
+            Self::Depth => "Depth",
+            Self::Normal => "Normal",
+            Self::Position => "Position",
+            Self::Albedo => "Albedo",
+            Self::Emission => "Emission",
+            Self::Background => "Background",
+            Self::DiffuseDirect => "Diffuse Direct",
+            Self::DiffuseIndirect => "Diffuse Indirect",
+            Self::SpecularDirect => "Specular Direct",
+            Self::SpecularIndirect => "Specular Indirect",
+            Self::Transmission => "Transmission",
+            Self::ObjectId => "Object ID",
+            Self::MaterialId => "Material ID",
+            Self::LightGroups => "Light Groups",
+        }
+    }
+
+    /// Its name in files (OpenEXR layers, PNG file names, `.g4d`).
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Alpha => "Alpha",
+            Self::Depth => "Depth",
+            Self::Normal => "Normal",
+            Self::Position => "Position",
+            Self::Albedo => "Albedo",
+            Self::Emission => "Emission",
+            Self::Background => "Background",
+            Self::DiffuseDirect => "DiffuseDirect",
+            Self::DiffuseIndirect => "DiffuseIndirect",
+            Self::SpecularDirect => "SpecularDirect",
+            Self::SpecularIndirect => "SpecularIndirect",
+            Self::Transmission => "Transmission",
+            Self::ObjectId => "ObjectID",
+            Self::MaterialId => "MaterialID",
+            Self::LightGroups => "Group",
+        }
+    }
+
+    const fn bit(self) -> u32 {
+        1 << (self as u32)
+    }
+}
+
+/// A set of passes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Passes(u32);
+
+impl Passes {
+    /// No pass beyond the picture.
+    pub const NONE: Self = Self(0);
+
+    #[must_use]
+    pub const fn contains(self, pass: Pass) -> bool {
+        self.0 & pass.bit() != 0
+    }
+
+    pub const fn set(&mut self, pass: Pass, on: bool) {
+        if on {
+            self.0 |= pass.bit();
+        } else {
+            self.0 &= !pass.bit();
+        }
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// The passes in it, in [`Pass::ALL`]'s order.
+    pub fn iter(self) -> impl Iterator<Item = Pass> {
+        Pass::ALL.into_iter().filter(move |&p| self.contains(p))
+    }
+}
+
+impl FromIterator<Pass> for Passes {
+    fn from_iter<I: IntoIterator<Item = Pass>>(iter: I) -> Self {
+        let mut passes = Self::NONE;
+        for pass in iter {
+            passes.set(pass, true);
+        }
+        passes
+    }
+}
+
+/// How passes are saved with PNG pictures.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PngPasses {
+    /// The picture only.
+    #[default]
+    BeautyOnly,
+    /// Each pass beside it as `<name>_<pass>.png`.
+    OneFilePerPass,
+}
+
+impl PngPasses {
+    pub const ALL: [Self; 2] = [Self::BeautyOnly, Self::OneFilePerPass];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::BeautyOnly => "Picture Only",
+            Self::OneFilePerPass => "One File per Pass",
+        }
+    }
 }
 
 impl Default for RenderSettings {
@@ -165,6 +343,8 @@ impl Default for RenderSettings {
             emissive_lights: true,
             motion_blur: false,
             segments: 3,
+            passes: Passes::NONE,
+            png_passes: PngPasses::BeautyOnly,
         }
     }
 }

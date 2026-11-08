@@ -12,8 +12,8 @@ use std::{
 
 use egui::ViewportCommand;
 use grid4d_io::{ObjectEntry, Objects};
-use grid4d_raytrace::Image;
-use grid4d_scene::{Document, ImageFormat, MeshHandle, NodeData, NodeId, ObjectKind, SceneEdit, Tags};
+
+use grid4d_scene::{Document, ImageFormat, MeshHandle, NodeData, NodeId, ObjectKind, PngPasses, SceneEdit, Tags};
 
 use crate::i18n::{tr, trf};
 use crate::{
@@ -704,7 +704,7 @@ pub(crate) fn save_rendered_frame(editor: &mut EditorState, done: &FinishedFrame
     let Some(path) = output.file(done.frame) else {
         return;
     };
-    match write_frame(&done.image, output, &path) {
+    match write_frame(done, output, &path) {
         Ok(()) => editor.renders.record_saved(done.number, &path),
         Err(err) => {
             // The note of an earlier failure starts like this one's (in the
@@ -723,8 +723,11 @@ pub(crate) fn save_rendered_frame(editor: &mut EditorState, done: &FinishedFrame
 }
 
 /// Writes a finished frame in `output`'s format and alpha setting, making its
-/// folder if needed: sRGB PNG, or OpenEXR in linear light.
-fn write_frame(image: &Image, output: &Output, path: &Path) -> Result<(), grid4d_io::IoError> {
+/// folder if needed: sRGB PNG (with One File per Pass, each pass beside it
+/// as `<name>_<pass>.png`), or OpenEXR in linear light with every pass in
+/// the same file (see `docs/reference/render-passes.md`).
+fn write_frame(done: &FinishedFrame, output: &Output, path: &Path) -> Result<(), grid4d_io::IoError> {
+    let image = &done.image;
     make_folder(path)?;
     let channels = if output.alpha() {
         grid4d_io::Channels::Rgba
@@ -738,10 +741,50 @@ fn write_frame(image: &Image, output: &Output, path: &Path) -> Result<(), grid4d
             } else {
                 image.to_rgb8()
             };
-            grid4d_io::save_png(path, image.width, image.height, channels, &pixels)
+            grid4d_io::save_png(path, image.width, image.height, channels, &pixels)?;
+            if output.png_passes() == PngPasses::OneFilePerPass {
+                for layer in &image.passes {
+                    let rgb = layer.to_rgb8();
+                    let file = pass_file(path, &layer.name);
+                    grid4d_io::save_png(&file, image.width, image.height, grid4d_io::Channels::Rgb, &rgb)?;
+                }
+            }
+            Ok(())
         }
-        ImageFormat::Exr => grid4d_io::save_exr(path, image.width, image.height, channels, &image.pixels),
+        ImageFormat::Exr if image.passes.is_empty() => {
+            grid4d_io::save_exr(path, image.width, image.height, channels, &image.pixels)
+        }
+        ImageFormat::Exr => {
+            let mut layers = grid4d_io::exr_beauty(channels, &image.pixels);
+            for layer in &image.passes {
+                for (index, channel) in layer.channels.iter().enumerate() {
+                    layers.push(grid4d_io::ExrChannel {
+                        name: format!("{}.{channel}", layer.name),
+                        float: layer.float,
+                        values: layer.channel(index),
+                    });
+                }
+            }
+            let mut attributes = Vec::new();
+            if !done.objects.is_empty() {
+                attributes.push(("grid4d/objects", done.objects.as_str()));
+            }
+            if !done.materials.is_empty() {
+                attributes.push(("grid4d/materials", done.materials.as_str()));
+            }
+            grid4d_io::save_exr_layers(path, image.width, image.height, &layers, &attributes)
+        }
     }
+}
+
+/// Where pass `name` of the picture at `path` goes as PNG: beside it, as
+/// `<name>_<pass>.png`.
+fn pass_file(path: &Path, name: &str) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    path.with_file_name(format!("{stem}_{name}.png"))
 }
 
 /// The Picture Viewer's Save As…: asks where, then saves the shown picture as
@@ -775,9 +818,10 @@ pub(crate) fn save_render_as(doc: &Document, editor: &mut EditorState) {
         path.as_mut_os_string().push(".png");
     }
     let number = picture.number;
-    let (pixels, channels) = picture.pixels();
+    // The pass shown, or the picture.
+    let (pixels, channels) = picture.shown_pixels();
     let written =
-        make_folder(&path).and_then(|()| grid4d_io::save_png(&path, picture.width, picture.height, channels, pixels));
+        make_folder(&path).and_then(|()| grid4d_io::save_png(&path, picture.width, picture.height, channels, &pixels));
     match written {
         Ok(()) => renders.set_note(number, trf("Saved to {0}", &[&path.display()])),
         Err(err) => {
@@ -1314,6 +1358,80 @@ mod tests {
         let picture = f.editor.renders.shown_picture().unwrap();
         assert_eq!((picture.frames, picture.saved), (3, 3));
         assert!(picture.note.starts_with("Saved 3 of 3 frames"), "{}", picture.note);
+    }
+
+    /// Renders `f`'s document to its folder (Save As, Browse) and waits.
+    fn render_and_wait(f: &mut Fixture) {
+        f.run(&[EditorCommand::SaveAs, EditorCommand::BrowseRenderOutput]);
+        f.run(&[EditorCommand::RenderToPictureViewer]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while f.editor.renders.is_rendering() {
+            assert!(std::time::Instant::now() < deadline, "the render did not end");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            f.run(&[]);
+        }
+    }
+
+    #[test]
+    fn passes_go_into_the_openexr_file_with_the_names_of_the_ids() {
+        use grid4d_scene::Pass;
+        let mut f = Fixture::new("render_passes_exr", None, Some("shot.g4d"));
+        crate::rendering::tests::small(&mut f.doc, 2);
+        f.doc.render.format = ImageFormat::Exr;
+        f.doc.render.passes = [Pass::Depth, Pass::DiffuseDirect, Pass::ObjectId, Pass::LightGroups]
+            .into_iter()
+            .collect();
+        render_and_wait(&mut f);
+        let bytes = std::fs::read(f.dir.join("renders").join("still.exr")).unwrap();
+        let has = |text: &str| bytes.windows(text.len()).any(|w| w == text.as_bytes());
+        for channel in [
+            "Depth.Z",
+            "DiffuseDirect.R",
+            "ObjectID.ID",
+            "Group.Default.G",
+            "R\0",
+            "B\0",
+        ] {
+            assert!(has(channel), "{channel}");
+        }
+        assert!(has("grid4d/objects"), "the IDs named");
+        // The demo scene's objects, by name.
+        assert!(has("= Cube") || has("= Sphere"));
+        // The viewer can show each pass.
+        let picture = f.editor.renders.shown_picture().unwrap();
+        assert_eq!(picture.passes.len(), 4, "depth, diffuse, IDs, the Default group");
+        f.editor.renders.show_pass(Some(0));
+        let picture = f.editor.renders.shown_picture().unwrap();
+        let (pixels, channels) = picture.shown_pixels();
+        assert_eq!((pixels.len(), channels), (24 * 14 * 3, grid4d_io::Channels::Rgb));
+    }
+
+    #[test]
+    fn png_passes_are_files_beside_the_picture_per_frame() {
+        use grid4d_scene::{Pass, PngPasses};
+        let mut f = Fixture::new("render_passes_png", None, Some("shot.g4d"));
+        crate::rendering::tests::small(&mut f.doc, 1);
+        f.doc.render.frames = grid4d_scene::FrameRange::Manual { from: 1, to: 2 };
+        f.doc.render.passes = [Pass::Normal, Pass::Albedo].into_iter().collect();
+        f.doc.render.png_passes = PngPasses::OneFilePerPass;
+        render_and_wait(&mut f);
+        let folder = f.dir.join("renders");
+        for frame in ["0001", "0002"] {
+            for name in [
+                format!("still{frame}.png"),
+                format!("still{frame}_Normal.png"),
+                format!("still{frame}_Albedo.png"),
+            ] {
+                assert!(folder.join(&name).exists(), "{name}");
+            }
+        }
+        // Picture Only: no pass files.
+        let mut g = Fixture::new("render_passes_png_only", None, Some("shot.g4d"));
+        crate::rendering::tests::small(&mut g.doc, 1);
+        g.doc.render.passes = [Pass::Normal].into_iter().collect();
+        render_and_wait(&mut g);
+        assert!(g.dir.join("renders").join("still.png").exists());
+        assert!(!g.dir.join("renders").join("still_Normal.png").exists());
     }
 
     #[test]

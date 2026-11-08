@@ -35,8 +35,7 @@ sampling and a denoiser, a render queue).
 - **Light linking** — a light can light only the objects in its list
   (Include) or everything but them (Exclude), children included; objects
   it does not light cast no shadow of it, in renders and in the viewport.
-  Lights, Skies and Environments have a Light Group name (its render pass
-  comes later).
+  Lights, Skies and Environments have a Light Group name.
 - **Depth of field and motion blur** — a camera object has a lens: Depth
   of Field with a focus distance or a focus object, F-Stop and a round or
   bladed aperture (out-of-focus highlights take its shape); and a shutter
@@ -44,6 +43,15 @@ sampling and a denoiser, a render queue).
   Blur on in the Render Settings, moving objects, deforming and simulated
   surfaces, clones and the camera itself smear over the shutter time.
   Renders without them come out exactly as before.
+- **Render passes** — Render Settings ▸ Passes picks pieces of the picture
+  to save beside it for compositing: Alpha, Depth, Normal, Position,
+  Albedo, Emission, Background, Diffuse and Specular (direct and indirect),
+  Transmission, Object and Material IDs, and one pass per light group. The
+  lighting passes, and the light-group passes, add up to the picture. With
+  OpenEXR they all go into the one file (half-float colour, float data,
+  the IDs' names listed in the file); with PNG each can be a file of its
+  own. The Picture Viewer shows any pass of a render. Renders without
+  passes come out exactly as before.
 - **Merge** — an Environment's picture, lights' links and cameras' focus
   objects survive merging.
 - **Renders** — lights that are sampled directly (glowing surfaces, area

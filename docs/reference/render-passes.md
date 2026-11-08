@@ -39,12 +39,12 @@ which object — so the look can be adjusted after rendering, from one render.
 | Transmission | R G B | light through glass |
 | Object ID | ID | the object hit by most of the pixel's samples (below) |
 | Material ID | ID | its material, likewise |
-| Light groups | R G B each | one pass per group in use, and Default ([`render-lights-area.md`](render-lights-area.md)) |
+| Light groups | R G B each | one pass per group in use, and Default ([`render-lights-area.md`](render-lights-area.md)); the first 16 group names met get passes, lights of further groups count as Default |
 
 | Setting | Values | Default | Effect |
 |---------|--------|---------|--------|
 | (each pass) | on / off | off (Beauty on) | written or not |
-| PNG Passes | Beauty Only, One File per Pass | Beauty Only | with Format PNG: only the picture, or each pass next to it as `<name>_<pass>.png` (data passes mapped: depth over the range found, normals × 0.5 + 0.5, IDs as distinct colours) |
+| PNG Passes | Picture Only, One File per Pass | Picture Only | with Format PNG: only the picture, or each pass next to it as `<name>_<pass>.png` (data passes mapped: depth over the range found from near white to far dark, normals × 0.5 + 0.5, positions over their range, IDs as distinct colours, Alpha as grey) |
 
 ## Behaviour
 
@@ -54,10 +54,14 @@ which object — so the look can be adjusted after rendering, from one render.
   same. Lighting passes are premultiplied by coverage like the beauty.
 - **Data passes** (Depth, Normal, Position, Albedo) are averaged over the
   pixel's samples at the first surface seen (through cut-outs; glass shows
-  its own surface). **IDs** are not averaged: each pixel takes the ID most
-  of its samples met (0 for none). The object ID is the object's place in
-  the Object Manager's order + 1 at the time of the render; the file names
-  them (below). Clone instances take their Cloner's ID.
+  its own surface). **IDs** are not averaged: each pixel takes the ID of a
+  running majority vote over its samples (the ID more than half of them
+  met, whenever there is one; 0 for none), so edges never blend two IDs
+  into a third. The object ID is the object's place in the Object
+  Manager's order + 1 at the time of the render; the file names them
+  (below). Clone instances take their Cloner's ID. The material ID is the
+  top Material tag's material's place in the Material Manager + 1 (0: no
+  material).
 - **Clamp Indirect** applies to the indirect passes as to the beauty.
 - **OpenEXR**: with Format OpenEXR every pass chosen goes into the same
   file, one part, scanlines, ZIP compression: the beauty as `R G B A` (so
@@ -81,8 +85,9 @@ which object — so the look can be adjusted after rendering, from one render.
 | Piece | Where |
 |-------|-------|
 | `RenderSettings::passes` (a set of `Pass`), `png_passes` | `grid4d-scene` (`render.rs`) |
-| Accumulating passes per pixel beside the beauty, IDs by vote | `grid4d-raytrace` (`trace.rs`, a `Passes` buffer set; `Image` gains named layers) |
-| Multi-channel OpenEXR (half and float channels, string attributes) | `grid4d-io` (`picture.rs`: `save_exr` takes layers) |
+| Accumulating passes per pixel beside the beauty, IDs by vote | `grid4d-raytrace` (`passes.rs`: a `Layout` of the chosen passes' floats per pixel, `Split` per sample; `Progressive::with_passes`; `Image::passes`, `PassLayer`) |
+| Light categories | `grid4d-raytrace` (`shade.rs`: each `Bounce` names its lobe; `trace.rs`: direct light split into its diffuse share) |
+| Multi-channel OpenEXR (half and float channels, string attributes) | `grid4d-io` (`picture.rs`: `save_exr_layers`, `ExrChannel`; `save_exr` writes through it, byte for byte as before) |
 | Passes in the history, the Pass menu | `grid4d-ui` (`rendering.rs`, `panels/picture_viewer.rs`) |
 | The Passes page | `grid4d-ui` (`panels/render_settings.rs`) |
 
@@ -93,13 +98,13 @@ live in the one EXR), no Photoshop or TIFF layers.
 
 ## Acceptance criteria
 
-- [ ] The lighting passes, and the group passes, each add up to the beauty
+- [x] The lighting passes, and the group passes, each add up to the beauty
       within 1e-3 of its value on test scenes (glass, coat, emission, sky).
-- [ ] A multi-layer EXR from Grid4D is read back by the `exr` crate with
+- [x] A multi-layer EXR from Grid4D is read back by the `exr` crate with
       every channel, the right types and the name attributes.
-- [ ] Depth, Normal and Position match the geometry of a test scene; IDs
+- [x] Depth, Normal and Position match the geometry of a test scene; IDs
       separate objects and materials, clones take their Cloner's.
-- [ ] PNG One File per Pass writes the expected names, also per frame.
-- [ ] The Picture Viewer shows each pass; a render without passes costs
+- [x] PNG One File per Pass writes the expected names, also per frame.
+- [x] The Picture Viewer shows each pass; a render without passes costs
       what it cost in 1.1 (time measured).
-- [ ] Settings are undoable, saved in v5, stripped from a v4 file.
+- [x] Settings are undoable, saved in v5, stripped from a v4 file.

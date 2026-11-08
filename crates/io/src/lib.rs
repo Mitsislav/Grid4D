@@ -77,7 +77,9 @@ pub use crate::{
         remap_materials, remap_object_textures, remap_objects, remap_textures,
     },
     obj::{export_obj, import_obj, obj_text},
-    picture::{Channels, exr_bytes, png_bytes, save_exr, save_png},
+    picture::{
+        Channels, ExrChannel, exr_beauty, exr_bytes, exr_layers_bytes, png_bytes, save_exr, save_exr_layers, save_png,
+    },
     texture::{
         Level, MAX_TEXTURE_SIDE, Pixels, TEXTURE_EXTENSIONS, TextureImage, decode_texture, is_texture_extension,
     },

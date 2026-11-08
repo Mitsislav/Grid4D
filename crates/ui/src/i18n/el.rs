@@ -52,6 +52,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Ένα νέο υλικό στη Διαχείριση Υλικών",
     ),
     (
+        "A number per material (the file names them)",
+        "Ένας αριθμός ανά υλικό (το αρχείο τα ονομάζει)",
+    ),
+    (
+        "A number per object (the file names them)",
+        "Ένας αριθμός ανά αντικείμενο (το αρχείο τα ονομάζει)",
+    ),
+    (
         "A recovery copy of your unsaved work could not be written. Save your work to keep it safe.",
         "Δεν ήταν δυνατό να γραφτεί αντίγραφο ανάκτησης της μη αποθηκευμένης δουλειάς σας. Αποθηκεύστε τη δουλειά σας για να είναι ασφαλής.",
     ),
@@ -175,6 +183,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Add {0}", "Προσθήκη: {0}"),
     ("Add…", "Προσθήκη…"),
     ("Akima", "Akima"),
+    ("Albedo", "Albedo (χρώμα επιφάνειας)"),
     ("Align", "Στοίχιση"),
     ("Align Clone", "Ευθυγράμμιση κλώνου"),
     ("Align to Surface", "Ευθυγράμμιση στην επιφάνεια"),
@@ -250,6 +259,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("B-Spline", "B-Spline"),
     ("Back", "Πίσω"),
     ("Backface Culling", "Απόρριψη πίσω όψεων"),
+    ("Background", "Φόντο"),
     ("Bake Simulation", "Ψήσιμο προσομοίωσης"),
     ("Bake to UVs", "Ψήσιμο σε UV"),
     ("Banking", "Κλίση"),
@@ -440,6 +450,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Count . X", "Πλήθος . X"),
     ("Count . Y", "Πλήθος . Y"),
     ("Count . Z", "Πλήθος . Z"),
+    (
+        "Coverage: how much of each pixel objects fill",
+        "Κάλυψη: πόσο από κάθε pixel γεμίζουν τα αντικείμενα",
+    ),
     ("Create", "Δημιουργία"),
     ("Create Caps", "Δημιουργία καπακιών"),
     ("Create Generator", "Δημιουργία γεννήτριας"),
@@ -465,6 +479,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Dark", "Σκούρο"),
     ("Darker", "Σκουρότερο"),
     ("Data Folder Unavailable", "Ο φάκελος δεδομένων δεν είναι διαθέσιμος"),
+    ("Default", "Προεπιλογή"),
     ("Default Camera", "Προεπιλεγμένη κάμερα"),
     ("Deformer", "Παραμορφωτής"),
     (
@@ -491,6 +506,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Depth", "Βάθος"),
     ("Depth of Field", "Βάθος πεδίου"),
     ("Deselect All", "Αποεπιλογή όλων"),
+    ("Diffuse Direct", "Διάχυτο άμεσο"),
+    ("Diffuse Indirect", "Διάχυτο έμμεσο"),
     ("Direction", "Κατεύθυνση"),
     ("Disc", "Δίσκος"),
     ("Disc Segments", "Τμήματα δίσκου"),
@@ -498,6 +515,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Display", "Εμφάνιση"),
     ("Display Color", "Χρώμα εμφάνισης"),
     ("Dissolve", "Διάλυση"),
+    (
+        "Distance from the camera along its view, in cm",
+        "Απόσταση από την κάμερα κατά τη ματιά της, σε cm",
+    ),
     ("Distribution", "Κατανομή"),
     ("Don't Save", "Χωρίς αποθήκευση"),
     (
@@ -701,6 +722,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Γεννήτριες: οι γεννήτριες παράγουν (ανενεργό: λειτουργούν σαν απενεργοποιημένες)",
     ),
     ("Global Density", "Συνολική πυκνότητα"),
+    (
+        "Glossy reflection of light that has bounced",
+        "Γυαλιστερή ανάκλαση φωτός που έχει αναπηδήσει",
+    ),
+    (
+        "Glossy reflection straight from the lights",
+        "Γυαλιστερή ανάκλαση κατευθείαν από τα φώτα",
+    ),
     ("Go to End", "Μετάβαση στο τέλος"),
     ("Go to Next Frame (G)", "Επόμενο καρέ (G)"),
     ("Go to Next Key", "Επόμενο κλειδί"),
@@ -884,7 +913,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Licences", "Άδειες"),
     ("Light", "Φως"),
     ("Light Group", "Ομάδα φωτός"),
+    ("Light Group: {0}", "Ομάδα φωτός: {0}"),
+    ("Light Groups", "Ομάδες φωτός"),
     ("Light a scene that has no lights", "Φωτισμός σκηνής χωρίς φώτα"),
+    (
+        "Light given off by glowing surfaces and visible lights",
+        "Φως που εκπέμπουν φωτεινές επιφάνειες και ορατά φώτα",
+    ),
+    ("Light through glass", "Φως μέσα από γυαλί"),
     (
         "Lights with the same group name make one group (its own render pass)",
         "Τα φώτα με το ίδιο όνομα ομάδας κάνουν μία ομάδα (με δικό της πέρασμα απόδοσης)",
@@ -988,6 +1024,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Mark Seams", "Σήμανση ραφών"),
     ("Mass", "Μάζα"),
     ("Material", "Υλικό"),
+    ("Material ID", "ID υλικού"),
     ("Material Manager", "Διαχείριση Υλικών"),
     (
         "Material Manager: click selects · double-click empty space makes a material · drag onto an object to assign · Delete removes",
@@ -999,6 +1036,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Material [{0}]", "Υλικό [{0}]"),
     ("Materials", "Υλικά"),
+    (
+        "Matte reflection of light that has bounced",
+        "Ματ ανάκλαση φωτός που έχει αναπηδήσει",
+    ),
+    (
+        "Matte reflection straight from the lights",
+        "Ματ ανάκλαση κατευθείαν από τα φώτα",
+    ),
     ("Maximum Angle", "Μέγιστη γωνία"),
     ("Maximum Length", "Μέγιστο μήκος"),
     ("Maximum Time", "Μέγιστος χρόνος"),
@@ -1154,6 +1199,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("OK", "OK"),
     ("Object", "Αντικείμενο"),
+    ("Object ID", "ID αντικειμένου"),
     ("Object Manager", "Διαχείριση Αντικειμένων"),
     ("Object Properties", "Ιδιότητες αντικειμένου"),
     ("Objects", "Αντικείμενα"),
@@ -1165,6 +1211,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "On a 36 × 24 mm sensor, from the field of view",
         "Σε αισθητήρα 36 × 24 mm, από το οπτικό πεδίο",
     ),
+    ("One File per Pass", "Ένα αρχείο ανά πέρασμα"),
     (
         "Only Grid4D documents (.g4d), models (.gltf, .glb, .obj) and pictures can be dropped",
         "Μπορούν να αφεθούν μόνο έγγραφα Grid4D (.g4d), μοντέλα (.gltf, .glb, .obj) και εικόνες",
@@ -1208,12 +1255,15 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Output", "Έξοδος"),
     ("Overrides", "Παρακάμψεις"),
     ("PNG (8 bit)", "PNG (8 bit)"),
+    ("PNG Passes", "Περάσματα σε PNG"),
     ("Pack Islands", "Τακτοποίηση νησιών"),
     ("Pan", "Μετατόπιση"),
     ("Panel", "Πάνελ"),
     ("Parallel Movement", "Παράλληλη κίνηση"),
     ("Parameters", "Παράμετροι"),
     ("Particles", "Σωματίδια"),
+    ("Pass", "Πέρασμα"),
+    ("Passes", "Περάσματα"),
     ("Paste", "Επικόλληση"),
     ("Path Tracer", "Ιχνηλάτης διαδρομών"),
     ("Pen", "Πένα"),
@@ -1232,10 +1282,16 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Phase", "Φάση"),
     ("Phong", "Phong"),
     ("Phong Angle", "Γωνία Phong"),
+    ("Picture", "Εικόνα"),
     ("Picture Channel", "Κανάλι εικόνας"),
+    ("Picture Only", "Μόνο η εικόνα"),
     ("Picture Viewer", "Προβολή Εικόνων"),
     ("Pictures", "Εικόνες"),
     ("Pictures (PNG, OpenEXR)", "Εικόνες (PNG, OpenEXR)"),
+    (
+        "Pieces of the picture for compositing: with OpenEXR all in one file, with PNG one file each.",
+        "Κομμάτια της εικόνας για σύνθεση: με OpenEXR όλα σε ένα αρχείο, με PNG ένα αρχείο το καθένα.",
+    ),
     ("Pin Borders", "Σταθερά όρια"),
     ("Pipe Radius", "Ακτίνα σωλήνα"),
     ("Pipe Segments", "Τμήματα σωλήνα"),
@@ -1740,6 +1796,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Solver Iterations", "Επαναλήψεις επιλυτή"),
     ("Spacing", "Απόσταση"),
     ("Specular", "Κατοπτρισμός"),
+    ("Specular Direct", "Γυαλιστερό άμεσο"),
+    ("Specular Indirect", "Γυαλιστερό έμμεσο"),
     ("Specular Texture", "Υφή κατοπτρισμού"),
     ("Sphere", "Σφαίρα"),
     ("Spherical", "Σφαιρική"),
@@ -1814,6 +1872,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Texture Strength", "Ισχύς υφής"),
     ("Textures", "Υφές"),
     ("The Render View is not saved.", "Η Προβολή απόδοσης δεν αποθηκεύεται."),
+    (
+        "The Sky or Environment seen directly",
+        "Ο Ουρανός ή το Περιβάλλον όπως φαίνεται απευθείας",
+    ),
     ("The View's Camera", "Η κάμερα της προβολής"),
     (
         "The aperture's shape: 0 round, else a polygon (out-of-focus highlights take it)",
@@ -1844,6 +1906,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Το στρώμα του αντικειμένου· Κανένα: του γονέα του",
     ),
     (
+        "The light of each light group apart, and of lights in none",
+        "Το φως κάθε ομάδας φωτός χωριστά, και των φώτων χωρίς ομάδα",
+    ),
+    (
         "The object and its children without a Material tag of their own show this material; later Material tags lie over earlier ones. Drag a material onto an object to assign it (Shift: as a new layer)",
         "Το αντικείμενο και τα παιδιά του χωρίς δική τους ετικέτα υλικού δείχνουν αυτό το υλικό· οι επόμενες ετικέτες υλικού μπαίνουν πάνω από τις προηγούμενες. Σύρετε ένα υλικό σε αντικείμενο για ανάθεση (Shift: ως νέο στρώμα)",
     ),
@@ -1860,6 +1926,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Το plugin «{0}» δεν είναι εγκατεστημένο: το αντικείμενο κρατά τις τιμές του και τις αποθηκεύει αμετάβλητες.",
     ),
     (
+        "The render pass shown (data passes mapped to colours)",
+        "Το πέρασμα που φαίνεται (τα περάσματα δεδομένων ως χρώματα)",
+    ),
+    (
         "The same seed always gives the same result",
         "Ο ίδιος σπόρος δίνει πάντα το ίδιο αποτέλεσμα",
     ),
@@ -1871,6 +1941,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "The simulation cache is full ({0} MB): raise Cache Memory in the Project settings",
         "Η μνήμη προσομοίωσης γέμισε ({0} MB): αυξήστε τη Μνήμη αποθήκευσης στις Ρυθμίσεις έργου",
+    ),
+    (
+        "The surface's own colour, unlit",
+        "Το χρώμα της ίδιας της επιφάνειας, χωρίς φως",
     ),
     (
         "The system gave Grid4D no folder for its data.",
@@ -2052,6 +2126,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Weld: select points, then click one of them (or anywhere else for their centre)",
         "Συγκόλληση: επιλέξτε σημεία, μετά κλικ σε ένα από αυτά (ή οπουδήποτε αλλού για το κέντρο τους)",
+    ),
+    (
+        "Where the surface is, in world space",
+        "Πού βρίσκεται η επιφάνεια, στον χώρο του κόσμου",
+    ),
+    (
+        "Which way the surface faces, in world space",
+        "Προς τα πού κοιτάζει η επιφάνεια, στον χώρο του κόσμου",
     ),
     ("Which way the wave runs", "Προς τα πού τρέχει το κύμα"),
     ("Width", "Πλάτος"),
