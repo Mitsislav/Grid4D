@@ -30,14 +30,20 @@ struct Camera {
 
 // Must match `LightRaw` in frame.rs.
 struct Light {
-    // xyz: world position, w: type (0 omni, 1 spot, 2 infinite).
+    // xyz: world position, w: type (0 omni, 1 spot, 2 infinite, 3 area).
     position: vec4<f32>,
     // xyz: the direction it shines in, w: cosine of half the outer angle.
     direction: vec4<f32>,
     // rgb: colour × intensity, w: cosine of half the inner angle.
     color: vec4<f32>,
-    // x: falloff (0 none, 1 linear, 2 inverse square), y: radius.
+    // x: falloff (0 none, 1 linear, 2 inverse square), y: radius. An area
+    // light: y its reference distance, z the most it gives, w 1 when two-sided.
     falloff: vec4<f32>,
+    // An area light: xyz half its first axis (a tube's length), w its shape
+    // (0 rectangle, 1 disc, 2 sphere, 3 tube).
+    area_x: vec4<f32>,
+    // An area light: xyz half its second axis, w a sphere's or tube's radius.
+    area_y: vec4<f32>,
 };
 
 @group(0) @binding(1) var<storage, read> lights: array<Light>;
@@ -242,6 +248,9 @@ fn incoming(light: Light, p: vec3<f32>) -> vec4<f32> {
         // Infinite: a direction only.
         return vec4<f32>(-light.direction.xyz, 1.0);
     }
+    if (kind == 3u) {
+        return area_incoming(light, p);
+    }
     let to_light = light.position.xyz - p;
     let distance = max(length(to_light), 0.001);
     let l = to_light / distance;
@@ -262,6 +271,53 @@ fn incoming(light: Light, p: vec3<f32>) -> vec4<f32> {
             amount = amount * smoothstep(cos_outer, cos_inner, cos_angle);
         } else if (cos_angle < cos_outer) {
             amount = 0.0;
+        }
+    }
+    return vec4<f32>(l, amount);
+}
+
+// An area light, approximately: from the point of its shape nearest `p`, as
+// bright as an Omni light with Inverse Square falloff at its reference
+// distance, never brighter than right at its face; a flat shape by the
+// cosine it is seen at (both faces when two-sided).
+fn area_incoming(light: Light, p: vec3<f32>) -> vec4<f32> {
+    let shape = u32(light.area_x.w + 0.5);
+    let c = light.position.xyz;
+    let d = p - c;
+    let ax = light.area_x.xyz;
+    let ay = light.area_y.xyz;
+    var q = c;
+    if (shape == 0u) {
+        let u = clamp(dot(d, ax) / max(dot(ax, ax), 1e-8), -1.0, 1.0);
+        let v = clamp(dot(d, ay) / max(dot(ay, ay), 1e-8), -1.0, 1.0);
+        q = c + ax * u + ay * v;
+    } else if (shape == 1u) {
+        let u = dot(d, ax) / max(dot(ax, ax), 1e-8);
+        let v = dot(d, ay) / max(dot(ay, ay), 1e-8);
+        let r = sqrt(u * u + v * v);
+        let s = select(1.0, 1.0 / r, r > 1.0);
+        q = c + (ax * u + ay * v) * s;
+    } else if (shape == 2u) {
+        let len = length(d);
+        q = c + d / max(len, 0.0001) * min(light.area_y.w, len);
+    } else {
+        let t = clamp(dot(d, ax) / max(dot(ax, ax), 1e-8), -1.0, 1.0);
+        let on_axis = c + ax * t;
+        let e = p - on_axis;
+        let len = length(e);
+        q = on_axis + e / max(len, 0.0001) * min(light.area_y.w, len);
+    }
+    let to_light = q - p;
+    let distance = max(length(to_light), 0.001);
+    let l = to_light / distance;
+    let ratio = light.falloff.y / distance;
+    var amount = min(ratio * ratio, light.falloff.z);
+    if (shape < 2u) {
+        let cos_emit = dot(-l, light.direction.xyz);
+        if (light.falloff.w > 0.5) {
+            amount = amount * abs(cos_emit);
+        } else {
+            amount = amount * max(cos_emit, 0.0);
         }
     }
     return vec4<f32>(l, amount);

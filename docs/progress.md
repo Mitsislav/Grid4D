@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 16 — Render quality (v1.2): in progress |
-| Last step done | 16.2a — Light transport: emitting surfaces sampled as lights with MIS, Clamp Indirect and Emissive Surfaces switches (2026-11-08) |
-| Next step | 16.2b — area lights (rectangle, disc, sphere, tube) in the scene, the file, the Attribute Manager, the viewport and the tracer |
-| Tests | 877 (and 6 ignored, run by hand: three timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy and rustfmt clean |
+| Last step done | 16.2b — Area lights (rectangle, disc, sphere, tube) in the scene, file, Attribute Manager, viewport and tracer (2026-11-08) |
+| Next step | 16.3 — the Sky (Preetham) and Environment (HDR) objects, the viewport's background and ambient light |
+| Tests | 887 (and 6 ignored, run by hand: three timings, the walkthrough, the README pictures and the Texture Manager's picture), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2735,6 +2735,7 @@ risks R5 – R8 go with it.
 |------|----------------|-------|
 | 16.1 | Eight specs (the format version 5, area lights with light transport, linking and groups, the Sky and Environment, lens and shutter, passes and multi-layer OpenEXR, adaptive sampling and the denoiser, the Render Queue with the region and the interactive Render View, subsurface and displacement); `.g4d` version 5 written (version 4's module moved to `v5.rs`; `v4.rs` upgrades a version 4 `document.json` as JSON, dropping fields version 5 adds by place and refusing values it adds; version 3 goes through both upgrades); `FILE_FORMAT.md` for version 5, golden `demo_v5.g4d` / `full_v5.g4d`, the version 4 fixtures frozen and checked to read exactly as before, the property test relabels documents as version 4 too; the render-time budget measured on four reference scenes (`examples/budget.rs`, `docs/performance.md`) | 871 |
 | 16.2a | Light transport: emitting triangles in a table by power (four points' brightness × area), one sampled at every surface with a shadow ray (stopped by glass, which refracted paths cross instead), weighed against the material's own bounce by multiple importance sampling (the power heuristic; `Material::pdf`, the mixture of its lobes); Omni / Spot / Infinite unchanged, so scenes without emitters render exactly as in 1.1; Render Settings ▸ Sampling: Clamp Indirect and Emissive Surfaces Light the Scene (`.g4d` v5 `clamp_indirect`, `emissive_lights`; dropped from a v4 file); Greek; the manual's §20.1 with a before / after picture; the studio scene re-measured | 877 |
+| 16.2b | Area lights: `LightType::Area` and `AreaShape` (Rectangle, Disc, Sphere, Tube) with Size X / Y (animatable as `Size . X / Y`), Visible in Render and Two-Sided in `LightDetails`; `.g4d` v5 `light_type: "area"` and an `area` object (a version 4 file with them is refused / stripped); the Attribute Manager's rows; glTF export as a wide spot or a point; in the tracer one power table for area lights and emitting triangles (`lights.rs`: `AreaLight`, `LightTable`), a Sphere sampled over the cone it fills and a Tube over its facing half, visible lights seen by camera rays and bounces with MIS, others sampled only; brightness matched to an Omni light with Inverse Square falloff at 500 cm; in the viewport the shapes as lines and an approximate light from the shape's nearest point (`LightRaw` 96 bytes); a third reference picture; Greek; the manual's §4.1 with a render | 887 |
 
 **16.1 — Specs, the format version 5, the render-time budget**
 
@@ -2816,6 +2817,45 @@ risks R5 – R8 go with it.
   (a shadow ray towards an emitter at every surface), but the studio scene
   reaches 1.1's 256-sample cleanliness at 64 samples, in a third of the
   time.
+
+**16.2b — Area lights**
+
+*Problems and solutions:*
+- **Where the shape's settings live.** `LightType` is a closed set that is
+  hashed and compared; giving its Area variant numbers would have cost it
+  both. The shape, size and switches went into `LightDetails`, beside the
+  cone and the falloff, as the reference keeps them on the same tab. In the
+  file they are written apart (`area`), so the version 4 upgrade can drop
+  them by name and refuse the `area` type.
+- **Animation without new parameters.** Size X and Size Y are the existing
+  `Size . X / Y` parameters (a cube's), so tracks, takes and the file needed
+  nothing new; a test requires a key button for each on every shape.
+- **How bright is an area light?** The spec asked for power independent of
+  size and an exposure close to an Omni light's. Radiance = intensity × π ×
+  500² ÷ the area seen face on makes a small light at 500 cm match an Omni
+  light with Inverse Square falloff at its default radius exactly; a test
+  checks every shape at 500 and 250 cm, and a large light against a small
+  one.
+- **A noisy sphere looked like a wrong one.** The first test of a small
+  Sphere came out 20 % dark. Its direct estimate at one point was right: the
+  render was noise, because half of a sphere's evenly spread points face
+  away. It is now sampled over the cone of directions it fills from the
+  shading point (and a Tube over its facing half), with a density function
+  that matches it for multiple importance sampling; a test integrates it.
+- **A test that looked at a tube end on.** The near-distance check stood on
+  the tube's axis, where it shows less area than side on; it now stands
+  beside it.
+- **A script that emptied a file.** A one-line rewrite of `v5.rs` opened it
+  for writing before reading it; the file was restored from the last
+  commit (16.2a had just been committed) and the edits applied again.
+- **The shadow map read the type by thresholds.** "Above 1.5" meant
+  Infinite, which an Area code of 3 would have matched; types are compared
+  exactly now, and an area light's shadow is cast from its centre like an
+  Omni light's.
+- **The Greek table's long entries.** A helper placed "Tube" after a
+  three-line entry it did not recognise; entries are now found in both
+  forms. "Area" (light type and shadow) reads "Επιφάνεια" rather than
+  "Εμβαδόν".
 
 ---
 

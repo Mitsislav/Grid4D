@@ -12,6 +12,7 @@ use rayon::prelude::*;
 
 use crate::{
     Image, RenderCamera, RenderScene,
+    lights::{Entry, LightTable},
     sample::Rng,
     scene::{Hit, Light},
     shade::Material,
@@ -186,7 +187,7 @@ impl Progressive {
             bounces: options.bounces,
             seed: options.seed,
             clamp: options.clamp_indirect,
-            emitters: options.emissive_lights && scene.has_emitters(),
+            table: scene.light_table(options.emissive_lights),
         };
         let row_length = usize::try_from(self.width).unwrap_or(1);
         let pass = u64::from(last - first);
@@ -237,8 +238,9 @@ struct Job<'a> {
     seed: u32,
     /// Light after a bounce is capped.
     clamp: bool,
-    /// Emitting surfaces are sampled as lights (and there are some).
-    emitters: bool,
+    /// Lights with a surface to sample: area lights, and emitting triangles
+    /// when they are sampled as lights.
+    table: &'a LightTable,
 }
 
 impl Job<'_> {
@@ -268,12 +270,23 @@ impl Job<'_> {
         let mut radiance = Vec3::ZERO;
         let mut throughput = Vec3::ONE;
         // The density with which the last bounce chose `dir` (reflected
-        // paths only): an emitter it meets is weighed against having been
-        // sampled directly from there. `None` for the camera ray and for
-        // refracted paths, which direct sampling cannot reproduce.
+        // paths only): a light with a surface it meets is weighed against
+        // having been sampled directly from there. `None` for the camera ray
+        // and for refracted paths, which direct sampling cannot reproduce.
         let mut last_pdf: Option<f32> = None;
+        let sampling = !self.table.is_empty();
         for depth in 0..=self.bounces {
-            let Some(hit) = self.scene.intersect(origin, dir) else {
+            let hit = self.scene.intersect(origin, dir);
+            let reach = hit
+                .as_ref()
+                .map_or(f32::INFINITY, |hit| (hit.position - origin).length());
+            // A visible area light in front of the surface: its light, and
+            // the path ends there (its shape is opaque).
+            if let Some(seen) = self.area_seen(origin, dir, reach, depth, last_pdf) {
+                radiance += self.capped(throughput * seen, depth);
+                break;
+            }
+            let Some(hit) = hit else {
                 if depth == 0 {
                     return None;
                 }
@@ -304,12 +317,12 @@ impl Job<'_> {
             let material = Material::new(&hit.surface);
             if hit.surface.emission.max_element() > 0.0 {
                 let weight = match last_pdf {
-                    Some(bsdf) if self.emitters => {
-                        let distance2 = (hit.position - origin).length_squared();
-                        let light = self.emitter_density(hit.triangle, geometric.dot(v), distance2);
+                    Some(bsdf) => {
+                        let distance2 = reach * reach;
+                        let light = self.triangle_density(hit.triangle, geometric.dot(v), distance2);
                         power_heuristic(bsdf, light)
                     }
-                    _ => 1.0,
+                    None => 1.0,
                 };
                 radiance += self.capped(throughput * hit.surface.emission * weight, depth);
             }
@@ -317,6 +330,9 @@ impl Job<'_> {
             let lift = offset(hit.position);
             let lifted = hit.position + geometric * lift;
             for light in self.lights {
+                if light.kind == LightType::Area {
+                    continue; // sampled from the table
+                }
                 let Some(incoming) = light.arriving(hit.position, rng) else {
                     continue;
                 };
@@ -335,8 +351,8 @@ impl Job<'_> {
                 }
                 radiance += self.capped(throughput * reflected * incoming.strength * passed, depth);
             }
-            if self.emitters {
-                let direct = self.sample_emitters(&hit, &material, n, v, geometric, lifted, entering, rng);
+            if sampling {
+                let direct = self.sample_surface_lights(&hit, &material, n, v, geometric, lifted, entering, rng);
                 radiance += self.capped(throughput * direct, depth);
             }
 
@@ -356,7 +372,7 @@ impl Job<'_> {
             if throughput.max_element() <= 1e-4 {
                 break;
             }
-            last_pdf = (self.emitters && !bounce.through).then(|| material.pdf(n, v, bounce.direction, entering));
+            last_pdf = (sampling && !bounce.through).then(|| material.pdf(n, v, bounce.direction, entering));
             origin = if bounce.through {
                 hit.position - geometric * lift
             } else {
@@ -367,11 +383,42 @@ impl Job<'_> {
         Some(radiance)
     }
 
-    /// One sample of the light that emitting surfaces send to `hit` and that
-    /// it reflects towards `v`, weighed against finding the same light by a
-    /// bounce (the power heuristic).
+    /// The light of the nearest visible area light the ray meets before
+    /// `reach`, weighed against direct sampling after a reflected bounce
+    /// (`last_pdf`); dark where its back is seen. `None` when it meets none.
+    fn area_seen(&self, origin: Vec3, dir: Vec3, reach: f32, depth: u32, last_pdf: Option<f32>) -> Option<Vec3> {
+        let (index, light, t, normal) = self
+            .scene
+            .areas()
+            .iter()
+            .enumerate()
+            .filter(|(_, light)| light.visible)
+            .filter_map(|(i, light)| light.intersect(origin, dir, reach).map(|(t, n)| (i, light, t, n)))
+            .min_by(|a, b| a.2.total_cmp(&b.2))?;
+        let Some(cos) = light.emits(normal, -dir) else {
+            return Some(Vec3::ZERO);
+        };
+        let weight = match last_pdf {
+            // Lights that are not weighed are found only by direct sampling
+            // after a bounce (seen directly, or through glass, they show).
+            Some(_) if !light.weighed() => 0.0,
+            Some(bsdf) => {
+                let point = origin + dir * t;
+                let density = self.table.area_chance(index) * light.density(origin, point, normal) * t * t / cos;
+                power_heuristic(bsdf, density)
+            }
+            None if depth > 0 && !light.weighed() => 0.0,
+            None => 1.0,
+        };
+        Some(light.radiance * weight)
+    }
+
+    /// One sample of the light that lights with a surface (area lights,
+    /// emitting triangles) send to `hit` and that it reflects towards `v`,
+    /// weighed against finding the same light by a bounce (the power
+    /// heuristic) where bounces can find it.
     #[expect(clippy::too_many_arguments, reason = "the hit's frame, as the loop has it")]
-    fn sample_emitters(
+    fn sample_surface_lights(
         &self,
         hit: &Hit,
         material: &Material,
@@ -383,67 +430,93 @@ impl Job<'_> {
         rng: &mut Rng,
     ) -> Vec3 {
         let (u, s, t) = (rng.next_f32(), rng.next_f32(), rng.next_f32());
-        let Some(sample) = self.scene.sample_emitter(u, s, t) else {
+        let Some(sample) = self.scene.sample_surface_light(self.table, hit.position, u, s, t) else {
             return Vec3::ZERO;
         };
-        if sample.triangle == hit.triangle {
+        if sample.source == Entry::Triangle(u32::try_from(hit.triangle).unwrap_or(u32::MAX)) {
             return Vec3::ZERO;
         }
-        let to_light = sample.position - hit.position;
+        let point = sample.point;
+        let to_light = point.position - hit.position;
         let distance2 = to_light.length_squared();
         if distance2 <= f32::MIN_POSITIVE {
             return Vec3::ZERO;
         }
-        let distance = distance2.sqrt();
-        let l = to_light / distance;
-        let cos_light = sample.normal.dot(l).abs();
-        if cos_light <= 1e-6 || l.dot(geometric) <= 0.0 {
+        let l = to_light / distance2.sqrt();
+        if l.dot(geometric) <= 0.0 {
+            return Vec3::ZERO;
+        }
+        // What the light gives off towards the surface, whether bounces can
+        // find it, whether things in the way stop it.
+        let (emitted, cos_light, weighed, shadowed) = match sample.source {
+            Entry::Triangle(triangle) => {
+                let cos = point.normal.dot(l).abs();
+                let triangle = usize::try_from(triangle).unwrap_or(usize::MAX);
+                (self.scene.emission_at(triangle, point.position), cos, true, true)
+            }
+            Entry::Area(index) => {
+                let Some(light) = usize::try_from(index).ok().and_then(|i| self.scene.areas().get(i)) else {
+                    return Vec3::ZERO;
+                };
+                let Some(cos) = light.emits(point.normal, -l) else {
+                    return Vec3::ZERO;
+                };
+                (light.radiance, cos, light.weighed(), light.shadow.casts())
+            }
+        };
+        if cos_light <= 1e-6 || emitted.max_element() <= 0.0 {
             return Vec3::ZERO;
         }
         let reflected = material.reflect(n, v, l);
         if reflected.max_element() <= 0.0 {
             return Vec3::ZERO;
         }
-        let emitted = self.scene.emission_at(sample.triangle, sample.position);
-        if emitted.max_element() <= 0.0 {
-            return Vec3::ZERO;
-        }
-        // Up to the emitter, not into it: from the lifted point to one lifted
-        // off the emitter on this side (a ray from the lifted point along `l`
-        // would meet the emitter's plane before `distance` at grazing angles).
-        // Glass blocks: paths refracted through it find the light themselves.
-        let facing = if sample.normal.dot(l) > 0.0 {
-            -sample.normal
+        let passed = if shadowed {
+            // Up to the light, not into it: from the lifted point to one
+            // lifted off the light on this side (a ray from the lifted point
+            // along `l` would meet an emitting triangle's plane before its
+            // end at grazing angles). Glass stops it for lights bounces can
+            // find (refracted paths bring their light), and tints it for the
+            // others.
+            let facing = if point.normal.dot(l) > 0.0 {
+                -point.normal
+            } else {
+                point.normal
+            };
+            let end = point.position + facing * offset(point.position);
+            let shadow = end - lifted;
+            let reach = shadow.length();
+            if reach <= f32::MIN_POSITIVE {
+                return Vec3::ZERO;
+            }
+            self.scene.transmittance(lifted, shadow / reach, reach, !weighed)
         } else {
-            sample.normal
+            Vec3::ONE
         };
-        let end = sample.position + facing * offset(sample.position);
-        let shadow = end - lifted;
-        let reach = shadow.length();
-        if reach <= f32::MIN_POSITIVE {
-            return Vec3::ZERO;
-        }
-        let passed = self.scene.transmittance(lifted, shadow / reach, reach, false);
         if passed.max_element() <= 0.0 {
             return Vec3::ZERO;
         }
         // The chance of this direction: per area, turned into per solid angle.
-        let light_pdf = sample.density * distance2 / cos_light;
-        let weight = power_heuristic(light_pdf, material.pdf(n, v, l, entering));
+        let light_pdf = point.density * distance2 / cos_light;
+        let weight = if weighed {
+            power_heuristic(light_pdf, material.pdf(n, v, l, entering))
+        } else {
+            1.0
+        };
         // `reflect` is the reflectance × π × n·l.
         reflected * emitted * passed * (weight / (PI * light_pdf))
     }
 
     /// The density per solid angle with which direct sampling picks the point
     /// of `triangle` seen at `distance2` (squared) and at cosine `cos` to its
-    /// normal.
-    fn emitter_density(&self, triangle: usize, cos: f32, distance2: f32) -> f32 {
+    /// normal (0 when it is not in the table).
+    fn triangle_density(&self, triangle: usize, cos: f32, distance2: f32) -> f32 {
         let area = self.scene.triangle_area(triangle);
         let cos = cos.abs();
         if area <= f32::MIN_POSITIVE || cos <= 1e-6 {
             return 0.0;
         }
-        self.scene.emitter_chance(triangle) / area * distance2 / cos
+        self.table.triangle_chance(triangle) / area * distance2 / cos
     }
 
     /// `light` as is when seen directly (`depth` 0), capped after a bounce
@@ -767,11 +840,165 @@ mod tests {
         );
     }
 
+    /// A white matte floor (400 cm) and one area light of `shape` and `size`
+    /// at `height` above the origin, its −Z turned by `pitch` degrees (−90:
+    /// straight down).
+    fn area_scene(shape: grid4d_scene::AreaShape, size: [f32; 2], height: f32, pitch: f32) -> Document {
+        let mut doc = Document::new("area");
+        let mut white = SceneMaterial::new("White");
+        (white.color, white.roughness, white.specular) = ([1.0; 3], 1.0, 0.0);
+        let white = doc.scene.materials_mut().insert(white);
+        let mut floor = Node::new(
+            "Floor",
+            ObjectKind::Plane {
+                width: 400.0,
+                depth: 400.0,
+                width_segments: 1,
+                depth_segments: 1,
+            },
+        );
+        floor.data.tags = vec![Tag::Material(MaterialTag::new(Some(white)))];
+        doc.scene.insert(floor);
+        let light = ObjectKind::Light {
+            color: [1.0; 3],
+            intensity: 1.0,
+            light_type: LightType::Area,
+            details: LightDetails {
+                area_shape: shape,
+                area_size: size,
+                ..LightDetails::default()
+            },
+            shadow: LightShadow::Area,
+        };
+        doc.scene.insert(
+            Node::new("Area", light).with_transform(
+                grid4d_scene::Transform::from_position(Vec3::new(0.0, height, 0.0))
+                    .with_rotation_deg(Vec3::new(0.0, pitch, 0.0)),
+            ),
+        );
+        doc
+    }
+
+    fn set_area(doc: &mut Document, edit: impl FnOnce(&mut LightDetails)) {
+        let id = doc.scene.iter().find(|(_, n)| n.data.name == "Area").unwrap().0;
+        if let ObjectKind::Light { details, .. } = &mut doc.scene.get_mut(id).unwrap().data.kind {
+            edit(details);
+        }
+    }
+
+    /// The floor's brightness at (x, z), its mean over a few pixels.
+    fn floor_at(doc: &Document, samples: u32, x: f32, z: f32) -> f32 {
+        let options = RenderOptions {
+            auto_light: false,
+            clamp_indirect: false,
+            ..options(60, samples, 0)
+        };
+        let image = render(&scene_of(doc), &top_camera(), &options);
+        let around = [(0.0, 0.0), (10.0, 0.0), (-10.0, 0.0), (0.0, 10.0), (0.0, -10.0)];
+        around.iter().map(|(dx, dz)| at(&image, x + dx, z + dz)[0]).sum::<f32>() / 5.0
+    }
+
+    #[test]
+    fn a_small_area_light_lights_like_an_omni_light_with_inverse_square_falloff() {
+        use grid4d_scene::AreaShape;
+        // At the reference distance (500 cm), straight below: as bright as
+        // an Omni light of the same intensity at its Radius/Decay; at half
+        // the distance four times as bright — for every shape, seen face on.
+        for (shape, pitch) in [
+            (AreaShape::Rectangle, -90.0),
+            (AreaShape::Disc, -90.0),
+            (AreaShape::Sphere, 0.0),
+            (AreaShape::Tube, 0.0),
+        ] {
+            let far = floor_at(&area_scene(shape, [2.0, 2.0], 500.0, pitch), 16, 100.0, 0.0);
+
+            let cos3 = (500.0f32 / 100.0f32.hypot(500.0)).powi(3);
+            let flat = if shape.is_flat() {
+                cos3 * (500.0 / 100.0f32.hypot(500.0))
+            } else {
+                cos3
+            };
+            assert!((far - flat).abs() < flat * 0.06, "{shape:?} at 500 cm: {far} vs {flat}");
+            // Beside it along X: a Tube (along Z) is seen side on.
+            let near = floor_at(&area_scene(shape, [2.0, 2.0], 250.0, pitch), 16, 120.0, 0.0);
+            let d = 120.0f32.hypot(250.0);
+            let expected = (500.0 / d).powi(2) * (250.0 / d) * if shape.is_flat() { 250.0 / d } else { 1.0 };
+            assert!(
+                (near - expected).abs() < expected * 0.06,
+                "{shape:?} at 250 cm: {near} vs {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_larger_area_light_is_softer_not_brighter() {
+        use grid4d_scene::AreaShape;
+        let small = floor_at(
+            &area_scene(AreaShape::Rectangle, [2.0, 2.0], 500.0, -90.0),
+            64,
+            100.0,
+            0.0,
+        );
+        let large = floor_at(
+            &area_scene(AreaShape::Rectangle, [200.0, 200.0], 500.0, -90.0),
+            64,
+            100.0,
+            0.0,
+        );
+        assert!((large - small).abs() < small * 0.08, "{large} vs {small}");
+    }
+
+    #[test]
+    fn a_one_sided_area_light_is_dark_behind_and_two_sided_shines_both_ways() {
+        use grid4d_scene::AreaShape;
+        // Facing up, away from the floor.
+        let mut doc = area_scene(AreaShape::Rectangle, [50.0, 50.0], 200.0, 90.0);
+        assert_eq!(floor_at(&doc, 8, 100.0, 0.0), 0.0, "nothing behind a one-sided light");
+        set_area(&mut doc, |d| d.two_sided = true);
+        assert!(floor_at(&doc, 8, 100.0, 0.0) > 0.5, "both faces shine");
+    }
+
+    #[test]
+    fn a_visible_area_light_is_seen_and_lights_the_same() {
+        use grid4d_scene::AreaShape;
+        let mut doc = area_scene(AreaShape::Rectangle, [60.0, 60.0], 200.0, -90.0);
+        let options = RenderOptions {
+            auto_light: false,
+            clamp_indirect: false,
+            ..options(60, 256, 1)
+        };
+        let hidden = render(&scene_of(&doc), &top_camera(), &options);
+        // From above the camera sees the light's back: the floor under it.
+        assert!(
+            at(&hidden, 0.0, 0.0)[0] > 1.0,
+            "lit floor under it: {:?}",
+            at(&hidden, 0.0, 0.0)
+        );
+        set_area(&mut doc, |d| d.area_visible = true);
+        let shown = render(&scene_of(&doc), &top_camera(), &options);
+        assert_eq!(at(&shown, 0.0, 0.0)[0], 0.0, "its dark back hides the floor");
+        // Seen from below (turned to face up, the camera sees its face).
+        let mut up = area_scene(AreaShape::Rectangle, [60.0, 60.0], 200.0, 90.0);
+        set_area(&mut up, |d| d.area_visible = true);
+        let face = render(&scene_of(&up), &top_camera(), &options);
+        assert!(
+            at(&face, 0.0, 0.0)[0] > 10.0,
+            "its bright face: {:?}",
+            at(&face, 0.0, 0.0)
+        );
+        // Found by bounces too (multiple importance sampling), the floor beside
+        // it gets the same light as when only sampled directly.
+        let mean = |image: &Image| floor_values(image).iter().sum::<f32>() / 200.0;
+        let (a, b) = (mean(&hidden), mean(&shown));
+        assert!((a - b).abs() < a * 0.03, "{a} vs {b}");
+    }
+
     #[test]
     fn the_indirect_clamp_caps_only_light_after_a_bounce() {
         let doc = Document::new("t");
         let scene = scene_of(&doc);
         let camera = top_camera();
+        let table = LightTable::default();
         let job = |clamp| Job {
             scene: &scene,
             lights: &[],
@@ -781,7 +1008,7 @@ mod tests {
             bounces: 1,
             seed: 0,
             clamp,
-            emitters: false,
+            table: &table,
         };
         let bright = Vec3::splat(50.0);
         assert_eq!(job(true).capped(bright, 0), bright, "seen directly");

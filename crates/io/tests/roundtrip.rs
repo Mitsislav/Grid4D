@@ -316,19 +316,43 @@ proptest! {
         objects in prop::collection::vec(object(), 0..8),
         clamp_indirect in any::<bool>(),
         emissive_lights in any::<bool>(),
+        area in prop::option::of((0usize..4, 1.0f32..500.0, 1.0f32..500.0, any::<bool>(), any::<bool>())),
     ) {
         let mut doc = document(objects, Vec::new(), Vec::new());
-        // Step 16.2: the light-transport switches.
+        // Step 16.2: the light-transport switches, an area light.
         doc.render.clamp_indirect = clamp_indirect;
         doc.render.emissive_lights = emissive_lights;
+        if let Some((shape, x, y, visible, two_sided)) = area {
+            doc.scene.insert(Node::new(
+                "Area",
+                ObjectKind::Light {
+                    color: [1.0; 3],
+                    intensity: 1.0,
+                    light_type: grid4d_scene::LightType::Area,
+                    details: grid4d_scene::LightDetails {
+                        area_shape: grid4d_scene::AreaShape::ALL[shape],
+                        area_size: [x, y],
+                        area_visible: visible,
+                        two_sided,
+                        ..grid4d_scene::LightDetails::default()
+                    },
+                    shadow: grid4d_scene::LightShadow::Area,
+                },
+            ));
+        }
         let bytes = grid4d_io::to_bytes(&doc).unwrap();
         let loaded = grid4d_io::from_bytes(&bytes).unwrap();
         prop_assert_eq!(&loaded.render, &doc.render);
         prop_assert!(grid4d_io::to_bytes(&loaded).unwrap() == bytes);
-        let as_v4 = grid4d_io::from_bytes(&labelled(&bytes, 4)).unwrap();
-        let mut expected = doc.render;
-        (expected.clamp_indirect, expected.emissive_lights) = (true, true);
-        prop_assert_eq!(as_v4.render, expected);
+        let as_v4 = grid4d_io::from_bytes(&labelled(&bytes, 4));
+        if area.is_some() {
+            // Grid4D 1.1 refused the Area light type: so does a version 4 file.
+            prop_assert!(as_v4.is_err());
+        } else {
+            let mut expected = doc.render;
+            (expected.clamp_indirect, expected.emissive_lights) = (true, true);
+            prop_assert_eq!(as_v4.unwrap().render, expected);
+        }
     }
 
     /// Written as version 3 (Grid4D 1.0) would have: the same document comes

@@ -29,7 +29,7 @@ pub(crate) const VERSION: u32 = 4;
 
 /// Where in `document.json` version 5 adds fields.
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(not(test), allow(dead_code, reason = "each Phase 16 step lists its additions"))]
+#[cfg_attr(not(test), allow(dead_code, reason = "later Phase 16 steps add at these places"))]
 enum Place {
     /// `document` itself.
     Document,
@@ -55,10 +55,14 @@ struct Added {
 
 /// Everything version 5 adds as fields, by step.
 const ADDED: &[Added] = &[
-    // Step 16.2: the two light-transport switches.
+    // Step 16.2: the two light-transport switches; an area light's shape.
     Added {
         place: Place::Render,
         fields: &["clamp_indirect", "emissive_lights"],
+    },
+    Added {
+        place: Place::Kind("light"),
+        fields: &["area"],
     },
 ];
 
@@ -66,14 +70,19 @@ const ADDED: &[Added] = &[
 /// of object or tag, a light type): Grid4D 1.1 refused it, so it is an error
 /// in a version 4 file still.
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(not(test), allow(dead_code, reason = "each Phase 16 step lists its new values"))]
 struct NewValue {
     field: &'static str,
     value: &'static str,
 }
 
-/// Every such value, by step. Empty in 16.1.
-const NEW_VALUES: &[NewValue] = &[];
+/// Every such value, by step.
+const NEW_VALUES: &[NewValue] = &[
+    // Step 16.2: the Area light type.
+    NewValue {
+        field: "light_type",
+        value: "area",
+    },
+];
 
 /// A version 4 `document.json`, already parsed, as version 5 (see the module
 /// documentation).

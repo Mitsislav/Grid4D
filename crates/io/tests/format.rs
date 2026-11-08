@@ -111,11 +111,27 @@ fn golden_with(mesh: grid4d_geom::PolyMesh) -> Document {
 
 /// Everything a version 5 file can hold (see `docs/FILE_FORMAT.md`): version
 /// 4's, and what Phase 16 adds as it arrives — the light-transport switches
-/// off (16.2).
+/// off and an area light with every area field set (16.2).
 fn full_document() -> (Document, SimulationCache) {
     let (mut doc, cache) = full_v4_document();
     doc.render.clamp_indirect = false;
     doc.render.emissive_lights = false;
+    doc.scene.insert(Node::new(
+        "Area Light",
+        ObjectKind::Light {
+            color: [1.0, 0.9, 0.8],
+            intensity: 2.5,
+            light_type: grid4d_scene::LightType::Area,
+            details: grid4d_scene::LightDetails {
+                area_shape: grid4d_scene::AreaShape::Disc,
+                area_size: [80.0, 40.0],
+                area_visible: true,
+                two_sided: true,
+                ..grid4d_scene::LightDetails::default()
+            },
+            shadow: grid4d_scene::LightShadow::Area,
+        },
+    ));
     (doc, cache)
 }
 

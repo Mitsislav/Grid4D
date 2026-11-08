@@ -18,9 +18,9 @@ use grid4d_geom::spline::{
 };
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
-    Axis, Body, Channel, CollisionShape, Document, Falloff, Inherit, KeyState, LightDetails, LightShadow, LightType,
-    MassMode, Material, MaterialId, MaterialTag, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, Placement,
-    Projection, Scene, SceneEdit, SimulationSettings, SplineHandle, Tag, TagKind, TextureSlot, TimeSettings,
+    AreaShape, Axis, Body, Channel, CollisionShape, Document, Falloff, Inherit, KeyState, LightDetails, LightShadow,
+    LightType, MassMode, Material, MaterialId, MaterialTag, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param,
+    Placement, Projection, Scene, SceneEdit, SimulationSettings, SplineHandle, Tag, TagKind, TextureSlot, TimeSettings,
 };
 
 use crate::i18n::{key, tr, trf};
@@ -2614,7 +2614,27 @@ fn light_details(ui: &mut Ui, k: &mut KeyRows, light_type: LightType, details: &
             ui.end_row();
         }
     }
-    if light_type.has_position() {
+    if light_type == LightType::Area {
+        attr_label(ui, "Shape", LABEL_WIDTH);
+        egui::ComboBox::from_id_salt("grid4d.attr.light.area_shape")
+            .selected_text(tr(details.area_shape.label()))
+            .show_ui(ui, |ui| {
+                for option in AreaShape::ALL {
+                    ui.selectable_value(&mut details.area_shape, option, tr(option.label()));
+                }
+            });
+        ui.end_row();
+        let [size_x, size_y] = &mut details.area_size;
+        area_size_row(ui, k, "Size . X", size_x);
+        if details.area_shape.uses_height() {
+            area_size_row(ui, k, "Size . Y", size_y);
+        }
+        check_row(ui, "Visible in Render", &mut details.area_visible);
+        if details.area_shape.is_flat() {
+            check_row(ui, "Two-Sided", &mut details.two_sided);
+        }
+    }
+    if light_type.has_falloff() {
         attr_label(ui, "Falloff", LABEL_WIDTH);
         egui::ComboBox::from_id_salt("grid4d.attr.light.falloff")
             .selected_text(tr(details.falloff.label()))
@@ -2656,6 +2676,21 @@ fn length_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
             .range(0.0..=1_000_000.0)
             .max_decimals(2),
     );
+    k.button(ui, label);
+    ui.end_row();
+}
+
+/// An area light's Size X or Y, kept within its range.
+fn area_size_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let field = ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        widgets::length(ui, value)
+            .speed(1.0)
+            .range(LightDetails::MIN_AREA_SIZE..=LightDetails::MAX_AREA_SIZE)
+            .max_decimals(2),
+    );
+    name_field(ui, &field, label);
     k.button(ui, label);
     ui.end_row();
 }
@@ -2819,6 +2854,18 @@ mod tests {
             .unwrap()
         {
             *light_type = LightType::Spot;
+        }
+        // An area light of every shape (Size Y only where the shape has one).
+        for shape in AreaShape::ALL {
+            let mut area = grid4d_scene::ObjectKindTag::Light.default_kind();
+            if let ObjectKind::Light {
+                light_type, details, ..
+            } = &mut area
+            {
+                *light_type = LightType::Area;
+                details.area_shape = shape;
+            }
+            kinds.push(area);
         }
         // Plugins' objects: a generator's and a deformer's.
         crate::test_plugins();

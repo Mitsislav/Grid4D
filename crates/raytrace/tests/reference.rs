@@ -2,7 +2,8 @@
 //! within a tolerance (floating-point details differ a little between
 //! machines) — the demo scene through its camera, and a scene of textured
 //! materials (pictures through UV and Box projections, a layer cut out
-//! by its Opacity, a bump map, glass and a clear coat).
+//! by its Opacity, a bump map, glass and a clear coat), and a scene lit by an
+//! area light of each shape.
 //!
 //! After an intended change to the renderer, write new references with
 //! `GRID4D_UPDATE_REFERENCE=1 cargo test -p grid4d-raytrace --test reference`
@@ -18,12 +19,13 @@ use grid4d_raytrace::{
     CameraProjection, Image, Picture, Pictures, RenderCamera, RenderOptions, RenderScene, Texels, Texturing, render,
 };
 use grid4d_scene::{
-    Channel, Document, LightDetails, LightShadow, LightType, Material, MaterialTag, Node, ObjectKind, Projection, Tag,
-    Texture, TextureId, TextureSlot, Transform,
+    AreaShape, Channel, Document, LightDetails, LightShadow, LightType, Material, MaterialTag, Node, ObjectKind,
+    Projection, Tag, Texture, TextureId, TextureSlot, Transform,
 };
 
 const DEMO: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/demo_reference.png");
 const TEXTURED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/textured_reference.png");
+const AREAS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/area_reference.png");
 
 fn demo() -> Image {
     let doc = Document::with_demo_scene();
@@ -223,6 +225,121 @@ fn textured() -> Image {
     render(&RenderScene::textured(&evaluated, &texturing), &camera, &options)
 }
 
+/// A grey floor with a cube and a ball, lit by an area light of each shape
+/// (a soft rectangle above, a disc from the side, a visible sphere, a
+/// visible tube) and a glowing panel, with light bouncing between them.
+fn areas() -> Image {
+    let mut doc = Document::new("areas");
+    let mut grey = Material::new("Grey");
+    (grey.color, grey.roughness) = ([0.6, 0.6, 0.6], 0.7);
+    let grey = doc.scene.materials_mut().insert(grey);
+    let mut floor = Node::new(
+        "Floor",
+        ObjectKind::Plane {
+            width: 800.0,
+            depth: 800.0,
+            width_segments: 1,
+            depth_segments: 1,
+        },
+    );
+    floor.data.tags = vec![Tag::Material(MaterialTag::new(Some(grey)))];
+    doc.scene.insert(floor);
+    let mut red = Material::new("Red");
+    (red.color, red.roughness) = ([0.7, 0.1, 0.08], 0.35);
+    let red = doc.scene.materials_mut().insert(red);
+    let mut cube = Node::new(
+        "Cube",
+        ObjectKind::Cube {
+            size: Vec3::splat(100.0),
+            segments: [1, 1, 1],
+        },
+    )
+    .with_position(Vec3::new(-80.0, 50.0, 0.0));
+    cube.data.tags = vec![Tag::Material(MaterialTag::new(Some(red)))];
+    doc.scene.insert(cube);
+    let mut gold = Material::new("Gold");
+    (gold.color, gold.roughness, gold.metallic) = ([0.9, 0.7, 0.35], 0.25, 1.0);
+    let gold = doc.scene.materials_mut().insert(gold);
+    let mut ball = Node::new(
+        "Ball",
+        ObjectKind::Sphere {
+            radius: 50.0,
+            segments: 32,
+        },
+    )
+    .with_position(Vec3::new(90.0, 50.0, 20.0));
+    ball.data.tags = vec![Tag::Material(MaterialTag::new(Some(gold)))];
+    doc.scene.insert(ball);
+    let area = |shape, size, visible, intensity| ObjectKind::Light {
+        color: [1.0, 0.95, 0.9],
+        intensity,
+        light_type: LightType::Area,
+        details: LightDetails {
+            area_shape: shape,
+            area_size: size,
+            area_visible: visible,
+            ..LightDetails::default()
+        },
+        shadow: LightShadow::Area,
+    };
+    let at = |position: Vec3, hpb: Vec3| Transform::from_position(position).with_rotation_deg(hpb);
+    for (shape, size, visible, intensity, place) in [
+        (
+            AreaShape::Rectangle,
+            [200.0, 120.0],
+            false,
+            0.4,
+            at(Vec3::new(0.0, 400.0, 100.0), Vec3::new(0.0, -90.0, 0.0)),
+        ),
+        (
+            AreaShape::Disc,
+            [80.0, 80.0],
+            false,
+            0.3,
+            at(Vec3::new(-350.0, 120.0, 0.0), Vec3::new(-90.0, 0.0, 0.0)),
+        ),
+        (
+            AreaShape::Sphere,
+            [30.0, 30.0],
+            true,
+            0.05,
+            at(Vec3::new(220.0, 60.0, -120.0), Vec3::ZERO),
+        ),
+        (
+            AreaShape::Tube,
+            [8.0, 160.0],
+            true,
+            0.05,
+            at(Vec3::new(0.0, 15.0, -200.0), Vec3::new(90.0, 0.0, 0.0)),
+        ),
+    ] {
+        doc.scene
+            .insert(Node::new("Area", area(shape, size, visible, intensity)).with_transform(place));
+    }
+    let mut eval = EvaluatedScene::for_render();
+    eval.update(&doc.scene);
+    let camera = RenderCamera::framing(Vec3::new(-200.0, 0.0, -200.0), Vec3::new(240.0, 120.0, 120.0), 0.75);
+    let options = RenderOptions {
+        width: 96,
+        height: 54,
+        samples: 32,
+        bounces: 2,
+        seed: 0,
+        auto_light: false,
+        clamp_indirect: true,
+        emissive_lights: true,
+    };
+    let pictures = Pictures::new();
+    let texturing = Texturing {
+        materials: doc.scene.materials(),
+        pictures: &pictures,
+        camera,
+        aspect: 96.0 / 54.0,
+        cameras: &[],
+    };
+    render(&RenderScene::textured(&eval, &texturing), &camera, &options)
+}
+
 /// Compares `image` with the picture at `path` (or writes it there when asked).
 fn matches_reference(image: &Image, path: &str) {
     let bytes = image.to_rgba8();
@@ -262,4 +379,9 @@ fn the_demo_scene_matches_its_reference() {
 #[test]
 fn textured_materials_match_their_reference() {
     matches_reference(&textured(), TEXTURED);
+}
+
+#[test]
+fn area_lights_match_their_reference() {
+    matches_reference(&areas(), AREAS);
 }

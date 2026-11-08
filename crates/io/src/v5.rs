@@ -34,6 +34,7 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
+use grid4d_scene::AreaShape;
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
     FrameRange, ImageFormat, Inherit, Interpolation, Key, Layer, LayerId, LayerSwitches, LightDetails, LightShadow,
@@ -1946,6 +1947,10 @@ enum KindDto {
         /// None when absent (added in step 7.6).
         #[serde(default, skip_serializing_if = "LightShadowDto::is_none")]
         shadow: LightShadowDto,
+        /// The area light's shape; the defaults when absent (version 5,
+        /// step 16.2).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        area: Option<AreaDto>,
     },
     /// `mesh` indexes the file's `meshes`; objects sharing a mesh share an index.
     /// `selected` / `hidden` flag components (optional, added in step 4.1);
@@ -3075,6 +3080,8 @@ enum LightTypeDto {
     Omni,
     Spot,
     Infinite,
+    /// Version 5 (step 16.2).
+    Area,
 }
 
 impl LightTypeDto {
@@ -3093,6 +3100,7 @@ impl From<LightType> for LightTypeDto {
             LightType::Omni => Self::Omni,
             LightType::Spot => Self::Spot,
             LightType::Infinite => Self::Infinite,
+            LightType::Area => Self::Area,
         }
     }
 }
@@ -3103,6 +3111,7 @@ impl From<LightTypeDto> for LightType {
             LightTypeDto::Omni => Self::Omni,
             LightTypeDto::Spot => Self::Spot,
             LightTypeDto::Infinite => Self::Infinite,
+            LightTypeDto::Area => Self::Area,
         }
     }
 }
@@ -3149,6 +3158,64 @@ impl From<LightShadowDto> for LightShadow {
     }
 }
 
+/// An area light's shape (version 5, step 16.2); written only when it
+/// differs from the defaults.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct AreaDto {
+    shape: AreaShapeDto,
+    /// Size X and Size Y, cm.
+    size: [f32; 2],
+    #[serde(default, skip_serializing_if = "is_false")]
+    visible: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    two_sided: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AreaShapeDto {
+    Rectangle,
+    Disc,
+    Sphere,
+    Tube,
+}
+
+impl AreaDto {
+    fn new(details: &LightDetails) -> Option<Self> {
+        let defaults = LightDetails::default();
+        let same = details.area_shape == defaults.area_shape
+            && details.area_size == defaults.area_size
+            && details.area_visible == defaults.area_visible
+            && details.two_sided == defaults.two_sided;
+        (!same).then_some(Self {
+            shape: match details.area_shape {
+                AreaShape::Rectangle => AreaShapeDto::Rectangle,
+                AreaShape::Disc => AreaShapeDto::Disc,
+                AreaShape::Sphere => AreaShapeDto::Sphere,
+                AreaShape::Tube => AreaShapeDto::Tube,
+            },
+            size: details.area_size,
+            visible: details.area_visible,
+            two_sided: details.two_sided,
+        })
+    }
+
+    /// Into `details`, the sizes brought into range (never trust a file).
+    fn apply(self, details: &mut LightDetails) {
+        details.area_shape = match self.shape {
+            AreaShapeDto::Rectangle => AreaShape::Rectangle,
+            AreaShapeDto::Disc => AreaShape::Disc,
+            AreaShapeDto::Sphere => AreaShape::Sphere,
+            AreaShapeDto::Tube => AreaShape::Tube,
+        };
+        details.area_size = self
+            .size
+            .map(|v| v.clamp(LightDetails::MIN_AREA_SIZE, LightDetails::MAX_AREA_SIZE));
+        details.area_visible = self.visible;
+        details.two_sided = self.two_sided;
+    }
+}
+
 /// A light's cone and falloff; written only when they differ from the defaults.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 struct LightDetailsDto {
@@ -3161,7 +3228,14 @@ struct LightDetailsDto {
 
 impl LightDetailsDto {
     fn new(details: LightDetails) -> Option<Self> {
-        (details != LightDetails::default()).then_some(Self {
+        // The area's fields are written apart (`AreaDto`).
+        let defaults = LightDetails::default();
+        let differs = details.use_inner != defaults.use_inner
+            || details.inner_angle_deg != defaults.inner_angle_deg
+            || details.outer_angle_deg != defaults.outer_angle_deg
+            || details.falloff != defaults.falloff
+            || details.radius != defaults.radius;
+        differs.then_some(Self {
             use_inner: details.use_inner,
             inner_angle_deg: details.inner_angle_deg,
             outer_angle_deg: details.outer_angle_deg,
@@ -3187,6 +3261,7 @@ impl LightDetailsDto {
                 FalloffDto::InverseSquare => Falloff::InverseSquare,
             },
             radius: self.radius.max(LightDetails::MIN_RADIUS),
+            ..LightDetails::default()
         }
     }
 }
@@ -3879,6 +3954,7 @@ impl KindDto {
                 light_type: light_type.into(),
                 details: LightDetailsDto::new(details),
                 shadow: shadow.into(),
+                area: AreaDto::new(&details),
             },
             ObjectKind::Polygon {
                 ref mesh,
@@ -4181,11 +4257,18 @@ impl KindDto {
                 light_type,
                 details,
                 shadow,
+                area,
             } => ObjectKind::Light {
                 color,
                 intensity,
                 light_type: light_type.into(),
-                details: details.map_or_else(LightDetails::default, LightDetailsDto::details),
+                details: {
+                    let mut details = details.map_or_else(LightDetails::default, LightDetailsDto::details);
+                    if let Some(area) = area {
+                        area.apply(&mut details);
+                    }
+                    details
+                },
                 shadow: shadow.into(),
             },
             Self::Polygon {
@@ -4649,11 +4732,15 @@ impl KindDto {
                 color,
                 intensity,
                 details,
+                area,
                 ..
             } => {
                 let mut numbers = vec![color[0], color[1], color[2], intensity];
                 if let Some(details) = details {
                     numbers.extend([details.inner_angle_deg, details.outer_angle_deg, details.radius]);
+                }
+                if let Some(area) = area {
+                    numbers.extend(area.size);
                 }
                 numbers
             }
@@ -5808,9 +5895,42 @@ mod tests {
                 outer_angle_deg: 70.0,
                 falloff: Falloff::InverseSquare,
                 radius: 250.0,
+                ..LightDetails::default()
             },
             shadow: LightShadow::Raytraced,
         };
+        // An area light (version 5): its shape apart from the details.
+        let panel = ObjectKind::Light {
+            color: [1.0; 3],
+            intensity: 2.0,
+            light_type: LightType::Area,
+            details: LightDetails {
+                area_shape: AreaShape::Tube,
+                area_size: [5.0, 120.0],
+                area_visible: true,
+                two_sided: true,
+                ..LightDetails::default()
+            },
+            shadow: LightShadow::Area,
+        };
+        let json = serde_json::to_value(KindDto::new(&panel, "Panel", &mut MeshTable::default())).unwrap();
+        assert_eq!(json["light_type"], "area");
+        assert_eq!(
+            json["area"],
+            serde_json::json!({"shape": "tube", "size": [5.0, 120.0], "visible": true, "two_sided": true})
+        );
+        assert!(json.get("details").is_none(), "the cone and falloff are the defaults");
+        // Sizes out of range are brought into it.
+        let tiny = r#"{"type": "light", "color": [1, 1, 1], "intensity": 1, "light_type": "area",
+            "area": {"shape": "disc", "size": [0, 1e9]}}"#;
+        let dto: KindDto = serde_json::from_str(tiny).unwrap();
+        let ObjectKind::Light { details, .. } = dto.into_kind(&[], "test").unwrap() else {
+            panic!("a light");
+        };
+        assert_eq!(
+            details.area_size,
+            [LightDetails::MIN_AREA_SIZE, LightDetails::MAX_AREA_SIZE]
+        );
         let sun = ObjectKind::Light {
             color: [1.0; 3],
             intensity: 1.0,
@@ -5818,7 +5938,12 @@ mod tests {
             details: LightDetails::default(),
             shadow: LightShadow::Area,
         };
-        for (name, kind) in [("Spot", spot), ("Sun", sun), ("Bulb", ObjectKind::light([1.0; 3], 1.0))] {
+        for (name, kind) in [
+            ("Spot", spot),
+            ("Sun", sun),
+            ("Panel", panel),
+            ("Bulb", ObjectKind::light([1.0; 3], 1.0)),
+        ] {
             doc.scene.insert(Node::new(name, kind));
         }
         assert_eq!(snapshot(&round_trip(&doc)), snapshot(&doc));

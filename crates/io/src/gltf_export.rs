@@ -179,6 +179,19 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
                     LightType::Infinite => {
                         json!({ "type": "directional", "color": color, "intensity": intensity })
                     }
+                    // glTF has no area lights: a one-sided flat one shines
+                    // into its half of space like a wide spot, the others all
+                    // round like a point.
+                    LightType::Area if details.area_shape.is_flat() && !details.two_sided => json!({
+                        "type": "spot",
+                        "color": color,
+                        "intensity": intensity,
+                        "spot": {
+                            "innerConeAngle": std::f32::consts::FRAC_PI_4,
+                            "outerConeAngle": std::f32::consts::FRAC_PI_2 * 0.999,
+                        },
+                    }),
+                    LightType::Area => json!({ "type": "point", "color": color, "intensity": intensity }),
                     LightType::Spot => {
                         let outer = details.outer_angle_deg.to_radians() * 0.5;
                         // glTF wants the inner cone strictly inside the outer one.
@@ -968,6 +981,20 @@ mod tests {
                 entry(None, "Soft", light(LightType::Spot, soft)),
                 entry(None, "Hard", light(LightType::Spot, hard)),
                 entry(None, "Sun", light(LightType::Infinite, LightDetails::default())),
+                // glTF has no area lights: a one-sided panel becomes a wide
+                // spot, a bulb (Sphere) a point light.
+                entry(None, "Panel", light(LightType::Area, LightDetails::default())),
+                entry(
+                    None,
+                    "Bulb",
+                    light(
+                        LightType::Area,
+                        LightDetails {
+                            area_shape: grid4d_scene::AreaShape::Sphere,
+                            ..LightDetails::default()
+                        },
+                    ),
+                ),
             ],
             ..Objects::default()
         };
@@ -992,6 +1019,13 @@ mod tests {
         assert_eq!(kinds[1].0, LightType::Spot);
         assert!(!kinds[1].1.use_inner, "a hard cone stays hard");
         assert_eq!(kinds[2], (LightType::Infinite, LightDetails::default()));
+        assert_eq!(kinds[3].0, LightType::Spot);
+        assert!(
+            kinds[3].1.outer_angle_deg >= 170.0,
+            "as wide as a cone can be: {:?}",
+            kinds[3].1
+        );
+        assert_eq!(kinds[4].0, LightType::Omni);
     }
 
     #[test]

@@ -5,8 +5,8 @@ use glam::{Affine2, Mat3, Mat4, Vec3};
 use grid4d_eval::{CurveHandle, EvaluatedLight, EvaluatedScene, MeshKey, Shading};
 use grid4d_geom::Component;
 use grid4d_scene::{
-    Channel, Falloff, LightType, Material, MaterialId, Materials, MeshHandle, NodeId, ObjectKindTag, Projection,
-    TextureSlot,
+    AreaShape, Channel, Falloff, LightType, Material, MaterialId, Materials, MeshHandle, NodeId, ObjectKindTag,
+    Projection, TextureSlot,
 };
 
 use crate::{
@@ -122,16 +122,31 @@ fn uv_fields(transform: Affine2, camera: bool) -> ([f32; 4], [f32; 4]) {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct LightRaw {
-    /// `xyz`: world position, `w`: type (0 omni, 1 spot, 2 infinite).
+    /// `xyz`: world position, `w`: type (0 omni, 1 spot, 2 infinite, 3 area).
     pub position: [f32; 4],
     /// `xyz`: the direction it shines in, `w`: cosine of half the outer angle.
     pub direction: [f32; 4],
     /// `rgb`: colour × intensity, `w`: cosine of half the inner angle (the outer
     /// one's for a hard cone).
     pub color: [f32; 4],
-    /// `x`: falloff (0 none, 1 linear, 2 inverse square), `y`: radius; `zw` unused.
+    /// `x`: falloff (0 none, 1 linear, 2 inverse square), `y`: radius. An
+    /// area light: `y` the distance at which it matches an Omni light with
+    /// Inverse Square falloff, `z` the most it gives (right at its face),
+    /// `w` 1 when two-sided.
     pub falloff: [f32; 4],
+    /// An area light: `xyz` half of the shape along its first axis (a
+    /// Tube's along its length), `w` the shape (0 rectangle, 1 disc, 2
+    /// sphere, 3 tube).
+    pub area_x: [f32; 4],
+    /// An area light: `xyz` half of the shape along its second axis, `w` the
+    /// radius of a Sphere or Tube.
+    pub area_y: [f32; 4],
 }
+
+/// The distance at which an area light of intensity 1 lights a facing
+/// surface like an Omni light of intensity 1 with Inverse Square falloff at
+/// its default Radius/Decay (the path tracer's `AREA_REFERENCE_DISTANCE`).
+const AREA_REFERENCE_DISTANCE: f32 = 500.0;
 
 impl LightRaw {
     #[must_use]
@@ -141,6 +156,7 @@ impl LightRaw {
             LightType::Omni => 0,
             LightType::Spot => 1,
             LightType::Infinite => 2,
+            LightType::Area => 3,
         };
         let details = &light.details;
         let half_cos = |degrees: f32| (degrees.to_radians() * 0.5).cos();
@@ -155,12 +171,50 @@ impl LightRaw {
             Falloff::Linear => 1,
             Falloff::InverseSquare => 2,
         };
-        Self {
+        let mut raw = Self {
             position: light.position.extend(code(kind)).to_array(),
             direction: light.direction.extend(cos_outer).to_array(),
             color: [light.color[0], light.color[1], light.color[2], cos_inner],
             falloff: [code(falloff), details.radius, 0.0, 0.0],
+            area_x: [0.0; 4],
+            area_y: [0.0; 4],
+        };
+        if light.light_type == LightType::Area {
+            raw.set_area(light);
         }
+        raw
+    }
+
+    /// An area light's shape, and the most light it gives: what the shader
+    /// needs to light from the shape's nearest point (see
+    /// `docs/reference/render-lights-area.md`).
+    fn set_area(&mut self, light: &EvaluatedLight) {
+        let details = &light.details;
+        let [size_x, size_y] = details.area_size;
+        let (shape, half_x, half_y, radius, projected) = match details.area_shape {
+            AreaShape::Rectangle => {
+                let (hx, hy) = (light.x_axis * (size_x * 0.5), light.y_axis * (size_y * 0.5));
+                (0u8, hx, hy, 0.0, 4.0 * hx.cross(hy).length())
+            }
+            AreaShape::Disc => {
+                let (hx, hy) = (light.x_axis * (size_x * 0.5), light.y_axis * (size_x * 0.5));
+                (1, hx, hy, 0.0, std::f32::consts::PI * hx.cross(hy).length())
+            }
+            AreaShape::Sphere => {
+                let r = size_x * 0.5 * light.x_axis.length();
+                (2, Vec3::ZERO, Vec3::ZERO, r, std::f32::consts::PI * r * r)
+            }
+            AreaShape::Tube => {
+                let r = size_x * 0.5 * light.x_axis.length();
+                let half = -light.direction * (light.z_scale * size_y * 0.5);
+                (3, half, Vec3::ZERO, r, 4.0 * r * half.length())
+            }
+        };
+        let reference = AREA_REFERENCE_DISTANCE;
+        let most = std::f32::consts::PI * reference * reference / projected.max(1e-6);
+        self.falloff = [0.0, reference, most, f32::from(u8::from(details.two_sided))];
+        self.area_x = half_x.extend(f32::from(shape)).to_array();
+        self.area_y = half_y.extend(radius).to_array();
     }
 }
 
@@ -838,8 +892,8 @@ mod tests {
     }
 
     #[test]
-    fn light_layout_is_64_bytes() {
-        assert_eq!(size_of::<LightRaw>(), 64);
+    fn light_layout_is_96_bytes() {
+        assert_eq!(size_of::<LightRaw>(), 96);
     }
 
     #[test]

@@ -463,17 +463,34 @@ The light's settings are on the Attribute Manager's **Object** tab:
 | Setting | What it does |
 |---------|--------------|
 | Color, Intensity | The light's colour and strength (100 % is normal; up to 10 000 %). |
-| Type | **Omni**: shines in every direction, like a bulb. **Spot**: shines in a cone. **Infinite**: shines in one direction everywhere, like the sun — only its rotation matters, not its position. |
+| Type | **Omni**: shines in every direction, like a bulb. **Spot**: shines in a cone. **Infinite**: shines in one direction everywhere, like the sun — only its rotation matters, not its position. **Area**: shines from a shape with a size — a softbox, a window, a strip light, a frosted bulb (see below). |
 | Use Inner, Inner Angle, Outer Angle (Spot) | The **Outer Angle** is the cone's opening (default 30°). Inside the **Inner Angle** the light is at full strength; it fades out towards the outer angle. With **Use Inner** off, the whole cone is at full strength and its edge is sharp. |
 | Shadow | **None** (the default): no shadow. **Shadow Maps (Soft)** and **Area**: a soft-edged shadow; **Raytraced (Hard)**: a sharp one. The viewport shows the shadow of one light, the first with a shadow, when Options ▸ Shadows is on ([§3.5](#35-shadows-and-ambient-occlusion)). |
 | Falloff, Radius/Decay (Omni, Spot) | **None**: as strong at any distance (the default). **Linear**: fades out to nothing at the Radius/Decay distance. **Inverse Square**: exactly the set intensity at Radius/Decay, stronger nearer and weaker farther, like real light. |
+| Shape, Size X, Size Y (Area) | **Rectangle** (Size X wide, Size Y high) and **Disc** (Size X across) lie in the light's X–Y plane and shine along its −Z axis; **Sphere** (Size X across) and **Tube** (Size X thick, Size Y long, along the light's Z axis) shine all round. |
+| Visible in Render (Area) | The renderer shows the light's shape itself — seen by the camera and in reflections — at its brightness. Off (the default): it lights the scene but is not seen. |
+| Two-Sided (Area: Rectangle, Disc) | Shines from both faces, each at full strength; off, only along −Z (it is dark from behind). |
+
+**Area lights** give soft light and soft shadows: the larger the shape, the
+softer they are. The **size does not change how much light it gives**: a
+larger light is softer, not brighter. It falls off with distance by itself,
+like real light, so it has no Falloff setting; at 500 cm a small area light
+lights a surface facing it as brightly as an Omni light of the same
+Intensity with Inverse Square falloff (at its default Radius/Decay of 500
+cm), so switching a light's type keeps the scene about as bright. To make
+one, create a light (**Create ▸ Light**) and set its **Type** to **Area**.
+In the viewport an area light is drawn as its shape (with a short arrow when
+it shines one way only) and lights the scene approximately, from the point of
+the shape nearest each surface; renders show it exactly.
+
+![A render lit only by area lights: a soft rectangle above, a disc from the left, a small visible sphere at the right and a visible tube behind the cube](images/manual/render-area-lights.png)
 
 - Spot and Infinite lights shine along their **−Z axis**, like cameras look. Turn
   them with the Rotate tool or the Coordinates, or give them a **Target tag** to
   point them at an object ([§18.3](#183-target)). *Cameras ▸ Selected Object as
   Camera* shows what a light points at.
-- In the viewport a **Spot** shows its cone and an **Infinite** light an arrow
-  along its direction (orange when selected).
+- In the viewport a **Spot** shows its cone, an **Infinite** light an arrow
+  along its direction and an **Area** light its shape (orange when selected).
 - A light hidden in the editor (the upper dot in the Object Manager) does not
   light the viewport.
 - Sides that no light reaches keep a little soft light, so shapes stay readable.

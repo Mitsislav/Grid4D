@@ -128,6 +128,12 @@ pub struct EvaluatedLight {
     pub position: Vec3,
     /// The direction it shines in (its −Z axis), unit length.
     pub direction: Vec3,
+    /// Its own X and Y axes in the world, with its scale: an area light's
+    /// Size X and Size Y run along them (a Tube's length along −`direction`).
+    pub x_axis: Vec3,
+    pub y_axis: Vec3,
+    /// The length of its Z axis in the world (its scale along it).
+    pub z_scale: f32,
     /// Colour × intensity, linear RGB.
     pub color: [f32; 3],
     pub details: LightDetails,
@@ -649,6 +655,9 @@ impl EvaluatedScene {
                 light_type,
                 position: node.world.w_axis.truncate(),
                 direction: node.world.transform_vector3(Vec3::NEG_Z).normalize_or(Vec3::NEG_Z),
+                x_axis: node.world.x_axis.truncate(),
+                y_axis: node.world.y_axis.truncate(),
+                z_scale: node.world.z_axis.truncate().length(),
                 color: color.map(|c| c * intensity),
                 details,
                 shadow,

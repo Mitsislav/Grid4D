@@ -17,6 +17,11 @@ sampling and a denoiser, a render queue).
   Settings ▸ Sampling gains *Emissive Surfaces Light the Scene* and *Clamp
   Indirect* (both on; off gives 1.1's behaviour). Scenes without glowing
   surfaces render exactly as before.
+- **Area lights** — a fourth light type shines from a shape: a rectangle,
+  a disc, a sphere or a tube, with its size, optionally seen in renders and
+  reflections, one- or two-sided. Soft light and shadows from the shape; a
+  larger light is softer, not brighter. The viewport draws the shape and
+  lights the scene approximately; glTF export writes a spot or point light.
 - **Files** — documents are saved in `.g4d` format version 5, which holds
   Grid4D 1.2's additions as they come. Every earlier file opens unchanged;
   Grid4D 1.1 cannot open version 5 files and says they come from a newer

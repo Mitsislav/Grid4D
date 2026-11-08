@@ -50,8 +50,10 @@ pub(crate) fn shadow_view(light: &LightRaw, min: Vec3, max: Vec3) -> ShadowView 
     let direction = Vec3::from_slice(&light.direction[..3]).normalize_or(Vec3::NEG_Z);
     let up = |d: Vec3| if d.y.abs() > 0.99 { Vec3::Z } else { Vec3::Y };
     let mut faces = [Mat4::IDENTITY; 6];
-    // `position.w`: 0 omni, 1 spot, 2 infinite.
-    if light.position[3] > 1.5 {
+    // `position.w`: 0 omni, 1 spot, 2 infinite, 3 area (its shadow from its
+    // centre, like an Omni light's).
+    let kind = light.position[3];
+    if (kind - 2.0).abs() < 0.5 {
         // Parallel light over the whole scene.
         let eye = centre - direction * radius * 2.0;
         let view = rh::view::look_at_mat4(eye, centre, up(direction));
@@ -67,7 +69,7 @@ pub(crate) fn shadow_view(light: &LightRaw, min: Vec3, max: Vec3) -> ShadowView 
     let far = (distance + radius).max(1.0);
     let near = (far * 0.0005).max(0.05);
     let texel = |fov: f32| 2.0 * distance.max(near) * (fov * 0.5).tan() / SHADOW_MAP_PIXELS;
-    if light.position[3] > 0.5 {
+    if (kind - 1.0).abs() < 0.5 {
         // Through the spot's cone (`direction.w`: cosine of half its opening).
         let opening = 2.0 * light.direction[3].clamp(-1.0, 1.0).acos();
         let fov = (opening + 0.1).clamp(0.1, 170f32.to_radians());
@@ -731,6 +733,8 @@ mod tests {
             direction: direction.extend(cos_outer).to_array(),
             color: [1.0, 1.0, 1.0, cos_outer],
             falloff: [0.0; 4],
+            area_x: [0.0; 4],
+            area_y: [0.0; 4],
         }
     }
 

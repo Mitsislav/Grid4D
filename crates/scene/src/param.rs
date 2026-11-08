@@ -321,7 +321,14 @@ impl ObjectKind {
             Self::Torus { .. } => &[P::RingRadius, P::PipeRadius],
             Self::Disc { .. } => &[P::InnerRadius, P::OuterRadius],
             Self::Camera { .. } => &[P::FieldOfView],
-            Self::Light { .. } => &[P::Intensity, P::InnerAngle, P::OuterAngle, P::FalloffRadius],
+            Self::Light { .. } => &[
+                P::Intensity,
+                P::InnerAngle,
+                P::OuterAngle,
+                P::Size(Axis::X),
+                P::Size(Axis::Y),
+                P::FalloffRadius,
+            ],
             Self::SplinePrimitive(primitive) => match primitive.shape {
                 SplineShape::Circle { .. } => &[P::Radius, P::EllipseRadius, P::InnerRadius],
                 SplineShape::Rectangle { .. } => &[P::Width, P::Height, P::RoundingRadius],
@@ -466,8 +473,23 @@ impl ObjectKind {
             return match self {
                 Self::Light {
                     light_type, details, ..
-                } if light_type.has_position() && details.falloff != Falloff::None => Some(&mut details.radius),
+                } if light_type.has_falloff() && details.falloff != Falloff::None => Some(&mut details.radius),
                 _ => None,
+            };
+        }
+        // An area light's size (Size Y only where its shape has one).
+        if let P::Size(axis @ (Axis::X | Axis::Y)) = param
+            && let Self::Light {
+                light_type: LightType::Area,
+                details,
+                ..
+            } = self
+        {
+            let shown = axis == Axis::X || details.area_shape.uses_height();
+            return if shown {
+                details.area_size.get_mut(axis.index())
+            } else {
+                None
             };
         }
         // An effector's falloff size only while it has one (the rows are shown then).

@@ -108,13 +108,23 @@ The Sky and Environment objects (16.3) have Group too.
   emits; a one-sided shape seen from behind is dark.
 - **In the viewport**: the shape is drawn as lines in the light's colour
   (orange when selected), with a short arrow along −Z for one-sided flat
-  shapes. It lights the scene approximately: as a point light at the shape's
-  nearest point to each surface (a representative point), its shadow-map
-  shadow softened by the size.
-- **Creating**: Create ▸ Light ▸ Area Light, or Type ▸ Area on any light.
-- glTF has no area lights: export writes a spot light (`KHR_lights_punctual`)
-  of the same colour and intensity in its place, with a note; import is
-  unchanged.
+  shapes. It lights the scene approximately: from the shape's point nearest
+  each surface (a representative point), as bright as the matching Omni light
+  with Inverse Square falloff but never brighter than right at its face, a
+  flat shape by the cosine it is seen at. Its shadow map is cast from its
+  centre, like an Omni light's (not softened by its size yet).
+- **Sampling in renders** (16.2b, as built): flat shapes evenly over their
+  area; a Sphere over the cone of directions it fills from the shading point
+  (nothing of it hidden behind itself: almost no noise from a small bulb); a
+  Tube over the half that faces the point.
+- **Brightness** (as built): radiance = colour × intensity × π × (500 cm)² ÷
+  the shape's area seen face on (a Sphere's disc, a Tube from the side).
+- **Creating**: Create ▸ Light, then Type ▸ Area (16.2b; a menu entry of its
+  own would need a command that creates a light of a given type, left for
+  later).
+- glTF has no area lights: export writes a one-sided flat one as the widest
+  spot light (`KHR_lights_punctual`), the others as a point light, of the
+  same colour and intensity; import is unchanged.
 
 ### Linking (16.4)
 
@@ -169,18 +179,21 @@ no separate diffuse / specular switches per light.
       also behind a glass slab (no light counted twice), with a quarter of
       the noise at 16 samples; the material's direction pdf integrates to
       the share of bounces that reflect.
-- [ ] (16.2b) A small and a large area light each converge to their
-      analytic irradiance on a plane.
-- [ ] Each shape lights a plane as its geometry says (a disc's centre value,
-      a sphere's inverse square, a one-sided light dark behind, two-sided lit
-      both ways); resizing keeps the total light.
+- [x] (16.2b) A small area light of every shape lights a plane as an Omni
+      light with Inverse Square falloff does at 500 and 250 cm; a large one
+      gives the same light farther away.
+- [x] Each shape lights a plane as its geometry says (the inverse square
+      for every shape, a one-sided light dark behind, two-sided lit both
+      ways); resizing keeps the total light; visible lights are seen and,
+      found by bounces too, light the same.
 - [x] Emissive triangles light the scene; with the switch off the picture
       matches 1.1's behaviour.
 - [ ] A linked light lights only its objects (Include) or all but them
       (Exclude), children included; their shadows follow; dangling entries
       do nothing.
 - [ ] Group passes add up to the beauty within rounding.
-- [ ] Area lights are drawn in the viewport and light it; idle frames stay
+- [x] Area lights are drawn in the viewport and light it; idle frames stay
       allocation-free.
 - [ ] Every new parameter is undoable, saved in v5, refused or stripped in v4.
-- [ ] A reference picture with each shape guards the renderer.
+- [x] A reference picture with each shape guards the renderer
+      (`area_reference.png`).

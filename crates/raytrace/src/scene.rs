@@ -9,7 +9,12 @@ use grid4d_eval::{Drawable, EvaluatedLight, EvaluatedScene, MaterialLayers, Mesh
 use grid4d_geom::{Bvh, PolyMesh, TriMesh, Triangulator, uv};
 use grid4d_scene::{Aabb, Falloff, LightShadow, LightType, MaterialId, Materials, NodeId, Projection};
 
-use crate::{RenderCamera, channels::Channels, picture::Pictures};
+use crate::{
+    RenderCamera,
+    channels::Channels,
+    lights::{AreaLight, Entry, LightTable, SurfacePoint},
+    picture::Pictures,
+};
 
 /// How a surface reflects and gives off light at a point: its material there.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -218,34 +223,21 @@ pub struct RenderScene {
     tangents: Vec<Vec4>,
     aspect: f32,
     lights: Vec<Light>,
-    emitters: Emitters,
+    /// The area lights among `lights`.
+    areas: Vec<AreaLight>,
+    /// Lights with a surface by power: area lights and emitting triangles,
+    /// and area lights alone (for renders whose emitting surfaces are not
+    /// sampled).
+    with_emitters: LightTable,
+    areas_only: LightTable,
     bounds: Option<(Vec3, Vec3)>,
 }
 
-/// The triangles that give off light, chosen by their power: what next-event
-/// estimation samples besides the lights (see
-/// `docs/reference/render-lights-area.md`).
-#[derive(Debug, Default)]
-struct Emitters {
-    /// Emitting triangles, in the scene's order.
-    triangles: Vec<u32>,
-    /// The running sum of their shares of the total power, ending at 1.
-    cumulative: Vec<f32>,
-    /// Per triangle of the scene, the chance that it is chosen (empty when
-    /// nothing emits).
-    chance: Vec<f32>,
-}
-
-/// A point chosen on an emitting triangle.
+/// A point chosen on a light with a surface.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct EmitterSample {
-    pub triangle: usize,
-    pub position: Vec3,
-    /// The triangle's unit normal (either side: emission is two-sided).
-    pub normal: Vec3,
-    /// The chance of this point per unit of area: the triangle's chance
-    /// divided by its area.
-    pub density: f32,
+pub(crate) struct SurfaceSample {
+    pub source: Entry,
+    pub point: SurfacePoint,
 }
 
 /// What the build keeps between objects.
@@ -349,23 +341,33 @@ impl RenderScene {
             tangents: b.tangents,
             aspect: texturing.map_or(1.0, |t| t.aspect),
             lights: evaluated.lights().iter().map(Light::new).collect(),
-            emitters: Emitters::default(),
+            areas: evaluated.lights().iter().filter_map(AreaLight::new).collect(),
+            with_emitters: LightTable::default(),
+            areas_only: LightTable::default(),
             bounds: b.bounds,
         }
-        .with_emitters()
+        .with_light_tables()
     }
 
-    /// The scene with its table of emitting triangles: each by its power,
-    /// its area times the brightness of its emission (the mean of four
-    /// points, so pictures on Emission count roughly).
-    fn with_emitters(mut self) -> Self {
+    /// The scene with its tables of lights with a surface: area lights by
+    /// their power, emitting triangles by their area times the brightness of
+    /// their emission (the mean of four points, so pictures on Emission count
+    /// roughly) in the same units (π × brightness × area × sides).
+    fn with_light_tables(mut self) -> Self {
         const POINTS: [Vec3; 4] = [
             Vec3::new(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0),
             Vec3::new(0.6, 0.2, 0.2),
             Vec3::new(0.2, 0.6, 0.2),
             Vec3::new(0.2, 0.2, 0.6),
         ];
-        let mut powers = Vec::new();
+        let areas: Vec<(Entry, f32)> = self
+            .areas
+            .iter()
+            .enumerate()
+            .map(|(i, light)| (Entry::Area(u32::try_from(i).unwrap_or(u32::MAX)), light.power()))
+            .filter(|&(_, power)| power > 0.0 && power.is_finite())
+            .collect();
+        let mut all = areas.clone();
         for (index, object) in self.objects.iter().enumerate() {
             let can_emit = if object.layers.0 == object.layers.1 {
                 object.plain.emission.max_element() > 0.0
@@ -395,33 +397,16 @@ impl RenderScene {
                     .map(|p| crate::shade::luminance(self.emission_at(triangle, p)))
                     .sum::<f32>()
                     / 4.0;
-                let power = area * brightness;
+                // Emission is two-sided.
+                let power = 2.0 * std::f32::consts::PI * area * brightness;
                 if power > 0.0 && power.is_finite() {
-                    powers.push((triangle, power));
+                    all.push((Entry::Triangle(u32::try_from(triangle).unwrap_or(u32::MAX)), power));
                 }
             }
         }
-        let total: f32 = powers.iter().map(|&(_, p)| p).sum();
-        if powers.is_empty() || total <= 0.0 || !total.is_finite() {
-            return self;
-        }
-        let mut chance = vec![0.0; self.object_of.len()];
-        let mut running = 0.0;
-        for &(triangle, power) in &powers {
-            let share = power / total;
-            if let Some(c) = chance.get_mut(triangle) {
-                *c = share;
-            }
-            running += share;
-            self.emitters.cumulative.push(running);
-            self.emitters
-                .triangles
-                .push(u32::try_from(triangle).unwrap_or(u32::MAX));
-        }
-        if let Some(last) = self.emitters.cumulative.last_mut() {
-            *last = 1.0;
-        }
-        self.emitters.chance = chance;
+        let (triangles, area_count) = (self.object_of.len(), self.areas.len());
+        self.with_emitters = LightTable::new(&all, triangles, area_count);
+        self.areas_only = LightTable::new(&areas, triangles, area_count);
         self
     }
 }
@@ -554,41 +539,59 @@ impl RenderScene {
         &self.lights
     }
 
-    /// Whether any surface gives off light.
-    pub(crate) fn has_emitters(&self) -> bool {
-        !self.emitters.triangles.is_empty()
+    /// The area lights.
+    pub(crate) fn areas(&self) -> &[AreaLight] {
+        &self.areas
     }
 
-    /// The chance that [`Self::sample_emitter`] chooses `triangle` (0 for one
-    /// that does not emit).
-    pub(crate) fn emitter_chance(&self, triangle: usize) -> f32 {
-        self.emitters.chance.get(triangle).copied().unwrap_or(0.0)
-    }
-
-    /// A point on an emitting triangle, the triangle chosen by its power
-    /// (`u`) and the point evenly over it (`s`, `t`); `None` without
-    /// emitters.
-    pub(crate) fn sample_emitter(&self, u: f32, s: f32, t: f32) -> Option<EmitterSample> {
-        let cumulative = &self.emitters.cumulative;
-        let last = cumulative.len().checked_sub(1)?;
-        let index = cumulative.partition_point(|&c| c <= u).min(last);
-        let triangle = usize::try_from(*self.emitters.triangles.get(index)?).ok()?;
-        let corners = self.triangles.points().get(triangle * 3..triangle * 3 + 3)?;
-        let cross = (corners[1] - corners[0]).cross(corners[2] - corners[0]);
-        let area = cross.length() * 0.5;
-        if area <= f32::MIN_POSITIVE {
-            return None;
+    /// The table of lights with a surface: with emitting triangles or
+    /// without.
+    pub(crate) fn light_table(&self, emitters: bool) -> &LightTable {
+        if emitters {
+            &self.with_emitters
+        } else {
+            &self.areas_only
         }
-        // Even over the triangle: the square root folds the unit square onto it.
-        let r = s.sqrt();
-        let (a, b) = (1.0 - r, r * (1.0 - t));
-        let position = corners[0] * a + corners[1] * b + corners[2] * (1.0 - a - b);
-        Some(EmitterSample {
-            triangle,
-            position,
-            normal: cross / (2.0 * area),
-            density: self.emitter_chance(triangle) / area,
-        })
+    }
+
+    /// A point on a light with a surface, chosen from `table` by power (`u`)
+    /// and on the light as seen from `from` (`s`, `t`); the density includes
+    /// the chance of choosing that light.
+    pub(crate) fn sample_surface_light(
+        &self,
+        table: &LightTable,
+        from: Vec3,
+        u: f32,
+        s: f32,
+        t: f32,
+    ) -> Option<SurfaceSample> {
+        let source = table.choose(u)?;
+        let point = match source {
+            Entry::Triangle(triangle) => {
+                let triangle = usize::try_from(triangle).ok()?;
+                let corners = self.triangles.points().get(triangle * 3..triangle * 3 + 3)?;
+                let cross = (corners[1] - corners[0]).cross(corners[2] - corners[0]);
+                let area = cross.length() * 0.5;
+                if area <= f32::MIN_POSITIVE {
+                    return None;
+                }
+                // Even over the triangle: the square root folds the unit square onto it.
+                let r = s.sqrt();
+                let (a, b) = (1.0 - r, r * (1.0 - t));
+                SurfacePoint {
+                    position: corners[0] * a + corners[1] * b + corners[2] * (1.0 - a - b),
+                    normal: cross / (2.0 * area),
+                    density: table.triangle_chance(triangle) / area,
+                }
+            }
+            Entry::Area(index) => {
+                let index = usize::try_from(index).ok()?;
+                let mut point = self.areas.get(index)?.sample(from, s, t);
+                point.density *= table.area_chance(index);
+                point
+            }
+        };
+        Some(SurfaceSample { source, point })
     }
 
     /// The area of `triangle`.

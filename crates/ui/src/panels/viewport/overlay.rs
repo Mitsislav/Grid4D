@@ -4,7 +4,7 @@ use egui::{Align2, CornerRadius, FontId, Mesh, Painter, Pos2, Rect, Shape, Strok
 use glam::{Mat4, Vec3};
 use grid4d_eval::EvaluatedScene;
 use grid4d_render::{OrbitCamera, ViewFilter};
-use grid4d_scene::LightType;
+use grid4d_scene::{AreaShape, LightType};
 
 use super::project;
 use crate::i18n::{tr, trf};
@@ -141,9 +141,10 @@ pub(super) fn camera_frustums(
     }
 }
 
-/// Where the visible lights shine: a Spot's cone (its outer angle) and an
-/// Infinite light's direction, in the light colour (orange when selected). Omni
-/// lights show only their marker.
+/// Where the visible lights shine: a Spot's cone (its outer angle), an
+/// Infinite light's direction and an area light's shape (with an arrow when it
+/// shines one way), in the light colour (orange when selected). Omni lights
+/// show only their marker.
 pub(super) fn light_shapes(
     painter: &Painter,
     rect: Rect,
@@ -195,6 +196,58 @@ pub(super) fn light_shapes(
                 for along in [side, other] {
                     line(tip, tip - forward * 24.0 + along * 10.0);
                     line(tip, tip - forward * 24.0 - along * 10.0);
+                }
+            }
+            LightType::Area => {
+                let c = light.position;
+                let details = &light.details;
+                let [size_x, size_y] = details.area_size;
+                // A ring around `centre` spanned by `a` and `b` (half axes).
+                let ring = |centre: Vec3, a: Vec3, b: Vec3| {
+                    let at = |k: u8| {
+                        let t = f32::from(k) / f32::from(RIM) * std::f32::consts::TAU;
+                        centre + a * t.cos() + b * t.sin()
+                    };
+                    for k in 0..RIM {
+                        line(at(k), at(k + 1));
+                    }
+                };
+                let (x, y) = (light.x_axis, light.y_axis);
+                match details.area_shape {
+                    AreaShape::Rectangle => {
+                        let (hx, hy) = (x * (size_x * 0.5), y * (size_y * 0.5));
+                        let corners = [c - hx - hy, c + hx - hy, c + hx + hy, c - hx + hy];
+                        for (k, &a) in corners.iter().enumerate() {
+                            line(a, corners[(k + 1) % 4]);
+                        }
+                    }
+                    AreaShape::Disc => ring(c, x * (size_x * 0.5), y * (size_x * 0.5)),
+                    AreaShape::Sphere => {
+                        let r = size_x * 0.5 * x.length();
+                        let (u, v, w) = (x.normalize_or(Vec3::X), y.normalize_or(Vec3::Y), forward);
+                        ring(c, u * r, v * r);
+                        ring(c, u * r, w * r);
+                        ring(c, v * r, w * r);
+                    }
+                    AreaShape::Tube => {
+                        let r = size_x * 0.5 * x.length();
+                        let half = -forward * (light.z_scale * size_y * 0.5);
+                        let (u, v) = (x.normalize_or(Vec3::X), y.normalize_or(Vec3::Y));
+                        for end in [c - half, c + half] {
+                            ring(end, u * r, v * r);
+                        }
+                        for along in [u, -u, v, -v] {
+                            line(c - half + along * r, c + half + along * r);
+                        }
+                    }
+                }
+                if details.area_shape.is_flat() && !details.two_sided {
+                    let tip = c + forward * 40.0;
+                    line(c, tip);
+                    for along in [side, other] {
+                        line(tip, tip - forward * 10.0 + along * 5.0);
+                        line(tip, tip - forward * 10.0 - along * 5.0);
+                    }
                 }
             }
         }

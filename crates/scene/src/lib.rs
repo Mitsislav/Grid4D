@@ -49,7 +49,7 @@ pub use document::Document;
 pub use dynamics::{Body, CachedBody, CollisionShape, Inherit, MassMode, Motion, SimulationCache, SimulationSettings};
 pub use edit::SceneEdit;
 pub use layer::{Layer, LayerId, LayerSwitches, Layers};
-pub use light::{Falloff, LightDetails, LightShadow, LightType};
+pub use light::{AreaShape, Falloff, LightDetails, LightShadow, LightType};
 pub use material::{Channel, Material, MaterialId, Materials, PictureChannel, TextureSlot};
 pub use mesh::{ComponentState, Components, MeshHandle, MeshId};
 pub use node::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, Node, NodeData, NodeId, ObjectKind, ObjectKindTag};

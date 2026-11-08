@@ -1,6 +1,6 @@
 //! Light parameters beyond colour and intensity (see
-//! `docs/reference/object-light.md`): the type, and the cone and falloff of
-//! Cinema 4D's Details tab.
+//! `docs/reference/object-light.md` and `render-lights-area.md`): the type,
+//! and the cone, falloff and area shape of Cinema 4D's Details tab.
 
 /// How a light shines.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -12,10 +12,13 @@ pub enum LightType {
     Spot,
     /// Along its −Z axis everywhere, like the sun: only its direction matters.
     Infinite,
+    /// From a shape with a size ([`LightDetails::area_shape`]): soft light and
+    /// soft shadows, falling off with distance by itself.
+    Area,
 }
 
 impl LightType {
-    pub const ALL: [Self; 3] = [Self::Omni, Self::Spot, Self::Infinite];
+    pub const ALL: [Self; 4] = [Self::Omni, Self::Spot, Self::Infinite, Self::Area];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
@@ -23,13 +26,61 @@ impl LightType {
             Self::Omni => "Omni",
             Self::Spot => "Spot",
             Self::Infinite => "Infinite",
+            Self::Area => "Area",
         }
     }
 
-    /// Whether the light has a position (and so a falloff with distance).
+    /// Whether the light has a position.
     #[must_use]
     pub const fn has_position(self) -> bool {
+        matches!(self, Self::Omni | Self::Spot | Self::Area)
+    }
+
+    /// Whether its Falloff setting applies (an area light falls off by
+    /// itself, an Infinite light not at all).
+    #[must_use]
+    pub const fn has_falloff(self) -> bool {
         matches!(self, Self::Omni | Self::Spot)
+    }
+}
+
+/// The shape an area light gives off light from, in its own space.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AreaShape {
+    /// In the light's XY plane, Size X wide and Size Y high, facing −Z.
+    #[default]
+    Rectangle,
+    /// In the light's XY plane, Size X across, facing −Z.
+    Disc,
+    /// Centred on the light, Size X across; shines all round.
+    Sphere,
+    /// Along the light's Z axis, Size X across and Size Y long; shines all round.
+    Tube,
+}
+
+impl AreaShape {
+    pub const ALL: [Self; 4] = [Self::Rectangle, Self::Disc, Self::Sphere, Self::Tube];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Rectangle => "Rectangle",
+            Self::Disc => "Disc",
+            Self::Sphere => "Sphere",
+            Self::Tube => "Tube",
+        }
+    }
+
+    /// Whether it is flat (and so one- or two-sided).
+    #[must_use]
+    pub const fn is_flat(self) -> bool {
+        matches!(self, Self::Rectangle | Self::Disc)
+    }
+
+    /// Whether Size Y means anything for it.
+    #[must_use]
+    pub const fn uses_height(self) -> bool {
+        matches!(self, Self::Rectangle | Self::Tube)
     }
 }
 
@@ -112,6 +163,14 @@ pub struct LightDetails {
     pub falloff: Falloff,
     /// Radius/Decay, in cm (see [`Falloff`]).
     pub radius: f32,
+    /// An area light's shape.
+    pub area_shape: AreaShape,
+    /// An area light's Size X and Size Y, in cm (see [`AreaShape`]).
+    pub area_size: [f32; 2],
+    /// Camera rays and reflections see an area light's shape.
+    pub area_visible: bool,
+    /// A flat area light shines from both faces (else only along −Z).
+    pub two_sided: bool,
 }
 
 impl LightDetails {
@@ -119,11 +178,20 @@ impl LightDetails {
     pub const MAX_ANGLE_DEG: f32 = 175.0;
     /// The smallest Radius/Decay, in cm.
     pub const MIN_RADIUS: f32 = 0.01;
+    /// The smallest and largest Size X / Y of an area light, in cm.
+    pub const MIN_AREA_SIZE: f32 = 0.1;
+    pub const MAX_AREA_SIZE: f32 = 100_000.0;
 
     /// Every number, for finiteness checks.
     #[must_use]
-    pub const fn numbers(&self) -> [f32; 3] {
-        [self.inner_angle_deg, self.outer_angle_deg, self.radius]
+    pub const fn numbers(&self) -> [f32; 5] {
+        [
+            self.inner_angle_deg,
+            self.outer_angle_deg,
+            self.radius,
+            self.area_size[0],
+            self.area_size[1],
+        ]
     }
 }
 
@@ -135,6 +203,10 @@ impl Default for LightDetails {
             outer_angle_deg: 30.0,
             falloff: Falloff::None,
             radius: 500.0,
+            area_shape: AreaShape::Rectangle,
+            area_size: [100.0, 100.0],
+            area_visible: false,
+            two_sided: false,
         }
     }
 }

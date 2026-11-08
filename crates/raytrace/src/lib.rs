@@ -17,6 +17,7 @@
 mod camera;
 mod channels;
 mod image;
+mod lights;
 mod picture;
 mod sample;
 mod scene;

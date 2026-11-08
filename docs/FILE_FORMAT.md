@@ -113,7 +113,7 @@ The `kind` of an object, by its `type`:
 | `disc` | `inner_radius`, `outer_radius`, `rotation_segments`, `disc_segments` |
 | `capsule` | `radius`, `height`, `rotation_segments`, `height_segments`, `cap_segments` |
 | `camera` | `fov_y_deg` (vertical field of view, degrees) |
-| `light` | `color`, `intensity` (1 = 100 %); `light_type`: `omni` (default), `spot`, `infinite`; `details` (default: none): `use_inner`, `inner_angle_deg`, `outer_angle_deg`, `falloff` (`none`, `linear`, `inverse_square`), `radius`; `shadow`: `none` (default), `shadow_maps`, `raytraced`, `area` |
+| `light` | `color`, `intensity` (1 = 100 %); `light_type`: `omni` (default), `spot`, `infinite`; `details` (default: none): `use_inner`, `inner_angle_deg`, `outer_angle_deg`, `falloff` (`none`, `linear`, `inverse_square`), `radius`; `shadow`: `none` (default), `shadow_maps`, `raytraced`, `area`. Version 5 adds the `light_type` `area` and `area` (default: none — a rectangle 100 × 100 cm, not visible, one-sided): `shape` (`rectangle`, `disc`, `sphere`, `tube`), `size` ([Size X, Size Y], cm, 0.1 – 100 000), `visible`, `two_sided` (bools; false when absent) |
 | `polygon` | `mesh` (index into `meshes`); `selected`, `hidden` (component sets, below; default empty); `seams` (a component set with `edges` only: the UV seams; default none) |
 | `subdivision_surface` | `viewport_levels`, `render_levels`, `linear_pre` (0 – 6), `boundary` (`edge`, `edge_and_corner`) |
 | `extrude` | `offset`, `movement` (vector), `subdivision`; `direction`: `auto` (default), `x`, `y`, `z`, `custom`, `absolute`; `reverse_normals` (false), `hierarchical` (false), `start_cap` (true), `end_cap` (true), `cap_type`: `n_gons` (default), `triangles` |
@@ -311,6 +311,7 @@ Phase 16; each step adds its row):
 | Addition | Since |
 |----------|-------|
 | the render settings' `clamp_indirect` and `emissive_lights` (bools, `true` when absent; also in takes' own and Main's render settings) | step 16.2 |
+| the `light` kind's `light_type` value `area`, and its `area` object (`shape`: `rectangle`, `disc`, `sphere`, `tube`; `size`: [x, y] cm; `visible`, `two_sided`: bools, false when absent) | step 16.2 |
 
 A version 4 file is therefore read as a version 5 file with the version
 number changed, minus any field this table lists (version 4 readers ignore
