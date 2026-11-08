@@ -349,6 +349,7 @@ impl ViewportPanel {
             revision: doc.scene.revision(),
             settings: doc.render.clone(),
             frame: doc.time.frame(),
+            object: self.view_object(),
         }
     }
 
@@ -1063,7 +1064,7 @@ impl ViewportPanel {
             .find(|n| n.id == id)
             .map_or_else(|| doc.scene.world_matrix_at(id, frame), |n| n.world);
         let fov = match doc.scene.get(id).map(|n| &n.data.kind) {
-            Some(ObjectKind::Camera { fov_y_deg }) => fov_y_deg.to_radians(),
+            Some(ObjectKind::Camera { fov_y_deg, .. }) => fov_y_deg.to_radians(),
             _ => self.camera.fov_y,
         };
         self.camera = OrbitCamera::from_world(&world, fov, self.camera.distance);

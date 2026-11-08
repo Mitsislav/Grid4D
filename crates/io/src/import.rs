@@ -127,7 +127,7 @@ pub(crate) enum Look {
 }
 
 /// Rewrites the object references in `data` (tags, a Cloner's object and
-/// effectors, a light's linked objects) through `map` (a reference `map` does
+/// effectors, a light's linked objects, a camera's focus object) through `map` (a reference `map` does
 /// not know is dropped).
 pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>) {
     for tag in &mut data.tags {
@@ -148,6 +148,7 @@ pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>
         ObjectKind::Light { linking, .. } => {
             linking.objects.retain_mut(|id| map(*id).map(|new| *id = new).is_some());
         }
+        ObjectKind::Camera { lens, .. } => lens.focus_object = lens.focus_object.and_then(&map),
         _ => {}
     }
 }
@@ -166,6 +167,7 @@ pub fn refers_to_objects(data: &NodeData) -> bool {
     let kind = match &data.kind {
         ObjectKind::Cloner { object, effectors, .. } => object.is_some() || !effectors.is_empty(),
         ObjectKind::Light { linking, .. } => !linking.objects.is_empty(),
+        ObjectKind::Camera { lens, .. } => lens.focus_object.is_some(),
         _ => false,
     };
     tags || kind

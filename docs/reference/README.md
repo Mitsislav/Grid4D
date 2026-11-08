@@ -114,7 +114,7 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 16.1 | [`app-format-v5.md`](app-format-v5.md) — `.g4d` version 5: what Phase 16 adds by step, reading version 4 (fields dropped, new values refused) | implemented 2026-11-07 (the container; each later step adds its data) |
 | 16.2, 16.4 | [`render-lights-area.md`](render-lights-area.md) — next-event estimation with MIS, emissive surfaces as lights, area lights (rectangle, disc, sphere, tube), light linking and groups | light transport and area lights implemented 2026-11-08 (16.2); linking and the group name 2026-11-08 (16.4); group passes with 16.6 |
 | 16.3 | [`render-environment.md`](render-environment.md) — the Sky (Preetham sky and sun) and the Environment (equirectangular HDR), importance sampled; the viewport's background and ambient | implemented 2026-11-08 |
-| 16.5 | [`render-lens.md`](render-lens.md) — thin-lens depth of field (focus, f-stop, blades), motion blur (shutter, segments) | draft 2026-11-07 |
+| 16.5 | [`render-lens.md`](render-lens.md) — thin-lens depth of field (focus, f-stop, blades), motion blur (shutter, segments) | implemented 2026-11-08 |
 | 16.6 | [`render-passes.md`](render-passes.md) — lighting, data and ID passes, light-group passes, multi-layer OpenEXR, the Picture Viewer's pass menu | draft 2026-11-07 |
 | 16.7 | [`render-sampling.md`](render-sampling.md) — adaptive sampling, the à-trous denoiser, the SAH BVH, the render-time budget | draft 2026-11-07 |
 | 16.8 – 16.9 | [`render-queue.md`](render-queue.md) — the Render Queue, the render region, the interactive Render View | draft 2026-11-07 |

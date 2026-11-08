@@ -933,7 +933,14 @@ l 5 6
                 ObjectKind::polygon(MeshHandle::new(primitives::cube(Vec3::splat(100.0), [1, 1, 1]))),
             ),
             entry(None, "Pentagon", ObjectKind::polygon(MeshHandle::new(pentagon))),
-            entry(None, "Cam", ObjectKind::Camera { fov_y_deg: 40.0 }),
+            entry(
+                None,
+                "Cam",
+                ObjectKind::Camera {
+                    fov_y_deg: 40.0,
+                    lens: grid4d_scene::Lens::default(),
+                },
+            ),
             entry(None, "Lamp", ObjectKind::light([1.0; 3], 1.0)),
         ];
         nodes[0].data.transform = Transform {

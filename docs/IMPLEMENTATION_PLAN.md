@@ -1748,5 +1748,6 @@ with MIS, emissive surfaces as lights (16.2a) and area lights (16.2b) — is
 done (2026-11-08); step 16.3 — the Sky and Environment objects
 ([`render-environment.md`](reference/render-environment.md)) — is done
 (2026-11-08); step 16.4 — light linking and the light-group name — is done
-(2026-11-08); next is 16.5, lens and shutter
-([`render-lens.md`](reference/render-lens.md)).
+(2026-11-08); step 16.5 — lens and shutter — is done (2026-11-08); next is
+16.6, render passes and multi-layer OpenEXR
+([`render-passes.md`](reference/render-passes.md)).

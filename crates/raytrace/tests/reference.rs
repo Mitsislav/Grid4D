@@ -3,8 +3,9 @@
 //! machines) — the demo scene through its camera, and a scene of textured
 //! materials (pictures through UV and Box projections, a layer cut out
 //! by its Opacity, a bump map, glass and a clear coat), a scene lit by an
-//! area light of each shape, a daylight scene under a Sky and a product lit
-//! by an Environment picture.
+//! area light of each shape, a daylight scene under a Sky, a product lit by
+//! an Environment picture, depth of field through a six-bladed aperture and
+//! a spinning wheel blurred by its motion.
 //!
 //! After an intended change to the renderer, write new references with
 //! `GRID4D_UPDATE_REFERENCE=1 cargo test -p grid4d-raytrace --test reference`
@@ -17,7 +18,8 @@ use std::{fs::File, io::BufWriter, sync::Arc};
 use glam::Vec3;
 use grid4d_eval::EvaluatedScene;
 use grid4d_raytrace::{
-    CameraProjection, Image, Picture, Pictures, RenderCamera, RenderOptions, RenderScene, Texels, Texturing, render,
+    CameraProjection, Image, Picture, Pictures, RenderCamera, RenderOptions, RenderScene, Texels, Texturing, ThinLens,
+    render,
 };
 use grid4d_scene::{
     AreaShape, Channel, Document, Environment, LightDetails, LightShadow, LightType, Material, MaterialTag, Node,
@@ -29,6 +31,11 @@ const TEXTURED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/text
 const AREAS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/area_reference.png");
 const DAYLIGHT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/daylight_reference.png");
 const PRODUCT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/environment_reference.png");
+const FOCUS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/depth_of_field_reference.png"
+);
+const WHEEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/motion_blur_reference.png");
 
 fn demo() -> Image {
     let doc = Document::with_demo_scene();
@@ -38,7 +45,7 @@ fn demo() -> Image {
         .scene
         .iter()
         .find_map(|(id, node)| match node.data.kind {
-            ObjectKind::Camera { fov_y_deg } => Some((id, fov_y_deg)),
+            ObjectKind::Camera { fov_y_deg, .. } => Some((id, fov_y_deg)),
             _ => None,
         })
         .expect("the demo scene has a camera");
@@ -47,6 +54,8 @@ fn demo() -> Image {
         projection: CameraProjection::Perspective {
             fov_y: fov.to_radians(),
         },
+        lens: None,
+        end: None,
     };
     let options = RenderOptions {
         width: 96,
@@ -415,6 +424,8 @@ fn still_life_at(doc: &Document, pictures: &Pictures, width: u32, height: u32, s
         projection: CameraProjection::Perspective {
             fov_y: 40f32.to_radians(),
         },
+        lens: None,
+        end: None,
     };
     let options = RenderOptions {
         width,
@@ -533,6 +544,162 @@ fn sky_and_environment_for_the_manual() {
     println!("{}", path.display());
 }
 
+/// A row of glowing beads going back from 150 to 900 cm and a grey ball at
+/// 400 cm, seen through a lens focused on the ball with six blades: the near
+/// and far beads blur into hexagons.
+fn depth_of_field_at(width: u32, height: u32, samples: u32) -> Image {
+    let mut doc = Document::new("focus");
+    let mut glow = Material::new("Glow");
+    (glow.color, glow.emission) = ([0.0; 3], [60.0, 48.0, 30.0]);
+    let glow = doc.scene.materials_mut().insert(glow);
+    for k in 0..8u8 {
+        let z = -150.0 - f32::from(k) * 110.0;
+        let x = -60.0 + f32::from(k) * 22.0;
+        doc.scene.insert(tagged(
+            ObjectKind::Sphere {
+                radius: 1.2,
+                segments: 12,
+            },
+            Vec3::new(x * 0.6, 5.0 + f32::from(k % 3) * 8.0, z),
+            vec![MaterialTag::new(Some(glow))],
+        ));
+    }
+    let mut grey = Material::new("Grey");
+    (grey.color, grey.roughness) = ([0.6, 0.6, 0.6], 0.5);
+    let grey = doc.scene.materials_mut().insert(grey);
+    // A dark wall far behind.
+    let mut wall = Material::new("Wall");
+    wall.color = [0.04, 0.04, 0.05];
+    let wall = doc.scene.materials_mut().insert(wall);
+    let mut back = Node::new(
+        "Wall",
+        ObjectKind::Plane {
+            width: 3000.0,
+            depth: 3000.0,
+            width_segments: 1,
+            depth_segments: 1,
+        },
+    )
+    .with_transform(
+        Transform::from_position(Vec3::new(0.0, 0.0, -1400.0)).with_rotation_deg(Vec3::new(0.0, 90.0, 0.0)),
+    );
+    back.data.tags = vec![Tag::Material(MaterialTag::new(Some(wall)))];
+    doc.scene.insert(back);
+    doc.scene.insert(tagged(
+        ObjectKind::Sphere {
+            radius: 40.0,
+            segments: 32,
+        },
+        Vec3::new(75.0, -20.0, -400.0),
+        vec![MaterialTag::new(Some(grey))],
+    ));
+    let mut eval = EvaluatedScene::for_render();
+    eval.update(&doc.scene);
+    let camera = RenderCamera {
+        lens: Some(ThinLens {
+            radius: 10.0,
+            focus_distance: 400.0,
+            blades: 6,
+            rotation: 0.3,
+        }),
+        ..RenderCamera::still(
+            glam::Mat4::IDENTITY,
+            CameraProjection::Perspective {
+                fov_y: 30f32.to_radians(),
+            },
+        )
+    };
+    let options = RenderOptions {
+        width,
+        height,
+        samples,
+        bounces: 1,
+        seed: 0,
+        auto_light: true,
+        clamp_indirect: true,
+        emissive_lights: true,
+    };
+    render(&RenderScene::new(&eval), &camera, &options)
+}
+
+/// A wheel (a tyre and four spokes) turning 20° over the shutter, seen from
+/// above, lit by the automatic light: the spokes smear into fans.
+fn spinning_wheel_at(width: u32, height: u32, samples: u32) -> Image {
+    let moment = |turn: f32| {
+        let mut doc = Document::new("wheel");
+        let mut dark = Material::new("Dark");
+        (dark.color, dark.roughness) = ([0.08, 0.08, 0.09], 0.6);
+        let dark = doc.scene.materials_mut().insert(dark);
+        let mut red = Material::new("Red");
+        (red.color, red.roughness) = ([0.75, 0.1, 0.08], 0.4);
+        let red = doc.scene.materials_mut().insert(red);
+        let mut floor = Material::new("Floor");
+        floor.color = [0.7, 0.7, 0.7];
+        let floor = doc.scene.materials_mut().insert(floor);
+        doc.scene.insert(tagged(
+            ObjectKind::Plane {
+                width: 600.0,
+                depth: 600.0,
+                width_segments: 1,
+                depth_segments: 1,
+            },
+            Vec3::ZERO,
+            vec![MaterialTag::new(Some(floor))],
+        ));
+        let mut wheel = Node::new("Wheel", ObjectKind::Null).with_transform(
+            Transform::from_position(Vec3::new(0.0, 30.0, 0.0)).with_rotation_deg(Vec3::new(turn, 0.0, 0.0)),
+        );
+        wheel.data.tags.clear();
+        let wheel = doc.scene.insert(wheel);
+        let mut tyre = Node::new(
+            "Tyre",
+            ObjectKind::Torus {
+                ring_radius: 110.0,
+                pipe_radius: 14.0,
+                ring_segments: 48,
+                pipe_segments: 12,
+            },
+        );
+        tyre.data.tags = vec![Tag::Material(MaterialTag::new(Some(dark)))];
+        doc.scene.insert_child(wheel, tyre).unwrap();
+        for k in 0..4u8 {
+            let mut spoke = Node::new(
+                "Spoke",
+                ObjectKind::Cube {
+                    size: Vec3::new(200.0, 10.0, 16.0),
+                    segments: [1, 1, 1],
+                },
+            )
+            .with_transform(Transform::default().with_rotation_deg(Vec3::new(
+                f32::from(k) * 45.0,
+                0.0,
+                0.0,
+            )));
+            spoke.data.tags = vec![Tag::Material(MaterialTag::new(Some(red)))];
+            doc.scene.insert_child(wheel, spoke).unwrap();
+        }
+        let mut eval = EvaluatedScene::for_render();
+        eval.update(&doc.scene);
+        RenderScene::new(&eval)
+    };
+    let moments: Vec<RenderScene> = (0..5u8).map(|k| moment(f32::from(k) * 5.0)).collect();
+    let (scene, still) = RenderScene::moving(moments, 2);
+    assert_eq!(still, 0);
+    let look = glam::camera::rh::view::look_at_mat4(Vec3::new(0.0, 330.0, 190.0), Vec3::new(0.0, 20.0, 0.0), Vec3::Y);
+    let camera = RenderCamera::still(look.inverse(), CameraProjection::Perspective { fov_y: 0.75 });
+    let options = RenderOptions {
+        width,
+        height,
+        samples,
+        bounces: 1,
+        seed: 0,
+        auto_light: true,
+        clamp_indirect: true,
+        emissive_lights: true,
+    };
+    render(&scene, &camera, &options)
+}
+
 /// Compares `image` with the picture at `path` (or writes it there when asked).
 fn matches_reference(image: &Image, path: &str) {
     let bytes = image.to_rgba8();
@@ -580,6 +747,16 @@ fn area_lights_match_their_reference() {
 }
 
 #[test]
+fn depth_of_field_matches_its_reference() {
+    matches_reference(&depth_of_field_at(96, 54, 64), FOCUS);
+}
+
+#[test]
+fn a_spinning_wheel_matches_its_reference() {
+    matches_reference(&spinning_wheel_at(96, 54, 32), WHEEL);
+}
+
+#[test]
 fn a_daylight_scene_matches_its_reference() {
     matches_reference(&daylight(), DAYLIGHT);
 }
@@ -587,4 +764,29 @@ fn a_daylight_scene_matches_its_reference() {
 #[test]
 fn an_environment_lit_product_matches_its_reference() {
     matches_reference(&environment_lit(), PRODUCT);
+}
+
+/// The manual's picture of depth of field and motion blur
+/// (`render-lens.png`, before it is reduced to 256 colours):
+///
+/// `GRID4D_MANUAL_PICTURES=<folder> cargo test --release -p grid4d-raytrace --test reference -- --ignored lens`
+#[test]
+#[ignore = "renders a picture for the manual"]
+fn lens_and_shutter_for_the_manual() {
+    let dir = std::env::var_os("GRID4D_MANUAL_PICTURES").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let (w, h) = (480u32, 270u32);
+    let left = depth_of_field_at(w, h, 256).to_rgba8();
+    let right = spinning_wheel_at(w, h, 128).to_rgba8();
+    let row = usize::try_from(w * 4).unwrap();
+    let mut both = Vec::with_capacity(row * 2 * usize::try_from(h).unwrap());
+    for (a, b) in left.chunks(row).zip(right.chunks(row)) {
+        both.extend_from_slice(a);
+        both.extend_from_slice(b);
+    }
+    let path = dir.join("render-lens.png");
+    let mut encoder = png::Encoder::new(BufWriter::new(File::create(&path).unwrap()), w * 2, h);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().unwrap().write_image_data(&both).unwrap();
+    println!("{}", path.display());
 }

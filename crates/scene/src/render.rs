@@ -138,6 +138,11 @@ pub struct RenderSettings {
     /// Surfaces with Emission are sampled as lights; off: they glow and reach
     /// others only through bounces, as in Grid4D 1.1.
     pub emissive_lights: bool,
+    /// Renders over the camera's shutter interval.
+    pub motion_blur: bool,
+    /// How many moments of the shutter interval are evaluated
+    /// ([`Self::MIN_SEGMENTS`] … [`Self::MAX_SEGMENTS`]).
+    pub segments: u32,
 }
 
 impl Default for RenderSettings {
@@ -158,6 +163,8 @@ impl Default for RenderSettings {
             naming: FrameNaming::Name0000,
             clamp_indirect: true,
             emissive_lights: true,
+            motion_blur: false,
+            segments: 3,
         }
     }
 }
@@ -167,6 +174,8 @@ impl RenderSettings {
     pub const MAX_SAMPLES: u32 = 4096;
     pub const MAX_BOUNCES: u32 = 64;
     pub const MAX_FRAME_STEP: u32 = 10_000;
+    pub const MIN_SEGMENTS: u32 = 2;
+    pub const MAX_SEGMENTS: u32 = 8;
 
     /// The settings with every value in its range.
     #[must_use]
@@ -176,6 +185,7 @@ impl RenderSettings {
         self.frame_step = self.frame_step.clamp(1, Self::MAX_FRAME_STEP);
         self.samples = self.samples.clamp(1, Self::MAX_SAMPLES);
         self.bounces = self.bounces.min(Self::MAX_BOUNCES);
+        self.segments = self.segments.clamp(Self::MIN_SEGMENTS, Self::MAX_SEGMENTS);
         if let FrameRange::Manual { from, to } = &mut self.frames {
             *to = (*to).max(*from);
         }

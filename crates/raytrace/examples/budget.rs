@@ -46,6 +46,8 @@ fn looking(eye: Vec3, target: Vec3, fov_y_deg: f32) -> RenderCamera {
         projection: CameraProjection::Perspective {
             fov_y: fov_y_deg.to_radians(),
         },
+        lens: None,
+        end: None,
     }
 }
 
@@ -95,7 +97,7 @@ fn demo() -> Scene {
         .scene
         .iter()
         .find_map(|(id, node)| match node.data.kind {
-            ObjectKind::Camera { fov_y_deg } => Some((id, fov_y_deg)),
+            ObjectKind::Camera { fov_y_deg, .. } => Some((id, fov_y_deg)),
             _ => None,
         })
         .unwrap_or_default();
@@ -104,6 +106,8 @@ fn demo() -> Scene {
         projection: CameraProjection::Perspective {
             fov_y: fov.to_radians(),
         },
+        lens: None,
+        end: None,
     };
     Scene {
         name: "demo",

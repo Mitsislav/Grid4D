@@ -191,6 +191,7 @@ impl Progressive {
             seed: options.seed,
             clamp: options.clamp_indirect,
             table: scene.light_table(options.emissive_lights),
+            moving: scene.is_moving() || camera.end.is_some(),
         };
         let row_length = usize::try_from(self.width).unwrap_or(1);
         let pass = u64::from(last - first);
@@ -244,6 +245,9 @@ struct Job<'a> {
     /// Lights with a surface to sample: area lights, and emitting triangles
     /// when they are sampled as lights.
     table: &'a LightTable,
+    /// The scene or the camera moves over the shutter interval: each sample
+    /// gets a moment of it.
+    moving: bool,
 }
 
 impl Job<'_> {
@@ -257,8 +261,13 @@ impl Job<'_> {
             // A point spread over the pixel: smooth edges.
             let px = (to_f32(x) + rng.next_f32()) / w * 2.0 - 1.0;
             let py = 1.0 - (to_f32(y) + rng.next_f32()) / h * 2.0;
-            let (origin, dir) = self.camera.ray(px, py, aspect);
-            if let Some(radiance) = self.trace(origin, dir, &mut rng) {
+            // A moment of the shutter interval and a point on the aperture,
+            // drawn only when they matter (so pictures without motion blur
+            // or depth of field come out as they always have).
+            let time = if self.moving { rng.next_f32() } else { 0.0 };
+            let aperture = self.camera.lens.map(|_| (rng.next_f32(), rng.next_f32()));
+            let (origin, dir) = self.camera.sample_ray(px, py, aspect, time, aperture);
+            if let Some(radiance) = self.trace(origin, dir, time, &mut rng) {
                 sum[0] += radiance.x;
                 sum[1] += radiance.y;
                 sum[2] += radiance.z;
@@ -269,7 +278,7 @@ impl Job<'_> {
 
     /// The light coming back along one path; `None` if the first ray meets no
     /// surface (background).
-    fn trace(&self, mut origin: Vec3, mut dir: Vec3, rng: &mut Rng) -> Option<Vec3> {
+    fn trace(&self, mut origin: Vec3, mut dir: Vec3, time: f32, rng: &mut Rng) -> Option<Vec3> {
         let mut radiance = Vec3::ZERO;
         let mut throughput = Vec3::ONE;
         // The density with which the last bounce chose `dir` (reflected
@@ -291,7 +300,7 @@ impl Job<'_> {
             if completing && last_pdf.is_none() {
                 break; // refracted: no light was weighed against this ray
             }
-            let hit = self.scene.intersect(origin, dir);
+            let hit = self.scene.intersect(origin, dir, time);
             let reach = hit
                 .as_ref()
                 .map_or(f32::INFINITY, |hit| (hit.position - origin).length());
@@ -376,8 +385,14 @@ impl Job<'_> {
                     continue;
                 }
                 let passed = if light.shadow.casts() {
-                    self.scene
-                        .transmittance(lifted, incoming.direction, incoming.distance - lift, true, light.link)
+                    self.scene.transmittance(
+                        lifted,
+                        incoming.direction,
+                        incoming.distance - lift,
+                        true,
+                        light.link,
+                        time,
+                    )
                 } else {
                     Vec3::ONE
                 };
@@ -400,6 +415,7 @@ impl Job<'_> {
                     geometric,
                     lifted,
                     entering,
+                    time,
                     rng,
                 );
                 radiance += self.capped(throughput * direct, depth);
@@ -493,7 +509,10 @@ impl Job<'_> {
         rng: &mut Rng,
     ) -> Vec3 {
         let (u, s, t) = (rng.next_f32(), rng.next_f32(), rng.next_f32());
-        let Some(sample) = self.scene.sample_surface_light(self.table, hit.position, u, s, t) else {
+        let Some(sample) = self
+            .scene
+            .sample_surface_light(self.table, hit.position, (u, s, t), hit.time)
+        else {
             return Vec3::ZERO;
         };
         if sample.source == Entry::Triangle(u32::try_from(hit.triangle).unwrap_or(u32::MAX)) {
@@ -515,7 +534,13 @@ impl Job<'_> {
             Entry::Triangle(triangle) => {
                 let cos = point.normal.dot(l).abs();
                 let triangle = usize::try_from(triangle).unwrap_or(usize::MAX);
-                (self.scene.emission_at(triangle, point.position), cos, true, true, None)
+                (
+                    self.scene.emission_at(triangle, point.position, hit.time),
+                    cos,
+                    true,
+                    true,
+                    None,
+                )
             }
             Entry::Area(index) => {
                 let Some(light) = usize::try_from(index).ok().and_then(|i| self.scene.areas().get(i)) else {
@@ -555,7 +580,8 @@ impl Job<'_> {
             if reach <= f32::MIN_POSITIVE {
                 return Vec3::ZERO;
             }
-            self.scene.transmittance(lifted, shadow / reach, reach, !weighed, link)
+            self.scene
+                .transmittance(lifted, shadow / reach, reach, !weighed, link, hit.time)
         } else {
             Vec3::ONE
         };
@@ -608,6 +634,7 @@ fn sample_environment(
     geometric: Vec3,
     lifted: Vec3,
     entering: bool,
+    time: f32,
     rng: &mut Rng,
 ) -> Vec3 {
     let (u, s, t) = (rng.next_f32(), rng.next_f32(), rng.next_f32());
@@ -622,7 +649,7 @@ fn sample_environment(
         return Vec3::ZERO;
     }
     // Out to infinity; glass stops it (refracted paths bring its light).
-    let passed = scene.transmittance(lifted, l, f32::INFINITY, false, None);
+    let passed = scene.transmittance(lifted, l, f32::INFINITY, false, None, time);
     if passed.max_element() <= 0.0 {
         return Vec3::ZERO;
     }
@@ -689,6 +716,8 @@ mod tests {
         RenderCamera {
             world: glam::camera::rh::view::look_at_mat4(Vec3::new(0.0, 1000.0, 0.0), Vec3::ZERO, Vec3::NEG_Z).inverse(),
             projection: CameraProjection::Parallel { half_height: 300.0 },
+            lens: None,
+            end: None,
         }
     }
 
@@ -1114,6 +1143,7 @@ mod tests {
             seed: 0,
             clamp,
             table: &table,
+            moving: false,
         };
         let bright = Vec3::splat(50.0);
         assert_eq!(job(true).capped(bright, 0), bright, "seen directly");
@@ -1704,5 +1734,133 @@ mod tests {
         link(&mut doc, LinkMode::Exclude, vec![gone]);
         let [shade, open, _] = look(&doc);
         assert!(shade < 0.01 && open > 0.6);
+    }
+
+    /// A small glowing ball (radius 1 cm) `distance` cm in front of a
+    /// perspective camera at the origin looking along −Z (40°), on black.
+    fn glowing_point(distance: f32) -> (Document, RenderCamera) {
+        let mut doc = Document::new("point");
+        let mut glow = SceneMaterial::new("Glow");
+        (glow.color, glow.emission) = ([0.0; 3], [1.0; 3]);
+        let glow = doc.scene.materials_mut().insert(glow);
+        let mut ball = Node::new(
+            "Ball",
+            ObjectKind::Sphere {
+                radius: 1.0,
+                segments: 12,
+            },
+        )
+        .with_position(Vec3::new(0.0, 0.0, -distance));
+        ball.data.tags = vec![Tag::Material(MaterialTag::new(Some(glow)))];
+        doc.scene.insert(ball);
+        let camera = RenderCamera::still(
+            Mat4::IDENTITY,
+            CameraProjection::Perspective {
+                fov_y: 40f32.to_radians(),
+            },
+        );
+        (doc, camera)
+    }
+
+    /// The radius (pixels) of the spot an image shows: from the brightness-
+    /// weighted spread about its centre (a uniform disc's mean r² is R² / 2).
+    fn spot_radius(image: &Image) -> f32 {
+        let (mut total, mut cx, mut cy) = (0.0f64, 0.0f64, 0.0f64);
+        let mut pixels = Vec::new();
+        for y in 0..image.height {
+            for x in 0..image.width {
+                let v = f64::from(image.pixel(x, y).unwrap()[0]);
+                pixels.push((f64::from(x) + 0.5, f64::from(y) + 0.5, v));
+                total += v;
+                cx += v * (f64::from(x) + 0.5);
+                cy += v * (f64::from(y) + 0.5);
+            }
+        }
+        let (cx, cy) = (cx / total, cy / total);
+        let r2 = pixels
+            .iter()
+            .map(|(x, y, v)| v * ((x - cx).powi(2) + (y - cy).powi(2)))
+            .sum::<f64>()
+            / total;
+        (2.0 * r2).sqrt() as f32
+    }
+
+    #[test]
+    fn the_focus_plane_is_sharp_and_the_blur_follows_the_thin_lens() {
+        let (doc, pinhole) = glowing_point(400.0);
+        let options = RenderOptions {
+            auto_light: false,
+            ..options(100, 256, 0)
+        };
+        let lens = |focus_distance| RenderCamera {
+            lens: Some(crate::ThinLens {
+                radius: 10.0,
+                focus_distance,
+                blades: 0,
+                rotation: 0.0,
+            }),
+            ..pinhole
+        };
+        let sharp = spot_radius(&render(&scene_of(&doc), &lens(400.0), &options));
+        assert!(sharp < 1.0, "in focus: {sharp} px");
+        // Focused at 200 cm: on the focus plane the blur is the aperture ×
+        // |1 − 200 / 400| = 10 cm across, the plane 2 × 200 × tan 20° high
+        // in 100 pixels.
+        let blurred = spot_radius(&render(&scene_of(&doc), &lens(200.0), &options));
+        let expected = 10.0 / (2.0 * 200.0 * 20f32.to_radians().tan()) * 100.0 / 2.0;
+        assert!((blurred - expected).abs() < 1.0, "{blurred} vs {expected} px");
+        // Without a lens the samples are drawn as before: the same picture.
+        let plain = render(&scene_of(&doc), &pinhole, &options);
+        let again = render(
+            &scene_of(&doc),
+            &RenderCamera {
+                lens: None,
+                ..lens(200.0)
+            },
+            &options,
+        );
+        assert_eq!(plain, again);
+    }
+
+    #[test]
+    fn a_moving_object_smears_over_its_path() {
+        // A 20 cm cube moving from x = −50 to x = +50 over the shutter.
+        let at = |x: f32| {
+            let mut doc = Document::new("move");
+            doc.scene.insert(
+                Node::new(
+                    "Cube",
+                    ObjectKind::Cube {
+                        size: Vec3::splat(20.0),
+                        segments: [1, 1, 1],
+                    },
+                )
+                .with_position(Vec3::new(x, 0.0, 0.0)),
+            );
+            scene_of(&doc)
+        };
+        let (moving, still) = RenderScene::moving(vec![at(-50.0), at(0.0), at(50.0)], 1);
+        assert!(moving.is_moving() && still == 0);
+        let image = render(&moving, &top_camera(), &options(60, 64, 0));
+        // Covered along the row through the middle: from −60 to +60 cm (12
+        // pixels of 10 cm), each part for part of the time.
+        let covered: Vec<u32> = (0..60).filter(|&x| image.pixel(x, 30).unwrap()[3] > 0.05).collect();
+        let width = covered.last().unwrap() - covered.first().unwrap() + 1;
+        assert!((11..=13).contains(&width), "{width} pixels: {covered:?}");
+        let middle = image.pixel(30, 30).unwrap()[3];
+        assert!(
+            middle > 0.1 && middle < 0.4,
+            "the middle is covered a fifth of the time: {middle}"
+        );
+        // A single moment: a still scene, the frame's picture.
+        let (one, _) = RenderScene::moving(vec![at(0.0)], 0);
+        assert!(!one.is_moving());
+        assert_eq!(
+            render(&one, &top_camera(), &options(60, 4, 0)),
+            render(&at(0.0), &top_camera(), &options(60, 4, 0))
+        );
+        // A changing number of triangles: that object stays put.
+        let (_, still) = RenderScene::moving(vec![at(0.0), scene_of(&Document::new("empty"))], 0);
+        assert_eq!(still, 1);
     }
 }

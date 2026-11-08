@@ -18,10 +18,10 @@ use grid4d_geom::spline::{
 };
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
-    AreaShape, Axis, Body, Channel, CollisionShape, Document, Environment, Falloff, Inherit, KeyState, LightDetails,
-    LightShadow, LightType, LinkMode, Linking, MassMode, Material, MaterialId, MaterialTag, Motion, NodeData, NodeId,
-    ObjectKind, ObjectParam, Param, Placement, Projection, Scene, SceneEdit, SimulationSettings, Sky, SplineHandle,
-    SunPlacement, Tag, TagKind, TextureSlot, TimeSettings,
+    AreaShape, Axis, Body, Channel, CollisionShape, Document, Environment, Falloff, Inherit, KeyState, Lens,
+    LightDetails, LightShadow, LightType, LinkMode, Linking, MassMode, Material, MaterialId, MaterialTag, Motion,
+    NodeData, NodeId, ObjectKind, ObjectParam, Param, Placement, Projection, Scene, SceneEdit, ShutterPosition,
+    SimulationSettings, Sky, SplineHandle, SunPlacement, Tag, TagKind, TextureSlot, TimeSettings,
 };
 
 use crate::i18n::{key, tr, trf};
@@ -834,7 +834,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
                 segments_row(ui, "Cap Segments", cap_segments, 1);
                 segments_row(ui, "Rotation Segments", rotation_segments, 3);
             }
-            ObjectKind::Camera { fov_y_deg } => {
+            ObjectKind::Camera { fov_y_deg, lens } => {
                 attr_label(ui, "Field of View (Vertical)", LABEL_WIDTH);
                 ui.add_sized(
                     [FIELD_WIDTH, 19.0],
@@ -842,6 +842,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
                 );
                 k.button(ui, "Field of View (Vertical)");
                 ui.end_row();
+                lens_rows(ui, k, lens, *fov_y_deg, links);
             }
             ObjectKind::Light {
                 color,
@@ -1584,6 +1585,89 @@ fn camera_row(ui: &mut Ui, value: &mut Option<NodeId>, scene: &Scene) {
             }
         });
     name_field(ui, &combo.response, "Camera");
+    ui.end_row();
+}
+
+/// A camera's lens and shutter (`docs/reference/render-lens.md`): depth of
+/// field (focus, aperture, blades) and how long the shutter stays open.
+fn lens_rows(ui: &mut Ui, k: &mut KeyRows, lens: &mut Lens, fov_y_deg: f32, links: Option<(&Scene, NodeId)>) {
+    attr_label(ui, "Focal Length", LABEL_WIDTH);
+    ui.label(trf(
+        "{0} mm",
+        &[&format!("{:.1}", Lens::focal_length_mm(fov_y_deg.to_radians()))],
+    ))
+    .on_hover_text(tr("On a 36 × 24 mm sensor, from the field of view"));
+    ui.end_row();
+    check_row(ui, "Depth of Field", &mut lens.depth_of_field);
+    if lens.depth_of_field {
+        if let Some((scene, owner)) = links {
+            object_row(ui, "Focus Object", &mut lens.focus_object, scene, owner);
+        }
+        if lens.focus_object.is_none() {
+            attr_label(ui, "Focus Distance", LABEL_WIDTH);
+            let field = ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                widgets::length(ui, &mut lens.focus_distance)
+                    .speed(1.0)
+                    .range(Lens::MIN_FOCUS_DISTANCE..=Lens::MAX_FOCUS_DISTANCE)
+                    .max_decimals(1),
+            );
+            name_field(ui, &field, "Focus Distance");
+            k.button(ui, "Focus Distance");
+            ui.end_row();
+        }
+        attr_label(ui, "F-Stop", LABEL_WIDTH);
+        let field = ui
+            .add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut lens.f_stop)
+                    .speed(0.05)
+                    .range(Lens::MIN_F_STOP..=Lens::MAX_F_STOP)
+                    .prefix("f/")
+                    .max_decimals(1),
+            )
+            .on_hover_text(tr("Smaller numbers open the aperture: a shallower depth of field"));
+        name_field(ui, &field, "F-Stop");
+        k.button(ui, "F-Stop");
+        ui.end_row();
+        attr_label(ui, "Blades", LABEL_WIDTH);
+        let field = ui
+            .add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut lens.blades).range(0..=Lens::MAX_BLADES),
+            )
+            .on_hover_text(tr(
+                "The aperture's shape: 0 round, else a polygon (out-of-focus highlights take it)",
+            ));
+        name_field(ui, &field, "Blades");
+        ui.end_row();
+        if lens.blades >= 3 {
+            angle_row(ui, k, "Blade Rotation", &mut lens.blade_rotation, -360.0..=360.0);
+        }
+    }
+    attr_label(ui, "Shutter", LABEL_WIDTH);
+    let field = ui
+        .add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut lens.shutter)
+                .speed(0.01)
+                .range(0.0..=Lens::MAX_SHUTTER)
+                .suffix(tr(" frames"))
+                .max_decimals(2),
+        )
+        .on_hover_text(tr(
+            "How long the shutter stays open (0.5: a 180° shutter); with Motion Blur on in the Render Settings",
+        ));
+    name_field(ui, &field, "Shutter");
+    ui.end_row();
+    attr_label(ui, "Shutter Position", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.camera.shutter")
+        .selected_text(tr(lens.shutter_position.label()))
+        .show_ui(ui, |ui| {
+            for option in ShutterPosition::ALL {
+                ui.selectable_value(&mut lens.shutter_position, option, tr(option.label()));
+            }
+        });
     ui.end_row();
 }
 

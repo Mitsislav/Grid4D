@@ -1583,7 +1583,14 @@ mod tests {
         let mut doc = Document::new("aim");
         let target = doc.scene.insert(Node::new("Target", ObjectKind::Null));
         let camera = doc.scene.insert(
-            Node::new("Cam", ObjectKind::Camera { fov_y_deg: 40.0 }).with_position(Vec3::new(300.0, 200.0, 0.0)),
+            Node::new(
+                "Cam",
+                ObjectKind::Camera {
+                    fov_y_deg: 40.0,
+                    lens: grid4d_scene::Lens::default(),
+                },
+            )
+            .with_position(Vec3::new(300.0, 200.0, 0.0)),
         );
         let child = doc
             .scene

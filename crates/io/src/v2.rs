@@ -278,7 +278,10 @@ impl From<KindDto> for ObjectKind {
                 height_segments,
                 cap_segments,
             },
-            KindDto::Camera { fov_y_deg } => Self::Camera { fov_y_deg },
+            KindDto::Camera { fov_y_deg } => Self::Camera {
+                fov_y_deg,
+                lens: grid4d_scene::Lens::default(),
+            },
             KindDto::Light { color, intensity } => Self::light(color, intensity),
         }
     }

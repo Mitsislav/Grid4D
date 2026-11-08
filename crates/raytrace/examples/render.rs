@@ -71,13 +71,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         .scene
         .iter()
         .filter_map(|(id, node)| match node.data.kind {
-            ObjectKind::Camera { fov_y_deg } => Some((
+            ObjectKind::Camera { fov_y_deg, .. } => Some((
                 id,
                 RenderCamera {
                     world: doc.scene.world_matrix(id),
                     projection: CameraProjection::Perspective {
                         fov_y: fov_y_deg.to_radians(),
                     },
+                    lens: None,
+                    end: None,
                 },
             )),
             _ => None,

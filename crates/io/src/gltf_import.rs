@@ -491,7 +491,10 @@ fn camera_or_light(node: &gltf::Node<'_>) -> Option<ObjectKind> {
         } else {
             40.0
         };
-        return Some(ObjectKind::Camera { fov_y_deg });
+        return Some(ObjectKind::Camera {
+            fov_y_deg,
+            lens: grid4d_scene::Lens::default(),
+        });
     }
     let light = node.light()?;
     let color = light.color();
@@ -852,7 +855,8 @@ mod tests {
         assert_eq!(
             node(3).kind,
             ObjectKind::Camera {
-                fov_y_deg: 0.7f32.to_degrees()
+                fov_y_deg: 0.7f32.to_degrees(),
+                lens: grid4d_scene::Lens::default(),
             }
         );
         assert_eq!(node(4).kind, ObjectKind::light([1.0, 0.5, 0.25], 20.0));

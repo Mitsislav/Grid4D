@@ -236,7 +236,30 @@ showing what it sees (its field of view, at the view's proportions), with a smal
 triangle marking its top. Selected cameras are drawn in orange.
 
 A **new camera** (Create ▸ Object ▸ Camera) is placed where the view is, looking
-the same way, with the same bank and field of view.
+the same way, with the same bank and field of view, and focused at the point the
+view orbits around.
+
+**Depth of field and motion blur.** A camera object's Object tab also holds its
+lens and shutter, which renders use (the viewport stays sharp):
+
+| Setting | What it does |
+|---------|--------------|
+| Focal Length | Shown for orientation: the lens a 36 × 24 mm camera would need for this field of view. |
+| Depth of Field | Renders through a lens with an opening: only what is at the focus distance is sharp. Off (the default): everything is sharp. |
+| Focus Object | Focuses on this object, wherever it goes (its distance along the camera's view). |
+| Focus Distance | Without a Focus Object: how far ahead the sharp plane lies. |
+| F-Stop | The opening: a smaller number gives a shallower depth of field (more blur). As on a real camera, the blur depends on the scene's size: f/2.8 on a 50 mm lens blurs a lot at a few metres. It never changes the brightness. |
+| Blades | The opening's shape: 0 is round; 3 or more make a polygon, which out-of-focus highlights take. **Blade Rotation** turns it. |
+| Shutter | How long the shutter stays open, in frames: 0.5 (the default) is a classic 180° film shutter; longer smears more. |
+| Shutter Position | **Centred** on the frame, **Opening** at it (the smear trails ahead) or **Closing** at it (the smear trails behind). |
+
+The selected camera's pyramid shows its sharp plane as a rectangle, and a
+dashed line to its Focus Object. Focus Distance, F-Stop and Blade Rotation can
+be animated (a focus pull). The shutter takes effect when **Motion Blur** is
+on in the Render Settings ([§20.1](#201-render-settings)); renders through the
+view's own camera use a half-frame shutter, centred.
+
+![A render through a six-bladed lens focused on the grey ball (near and far glowing beads blur into hexagons), and a wheel turning during the shutter (its spokes smear into fans)](images/manual/render-lens.png)
 
 ### 3.2 Several views: top, front and side
 
@@ -2496,6 +2519,8 @@ how many frames and the first file's name.
 | Bounces | how often light bounces between surfaces (2 by default; 0: direct light only) |
 | Clamp Indirect | on (the default): light that arrives after a bounce is capped, which keeps bright specks out of the picture at the cost of slightly darker reflections of very bright things; off: exact, but noisier |
 | Emissive Surfaces Light the Scene | on (the default): surfaces whose material has **Emission** light the scene like lights — a glowing panel, a neon tube, a screen; off: they still glow, but light other surfaces only when a bounce happens to meet them, which is much noisier |
+| Motion Blur | off (the default); on: each frame is rendered over the camera's shutter time, so what moves — objects, deforming or simulated surfaces, clones, the camera itself — smears ([§3.1](#31-looking-through-a-camera)) |
+| Segments | with Motion Blur: how many moments of the shutter time are worked out (2 – 8, default 3). Movement between them is straight, so a spinning wheel wants more; each one costs about one more scene preparation, not more samples |
 
 Glowing surfaces are real light sources in renders: a large panel with
 Emission gives soft light and soft shadows, and the brighter or larger it is,
@@ -2896,6 +2921,13 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   only); an Area light's viewport shadow is not softened by its size;
   linking objects by dragging them from the Object Manager, separate lists
   for light and shadow, and the light groups' render passes.
+- **Lens and shutter**: no exposure from the F-Stop or shutter, ISO, lens
+  distortion, vignetting or a custom aperture picture; the viewport shows no
+  blur; an object whose shape changes its number of polygons during the
+  shutter (a growing generator, a Cloner whose count changes) is not motion
+  blurred; lights do not move during the shutter (their light on moving
+  objects does); the camera moves straight from the shutter's opening to its
+  closing.
 - **Sky and Environment**: no date, time and place for the sun, no clouds,
   fog, rainbows, moon or stars; only latitude-longitude panoramas (no cube
   maps); one surround at a time; parallel views keep their gradient.

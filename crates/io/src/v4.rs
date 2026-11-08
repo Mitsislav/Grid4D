@@ -64,6 +64,15 @@ const ADDED: &[Added] = &[
         place: Place::Kind("light"),
         fields: &["area"],
     },
+    // Step 16.5: motion blur, a camera's lens and shutter.
+    Added {
+        place: Place::Render,
+        fields: &["motion_blur", "segments"],
+    },
+    Added {
+        place: Place::Kind("camera"),
+        fields: &["lens"],
+    },
     // Step 16.4: which objects a light lights, and its light group.
     Added {
         place: Place::Kind("light"),

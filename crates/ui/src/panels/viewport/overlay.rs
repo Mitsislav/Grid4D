@@ -104,7 +104,10 @@ pub(super) fn camera_frustums(
         if Some(node.id) == linked {
             continue;
         }
-        let Some(grid4d_scene::ObjectKind::Camera { fov_y_deg }) = scene.get(node.id).map(|n| &n.data.kind) else {
+        let Some(kind) = scene.get(node.id).map(|n| n.data.kind_at(evaluated.frame())) else {
+            continue;
+        };
+        let grid4d_scene::ObjectKind::Camera { fov_y_deg, lens } = *kind else {
             continue;
         };
         let (_, rotation, apex) = node.world.to_scale_rotation_translation();
@@ -138,6 +141,33 @@ pub(super) fn camera_frustums(
         let peak = top + up * half_h * 0.35;
         line(top + right * half_w * 0.3, peak);
         line(peak, top - right * half_w * 0.3);
+        // A selected camera with depth of field: its focus plane, and a
+        // dashed line to its focus object.
+        if lens.depth_of_field && selection.contains(node.id) {
+            let target = lens
+                .focus_object
+                .and_then(|id| evaluated.nodes().iter().find(|n| n.id == id))
+                .map(|n| n.world.w_axis.truncate());
+            let distance = target.map_or(lens.focus_distance, |p| (p - apex).dot(forward)).max(1.0);
+            let scale = distance / DEPTH;
+            let plane = apex + forward * distance;
+            let (w, h) = (half_w * scale, half_h * scale);
+            let rim = [
+                plane + right * w + up * h,
+                plane - right * w + up * h,
+                plane - right * w - up * h,
+                plane + right * w - up * h,
+            ];
+            for k in 0..4 {
+                line(rim[k], rim[(k + 1) % 4]);
+            }
+            if let Some(target) = target {
+                for i in 0..12u8 {
+                    let (a, b) = (f32::from(i * 2) / 24.0, f32::from(i * 2 + 1) / 24.0);
+                    line(apex.lerp(target, a), apex.lerp(target, b));
+                }
+            }
+        }
     }
 }
 

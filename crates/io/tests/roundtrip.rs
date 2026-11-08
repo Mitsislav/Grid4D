@@ -333,6 +333,8 @@ proptest! {
         sky in prop::option::of((any::<bool>(), -0.17f32..1.57, 0.0f32..6.0, 1.7f32..10.0, 0.0f32..5.0, any::<bool>(), 0.1f32..20.0, any::<bool>())),
         environment in prop::option::of((any::<bool>(), 0.0f32..5.0, -6.0f32..6.0, any::<bool>())),
         linked in prop::option::of((any::<bool>(), "[A-Za-z]{0,8}")),
+        blur in prop::option::of(2u32..9),
+        lens in prop::option::of((any::<bool>(), 1.0f32..5000.0, 0.5f32..64.0, 0u32..17, -6.0f32..6.0, 0.0f32..2.0, 0usize..3, any::<bool>())),
     ) {
         let mut doc = document(objects, Vec::new(), Vec::new());
         // Step 16.2: the light-transport switches, an area light.
@@ -355,6 +357,30 @@ proptest! {
                     shadow: grid4d_scene::LightShadow::Area,
                     linking: grid4d_scene::Linking::default(),
                     group: String::new(),
+                },
+            ));
+        }
+        // Step 16.5: motion blur, a camera's lens (focused on an object or not).
+        if let Some(segments) = blur {
+            doc.render.motion_blur = true;
+            doc.render.segments = segments;
+        }
+        if let Some((dof, focus_distance, f_stop, blades, blade_rotation, shutter, position, focused)) = lens {
+            let focus_object = doc.scene.iter().map(|(id, _)| id).next().filter(|_| focused);
+            doc.scene.insert(Node::new(
+                "Camera",
+                ObjectKind::Camera {
+                    fov_y_deg: 40.0,
+                    lens: grid4d_scene::Lens {
+                        depth_of_field: dof,
+                        focus_distance,
+                        focus_object,
+                        f_stop,
+                        blades,
+                        blade_rotation,
+                        shutter,
+                        shutter_position: grid4d_scene::ShutterPosition::ALL[position],
+                    },
                 },
             ));
         }
@@ -410,12 +436,16 @@ proptest! {
         } else {
             let mut expected = doc.render;
             (expected.clamp_indirect, expected.emissive_lights) = (true, true);
+            (expected.motion_blur, expected.segments) = (false, 3);
             let as_v4 = as_v4.unwrap();
             prop_assert_eq!(&as_v4.render, &expected);
-            // Lights light everything, in no group.
+            // Lights light everything, in no group; cameras are pinholes.
             for (_, node) in as_v4.scene.iter() {
                 if let ObjectKind::Light { linking, group, .. } = &node.data.kind {
                     prop_assert!(linking.is_open() && group.is_empty());
+                }
+                if let ObjectKind::Camera { lens, .. } = &node.data.kind {
+                    prop_assert_eq!(*lens, grid4d_scene::Lens::default());
                 }
             }
         }

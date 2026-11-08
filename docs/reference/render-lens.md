@@ -74,8 +74,13 @@ for spinning wheels, passing cars, a fast camera move.
   moving camera all blur, and so does a deforming or simulated surface.
 - Objects whose topology changes during the interval (a generator whose
   point count changes, a Cloner whose count changes) are not blurred: the
-  moment at the frame is used throughout (a note in the render's
-  information line: "n objects not motion blurred").
+  moment nearest the frame is used throughout (our choice: the log says how
+  many; the picture's information line does not yet).
+- Our choices: lights stay where they are at the moment nearest the frame
+  (their light on moving things still blurs); the camera moves straight from
+  the shutter's opening to its closing, turning evenly; the Render View
+  through a camera object uses its lens and shutter, through the editor
+  camera a pinhole and a half-frame shutter, centred.
 - Render time grows with Segments (each moment is a full evaluation and its
   triangles) but not with how far things move.
 - The Render View blurs too; the viewport does not.
@@ -84,10 +89,10 @@ for spinning wheels, passing cars, a fast camera move.
 
 | Piece | Where |
 |-------|-------|
-| `ObjectKind::Camera` gains a `Lens` (depth of field, focus distance / object, f-stop, blades, rotation, shutter, position); `ObjectParam`s for the animatable ones | `grid4d-scene` |
+| `ObjectKind::Camera { fov_y_deg, lens: Lens }` (`lens.rs`: depth of field, focus distance / object, f-stop, blades, rotation, shutter, `ShutterPosition`); `ObjectParam::{FocusDistance, FStop, BladeRotation}` | `grid4d-scene` |
 | `RenderSettings::{motion_blur, segments}` | `grid4d-scene` (`render.rs`) |
-| Sub-frame evaluation (`EvaluatedScene::set_time(f64)`; whole frames unchanged) | `grid4d-eval`, `grid4d-sim` (interpolated cache) |
-| A `RenderCamera` with a thin lens; per-sample time; triangles with positions per moment; BVH boxes over the interval | `grid4d-raytrace` (`camera.rs`, `scene.rs`, `grid4d_geom::Bvh` building from boxes) |
+| Sub-frame evaluation (`EvaluatedScene::set_frame` takes fractional frames); `Overrides::blend_towards`, `Replay::overrides_at` | `grid4d-eval`, `grid4d-sim` |
+| `RenderCamera { lens: Option<ThinLens>, end: Option<Mat4> }`; a time per sample drawn only when something moves; `RenderScene::moving(moments, base)` (corners and normals per moment, blended); `Bvh::build_swept` / `raycast_by` | `grid4d-raytrace` (`camera.rs`, `scene.rs`, `trace.rs`), `grid4d-geom` (`bvh.rs`) |
 | The Lens fields; focus plane in the frustum | `ui/panels/attributes.rs`, `viewport/overlay.rs` |
 | Renders evaluate the moments on their worker | `grid4d-ui` (`rendering.rs`) |
 
@@ -99,17 +104,18 @@ sub-frame evaluations only (no motion vectors pass; that is
 
 ## Acceptance criteria
 
-- [ ] A point on the focus plane renders sharp; the blur circle of a point
+- [x] A point on the focus plane renders sharp; the blur circle of a point
       off it matches the thin-lens formula within a pixel (a test with a
       small bright sphere); Blades give a polygonal highlight.
-- [ ] Depth of field off renders exactly as 1.1 (same samples, same picture).
-- [ ] A moving cube blurs over exactly its shutter path (its smear's length
+- [x] Depth of field off renders exactly as 1.1 (same samples, same picture).
+- [x] A moving cube blurs over exactly its shutter path (its smear's length
       measured); Shutter 0 or Motion Blur off gives the frame's picture;
       Centred / Opening / Closing move the smear.
-- [ ] A deformed, a simulated and a cloned object blur; a camera move blurs
-      the whole picture.
-- [ ] Renders stay repeatable (the time of a sample is seeded like the rest).
-- [ ] Every new field is undoable, animatable where listed, saved in v5,
+- [x] A deformed, a simulated and a cloned object blur (every moment is a
+      full evaluation, simulations blended between cached frames); a camera
+      move blurs the whole picture.
+- [x] Renders stay repeatable (the time of a sample is seeded like the rest).
+- [x] Every new field is undoable, animatable where listed, saved in v5,
       stripped from a v4 file.
-- [ ] Reference pictures: depth of field with a bladed aperture, a
+- [x] Reference pictures: depth of field with a bladed aperture, a
       motion-blurred spinning wheel.

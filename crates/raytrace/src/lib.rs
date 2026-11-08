@@ -25,7 +25,7 @@ mod scene;
 mod shade;
 mod trace;
 
-pub use camera::{CameraProjection, RenderCamera};
+pub use camera::{CameraProjection, RenderCamera, ThinLens};
 pub use image::Image;
 pub use picture::{Picture, Pictures, Texels};
 pub use scene::{RenderScene, Texturing};

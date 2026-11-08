@@ -426,6 +426,27 @@ fn sampling_page(ui: &mut Ui, s: &mut RenderSettings) {
                 &mut s.emissive_lights,
                 key("Surfaces with Emission are sampled as lights: far less noise where they light the scene"),
             );
+            check(
+                ui,
+                key("Motion Blur"),
+                &mut s.motion_blur,
+                key("Renders over the camera's shutter: moving things smear (the camera's Shutter sets how long)"),
+            );
+            if s.motion_blur {
+                attr_label(ui, "Segments", LABEL_WIDTH);
+                let field = ui
+                    .add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut s.segments)
+                            .range(RenderSettings::MIN_SEGMENTS..=RenderSettings::MAX_SEGMENTS),
+                    )
+                    .on_hover_text(tr(
+                        "Moments of the shutter evaluated: motion between them is straight, so curved paths want more",
+                    ));
+                ui.ctx()
+                    .accesskit_node_builder(field.id, |node| node.set_label(tr("Segments")));
+                ui.end_row();
+            }
         });
 }
 

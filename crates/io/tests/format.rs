@@ -119,6 +119,27 @@ fn full_document() -> (Document, SimulationCache) {
     let (mut doc, cache) = full_v4_document();
     doc.render.clamp_indirect = false;
     doc.render.emissive_lights = false;
+    // Step 16.5: motion blur, a camera with depth of field focused on the
+    // sphere and a bladed aperture.
+    doc.render.motion_blur = true;
+    doc.render.segments = 5;
+    let sphere = doc.scene.iter().find(|(_, n)| n.data.name == "Sphere").unwrap().0;
+    doc.scene.insert(Node::new(
+        "Lens Camera",
+        ObjectKind::Camera {
+            fov_y_deg: 30.0,
+            lens: grid4d_scene::Lens {
+                depth_of_field: true,
+                focus_distance: 350.0,
+                focus_object: Some(sphere),
+                f_stop: 1.4,
+                blades: 6,
+                blade_rotation: 0.25,
+                shutter: 0.75,
+                shutter_position: grid4d_scene::ShutterPosition::Closing,
+            },
+        },
+    ));
     doc.scene.insert(Node::new(
         "Area Light",
         ObjectKind::Light {

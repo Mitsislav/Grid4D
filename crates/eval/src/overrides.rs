@@ -4,7 +4,17 @@
 
 use std::collections::HashMap;
 
-use glam::Mat4;
+use glam::{Mat4, Quat};
+
+/// The placement `t` of the way (0 – 1) from `a` to `b`: scale and position
+/// straight, rotation along the shorter arc.
+#[must_use]
+pub fn interpolate(a: Mat4, b: Mat4, t: f32) -> Mat4 {
+    let (s0, r0, p0) = a.to_scale_rotation_translation();
+    let (s1, r1, p1) = b.to_scale_rotation_translation();
+    let r1 = if r0.dot(r1) < 0.0 { -r1 } else { r1 };
+    Mat4::from_scale_rotation_translation(s0.lerp(s1, t), Quat::slerp(r0, r1, t), p0.lerp(p1, t))
+}
 use grid4d_scene::{Aabb, NodeId};
 
 use crate::{EvaluatedInstance, EvaluatedNode};
@@ -44,6 +54,22 @@ impl Overrides {
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<Mat4> {
         self.nodes.get(&id).copied()
+    }
+
+    /// Moves every placement `t` of the way (0 – 1) towards `other`'s for
+    /// the same object or clone (those `other` lacks stay): a pose between
+    /// two cached frames.
+    pub fn blend_towards(&mut self, other: &Self, t: f32) {
+        for (id, world) in &mut self.nodes {
+            if let Some(&to) = other.nodes.get(id) {
+                *world = interpolate(*world, to, t);
+            }
+        }
+        for (key, delta) in &mut self.clones {
+            if let Some(&to) = other.clones.get(key) {
+                *delta = interpolate(*delta, to, t);
+            }
+        }
     }
 
     #[must_use]

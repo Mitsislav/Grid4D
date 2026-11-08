@@ -147,7 +147,7 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
                     node.insert("mesh".into(), json!(index));
                 }
             }
-            ObjectKind::Camera { fov_y_deg } => {
+            ObjectKind::Camera { fov_y_deg, .. } => {
                 let yfov = fov_y_deg.to_radians();
                 if !yfov.is_finite() || yfov <= 0.0 {
                     return Err(invalid(format!(
@@ -853,7 +853,14 @@ mod tests {
             entry(Some(0), "Box", ObjectKind::polygon(cube.clone())),
             entry(Some(0), "Pillar", ObjectKind::polygon(cylinder)),
             entry(Some(0), "Twin", ObjectKind::polygon(cube)),
-            entry(None, "Cam", ObjectKind::Camera { fov_y_deg: 35.0 }),
+            entry(
+                None,
+                "Cam",
+                ObjectKind::Camera {
+                    fov_y_deg: 35.0,
+                    lens: grid4d_scene::Lens::default(),
+                },
+            ),
             entry(None, "Lamp", ObjectKind::light([1.0, 0.8, 0.6], 2.5)),
             entry(None, "Empty", ObjectKind::polygon(MeshHandle::new(PolyMesh::new()))),
         ];
@@ -921,7 +928,7 @@ mod tests {
             );
         }
         assert_eq!(back.nodes[0].data.kind, ObjectKind::Null);
-        let ObjectKind::Camera { fov_y_deg } = back.nodes[4].data.kind else {
+        let ObjectKind::Camera { fov_y_deg, .. } = back.nodes[4].data.kind else {
             panic!("not a camera")
         };
         assert!((fov_y_deg - 35.0).abs() < 1e-4);
@@ -1167,6 +1174,7 @@ mod tests {
         let mut objects = scene();
         objects.nodes[4].data.kind = ObjectKind::Camera {
             fov_y_deg: f32::INFINITY,
+            lens: grid4d_scene::Lens::default(),
         };
         assert!(glb_bytes(&objects).is_err());
     }

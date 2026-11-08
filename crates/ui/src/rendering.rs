@@ -22,9 +22,10 @@ use crate::i18n::{key, trf};
 use grid4d_eval::EvaluatedScene;
 use grid4d_raytrace::{
     CameraProjection, Image, Pictures, Progressive, RenderCamera, RenderControl, RenderOptions, RenderScene, Texturing,
+    ThinLens,
 };
 use grid4d_render::OrbitCamera;
-use grid4d_scene::{Document, ImageFormat, NodeId, ObjectKind, ObjectKindTag, RenderSettings, Scene};
+use grid4d_scene::{Document, ImageFormat, Lens, NodeId, ObjectKind, ObjectKindTag, RenderSettings, Scene};
 use grid4d_sim::Replay;
 
 /// The history's pictures may take this much memory together; older ones go first.
@@ -165,6 +166,8 @@ enum Eye {
 }
 
 impl Eye {
+    /// The camera at `frame` as `evaluated` (evaluated at it) places it,
+    /// with its lens when it has depth of field.
     fn at(self, scene: &Scene, evaluated: &EvaluatedScene, frame: f64) -> RenderCamera {
         let (id, fallback) = match self {
             Self::Fixed(camera) => return camera,
@@ -173,19 +176,74 @@ impl Eye {
         let Some(node) = scene.get(id) else {
             return fallback;
         };
-        let world = evaluated
-            .nodes()
-            .iter()
-            .find(|n| n.id == id)
-            .map_or_else(|| scene.world_matrix_at(id, frame), |n| n.world);
-        let projection = match node.data.kind {
-            ObjectKind::Camera { fov_y_deg } => CameraProjection::Perspective {
-                fov_y: fov_y_deg.to_radians(),
-            },
-            _ => fallback.projection,
+        let world_of = |id: NodeId| {
+            evaluated
+                .nodes()
+                .iter()
+                .find(|n| n.id == id)
+                .map_or_else(|| scene.world_matrix_at(id, frame), |n| n.world)
         };
-        RenderCamera { world, projection }
+        let world = world_of(id);
+        let ObjectKind::Camera { fov_y_deg, lens } = *node.data.kind_at(frame) else {
+            return RenderCamera { world, ..fallback };
+        };
+        let fov_y = fov_y_deg.to_radians();
+        let thin = lens.depth_of_field.then(|| {
+            // The focus object's distance along the camera's axis.
+            let forward = -world.z_axis.truncate().normalize_or(glam::Vec3::Z);
+            let focus = lens
+                .focus_object
+                .filter(|&target| scene.get(target).is_some())
+                .map_or(lens.focus_distance, |target| {
+                    (world_of(target).w_axis.truncate() - world.w_axis.truncate()).dot(forward)
+                });
+            ThinLens {
+                radius: lens.aperture_radius(fov_y),
+                focus_distance: focus.max(Lens::MIN_FOCUS_DISTANCE),
+                blades: lens.blade_count(),
+                rotation: lens.blade_rotation,
+            }
+        });
+        RenderCamera {
+            world,
+            projection: CameraProjection::Perspective { fov_y },
+            lens: thin,
+            end: None,
+        }
     }
+
+    /// The shutter that opens for the frame: a camera object's, else the
+    /// usual half frame, centred.
+    fn shutter(self, scene: &Scene, frame: f64) -> Lens {
+        match self {
+            Self::Object(id, _) => match scene.get(id).map(|n| n.data.kind_at(frame).into_owned()) {
+                Some(ObjectKind::Camera { lens, .. }) => lens,
+                _ => Lens::default(),
+            },
+            Self::Fixed(_) => Lens::default(),
+        }
+    }
+}
+
+/// The moments of `lens`'s shutter interval around `frame` that motion blur
+/// with `segments` evaluates, in order, and the one nearest the frame; just
+/// the frame when the shutter does not open.
+#[must_use]
+pub fn shutter_moments(lens: &Lens, frame: f64, segments: u32) -> (Vec<f64>, usize) {
+    let (start, end) = lens.shutter_interval(frame);
+    if end <= start {
+        return (vec![frame], 0);
+    }
+    let n = segments.clamp(RenderSettings::MIN_SEGMENTS, RenderSettings::MAX_SEGMENTS);
+    let moments: Vec<f64> = (0..n)
+        .map(|k| start + (end - start) * f64::from(k) / f64::from(n - 1))
+        .collect();
+    let base = moments
+        .iter()
+        .enumerate()
+        .min_by(|a, b| (a.1 - frame).abs().total_cmp(&(b.1 - frame).abs()))
+        .map_or(0, |(i, _)| i);
+    (moments, base)
 }
 
 /// The render that runs.
@@ -209,7 +267,11 @@ impl Job {
     /// Starts a worker rendering `scene` at each of `frames`; `None` if no
     /// thread could start.
     fn spawn(number: u32, scene: Scene, pictures: Pictures, frames: Vec<i32>, eye: Eye, look: Look) -> Option<Self> {
-        let Look { options, replay } = look;
+        let Look {
+            options,
+            replay,
+            segments,
+        } = look;
         let control = Arc::new(RenderControl::default());
         let (sender, updates) = mpsc::channel();
         let worker_control = Arc::clone(&control);
@@ -223,7 +285,7 @@ impl Job {
                     frames: &frames,
                     eye,
                 };
-                work(&input, &options, replay, &worker_control, &sender);
+                work(&input, &options, segments, replay, &worker_control, &sender);
             });
         if let Err(err) = spawned {
             log::error!("could not start the render thread: {err}");
@@ -307,6 +369,8 @@ pub struct ViewKey {
     pub revision: u64,
     pub settings: RenderSettings,
     pub frame: i32,
+    /// The camera object the view looks through (its lens and shutter).
+    pub object: Option<NodeId>,
 }
 
 /// The Render View: a render of the active view, drawn over it.
@@ -424,8 +488,14 @@ impl Renders {
             doc.scene.clone(),
             pictures,
             vec![doc.time.frame()],
-            Eye::Fixed(render_camera(view)),
-            Look { options, replay },
+            key.object.map_or(Eye::Fixed(render_camera(view)), |id| {
+                Eye::Object(id, render_camera(view))
+            }),
+            Look {
+                options,
+                replay,
+                segments: settings.motion_blur.then_some(settings.segments),
+            },
         );
         let picture = Picture {
             number: 0,
@@ -510,7 +580,11 @@ impl Renders {
             pictures,
             frames,
             eye,
-            Look { options, replay },
+            Look {
+                options,
+                replay,
+                segments: settings.motion_blur.then_some(settings.segments),
+            },
         );
         if job.is_none() {
             self.end(number, true);
@@ -641,6 +715,8 @@ pub fn render_camera(view: &OrbitCamera) -> RenderCamera {
         } else {
             CameraProjection::Perspective { fov_y: view.fov_y }
         },
+        lens: None,
+        end: None,
     }
 }
 
@@ -666,10 +742,12 @@ pub fn save_target(settings: &RenderSettings, document: Option<&std::path::Path>
     })
 }
 
-/// How a render looks: its options and the simulation it replays.
+/// How a render looks: its options, the simulation it replays and, with
+/// motion blur, how many moments of the shutter it evaluates.
 struct Look {
     options: RenderOptions,
     replay: Option<Replay>,
+    segments: Option<u32>,
 }
 
 /// What a render worker renders: the scene, its texture pictures, its frames
@@ -688,13 +766,15 @@ fn camera_objects(scene: &Scene, evaluated: &EvaluatedScene) -> Vec<(NodeId, Ren
         .iter()
         .filter(|n| n.kind == ObjectKindTag::Camera)
         .filter_map(|n| match scene.get(n.id)?.data.kind {
-            ObjectKind::Camera { fov_y_deg } => Some((
+            ObjectKind::Camera { fov_y_deg, .. } => Some((
                 n.id,
                 RenderCamera {
                     world: n.world,
                     projection: CameraProjection::Perspective {
                         fov_y: fov_y_deg.to_radians(),
                     },
+                    lens: None,
+                    end: None,
                 },
             )),
             _ => None,
@@ -714,6 +794,7 @@ fn aspect(options: &RenderOptions) -> f32 {
 fn work(
     input: &Input<'_>,
     options: &RenderOptions,
+    segments: Option<u32>,
     mut replay: Option<Replay>,
     control: &RenderControl,
     sender: &Sender<Update>,
@@ -727,23 +808,46 @@ fn work(
     let mut evaluated = EvaluatedScene::for_render();
     let mut simulated = grid4d_eval::Overrides::default();
     for &frame in frames {
-        // The simulation at this frame (simulated here if the cache lacks it).
-        if let Some(replay) = replay.as_mut() {
-            replay.overrides(frame, &mut simulated);
-            evaluated.set_overrides(&simulated);
-        }
-        evaluated.set_frame(f64::from(frame));
-        evaluated.update(scene);
-        let camera = eye.at(scene, &evaluated, f64::from(frame));
-        let cameras = camera_objects(scene, &evaluated);
-        let texturing = Texturing {
-            materials: scene.materials(),
-            pictures,
-            camera,
-            aspect: aspect(options),
-            cameras: &cameras,
+        let at = f64::from(frame);
+        // With motion blur, the scene at moments of the shutter interval.
+        let (moments, base) = match segments {
+            Some(segments) => shutter_moments(&eye.shutter(scene, at), at, segments),
+            None => (vec![at], 0),
         };
-        let render_scene = RenderScene::textured(&evaluated, &texturing);
+        let mut scenes = Vec::with_capacity(moments.len());
+        let mut placements = Vec::with_capacity(moments.len());
+        for &time in &moments {
+            // The simulation then (simulated here if the cache lacks it).
+            if let Some(replay) = replay.as_mut() {
+                replay.overrides_at(time, &mut simulated);
+                evaluated.set_overrides(&simulated);
+            }
+            evaluated.set_frame(time);
+            evaluated.update(scene);
+            let camera = eye.at(scene, &evaluated, time);
+            let cameras = camera_objects(scene, &evaluated);
+            let texturing = Texturing {
+                materials: scene.materials(),
+                pictures,
+                camera,
+                aspect: aspect(options),
+                cameras: &cameras,
+            };
+            scenes.push(RenderScene::textured(&evaluated, &texturing));
+            placements.push(camera);
+        }
+        let (render_scene, still) = RenderScene::moving(scenes, base);
+        if still > 0 {
+            log::info!("frame {frame}: {still} objects not motion blurred (their shape changes over the shutter)");
+        }
+        // Through the camera at the frame, moving from the shutter's opening
+        // to its closing.
+        let (first, last) = (placements[0], placements[placements.len() - 1]);
+        let camera = RenderCamera {
+            world: first.world,
+            end: (last.world != first.world).then_some(last.world),
+            ..placements[base]
+        };
         let mut progressive = Progressive::new(options);
         while !progressive.is_complete(options) {
             // 1, 1, 2, 4, … samples: a first picture at once, then fewer updates.
@@ -875,6 +979,7 @@ pub(crate) mod tests {
             revision: doc.scene.revision(),
             settings: doc.render.clone(),
             frame: 0,
+            object: None,
         };
         let mut renders = Renders::default();
         renders.start_view(&doc, Pictures::new(), &camera, key.clone(), None);
@@ -1060,5 +1165,105 @@ pub(crate) mod tests {
         let fallen = picture(&doc, replay);
         assert_ne!(still, fallen, "the cube has fallen out of view");
         assert!(fallen.chunks(4).all(|p| p[3] == 0), "nothing left in view");
+    }
+
+    #[test]
+    fn the_shutter_opens_its_moments_around_the_frame() {
+        let centred = Lens::default();
+        assert_eq!(shutter_moments(&centred, 10.0, 3), (vec![9.75, 10.0, 10.25], 1));
+        let opening = Lens {
+            shutter_position: grid4d_scene::ShutterPosition::Opening,
+            ..centred
+        };
+        assert_eq!(shutter_moments(&opening, 10.0, 2), (vec![10.0, 10.5], 0));
+        let closing = Lens {
+            shutter_position: grid4d_scene::ShutterPosition::Closing,
+            shutter: 1.0,
+            ..centred
+        };
+        assert_eq!(shutter_moments(&closing, 10.0, 3), (vec![9.0, 9.5, 10.0], 2));
+        // A closed shutter: the frame alone.
+        let closed = Lens {
+            shutter: 0.0,
+            ..centred
+        };
+        assert_eq!(shutter_moments(&closed, 10.0, 5), (vec![10.0], 0));
+    }
+
+    /// A cube moving 1000 cm along +X per frame seen from above through a
+    /// camera object with `lens`, rendered at frame 10 (`blur`: motion
+    /// blur on); the picture's columns where the cube covers the middle row.
+    fn smear(lens: Lens, blur: bool) -> Vec<u32> {
+        let mut doc = Document::new("smear");
+        doc.render.width = 60;
+        doc.render.height = 20;
+        doc.render.samples = 128;
+        doc.render.bounces = 0;
+        doc.render.motion_blur = blur;
+        doc.render.segments = 3;
+        doc.time.set_frame(10);
+        let cube = doc.scene.insert(grid4d_scene::Node::new(
+            "Cube",
+            ObjectKind::Cube {
+                size: glam::Vec3::splat(40.0),
+                segments: [1, 1, 1],
+            },
+        ));
+        let data = &mut doc.scene.get_mut(cube).unwrap().data;
+        data.tracks.push(grid4d_scene::Track {
+            param: grid4d_scene::Param::Position(grid4d_scene::Axis::X),
+            curve: grid4d_scene::Curve::from_keys([
+                grid4d_scene::Key {
+                    interpolation: grid4d_scene::Interpolation::Linear,
+                    ..grid4d_scene::Key::new(0.0, -10000.0)
+                },
+                grid4d_scene::Key {
+                    interpolation: grid4d_scene::Interpolation::Linear,
+                    ..grid4d_scene::Key::new(20.0, 10000.0)
+                },
+            ]),
+        });
+        // Looking straight down from 1000 cm: 40° shows about 728 cm high.
+        let look = glam::camera::rh::view::look_at_mat4(
+            glam::Vec3::new(0.0, 1000.0, 0.0),
+            glam::Vec3::ZERO,
+            glam::Vec3::NEG_Z,
+        )
+        .inverse();
+        let camera = doc.scene.insert(
+            grid4d_scene::Node::new("Camera", ObjectKind::Camera { fov_y_deg: 40.0, lens })
+                .with_transform(grid4d_scene::Transform::from_matrix(&look)),
+        );
+        let mut renders = Renders::default();
+        renders.start(&doc, Pictures::new(), &OrbitCamera::default(), Some(camera), None, None);
+        let finished = wait(&mut renders);
+        let image = &finished[0].image;
+        (0..image.width)
+            .filter(|&x| image.pixel(x, image.height / 2).unwrap()[3] > 0.01)
+            .collect()
+    }
+
+    #[test]
+    fn motion_blur_smears_over_the_shutter_and_its_position_moves_the_smear() {
+        let lens = Lens::default();
+        let sharp = smear(lens, false);
+        let blurred = smear(lens, true);
+        // 40 cm wide; the picture 60 × 728 / 20 cm per pixel ≈ 36 cm.
+        assert!(sharp.len() <= 3, "{sharp:?}");
+        // Half a frame: 500 cm more, about 14 pixels.
+        let span = |columns: &[u32]| columns[columns.len() - 1] - columns[0] + 1;
+        assert!((12..=17).contains(&span(&blurred)), "{blurred:?} vs {sharp:?}");
+        let centre = |columns: &[u32]| (columns[0] + columns[columns.len() - 1]) as f32 / 2.0;
+        assert!((centre(&blurred) - centre(&sharp)).abs() <= 1.0, "centred on the frame");
+        let opening = smear(
+            Lens {
+                shutter_position: grid4d_scene::ShutterPosition::Opening,
+                ..lens
+            },
+            true,
+        );
+        assert!(centre(&opening) > centre(&sharp) + 5.0, "after the frame: {opening:?}");
+        // A closed shutter: the frame's picture.
+        assert_eq!(smear(Lens { shutter: 0.0, ..lens }, true), sharp);
     }
 }

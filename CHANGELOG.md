@@ -37,7 +37,15 @@ sampling and a denoiser, a render queue).
   it does not light cast no shadow of it, in renders and in the viewport.
   Lights, Skies and Environments have a Light Group name (its render pass
   comes later).
-- **Merge** — an Environment's picture and lights' links survive merging.
+- **Depth of field and motion blur** — a camera object has a lens: Depth
+  of Field with a focus distance or a focus object, F-Stop and a round or
+  bladed aperture (out-of-focus highlights take its shape); and a shutter
+  (how long, centred on the frame or opening or closing at it). With Motion
+  Blur on in the Render Settings, moving objects, deforming and simulated
+  surfaces, clones and the camera itself smear over the shutter time.
+  Renders without them come out exactly as before.
+- **Merge** — an Environment's picture, lights' links and cameras' focus
+  objects survive merging.
 - **Renders** — lights that are sampled directly (glowing surfaces, area
   lights) no longer lose a little light at the last bounce.
 - **Files** — documents are saved in `.g4d` format version 5, which holds

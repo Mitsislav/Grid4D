@@ -406,8 +406,14 @@ fn sky_picture() {
     let eye = Vec3::new(-430.0, 120.0, -620.0);
     let look = glam::camera::rh::view::look_at_mat4(eye, Vec3::new(20.0, 70.0, 0.0), Vec3::Y).inverse();
     let camera = doc.scene.insert(
-        Node::new("Camera", ObjectKind::Camera { fov_y_deg: 40.0 })
-            .with_transform(grid4d_scene::Transform::from_matrix(&look)),
+        Node::new(
+            "Camera",
+            ObjectKind::Camera {
+                fov_y_deg: 40.0,
+                lens: grid4d_scene::Lens::default(),
+            },
+        )
+        .with_transform(grid4d_scene::Transform::from_matrix(&look)),
     );
     let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
     h.state_mut().editor.view_camera = Some(camera);
@@ -473,8 +479,14 @@ fn light_linking_picture() {
     let eye = Vec3::new(0.0, 260.0, -560.0);
     let look = glam::camera::rh::view::look_at_mat4(eye, Vec3::new(0.0, 40.0, 0.0), Vec3::Y).inverse();
     let camera = doc.scene.insert(
-        Node::new("Camera", ObjectKind::Camera { fov_y_deg: 40.0 })
-            .with_transform(grid4d_scene::Transform::from_matrix(&look)),
+        Node::new(
+            "Camera",
+            ObjectKind::Camera {
+                fov_y_deg: 40.0,
+                lens: grid4d_scene::Lens::default(),
+            },
+        )
+        .with_transform(grid4d_scene::Transform::from_matrix(&look)),
     );
     let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
     h.state_mut().editor.view_camera = Some(camera);
@@ -1065,6 +1077,8 @@ fn readme_pictures() {
     let camera = grid4d_raytrace::RenderCamera {
         world: view.view().inverse(),
         projection: grid4d_raytrace::CameraProjection::Perspective { fov_y: view.fov_y },
+        lens: None,
+        end: None,
     };
     let options = grid4d_raytrace::RenderOptions {
         width: 1280,

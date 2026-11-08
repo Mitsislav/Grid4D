@@ -162,6 +162,46 @@ pub(crate) struct Hit {
     pub shading: Vec3,
     pub surface: Surface,
     pub bend: Bend,
+    /// The moment of the shutter interval (0 – 1) the ray was cast at.
+    pub time: f32,
+}
+
+/// Where the triangles are over the shutter interval (motion blur): their
+/// corners and smoothed normals at each of its moments, evenly spread from
+/// its opening (0) to its closing (1); in between, blended from the two
+/// moments around.
+#[derive(Debug)]
+struct Motion {
+    points: Vec<Vec<Vec3>>,
+    normals: Vec<Vec<Vec3>>,
+}
+
+impl Motion {
+    /// `moments`' value at corner `i`, at `time`.
+    fn at(moments: &[Vec<Vec3>], i: usize, time: f32) -> Vec3 {
+        let last = moments.len().saturating_sub(1);
+        let scaled = time.clamp(0.0, 1.0) * to_f32(last);
+        let below = scaled.floor();
+        // A moment index below 2¹⁶.
+        let k = usize::from(u16::try_from(below as u32).unwrap_or(0)).min(last.saturating_sub(1));
+        let f = scaled - to_f32(k);
+        let get = |m: usize| {
+            moments
+                .get(m)
+                .and_then(|points| points.get(i))
+                .copied()
+                .unwrap_or(Vec3::NAN)
+        };
+        if last == 0 {
+            return get(0);
+        }
+        get(k).lerp(get(k + 1), f)
+    }
+}
+
+/// A small count as a float.
+fn to_f32(n: usize) -> f32 {
+    u16::try_from(n).map_or(f32::from(u16::MAX), f32::from)
 }
 
 /// What a render reads beyond the evaluated scene to show materials: the
@@ -239,6 +279,8 @@ pub struct RenderScene {
     /// What surrounds the scene (a Sky or an Environment).
     environment: Option<EnvironmentLight>,
     bounds: Option<(Vec3, Vec3)>,
+    /// The triangles over the shutter interval; `None`: they stand still.
+    motion: Option<Motion>,
 }
 
 /// A point chosen on a light with a surface.
@@ -358,8 +400,121 @@ impl RenderScene {
                 .environment()
                 .map(|environment| EnvironmentLight::new(environment, texturing.map(|t| t.pictures))),
             bounds: b.bounds,
+            motion: None,
         }
         .with_light_tables()
+    }
+
+    /// The scene over a shutter interval (motion blur) from `moments`, the
+    /// scene at moments spread evenly from the interval's opening to its
+    /// closing: everything but where the triangles are comes from moment
+    /// `base` (the one at the frame). An object whose triangles differ in
+    /// number between moments (a changing generator, a Cloner whose count
+    /// changes) stays where it is at `base`, as do all objects when the
+    /// moments do not have the same objects. Returns the scene and how many
+    /// objects stayed still that way.
+    #[must_use]
+    pub fn moving(mut moments: Vec<Self>, base: usize) -> (Self, usize) {
+        if moments.len() < 2 || base >= moments.len() {
+            let scene = if base < moments.len() {
+                moments.swap_remove(base)
+            } else {
+                moments
+                    .pop()
+                    .unwrap_or_else(|| Self::new(&EvaluatedScene::for_render()))
+            };
+            return (scene, 0);
+        }
+        let end_of = |s: &Self, i: usize| s.objects.get(i + 1).map_or(s.object_of.len(), |o| o.first_triangle);
+        let (points, normals, still) = {
+            let at_base = &moments[base];
+            let objects = at_base.objects.len();
+            let mut still = vec![false; objects];
+            let mut points = Vec::with_capacity(moments.len());
+            let mut normals = Vec::with_capacity(moments.len());
+            for moment in &moments {
+                let mut p = at_base.triangles.points().to_vec();
+                let mut n = at_base.normals.clone();
+                if moment.objects.len() == objects {
+                    for (i, flag) in still.iter_mut().enumerate() {
+                        let (from, to) = (at_base.objects[i].first_triangle * 3, end_of(at_base, i) * 3);
+                        let (m_from, m_to) = (moment.objects[i].first_triangle * 3, end_of(moment, i) * 3);
+                        if to - from == m_to - m_from {
+                            p[from..to].copy_from_slice(&moment.triangles.points()[m_from..m_to]);
+                            n[from..to].copy_from_slice(&moment.normals[m_from..m_to]);
+                        } else {
+                            *flag = true;
+                        }
+                    }
+                } else {
+                    still.fill(true);
+                }
+                points.push(p);
+                normals.push(n);
+            }
+            // Still objects: every moment as at `base`.
+            for (i, _) in still.iter().enumerate().filter(|(_, s)| **s) {
+                let (from, to) = (at_base.objects[i].first_triangle * 3, end_of(at_base, i) * 3);
+                for (p, n) in points.iter_mut().zip(normals.iter_mut()) {
+                    p[from..to].copy_from_slice(&at_base.triangles.points()[from..to]);
+                    n[from..to].copy_from_slice(&at_base.normals[from..to]);
+                }
+            }
+            (points, normals, still)
+        };
+        let mut scene = moments.swap_remove(base);
+        let refs: Vec<&[Vec3]> = points.iter().map(Vec::as_slice).collect();
+        scene.bvh = Bvh::build_swept(&scene.triangles, &refs);
+        for moment in &points {
+            for &p in moment {
+                scene.bounds = Some(scene.bounds.map_or((p, p), |(min, max)| (min.min(p), max.max(p))));
+            }
+        }
+        scene.motion = Some(Motion { points, normals });
+        (scene, still.iter().filter(|s| **s).count())
+    }
+
+    /// Whether the triangles move over the shutter interval.
+    #[must_use]
+    pub fn is_moving(&self) -> bool {
+        self.motion.is_some()
+    }
+
+    /// `triangle`'s corners at `time`.
+    fn corner_points(&self, triangle: usize, time: f32) -> Option<[Vec3; 3]> {
+        let first = triangle * 3;
+        match &self.motion {
+            None => {
+                let points = self.triangles.points().get(first..first + 3)?;
+                Some([points[0], points[1], points[2]])
+            }
+            Some(motion) => Some(std::array::from_fn(|i| Motion::at(&motion.points, first + i, time))),
+        }
+    }
+
+    /// `triangle`'s smoothed normals at `time`.
+    fn corner_normals(&self, triangle: usize, time: f32) -> Option<[Vec3; 3]> {
+        let first = triangle * 3;
+        match &self.motion {
+            None => {
+                let normals = self.normals.get(first..first + 3)?;
+                Some([normals[0], normals[1], normals[2]])
+            }
+            Some(motion) => Some(std::array::from_fn(|i| Motion::at(&motion.normals, first + i, time))),
+        }
+    }
+
+    /// The nearest triangle hit by the ray at `time`, from `start`.
+    fn cast(&self, start: Vec3, dir: Vec3, time: f32) -> Option<grid4d_geom::RayHit> {
+        match &self.motion {
+            None => self.bvh.raycast(self.triangles.points(), start, dir),
+            Some(motion) => self.bvh.raycast_by(
+                |p| Motion::at(&motion.points, usize::try_from(p).unwrap_or(usize::MAX), time),
+                start,
+                dir,
+                |_| true,
+            ),
+        }
     }
 
     /// The scene with its tables of lights with a surface: area lights by
@@ -407,7 +562,7 @@ impl RenderScene {
                 let brightness = POINTS
                     .iter()
                     .map(|w| corners[0] * w.x + corners[1] * w.y + corners[2] * w.z)
-                    .map(|p| crate::shade::luminance(self.emission_at(triangle, p)))
+                    .map(|p| crate::shade::luminance(self.emission_at(triangle, p, 0.0)))
                     .sum::<f32>()
                     / 4.0;
                 // Emission is two-sided.
@@ -580,15 +735,14 @@ impl RenderScene {
         &self,
         table: &LightTable,
         from: Vec3,
-        u: f32,
-        s: f32,
-        t: f32,
+        (u, s, t): (f32, f32, f32),
+        time: f32,
     ) -> Option<SurfaceSample> {
         let source = table.choose(u)?;
         let point = match source {
             Entry::Triangle(triangle) => {
                 let triangle = usize::try_from(triangle).ok()?;
-                let corners = self.triangles.points().get(triangle * 3..triangle * 3 + 3)?;
+                let corners = self.corner_points(triangle, time)?;
                 let cross = (corners[1] - corners[0]).cross(corners[2] - corners[0]);
                 let area = cross.length() * 0.5;
                 if area <= f32::MIN_POSITIVE {
@@ -633,21 +787,22 @@ impl RenderScene {
             .map_or(0.0, |c| (c[1] - c[0]).cross(c[2] - c[0]).length() * 0.5)
     }
 
-    /// The light `triangle` gives off at `position` (none where it is cut out).
-    pub(crate) fn emission_at(&self, triangle: usize, position: Vec3) -> Vec3 {
-        self.surface_at(triangle, position)
+    /// The light `triangle` gives off at `position` at `time` (none where it
+    /// is cut out).
+    pub(crate) fn emission_at(&self, triangle: usize, position: Vec3, time: f32) -> Vec3 {
+        self.surface_at(triangle, position, time)
             .map_or(Vec3::ZERO, |(surface, _)| surface.emission)
     }
 
-    /// The nearest surface the ray `origin + t · dir` meets (passing where
-    /// surfaces are cut out).
-    pub(crate) fn intersect(&self, origin: Vec3, dir: Vec3) -> Option<Hit> {
+    /// The nearest surface the ray `origin + t · dir` meets at `time` (0 – 1
+    /// over the shutter interval; passing where surfaces are cut out).
+    pub(crate) fn intersect(&self, origin: Vec3, dir: Vec3, time: f32) -> Option<Hit> {
         let mut start = origin;
         for _ in 0..MAX_CUT_OUTS {
-            let hit = self.bvh.raycast(self.triangles.points(), start, dir)?;
+            let hit = self.cast(start, dir, time)?;
             let triangle = usize::try_from(hit.face).ok()?;
             let position = start + dir * hit.t;
-            if let Some(found) = self.hit(triangle, position) {
+            if let Some(found) = self.hit(triangle, position, time) {
                 return Some(found);
             }
             start = position + dir * crate::trace::offset(position);
@@ -668,12 +823,13 @@ impl RenderScene {
         distance: f32,
         through_glass: bool,
         link: Option<u8>,
+        time: f32,
     ) -> Vec3 {
         let mut start = origin;
         let mut left = distance;
         let mut passed = Vec3::ONE;
         for _ in 0..MAX_CUT_OUTS {
-            let Some(hit) = self.bvh.raycast(self.triangles.points(), start, dir) else {
+            let Some(hit) = self.cast(start, dir, time) else {
                 return passed;
             };
             if hit.t >= left {
@@ -684,7 +840,7 @@ impl RenderScene {
             };
             let position = start + dir * hit.t;
             let surface = if self.lit_by(triangle, link) {
-                self.surface_at(triangle, position)
+                self.surface_at(triangle, position, time)
             } else {
                 None
             };
@@ -705,10 +861,10 @@ impl RenderScene {
         Vec3::ZERO
     }
 
-    /// The triangle's corners (world) and its barycentric weights at `position`.
-    fn corners(&self, triangle: usize, position: Vec3) -> Option<(&[Vec3], Vec3)> {
-        let first = triangle * 3;
-        let points = self.triangles.points().get(first..first + 3)?;
+    /// The triangle's corners (world) at `time` and its barycentric weights
+    /// at `position`.
+    fn corners(&self, triangle: usize, position: Vec3, time: f32) -> Option<([Vec3; 3], Vec3)> {
+        let points = self.corner_points(triangle, time)?;
         let (a, e1, e2) = (points[0], points[1] - points[0], points[2] - points[0]);
         let p = position - a;
         let (d00, d01, d11) = (e1.dot(e1), e1.dot(e2), e2.dot(e2));
@@ -727,7 +883,7 @@ impl RenderScene {
 
     /// The surface where `triangle` is met at `position` and how its pictures
     /// bend the shading; `None` where every layer is cut out.
-    fn surface_at(&self, triangle: usize, position: Vec3) -> Option<(Surface, Bend)> {
+    fn surface_at(&self, triangle: usize, position: Vec3, time: f32) -> Option<(Surface, Bend)> {
         let object = self
             .object_of
             .get(triangle)
@@ -736,7 +892,8 @@ impl RenderScene {
         if layers.is_empty() {
             return Some((object.plain, Bend::None));
         }
-        let (points, weights) = self.corners(triangle, position)?;
+        let (corners, weights) = self.corners(triangle, position, time)?;
+        let points = &corners[..];
         let local = triangle - object.first_triangle;
         // From the top layer down, the first one that is there.
         for layer in layers.iter().rev() {
@@ -803,12 +960,12 @@ impl RenderScene {
         }
     }
 
-    /// The hit on `triangle` at `position`; `None` where it is cut out.
-    fn hit(&self, triangle: usize, position: Vec3) -> Option<Hit> {
-        let (surface, bend) = self.surface_at(triangle, position)?;
-        let (points, weights) = self.corners(triangle, position)?;
-        let first = triangle * 3;
-        let normals = self.normals.get(first..first + 3)?;
+    /// The hit on `triangle` at `position` at `time`; `None` where it is cut
+    /// out.
+    fn hit(&self, triangle: usize, position: Vec3, time: f32) -> Option<Hit> {
+        let (surface, bend) = self.surface_at(triangle, position, time)?;
+        let (points, weights) = self.corners(triangle, position, time)?;
+        let normals = self.corner_normals(triangle, time)?;
         let geometric = (points[1] - points[0])
             .cross(points[2] - points[0])
             .normalize_or(Vec3::Y);
@@ -821,6 +978,7 @@ impl RenderScene {
             shading,
             surface,
             bend,
+            time,
         })
     }
 }
@@ -874,12 +1032,18 @@ mod tests {
         assert_eq!(scene.lights().len(), 1);
 
         // A ray down onto the top face.
-        let hit = scene.intersect(Vec3::new(10.0, 500.0, 20.0), Vec3::NEG_Y).unwrap();
+        let hit = scene.intersect(Vec3::new(10.0, 500.0, 20.0), Vec3::NEG_Y, 0.0).unwrap();
         assert!(hit.position.abs_diff_eq(Vec3::new(10.0, 200.0, 20.0), 1e-3));
         assert!(hit.geometric.y.abs() > 0.999 && hit.shading.abs_diff_eq(Vec3::Y, 1e-4));
         let above = Vec3::new(10.0, 500.0, 20.0);
-        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 400.0, true, None), Vec3::ZERO);
-        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 250.0, true, None), Vec3::ONE);
+        assert_eq!(
+            scene.transmittance(above, Vec3::NEG_Y, 400.0, true, None, 0.0),
+            Vec3::ZERO
+        );
+        assert_eq!(
+            scene.transmittance(above, Vec3::NEG_Y, 250.0, true, None, 0.0),
+            Vec3::ONE
+        );
     }
 
     #[test]
@@ -938,11 +1102,14 @@ mod tests {
         };
         let scene = RenderScene::textured(&eval, &texturing);
         let (solid, cut) = (Vec3::new(-50.0, 100.0, 0.0), Vec3::new(50.0, 100.0, 0.0));
-        assert!(scene.intersect(solid, Vec3::NEG_Y).is_some());
-        assert_eq!(scene.transmittance(solid, Vec3::NEG_Y, 200.0, true, None), Vec3::ZERO);
-        assert!(scene.intersect(cut, Vec3::NEG_Y).is_none(), "cut out");
-        assert_eq!(scene.transmittance(cut, Vec3::NEG_Y, 200.0, true, None), Vec3::ONE);
+        assert!(scene.intersect(solid, Vec3::NEG_Y, 0.0).is_some());
+        assert_eq!(
+            scene.transmittance(solid, Vec3::NEG_Y, 200.0, true, None, 0.0),
+            Vec3::ZERO
+        );
+        assert!(scene.intersect(cut, Vec3::NEG_Y, 0.0).is_none(), "cut out");
+        assert_eq!(scene.transmittance(cut, Vec3::NEG_Y, 200.0, true, None, 0.0), Vec3::ONE);
         // Without materials it is whole.
-        assert!(RenderScene::new(&eval).intersect(cut, Vec3::NEG_Y).is_some());
+        assert!(RenderScene::new(&eval).intersect(cut, Vec3::NEG_Y, 0.0).is_some());
     }
 }

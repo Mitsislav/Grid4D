@@ -89,7 +89,13 @@ fn ten_thousand() -> Result<Document, grid4d_scene::SceneError> {
     let mut rig = NodeData::new("Camera Rig", ObjectKind::Null);
     rig.tracks.push(track(Param::Rotation(Axis::X), 0.0, TAU));
     let rig = doc.scene.insert(Node::from_data(rig));
-    let mut camera = NodeData::new("Orbit Camera", ObjectKind::Camera { fov_y_deg: 45.0 });
+    let mut camera = NodeData::new(
+        "Orbit Camera",
+        ObjectKind::Camera {
+            fov_y_deg: 45.0,
+            lens: grid4d_scene::Lens::default(),
+        },
+    );
     camera.transform.position = Vec3::new(0.0, 4000.0, 11_000.0);
     camera.transform.rotation = Vec3::new(0.0, -0.35, 0.0);
     doc.scene.insert_child(rig, Node::from_data(camera))?;

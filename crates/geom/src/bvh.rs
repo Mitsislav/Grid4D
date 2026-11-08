@@ -63,6 +63,16 @@ impl Bvh {
     /// GPU mesh, so hits match what is drawn).
     #[must_use]
     pub fn build(mesh: &PolyMesh) -> Self {
+        Self::build_swept(mesh, &[])
+    }
+
+    /// Builds the hierarchy over `mesh`'s triangles moving through the
+    /// point positions `moments` (each as many points as the mesh's): every
+    /// box covers its triangle at the mesh's own points and at every moment,
+    /// so a ray at any time in between, against points blended between two
+    /// moments, finds what it meets ([`raycast_by`](Self::raycast_by)).
+    #[must_use]
+    pub fn build_swept(mesh: &PolyMesh, moments: &[&[Vec3]]) -> Self {
         let (mut triangles, mut faces) = (Vec::new(), Vec::new());
         Triangulator::new().triangulate_points(mesh, &mut triangles, &mut faces);
         let points = mesh.points();
@@ -73,9 +83,16 @@ impl Bvh {
             .enumerate()
             .map(|(k, t)| {
                 let [a, b, c] = t.map(|p| points[us(p)]);
+                let (mut min, mut max) = (a.min(b).min(c), a.max(b).max(c));
+                for moment in moments {
+                    for p in t.map(|p| moment.get(us(p)).copied().unwrap_or(points[us(p)])) {
+                        min = min.min(p);
+                        max = max.max(p);
+                    }
+                }
                 Item {
-                    min: a.min(b).min(c),
-                    max: a.max(b).max(c),
+                    min,
+                    max,
                     triangle: u32_index(k),
                 }
             })
@@ -156,6 +173,20 @@ impl Bvh {
         dir: Vec3,
         accept: impl Fn(u32) -> bool,
     ) -> Option<RayHit> {
+        self.raycast_by(|p| points.get(us(p)).copied().unwrap_or(Vec3::NAN), origin, dir, accept)
+    }
+
+    /// Like [`raycast_where`](Self::raycast_where), with each point's position
+    /// given by `point` (by its index): points that move, within the boxes
+    /// [`build_swept`](Self::build_swept) made.
+    #[must_use]
+    pub fn raycast_by(
+        &self,
+        point: impl Fn(u32) -> Vec3,
+        origin: Vec3,
+        dir: Vec3,
+        accept: impl Fn(u32) -> bool,
+    ) -> Option<RayHit> {
         if self.nodes.is_empty() {
             return None;
         }
@@ -176,7 +207,7 @@ impl Bvh {
                     if !accept(face) {
                         continue;
                     }
-                    let [a, b, c] = triangle.map(|p| points.get(us(p)).copied().unwrap_or(Vec3::NAN));
+                    let [a, b, c] = triangle.map(&point);
                     if let Some(t) = ray_triangle(origin, dir, a, b, c)
                         && best.is_none_or(|hit| t < hit.t)
                     {
@@ -393,5 +424,29 @@ mod tests {
         let flat = PolyMesh::from_faces(points, [[0u32, 1, 2]; 1]).unwrap();
         let bvh = Bvh::build(&flat);
         assert_eq!(bvh.raycast(flat.points(), Vec3::new(0.0, 0.0, 1.0), -Vec3::Z), None);
+    }
+
+    #[test]
+    fn swept_boxes_find_moving_triangles_anywhere_on_their_way() {
+        let mut mesh = PolyMesh::new();
+        for p in [Vec3::ZERO, Vec3::X, Vec3::Y] {
+            mesh.add_point(p).unwrap();
+        }
+        mesh.add_face(&[0, 1, 2]).unwrap();
+        // It moves 10 along +X.
+        let later: Vec<Vec3> = mesh.points().iter().map(|p| *p + Vec3::new(10.0, 0.0, 0.0)).collect();
+        let bvh = Bvh::build_swept(&mesh, &[mesh.points(), &later]);
+        for t in [0.0f32, 0.3, 1.0] {
+            let at = |p: u32| mesh.points()[us(p)].lerp(later[us(p)], t);
+            let origin = Vec3::new(0.2 + 10.0 * t, 0.2, 5.0);
+            let hit = bvh.raycast_by(at, origin, Vec3::NEG_Z, |_| true);
+            assert!(hit.is_some_and(|h| (h.t - 5.0).abs() < 1e-4), "{t}");
+        }
+        // Built without moments: the plain hierarchy.
+        assert!(
+            Bvh::build(&mesh)
+                .raycast(mesh.points(), Vec3::new(5.2, 0.2, 5.0), Vec3::NEG_Z)
+                .is_none()
+        );
     }
 }

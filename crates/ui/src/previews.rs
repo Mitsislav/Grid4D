@@ -65,6 +65,8 @@ pub fn render_preview(material: &Material, pictures: &Pictures) -> Image {
     let camera = RenderCamera {
         world: Mat4::from_translation(Vec3::new(0.0, 0.0, 220.0)),
         projection: CameraProjection::Perspective { fov_y: 0.5 },
+        lens: None,
+        end: None,
     };
     let options = RenderOptions {
         width: PREVIEW_SIZE,

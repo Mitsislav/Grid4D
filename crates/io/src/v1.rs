@@ -150,7 +150,10 @@ impl KindDto {
                 width_segments: 20,
                 depth_segments: 20,
             },
-            Self::Camera { fov_y_deg } => ObjectKind::Camera { fov_y_deg },
+            Self::Camera { fov_y_deg } => ObjectKind::Camera {
+                fov_y_deg,
+                lens: grid4d_scene::Lens::default(),
+            },
             Self::Light { color, intensity } => ObjectKind::light(color, intensity),
         }
     }

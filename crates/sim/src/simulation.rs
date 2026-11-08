@@ -274,6 +274,22 @@ impl Replay {
         }
     }
 
+    /// Every body's place at `time` (frames, fractional for motion blur):
+    /// between the frames around it, blended; simulating up to them if
+    /// needed.
+    pub fn overrides_at(&mut self, time: f64, out: &mut Overrides) {
+        let below = time.floor();
+        // Whole frames stay far inside i32 (a document's range).
+        let frame = below.clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32;
+        self.overrides(frame, out);
+        let t = (time - below) as f32;
+        if t > 0.0 {
+            let mut next = Overrides::default();
+            self.overrides(frame.saturating_add(1), &mut next);
+            out.blend_towards(&next, t);
+        }
+    }
+
     /// Every body's place at `frame`, simulating up to it if needed.
     pub fn overrides(&mut self, frame: i32, out: &mut Overrides) {
         if frame > self.cache.last() {

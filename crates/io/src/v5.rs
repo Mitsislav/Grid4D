@@ -34,7 +34,7 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
-use grid4d_scene::{AreaShape, Environment, LinkMode, Linking, Sky, SunPlacement};
+use grid4d_scene::{AreaShape, Environment, Lens, LinkMode, Linking, ShutterPosition, Sky, SunPlacement};
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
     FrameRange, ImageFormat, Inherit, Interpolation, Key, Layer, LayerId, LayerSwitches, LightDetails, LightShadow,
@@ -826,6 +826,24 @@ struct RenderDto {
     /// Added in version 5 (step 16.2): on when absent.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     emissive_lights: bool,
+    /// Added in version 5 (step 16.5): off when absent.
+    #[serde(default, skip_serializing_if = "is_false")]
+    motion_blur: bool,
+    /// Added in version 5 (step 16.5): 3 when absent.
+    #[serde(default = "three", skip_serializing_if = "is_three")]
+    segments: u32,
+}
+
+const fn three() -> u32 {
+    3
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+const fn is_three(value: &u32) -> bool {
+    *value == 3
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -895,6 +913,8 @@ impl RenderDto {
             naming,
             clamp_indirect,
             emissive_lights,
+            motion_blur,
+            segments,
         } = *settings;
         Some(Self {
             width,
@@ -923,6 +943,8 @@ impl RenderDto {
             },
             clamp_indirect,
             emissive_lights,
+            motion_blur,
+            segments,
         })
     }
 
@@ -954,6 +976,8 @@ impl RenderDto {
             },
             clamp_indirect: self.clamp_indirect,
             emissive_lights: self.emissive_lights,
+            motion_blur: self.motion_blur,
+            segments: self.segments,
         }
         .validated()
     }
@@ -1056,6 +1080,10 @@ enum ParamDto {
     Turbidity,
     /// An Environment's (version 5, step 16.3).
     PictureRotation,
+    /// A camera's (version 5, step 16.5).
+    FocusDistance,
+    FStop,
+    BladeRotation,
     /// A plugin object's number, by its name (added in step 13.2):
     /// `{"plugin": "Phase"}`.
     Plugin(String),
@@ -1146,6 +1174,9 @@ impl From<Param> for ParamDto {
             Param::Object(ObjectParam::Azimuth) => Self::Azimuth,
             Param::Object(ObjectParam::Turbidity) => Self::Turbidity,
             Param::Object(ObjectParam::PictureRotation) => Self::PictureRotation,
+            Param::Object(ObjectParam::FocusDistance) => Self::FocusDistance,
+            Param::Object(ObjectParam::FStop) => Self::FStop,
+            Param::Object(ObjectParam::BladeRotation) => Self::BladeRotation,
             // Named by `ParamDto::new`, which has the object.
             Param::Object(ObjectParam::Plugin(_)) => Self::Plugin(String::new()),
         }
@@ -1210,6 +1241,9 @@ impl From<ParamDto> for Param {
             ParamDto::Azimuth => Self::Object(ObjectParam::Azimuth),
             ParamDto::Turbidity => Self::Object(ObjectParam::Turbidity),
             ParamDto::PictureRotation => Self::Object(ObjectParam::PictureRotation),
+            ParamDto::FocusDistance => Self::Object(ObjectParam::FocusDistance),
+            ParamDto::FStop => Self::Object(ObjectParam::FStop),
+            ParamDto::BladeRotation => Self::Object(ObjectParam::BladeRotation),
             ParamDto::Curvature => Self::Object(ObjectParam::Curvature),
             // Resolved by `ParamDto::into_param`; never reached from there.
             ParamDto::Plugin(_) => Self::Object(ObjectParam::Plugin(u8::MAX)),
@@ -1973,6 +2007,10 @@ enum KindDto {
     },
     Camera {
         fov_y_deg: f32,
+        /// Depth of field and the shutter (version 5, step 16.5); the
+        /// defaults when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lens: Option<LensDto>,
     },
     Light {
         color: [f32; 3],
@@ -3221,8 +3259,77 @@ impl From<LinkModeDto> for LinkMode {
 /// Links a light `kind` read from a file to the objects at `indices` of
 /// `ids` (an index the file lacks is left out).
 fn link_objects(kind: &mut ObjectKind, indices: &[usize], ids: &[NodeId]) {
-    if let ObjectKind::Light { linking, .. } = kind {
-        linking.objects = indices.iter().filter_map(|&i| ids.get(i).copied()).collect();
+    match kind {
+        ObjectKind::Light { linking, .. } => {
+            linking.objects = indices.iter().filter_map(|&i| ids.get(i).copied()).collect();
+        }
+        ObjectKind::Camera { lens, .. } => {
+            lens.focus_object = indices.first().and_then(|&i| ids.get(i).copied());
+        }
+        _ => {}
+    }
+}
+
+/// A camera's lens and shutter (version 5, step 16.5); angles in radians.
+#[derive(Debug, Serialize, Deserialize)]
+struct LensDto {
+    depth_of_field: bool,
+    focus_distance: f32,
+    /// By index in `objects`; written by the object, resolved once every
+    /// object exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    focus_object: Option<usize>,
+    f_stop: f32,
+    blades: u32,
+    blade_rotation: f32,
+    shutter: f32,
+    shutter_position: ShutterPositionDto,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ShutterPositionDto {
+    Centred,
+    Opening,
+    Closing,
+}
+
+impl LensDto {
+    const fn new(lens: &Lens) -> Self {
+        Self {
+            depth_of_field: lens.depth_of_field,
+            focus_distance: lens.focus_distance,
+            focus_object: None,
+            f_stop: lens.f_stop,
+            blades: lens.blades,
+            blade_rotation: lens.blade_rotation,
+            shutter: lens.shutter,
+            shutter_position: match lens.shutter_position {
+                ShutterPosition::Centred => ShutterPositionDto::Centred,
+                ShutterPosition::Opening => ShutterPositionDto::Opening,
+                ShutterPosition::Closing => ShutterPositionDto::Closing,
+            },
+        }
+    }
+
+    /// Out-of-range values clamped; the focus object linked by the caller.
+    fn into_lens(self) -> Lens {
+        Lens {
+            depth_of_field: self.depth_of_field,
+            focus_distance: self
+                .focus_distance
+                .clamp(Lens::MIN_FOCUS_DISTANCE, Lens::MAX_FOCUS_DISTANCE),
+            focus_object: None,
+            f_stop: self.f_stop.clamp(Lens::MIN_F_STOP, Lens::MAX_F_STOP),
+            blades: self.blades.min(Lens::MAX_BLADES),
+            blade_rotation: self.blade_rotation,
+            shutter: self.shutter.clamp(0.0, Lens::MAX_SHUTTER),
+            shutter_position: match self.shutter_position {
+                ShutterPositionDto::Centred => ShutterPosition::Centred,
+                ShutterPositionDto::Opening => ShutterPosition::Opening,
+                ShutterPositionDto::Closing => ShutterPosition::Closing,
+            },
+        }
     }
 }
 
@@ -4033,6 +4140,7 @@ impl KindDto {
             Self::Light {
                 linking: Some(linking), ..
             } => linking.objects.clone(),
+            Self::Camera { lens: Some(lens), .. } => lens.focus_object.into_iter().collect(),
             _ => Vec::new(),
         }
     }
@@ -4040,12 +4148,18 @@ impl KindDto {
     /// Writes a light's linked objects by their index in `objects` (a
     /// deleted one is left out).
     fn link_objects(&mut self, kind: &ObjectKind, objects: &HashMap<NodeId, usize>) {
-        if let (Self::Light { linking: Some(dto), .. }, ObjectKind::Light { linking, .. }) = (self, kind) {
-            dto.objects = linking
-                .objects
-                .iter()
-                .filter_map(|id| objects.get(id).copied())
-                .collect();
+        match (self, kind) {
+            (Self::Light { linking: Some(dto), .. }, ObjectKind::Light { linking, .. }) => {
+                dto.objects = linking
+                    .objects
+                    .iter()
+                    .filter_map(|id| objects.get(id).copied())
+                    .collect();
+            }
+            (Self::Camera { lens: Some(dto), .. }, ObjectKind::Camera { lens, .. }) => {
+                dto.focus_object = lens.focus_object.and_then(|id| objects.get(&id).copied());
+            }
+            _ => {}
         }
     }
 
@@ -4162,7 +4276,10 @@ impl KindDto {
                 height_segments,
                 cap_segments,
             },
-            ObjectKind::Camera { fov_y_deg } => Self::Camera { fov_y_deg },
+            ObjectKind::Camera { fov_y_deg, lens } => Self::Camera {
+                fov_y_deg,
+                lens: (lens != Lens::default()).then(|| LensDto::new(&lens)),
+            },
             ObjectKind::Light {
                 color,
                 intensity,
@@ -4480,7 +4597,11 @@ impl KindDto {
                 height_segments,
                 cap_segments,
             },
-            Self::Camera { fov_y_deg } => ObjectKind::Camera { fov_y_deg },
+            // Its focus object is linked by the caller, which knows them.
+            Self::Camera { fov_y_deg, lens } => ObjectKind::Camera {
+                fov_y_deg,
+                lens: lens.map_or_else(Lens::default, LensDto::into_lens),
+            },
             Self::Sky(sky) => ObjectKind::Sky(sky.into_sky()),
             // Its texture is linked by the caller, which has the table.
             Self::Environment {
@@ -4980,7 +5101,13 @@ impl KindDto {
                 outer_radius,
                 ..
             } => vec![inner_radius, outer_radius],
-            Self::Camera { fov_y_deg } => vec![fov_y_deg],
+            Self::Camera { fov_y_deg, ref lens } => {
+                let mut numbers = vec![fov_y_deg];
+                if let Some(lens) = lens {
+                    numbers.extend([lens.focus_distance, lens.f_stop, lens.blade_rotation, lens.shutter]);
+                }
+                numbers
+            }
             Self::Light {
                 color,
                 intensity,
@@ -6608,6 +6735,8 @@ mod tests {
             naming: FrameNaming::NameDot0000,
             clamp_indirect: false,
             emissive_lights: false,
+            motion_blur: true,
+            segments: 6,
         };
         assert_eq!(round_trip(&doc).render, doc.render);
         doc.render.frames = FrameRange::All;

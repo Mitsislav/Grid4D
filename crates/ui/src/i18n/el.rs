@@ -11,6 +11,7 @@ pub(super) fn lookup(english: &str) -> Option<&'static str> {
 }
 
 pub(super) static TABLE: &[(&str, &str)] = &[
+    (" frames", " καρέ"),
     (" · frame {0} ({1} of {2} done)", " · καρέ {0} ({1} από {2} έτοιμα)"),
     (" · rendering", " · σε απόδοση"),
     (" · stopped", " · διακόπηκε"),
@@ -275,6 +276,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Λοξοτόμηση: σύρετε αριστερά/δεξιά για λοξοτόμηση της επιλογής · Εφαρμογή στη Διαχείριση Ιδιοτήτων · Esc ακυρώνει",
     ),
     ("Bezier", "Bezier"),
+    ("Blade Rotation", "Περιστροφή λεπίδων"),
+    ("Blades", "Λεπίδες"),
     ("Blue", "Μπλε"),
     ("Bookmarks", "Σελιδοδείκτες"),
     ("Bookmarks — planned", "Σελιδοδείκτες — προγραμματίζεται"),
@@ -333,6 +336,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Center C-Shape", "Κέντρο σε σχήμα C"),
     ("Center S-Shape", "Κέντρο σε σχήμα S"),
     ("Centimetres", "Εκατοστά"),
+    ("Centred", "Κεντραρισμένο"),
     (
         "Changed but not recorded: dropped when the frame changes · click: set a key · Shift+Ctrl+click: delete the track",
         "Αλλαγμένο χωρίς καταγραφή: χάνεται όταν αλλάξει το καρέ · κλικ: κλειδί · Shift+Ctrl+κλικ: διαγραφή του καναλιού",
@@ -378,6 +382,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Clones repeat its children", "Οι κλώνοι επαναλαμβάνουν τα παιδιά του"),
     ("Close", "Κλείσιμο"),
     ("Close Spline", "Κλείσιμο καμπύλης"),
+    ("Closing", "Στο κλείσιμο"),
     ("Cloth", "Ύφασμα"),
     ("Coat", "Βερνίκι"),
     ("Coat Roughness", "Τραχύτητα βερνικιού"),
@@ -484,6 +489,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Delete Track", "Διαγραφή καναλιού"),
     ("Density", "Πυκνότητα"),
     ("Depth", "Βάθος"),
+    ("Depth of Field", "Βάθος πεδίου"),
     ("Deselect All", "Αποεπιλογή όλων"),
     ("Direction", "Κατεύθυνση"),
     ("Disc", "Δίσκος"),
@@ -631,6 +637,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "F-Curve: click/drag keys · Ctrl toggles · drag a handle (Shift: one side) · Ctrl+click on a curve adds a key · wheel zoom (Ctrl time, Shift value) · middle drag pans · H / S frame",
         "F-Curve: κλικ/σύρσιμο κλειδιών · Ctrl εναλλάσσει · σύρσιμο λαβής (Shift: μία πλευρά) · Ctrl+κλικ σε καμπύλη προσθέτει κλειδί · ροδέλα ζουμ (Ctrl χρόνος, Shift τιμή) · μεσαίο σύρσιμο μετατοπίζει · H / S πλαισίωση",
     ),
+    ("F-Stop", "Διάφραγμα (f)"),
     ("FFD", "FFD"),
     ("FPS", "FPS"),
     ("Falloff", "Εξασθένηση"),
@@ -646,6 +653,9 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Flip U", "Αναστροφή U"),
     ("Flip V", "Αναστροφή V"),
     ("Flower", "Λουλούδι"),
+    ("Focal Length", "Εστιακή απόσταση"),
+    ("Focus Distance", "Απόσταση εστίασης"),
+    ("Focus Object", "Αντικείμενο εστίασης"),
     ("Font", "Γραμματοσειρά"),
     (
         "Forget the simulated frames; they are simulated again as you visit them",
@@ -766,6 +776,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "How frame numbers join the file names of an animation",
         "Πώς οι αριθμοί καρέ μπαίνουν στα ονόματα αρχείων μιας κίνησης",
+    ),
+    (
+        "How long the shutter stays open (0.5: a 180° shutter); with Motion Blur on in the Render Settings",
+        "Πόσο μένει ανοιχτό το κλείστρο (0,5: κλείστρο 180°)· με ενεργό το Θόλωμα κίνησης στις Ρυθμίσεις απόδοσης",
     ),
     ("How many copies to place", "Πόσα αντίγραφα θα τοποθετηθούν"),
     (
@@ -1022,6 +1036,11 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Model mode", "Λειτουργία μοντέλου"),
     ("Modeling", "Μοντελοποίηση"),
     ("Modes", "Λειτουργίες"),
+    (
+        "Moments of the shutter evaluated: motion between them is straight, so curved paths want more",
+        "Στιγμές του κλείστρου που υπολογίζονται: ανάμεσά τους η κίνηση είναι ευθεία, οπότε οι καμπύλες διαδρομές θέλουν περισσότερες",
+    ),
+    ("Motion Blur", "Θόλωμα κίνησης"),
     ("Move", "Μετακίνηση"),
     ("Move (E)", "Μετακίνηση (E)"),
     (
@@ -1143,6 +1162,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Omni", "Πανκατευθυντικό"),
     ("On", "Ναι"),
     (
+        "On a 36 × 24 mm sensor, from the field of view",
+        "Σε αισθητήρα 36 × 24 mm, από το οπτικό πεδίο",
+    ),
+    (
         "Only Grid4D documents (.g4d), models (.gltf, .glb, .obj) and pictures can be dropped",
         "Μπορούν να αφεθούν μόνο έγγραφα Grid4D (.g4d), μοντέλα (.gltf, .glb, .obj) και εικόνες",
     ),
@@ -1164,6 +1187,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "OpenEXR keeps the light's full range, in linear colour, for compositing",
         "Το OpenEXR κρατά όλο το εύρος του φωτός, σε γραμμικό χρώμα, για σύνθεση",
     ),
+    ("Opening", "Στο άνοιγμα"),
     ("Open…", "Άνοιγμα…"),
     ("Optimize", "Βελτιστοποίηση"),
     ("Optimize…", "Βελτιστοποίηση…"),
@@ -1431,6 +1455,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Render: shown in renders", "Απόδοση: εμφανίζεται στις αποδόσεις"),
     ("Rendering · {0}", "Απόδοση · {0}"),
     ("Renders are not saved.", "Οι αποδόσεις δεν αποθηκεύονται."),
+    (
+        "Renders over the camera's shutter: moving things smear (the camera's Shutter sets how long)",
+        "Απόδοση σε όλη τη διάρκεια του κλείστρου της κάμερας: ό,τι κινείται θολώνει (το Κλείστρο της κάμερας ορίζει πόσο)",
+    ),
     ("Reparent", "Αλλαγή γονέα"),
     ("Reset Coordinates", "Επαναφορά συντεταγμένων"),
     ("Reset Lattice", "Επαναφορά πλέγματος"),
@@ -1662,6 +1690,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Δείχνει πόσο διαρκούν τα καρέ και το πιο αργό τμήμα",
     ),
     ("Shrink Selection", "Συρρίκνωση επιλογής"),
+    ("Shutter", "Κλείστρο"),
+    ("Shutter Position", "Θέση κλείστρου"),
     ("Sides", "Πλευρές"),
     ("Simulate", "Προσομοίωση"),
     (
@@ -1686,6 +1716,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Size+", "Μέγεθος+"),
     ("Skeleton — planned", "Σκελετός — προγραμματίζεται"),
     ("Sky", "Ουρανός"),
+    (
+        "Smaller numbers open the aperture: a shallower depth of field",
+        "Μικρότεροι αριθμοί ανοίγουν το διάφραγμα: πιο ρηχό βάθος πεδίου",
+    ),
     (
         "Smooths its first child (the cage)",
         "Λειαίνει το πρώτο του παιδί (τον κλωβό)",
@@ -1781,6 +1815,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Textures", "Υφές"),
     ("The Render View is not saved.", "Η Προβολή απόδοσης δεν αποθηκεύεται."),
     ("The View's Camera", "Η κάμερα της προβολής"),
+    (
+        "The aperture's shape: 0 round, else a polygon (out-of-focus highlights take it)",
+        "Το σχήμα του διαφράγματος: 0 στρογγυλό, αλλιώς πολύγωνο (το παίρνουν οι εκτός εστίασης ανταύγειες)",
+    ),
     (
         "The camera renders of this take look through",
         "Η κάμερα μέσα από την οποία βλέπουν οι αποδόσεις αυτής της λήψης",
@@ -2095,6 +2133,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("{0} hours ago", "πριν από {0} ώρες"),
     ("{0} keys selected", "{0} επιλεγμένα κλειδιά"),
     ("{0} minutes ago", "πριν από {0} λεπτά"),
+    ("{0} mm", "{0} mm"),
     ("{0} ms · {1} fps · worst {2} ms", "{0} ms · {1} fps · χειρότερο {2} ms"),
     ("{0} objects · {1} selected", "{0} αντικείμενα · {1} επιλεγμένα"),
     ("{0} of {1}", "{0} του {1}"),

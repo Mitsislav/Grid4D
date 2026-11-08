@@ -87,6 +87,12 @@ pub enum ObjectParam {
     Turbidity,
     /// An Environment's turn about the vertical (radians).
     PictureRotation,
+    /// A camera's focus distance (cm).
+    FocusDistance,
+    /// A camera's aperture.
+    FStop,
+    /// A camera's aperture blades' turn (radians).
+    BladeRotation,
     /// A plugin object's number: its value at this index of
     /// [`PluginObject::values`](crate::PluginObject::values) (below
     /// [`ObjectParam::PLUGIN_PARAMS`]).
@@ -96,7 +102,7 @@ pub enum ObjectParam {
 impl ObjectParam {
     /// How many built-in ones there are (their [`ObjectParam::index`] is below
     /// this; a plugin's follow).
-    pub const COUNT: usize = 46;
+    pub const COUNT: usize = 49;
 
     /// How many of a plugin object's values can be animated (the first ones).
     pub const PLUGIN_PARAMS: usize = 64;
@@ -149,6 +155,9 @@ impl ObjectParam {
         Self::Azimuth,
         Self::Turbidity,
         Self::PictureRotation,
+        Self::FocusDistance,
+        Self::FStop,
+        Self::BladeRotation,
     ];
 
     /// The row label (shared by the Attribute Manager and the F-Curve editor).
@@ -200,6 +209,9 @@ impl ObjectParam {
             Self::Azimuth => "Azimuth",
             Self::Turbidity => "Turbidity",
             Self::PictureRotation => "Rotation",
+            Self::FocusDistance => "Focus Distance",
+            Self::FStop => "F-Stop",
+            Self::BladeRotation => "Blade Rotation",
             // Named by its plugin: see `ObjectKind::param_label`.
             Self::Plugin(_) => "Plugin Parameter",
         }
@@ -252,6 +264,9 @@ impl ObjectParam {
             Self::Azimuth => 43,
             Self::Turbidity => 44,
             Self::PictureRotation => 45,
+            Self::FocusDistance => 46,
+            Self::FStop => 47,
+            Self::BladeRotation => 48,
             Self::Plugin(i) => Self::COUNT + i as usize,
         }
     }
@@ -269,7 +284,8 @@ impl ObjectParam {
             | Self::Strength
             | Self::Elevation
             | Self::Azimuth
-            | Self::PictureRotation => ParamUnit::Radians,
+            | Self::PictureRotation
+            | Self::BladeRotation => ParamUnit::Radians,
             Self::RadialBias
             | Self::HeightBias
             | Self::Intensity
@@ -303,6 +319,8 @@ impl ObjectParam {
             | Self::Movement(_)
             | Self::Rise
             | Self::Turbidity
+            | Self::FocusDistance
+            | Self::FStop
             // A plugin's description says how its numbers are shown.
             | Self::Plugin(_) => ParamUnit::Plain,
         }
@@ -347,7 +365,7 @@ impl ObjectKind {
             Self::Cone { .. } => &[P::TopRadius, P::BottomRadius, P::Height],
             Self::Torus { .. } => &[P::RingRadius, P::PipeRadius],
             Self::Disc { .. } => &[P::InnerRadius, P::OuterRadius],
-            Self::Camera { .. } => &[P::FieldOfView],
+            Self::Camera { .. } => &[P::FieldOfView, P::FocusDistance, P::FStop, P::BladeRotation],
             Self::Light { .. } => &[
                 P::Intensity,
                 P::InnerAngle,
@@ -487,6 +505,8 @@ impl ObjectKind {
         let value = match param {
             P::RadialBias | P::HeightBias | P::StartGrowth | P::EndGrowth => value.min(1.0),
             P::FieldOfView => value.clamp(1.0, 170.0),
+            P::FocusDistance => value.clamp(crate::Lens::MIN_FOCUS_DISTANCE, crate::Lens::MAX_FOCUS_DISTANCE),
+            P::FStop => value.clamp(crate::Lens::MIN_F_STOP, crate::Lens::MAX_F_STOP),
             P::Elevation => value.clamp(crate::Sky::MIN_ELEVATION, crate::Sky::MAX_ELEVATION),
             _ => value,
         };
@@ -528,6 +548,19 @@ impl ObjectKind {
             return match param {
                 P::Amount => Some(&mut effector.strength),
                 P::Size(axis) if sized => Some(&mut effector.falloff.size[axis.index()]),
+                _ => None,
+            };
+        }
+        // A camera's field of view, and its lens's numbers while it has depth
+        // of field (the rows are shown then); the focus distance only without
+        // a focus object.
+        if let Self::Camera { fov_y_deg, lens } = self {
+            let on = lens.depth_of_field;
+            return match param {
+                P::FieldOfView => Some(fov_y_deg),
+                P::FocusDistance if on && lens.focus_object.is_none() => Some(&mut lens.focus_distance),
+                P::FStop if on => Some(&mut lens.f_stop),
+                P::BladeRotation if on && lens.blades >= 3 => Some(&mut lens.blade_rotation),
                 _ => None,
             };
         }
@@ -573,7 +606,6 @@ impl ObjectKind {
             (Self::Torus { pipe_radius, .. }, P::PipeRadius) => Some(pipe_radius),
             (Self::Disc { inner_radius, .. }, P::InnerRadius) => Some(inner_radius),
             (Self::Disc { outer_radius, .. }, P::OuterRadius) => Some(outer_radius),
-            (Self::Camera { fov_y_deg }, P::FieldOfView) => Some(fov_y_deg),
             (Self::Light { intensity, .. }, P::Intensity) => Some(intensity),
             (Self::Environment(environment), P::Intensity) => Some(&mut environment.intensity),
             (Self::Environment(environment), P::PictureRotation) => Some(&mut environment.rotation),

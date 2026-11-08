@@ -29,15 +29,9 @@ pub enum ObjectKind {
     /// Empty transform used to group other objects.
     Null,
     /// Box; `segments` subdivide X, Y and Z.
-    Cube {
-        size: Vec3,
-        segments: [u32; 3],
-    },
+    Cube { size: Vec3, segments: [u32; 3] },
     /// UV sphere; `segments` around the axis, half as many from pole to pole.
-    Sphere {
-        radius: f32,
-        segments: u32,
-    },
+    Sphere { radius: f32, segments: u32 },
     Cylinder {
         radius: f32,
         height: f32,
@@ -82,6 +76,8 @@ pub enum ObjectKind {
     },
     Camera {
         fov_y_deg: f32,
+        /// Depth of field and the shutter.
+        lens: crate::Lens,
     },
     /// `color` is linear RGB; `intensity` is a multiplier (1.0 = 100 %).
     Light {
@@ -105,10 +101,7 @@ pub enum ObjectKind {
     /// An editable mesh (C4D's "Polygon Object"), in object space, with its
     /// selected and hidden components (they live in the object, like C4D's, so
     /// they are undoable and saved).
-    Polygon {
-        mesh: MeshHandle,
-        components: Components,
-    },
+    Polygon { mesh: MeshHandle, components: Components },
     /// Subdivision Surface generator: shows its first child (the cage) smoothed
     /// with Catmull-Clark and hides the cage's own surface.
     SubdivisionSurface {
@@ -405,7 +398,10 @@ impl ObjectKindTag {
                 height_segments: 4,
                 cap_segments: 8,
             },
-            Self::Camera => ObjectKind::Camera { fov_y_deg: 40.0 },
+            Self::Camera => ObjectKind::Camera {
+                fov_y_deg: 40.0,
+                lens: crate::Lens::default(),
+            },
             Self::Light => ObjectKind::light([1.0, 1.0, 1.0], 1.0),
             // docs/reference/render-environment.md: a clear day, the sun 45° up.
             Self::Sky => ObjectKind::Sky(crate::Sky::default()),
