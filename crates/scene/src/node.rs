@@ -91,6 +91,11 @@ pub enum ObjectKind {
         /// Cone (spots) and falloff.
         details: LightDetails,
         shadow: LightShadow,
+        /// Which objects it lights.
+        linking: crate::Linking,
+        /// Its light group (empty: none): its light also goes into that
+        /// group's pass.
+        group: String,
     },
     /// A daylight sky with a sun around the scene
     /// (`docs/reference/render-environment.md`).
@@ -539,6 +544,8 @@ impl ObjectKind {
             light_type: LightType::Omni,
             details: LightDetails::default(),
             shadow: LightShadow::None,
+            linking: crate::Linking::default(),
+            group: String::new(),
         }
     }
 

@@ -56,6 +56,9 @@ pub struct EvaluatedNode {
     /// The Material tags it shows, bottom first (see
     /// [`EvaluatedScene::material_layers`]).
     pub materials: MaterialLayers,
+    /// The linked lights that do not light it: bit `n` for the light whose
+    /// [`EvaluatedLight::link`] is `n`.
+    pub unlit: u64,
 }
 
 /// One shape of a clone a Cloner makes, as viewers see it this frame: a
@@ -78,6 +81,9 @@ pub struct EvaluatedInstance {
     pub pick: PickShape,
     /// The Material tags the child shows.
     pub materials: MaterialLayers,
+    /// The linked lights that do not light it (as its source's, see
+    /// [`EvaluatedNode::unlit`]).
+    pub unlit: u64,
 }
 
 /// An object inside a Cloner as evaluated: what each clone of it shows.
@@ -138,7 +144,13 @@ pub struct EvaluatedLight {
     pub color: [f32; 3],
     pub details: LightDetails,
     pub shadow: LightShadow,
+    /// Its bit in the objects' `unlit` masks when it lights only some
+    /// objects (the first 64 such lights); `None`: it lights everything.
+    pub link: Option<u8>,
 }
+
+/// How many lights can light only some objects (the rest light everything).
+pub const MAX_LINKED_LIGHTS: usize = 64;
 
 /// The document as viewers see it: every node that is visible in the editor and
 /// enabled (a hidden or disabled node hides its whole subtree — except a disabled
@@ -603,6 +615,7 @@ impl EvaluatedScene {
                 drawable,
                 pick,
                 materials: shown_layers,
+                unlit: 0,
             });
             true
         });
@@ -648,6 +661,7 @@ impl EvaluatedScene {
                 light_type,
                 details,
                 shadow,
+                ..
             } = *kind
             else {
                 continue;
@@ -663,23 +677,25 @@ impl EvaluatedScene {
                 color: color.map(|c| c * intensity),
                 details,
                 shadow,
+                link: None,
             });
         }
+        link_lights(scene, &mut self.lights, &mut self.nodes, &mut self.instances);
         // The topmost visible Sky or Environment surrounds the scene.
         self.environment = self.nodes.iter().find_map(|node| {
             let kind = scene.get(node.id).map(|n| n.data.kind_at(self.frame))?;
             let axes = glam::Mat3::from_mat4(node.world);
-            match *kind {
+            match &*kind {
                 ObjectKind::Sky(sky) => Some(crate::EvaluatedEnvironment {
                     id: node.id,
                     visible: sky.visible,
-                    surround: crate::Surround::Sky(crate::SkyModel::new(&sky, axes.z_axis)),
+                    surround: crate::Surround::Sky(crate::SkyModel::new(sky, axes.z_axis)),
                 }),
                 ObjectKind::Environment(environment) => Some(crate::EvaluatedEnvironment {
                     id: node.id,
                     visible: environment.visible,
                     surround: crate::Surround::Picture(crate::PictureSurround::new(
-                        &environment,
+                        environment,
                         crate::sky::rotation_of(axes),
                     )),
                 }),
@@ -986,6 +1002,7 @@ fn build_instances(
                             drawable: coloured(part.drawable),
                             pick: part.pick,
                             materials: part.materials,
+                            unlit: 0,
                         },
                         instances,
                     );
@@ -1185,6 +1202,42 @@ struct Generated {
     mesh: MeshHandle,
     /// The scene revision of the last update that used it.
     seen: u64,
+}
+
+/// Gives each light that lights only some objects a bit (the first
+/// [`MAX_LINKED_LIGHTS`]), and every node and clone the bits of those that
+/// do not light it (a clone as the object it shows). Allocation-free.
+fn link_lights(
+    scene: &Scene,
+    lights: &mut [EvaluatedLight],
+    nodes: &mut [EvaluatedNode],
+    instances: &mut [EvaluatedInstance],
+) {
+    let mut bit = 0u8;
+    for light in lights {
+        if usize::from(bit) >= MAX_LINKED_LIGHTS {
+            break;
+        }
+        let Some(ObjectKind::Light { linking, .. }) = scene.get(light.id).map(|n| &n.data.kind) else {
+            continue;
+        };
+        if linking.is_open() {
+            continue;
+        }
+        light.link = Some(bit);
+        let mask = 1u64 << bit;
+        for node in nodes.iter_mut() {
+            if !linking.lights(scene, node.id) {
+                node.unlit |= mask;
+            }
+        }
+        for instance in instances.iter_mut() {
+            if !linking.lights(scene, instance.source) {
+                instance.unlit |= mask;
+            }
+        }
+        bit += 1;
+    }
 }
 
 /// Generator `id`'s cached result, rebuilt if its options or inputs changed.
@@ -1614,6 +1667,8 @@ mod tests {
                 light_type: LightType::Spot,
                 details: LightDetails::default(),
                 shadow: LightShadow::None,
+                linking: grid4d_scene::Linking::default(),
+                group: String::new(),
             },
         )
         .with_transform(Transform::from_position(Vec3::new(0.0, 300.0, 0.0)));
@@ -3344,5 +3399,42 @@ mod tests {
         doc.scene.get_mut(sky).unwrap().data.enabled = false;
         eval.update(&doc.scene);
         assert_eq!(eval.environment(), None);
+    }
+
+    #[test]
+    fn linked_lights_get_a_bit_and_objects_the_bits_of_lights_that_skip_them() {
+        use grid4d_scene::{LinkMode, Linking};
+        let mut doc = Document::new("links");
+        let group = doc.scene.insert(Node::new("Group", ObjectKind::Null));
+        let inside = doc
+            .scene
+            .insert_child(group, Node::new("Inside", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        let outside = doc
+            .scene
+            .insert(Node::new("Outside", ObjectKindTag::Cube.default_kind()));
+        let light = |linking: Linking| {
+            let mut kind = ObjectKind::light([1.0; 3], 1.0);
+            if let ObjectKind::Light { linking: own, .. } = &mut kind {
+                *own = linking;
+            }
+            Node::new("Light", kind)
+        };
+        doc.scene.insert(light(Linking::default()));
+        doc.scene.insert(light(Linking {
+            mode: LinkMode::Exclude,
+            objects: vec![group],
+        }));
+        doc.scene.insert(light(Linking {
+            mode: LinkMode::Include,
+            objects: vec![group],
+        }));
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let links: Vec<_> = eval.lights().iter().map(|l| l.link).collect();
+        assert_eq!(links, [None, Some(0), Some(1)], "only linked lights get a bit");
+        let unlit = |id| eval.nodes().iter().find(|n| n.id == id).unwrap().unlit;
+        assert_eq!(unlit(inside), 0b01, "the excluding light skips the group's child");
+        assert_eq!(unlit(outside), 0b10, "the including light lights only the group");
     }
 }

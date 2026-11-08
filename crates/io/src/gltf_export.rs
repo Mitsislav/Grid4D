@@ -969,6 +969,8 @@ mod tests {
             light_type,
             details,
             shadow: grid4d_scene::LightShadow::None,
+            linking: grid4d_scene::Linking::default(),
+            group: String::new(),
         };
         let soft = LightDetails {
             inner_angle_deg: 20.0,

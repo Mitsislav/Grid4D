@@ -332,6 +332,7 @@ proptest! {
         area in prop::option::of((0usize..4, 1.0f32..500.0, 1.0f32..500.0, any::<bool>(), any::<bool>())),
         sky in prop::option::of((any::<bool>(), -0.17f32..1.57, 0.0f32..6.0, 1.7f32..10.0, 0.0f32..5.0, any::<bool>(), 0.1f32..20.0, any::<bool>())),
         environment in prop::option::of((any::<bool>(), 0.0f32..5.0, -6.0f32..6.0, any::<bool>())),
+        linked in prop::option::of((any::<bool>(), "[A-Za-z]{0,8}")),
     ) {
         let mut doc = document(objects, Vec::new(), Vec::new());
         // Step 16.2: the light-transport switches, an area light.
@@ -352,8 +353,21 @@ proptest! {
                         ..grid4d_scene::LightDetails::default()
                     },
                     shadow: grid4d_scene::LightShadow::Area,
+                    linking: grid4d_scene::Linking::default(),
+                    group: String::new(),
                 },
             ));
+        }
+        // Step 16.4: a light linked to the objects so far, in a group.
+        if let Some((include, group)) = &linked {
+            let objects: Vec<_> = doc.scene.iter().map(|(id, _)| id).take(3).collect();
+            let mut light = ObjectKind::light([1.0; 3], 1.0);
+            if let ObjectKind::Light { linking, group: own, .. } = &mut light {
+                linking.mode = if *include { grid4d_scene::LinkMode::Include } else { grid4d_scene::LinkMode::Exclude };
+                linking.objects = objects;
+                own.clone_from(group);
+            }
+            doc.scene.insert(Node::new("Linked", light));
         }
         // Step 16.3: a Sky, an Environment (with a texture or none).
         if let Some((angles, elevation, azimuth, turbidity, intensity, sun, sun_size, visible)) = sky {
@@ -369,6 +383,7 @@ proptest! {
                     sun_size,
                     sun_intensity: intensity * 0.5,
                     visible,
+                    group: String::new(),
                 }),
             ));
         }
@@ -380,7 +395,7 @@ proptest! {
             });
             doc.scene.insert(Node::new(
                 "Environment",
-                ObjectKind::Environment(grid4d_scene::Environment { texture, intensity, rotation, visible }),
+                ObjectKind::Environment(grid4d_scene::Environment { texture, intensity, rotation, visible, group: "Fill".to_owned() }),
             ));
         }
         let bytes = grid4d_io::to_bytes(&doc).unwrap();
@@ -395,7 +410,14 @@ proptest! {
         } else {
             let mut expected = doc.render;
             (expected.clamp_indirect, expected.emissive_lights) = (true, true);
-            prop_assert_eq!(as_v4.unwrap().render, expected);
+            let as_v4 = as_v4.unwrap();
+            prop_assert_eq!(&as_v4.render, &expected);
+            // Lights light everything, in no group.
+            for (_, node) in as_v4.scene.iter() {
+                if let ObjectKind::Light { linking, group, .. } = &node.data.kind {
+                    prop_assert!(linking.is_open() && group.is_empty());
+                }
+            }
         }
     }
 

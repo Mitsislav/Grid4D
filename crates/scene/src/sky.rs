@@ -31,7 +31,7 @@ impl SunPlacement {
 
 /// An open daylight sky with a sun (a sky model from its turbidity and the
 /// sun's height).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Sky {
     pub placement: SunPlacement,
     /// The sun's height above the horizon (radians, −10° … 90°).
@@ -50,6 +50,8 @@ pub struct Sky {
     pub sun_intensity: f32,
     /// Camera rays that miss everything see it.
     pub visible: bool,
+    /// Its light group (empty: none).
+    pub group: String,
 }
 
 impl Sky {
@@ -78,13 +80,14 @@ impl Default for Sky {
             sun_size: 1.0,
             sun_intensity: 1.0,
             visible: true,
+            group: String::new(),
         }
     }
 }
 
 /// A picture all around the scene: an equirectangular (latitude-longitude)
 /// texture, its centre column along −Z.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Environment {
     /// One of the document's textures (`None`, or a dangling id: a uniform
     /// grey of half the intensity).
@@ -95,6 +98,8 @@ pub struct Environment {
     pub rotation: f32,
     /// Camera rays that miss everything see it.
     pub visible: bool,
+    /// Its light group (empty: none).
+    pub group: String,
 }
 
 impl Default for Environment {
@@ -104,6 +109,7 @@ impl Default for Environment {
             intensity: 1.0,
             rotation: 0.0,
             visible: true,
+            group: String::new(),
         }
     }
 }

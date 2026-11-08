@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 16 — Render quality (v1.2): in progress |
-| Last step done | 16.3 — the Sky and Environment objects: daylight model and panoramas lighting renders (importance sampled), the viewport's background and ambient light (2026-11-08) |
-| Next step | 16.4 — light linking (include / exclude) and light groups |
-| Tests | 908 (and 8 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky and Sky / Environment render pictures), all passing; clippy and rustfmt clean |
+| Last step done | 16.4 — light linking (Include / Exclude, shadows following) and the light-group name, in renders, the viewport, the file and the Attribute Manager (2026-11-08) |
+| Next step | 16.5 — lens and shutter: depth of field and motion blur |
+| Tests | 912 (and 9 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking and Sky / Environment render pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2736,6 +2736,7 @@ risks R5 – R8 go with it.
 | 16.1 | Eight specs (the format version 5, area lights with light transport, linking and groups, the Sky and Environment, lens and shutter, passes and multi-layer OpenEXR, adaptive sampling and the denoiser, the Render Queue with the region and the interactive Render View, subsurface and displacement); `.g4d` version 5 written (version 4's module moved to `v5.rs`; `v4.rs` upgrades a version 4 `document.json` as JSON, dropping fields version 5 adds by place and refusing values it adds; version 3 goes through both upgrades); `FILE_FORMAT.md` for version 5, golden `demo_v5.g4d` / `full_v5.g4d`, the version 4 fixtures frozen and checked to read exactly as before, the property test relabels documents as version 4 too; the render-time budget measured on four reference scenes (`examples/budget.rs`, `docs/performance.md`) | 871 |
 | 16.2a | Light transport: emitting triangles in a table by power (four points' brightness × area), one sampled at every surface with a shadow ray (stopped by glass, which refracted paths cross instead), weighed against the material's own bounce by multiple importance sampling (the power heuristic; `Material::pdf`, the mixture of its lobes); Omni / Spot / Infinite unchanged, so scenes without emitters render exactly as in 1.1; Render Settings ▸ Sampling: Clamp Indirect and Emissive Surfaces Light the Scene (`.g4d` v5 `clamp_indirect`, `emissive_lights`; dropped from a v4 file); Greek; the manual's §20.1 with a before / after picture; the studio scene re-measured | 877 |
 | 16.3 | The Sky and Environment objects (`ObjectKind::{Sky, Environment}`, `SunPlacement`; Elevation, Azimuth, Turbidity, Intensity, Rotation animate): the Preetham daylight model and the sun's colour from Rayleigh and haze transmittance (`grid4d-eval::sky`, pure; 1.0 = 100 000 lux), the topmost visible one chosen by evaluation; in the tracer the surround met by rays and sampled as a light — the sun as a disc, the rest by importance over an equirectangular table (`environment.rs`) — with MIS, Auto Light off, and the last bounce followed one ray further for lights sampled directly; in the viewport a background pass (`sky.wgsl`) behind perspective views and spherical-harmonic ambient light in Gouraud shading (a Sky's made when it changes, a picture's on the texture loader's thread), the sun as an Infinite light with the view's shadow; View ▸ Filter ▸ Sky; `.g4d` v5 kinds `sky` / `environment` (refused in a version 4 file); the Attribute Manager's rows and the "Not used" note; Create ▸ Sky / Environment, icons, Greek; two reference pictures (daylight, a panorama-lit still life); the manual's §4.2 | 908 |
+| 16.4 | Light linking and the light-group name: `Linking { mode: Exclude / Include, objects }` and `group` on lights (`group` on the Sky and Environment too); evaluation gives each linked light a bit (the first 64) and every object and clone a mask of the linked lights that skip it (`link_lights`, allocation-free); renders skip those lights and let their shadow rays through such objects (`RenderScene::lit_by`); the viewport carries the mask in `InstanceRaw::normal`'s free `w`s (24 bits each), each light its bit (`LightRaw` 112 bytes) and the shadow pass the key light's; `.g4d` v5 `linking` (object indices) and `group` (stripped from a version 4 file); Merge keeps links and, newly, an Environment's picture; the Attribute Manager's Linking, Objects and Light Group rows; Greek; the manual's §4.1 with a picture | 912 |
 | 16.2b | Area lights: `LightType::Area` and `AreaShape` (Rectangle, Disc, Sphere, Tube) with Size X / Y (animatable as `Size . X / Y`), Visible in Render and Two-Sided in `LightDetails`; `.g4d` v5 `light_type: "area"` and an `area` object (a version 4 file with them is refused / stripped); the Attribute Manager's rows; glTF export as a wide spot or a point; in the tracer one power table for area lights and emitting triangles (`lights.rs`: `AreaLight`, `LightTable`), a Sphere sampled over the cone it fills and a Tube over its facing half, visible lights seen by camera rays and bounces with MIS, others sampled only; brightness matched to an Omni light with Inverse Square falloff at 500 cm; in the viewport the shapes as lines and an approximate light from the shape's nearest point (`LightRaw` 96 bytes); a third reference picture; Greek; the manual's §4.1 with a render | 887 |
 
 **16.1 — Specs, the format version 5, the render-time budget**
@@ -2913,6 +2914,40 @@ risks R5 – R8 go with it.
 - **The Greek table's long entries, again.** New entries landed after a
   multi-line one; the table is now re-sorted by a script that reads both
   forms.
+
+**16.4 — Light linking and groups**
+
+*Problems and solutions:*
+- **Where the links live.** `LightDetails` and `EvaluatedLight` are plain
+  copyable values read every frame; a list of objects in them would have
+  made every evaluation allocate. The list and the group name went beside
+  them on `ObjectKind::Light`, and evaluation turns them into numbers: a
+  bit per linked light and a 64-bit mask per object, filled without
+  allocating (the steady-frame test now holds a linked light).
+- **Thirty-seven places build a light.** Adding two fields to the variant
+  broke every literal and every exhaustive pattern across the crates; a
+  script read the compiler's errors and filled in the defaults (or `..` for
+  patterns), round after round, and the few kinds it must not touch (a
+  Sky, an Environment) were fixed by hand.
+- **No room for a mask on the GPU.** Instances already use the 12 vertex
+  attributes WebGPU allows. The three columns of the normal matrix are
+  padded to four, so the mask rides in their `w`s, as three whole numbers
+  of 24 bits (exact in a float, whatever the GPU does with odd bit
+  patterns); a test packs and unpacks a mask.
+- **Shadows that should not be.** An object a light skips must cast no
+  shadow of it: in renders a shadow ray passes such objects as it passes
+  cut-outs; in the viewport the shadow pass drops them, its face uniform
+  carrying the key light's bit.
+- **Light seen after a bounce.** A visible area light met by a bounce from
+  an object it does not light would still have lit it; the path now
+  remembers the triangle it left.
+- **Merge lost references.** Merging rewrote Target tags and a Cloner's
+  object, but only when it noticed them: a Cloner with effectors only, a
+  Material tag's camera, and now a light's links were missed, and an
+  Environment kept the merged file's texture id. One function says whether
+  an object refers to others, and textures are remapped for Environments.
+- **"Include" with nothing listed** lights nothing, as the words say; the
+  default (Exclude, empty) lights everything and needs no bit.
 
 ---
 

@@ -57,6 +57,8 @@ pub fn render_preview(material: &Material, pictures: &Pictures) -> Image {
             light_type: LightType::Omni,
             details: LightDetails::default(),
             shadow: LightShadow::None,
+            linking: grid4d_scene::Linking::default(),
+            group: String::new(),
         };
         doc.scene.insert(Node::new(name, light).with_position(position));
     }

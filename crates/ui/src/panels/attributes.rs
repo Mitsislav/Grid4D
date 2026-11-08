@@ -19,9 +19,9 @@ use grid4d_geom::spline::{
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
     AreaShape, Axis, Body, Channel, CollisionShape, Document, Environment, Falloff, Inherit, KeyState, LightDetails,
-    LightShadow, LightType, MassMode, Material, MaterialId, MaterialTag, Motion, NodeData, NodeId, ObjectKind,
-    ObjectParam, Param, Placement, Projection, Scene, SceneEdit, SimulationSettings, Sky, SplineHandle, SunPlacement,
-    Tag, TagKind, TextureSlot, TimeSettings,
+    LightShadow, LightType, LinkMode, Linking, MassMode, Material, MaterialId, MaterialTag, Motion, NodeData, NodeId,
+    ObjectKind, ObjectParam, Param, Placement, Projection, Scene, SceneEdit, SimulationSettings, Sky, SplineHandle,
+    SunPlacement, Tag, TagKind, TextureSlot, TimeSettings,
 };
 
 use crate::i18n::{key, tr, trf};
@@ -849,6 +849,8 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
                 light_type,
                 details,
                 shadow,
+                linking,
+                group,
             } => {
                 attr_label(ui, "Color", LABEL_WIDTH);
                 widgets::colour_button(ui, color);
@@ -888,6 +890,10 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
                     });
                 ui.end_row();
                 light_details(ui, k, *light_type, details);
+                if let Some((scene, owner)) = links {
+                    linking_rows(ui, linking, scene, owner);
+                }
+                group_row(ui, group);
             }
             ObjectKind::SubdivisionSurface {
                 viewport_levels,
@@ -978,10 +984,12 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
             ObjectKind::Sky(sky) => {
                 unused_surround_note(ui, links);
                 sky_rows(ui, k, sky);
+                group_row(ui, &mut sky.group);
             }
             ObjectKind::Environment(environment) => {
                 unused_surround_note(ui, links);
                 environment_rows(ui, k, environment, links.map(|(scene, _)| scene));
+                group_row(ui, &mut environment.group);
             }
             ObjectKind::Spline {
                 spline, interpolation, ..
@@ -2216,6 +2224,77 @@ fn effector_list_rows(ui: &mut Ui, effectors: &mut Vec<NodeId>, scene: &Scene) {
     }
 }
 
+/// Which objects a light lights: Exclude or Include, and the objects (each
+/// with its children), removed with × and added from a list.
+fn linking_rows(ui: &mut Ui, linking: &mut Linking, scene: &Scene, owner: NodeId) {
+    attr_label(ui, "Linking", LABEL_WIDTH);
+    egui::ComboBox::from_id_salt("grid4d.attr.light.linking")
+        .selected_text(tr(linking.mode.label()))
+        .show_ui(ui, |ui| {
+            for option in LinkMode::ALL {
+                ui.selectable_value(&mut linking.mode, option, tr(option.label()));
+            }
+        })
+        .response
+        .on_hover_text(tr(match linking.mode {
+            LinkMode::Exclude => key("It lights everything but the objects listed (with their children)"),
+            LinkMode::Include => key("It lights only the objects listed (with their children)"),
+        }));
+    ui.end_row();
+    let mut remove = None;
+    for (index, &id) in linking.objects.iter().enumerate() {
+        attr_label(ui, if index == 0 { "Objects" } else { "" }, LABEL_WIDTH);
+        let name = scene.get(id).map_or(tr("(deleted)"), |n| n.data.name.as_str());
+        ui.horizontal(|ui| {
+            ui.label(name);
+            if ui
+                .small_button(tr("×"))
+                .on_hover_text(tr("Remove from the list"))
+                .clicked()
+            {
+                remove = Some(index);
+            }
+        });
+        ui.end_row();
+    }
+    if let Some(index) = remove {
+        linking.objects.remove(index);
+    }
+    attr_label(ui, if linking.objects.is_empty() { "Objects" } else { "" }, LABEL_WIDTH);
+    let mut added = None;
+    egui::ComboBox::from_id_salt("grid4d.attr.light.add_object")
+        .selected_text(tr("Add…"))
+        .width(FIELD_WIDTH + 40.0)
+        .show_ui(ui, |ui| {
+            // Built only while the list is open; indented by depth.
+            scene.walk(&mut Vec::new(), |id, node, _, depth| {
+                if id != owner && !linking.objects.contains(&id) {
+                    let indent = "   ".repeat(usize::try_from(depth).unwrap_or(0));
+                    if ui.button(format!("{indent}{}", node.data.name)).clicked() {
+                        added = Some(id);
+                    }
+                }
+                true
+            });
+        });
+    ui.end_row();
+    if let Some(id) = added {
+        linking.objects.push(id);
+    }
+}
+
+/// A light's (or Sky's, Environment's) light group: a name.
+fn group_row(ui: &mut Ui, group: &mut String) {
+    attr_label(ui, "Light Group", LABEL_WIDTH);
+    let field = ui
+        .add_sized([FIELD_WIDTH + 40.0, 19.0], TextEdit::singleline(group))
+        .on_hover_text(tr(
+            "Lights with the same group name make one group (its own render pass)",
+        ));
+    name_field(ui, &field, "Light Group");
+    ui.end_row();
+}
+
 /// A Plain or Random effector: Strength, the changes it makes, its colour and
 /// falloff.
 fn effector_rows(ui: &mut Ui, k: &mut KeyRows, effector: &mut Effector, random: bool) {
@@ -2921,6 +3000,8 @@ mod tests {
                             ..LightDetails::default()
                         },
                         shadow: LightShadow::ShadowMaps,
+                        linking: Linking::default(),
+                        group: String::new(),
                     },
                 );
                 let before = data.clone();

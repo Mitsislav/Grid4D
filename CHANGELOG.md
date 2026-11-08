@@ -32,6 +32,12 @@ sampling and a denoiser, a render queue).
   objects softly; the Sky's sun lights and shadows the view like an
   Infinite light. The topmost visible one is used. View ▸ Filter ▸ Sky
   hides the background in a view.
+- **Light linking** — a light can light only the objects in its list
+  (Include) or everything but them (Exclude), children included; objects
+  it does not light cast no shadow of it, in renders and in the viewport.
+  Lights, Skies and Environments have a Light Group name (its render pass
+  comes later).
+- **Merge** — an Environment's picture and lights' links survive merging.
 - **Renders** — lights that are sampled directly (glowing surfaces, area
   lights) no longer lose a little light at the last bounce.
 - **Files** — documents are saved in `.g4d` format version 5, which holds

@@ -133,6 +133,14 @@ fn full_document() -> (Document, SimulationCache) {
                 ..grid4d_scene::LightDetails::default()
             },
             shadow: grid4d_scene::LightShadow::Area,
+            // Step 16.4: it lights only the cube and the sphere, in a group.
+            linking: grid4d_scene::Linking {
+                mode: grid4d_scene::LinkMode::Include,
+                objects: ["Cube", "Sphere"]
+                    .map(|name| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0)
+                    .to_vec(),
+            },
+            group: "Key".to_owned(),
         },
     ));
     // Step 16.3: a Sky with its sun placed by angles (its elevation keyed)
@@ -149,6 +157,7 @@ fn full_document() -> (Document, SimulationCache) {
             sun_size: 3.0,
             sun_intensity: 0.75,
             visible: false,
+            group: "Daylight".to_owned(),
         }),
     );
     sky.data.tracks.push(Track {
@@ -164,6 +173,7 @@ fn full_document() -> (Document, SimulationCache) {
             intensity: 2.0,
             rotation: -1.0,
             visible: true,
+            group: String::new(),
         }),
     ));
     (doc, cache)

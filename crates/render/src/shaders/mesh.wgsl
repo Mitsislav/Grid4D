@@ -50,6 +50,8 @@ struct Light {
     area_x: vec4<f32>,
     // An area light: xyz half its second axis, w a sphere's or tube's radius.
     area_y: vec4<f32>,
+    // x: its bit in the objects' unlit masks, −1 when it lights everything.
+    link: vec4<f32>,
 };
 
 @group(0) @binding(1) var<storage, read> lights: array<Light>;
@@ -156,7 +158,19 @@ struct VertexOut {
     @location(6) @interpolate(flat) uv_matrix: vec4<f32>,
     @location(7) @interpolate(flat) uv_offset: vec4<f32>,
     @location(8) world_tangent: vec4<f32>,
+    // The linked lights that do not light the object, 24 bits each.
+    @location(9) @interpolate(flat) unlit: vec3<f32>,
 };
+
+// Whether `light` lights an object with the `unlit` mask (24 bits a part).
+fn lit_by(light: Light, unlit: vec3<f32>) -> bool {
+    if (light.link.x < -0.5) {
+        return true;
+    }
+    let bit = u32(light.link.x + 0.5);
+    let chunk = u32(unlit[min(bit / 24u, 2u)] + 0.5);
+    return ((chunk >> (bit % 24u)) & 1u) == 0u;
+}
 
 @vertex
 fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
@@ -178,6 +192,7 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     let model3 = mat3x3<f32>(model[0].xyz, model[1].xyz, model[2].xyz);
     let side = select(1.0, -1.0, determinant(model3) < 0.0);
     out.world_tangent = vec4<f32>(model3 * vertex.tangent.xyz, vertex.tangent.w * side);
+    out.unlit = vec3<f32>(instance.normal_0.w, instance.normal_1.w, instance.normal_2.w);
     return out;
 }
 
@@ -500,6 +515,9 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         let caster = u32(shadow.params.x + 0.5);
         for (var i = 0u; i < count; i = i + 1u) {
             let light = lights[i];
+            if (!lit_by(light, in.unlit)) {
+                continue;
+            }
             let arriving = incoming(light, in.world_position);
             var amount = arriving.w;
             if (amount > 0.0 && i == caster) {

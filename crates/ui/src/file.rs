@@ -551,9 +551,9 @@ pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, v
     // The file's textures join the document's (a picture it already links is
     // reused); its materials' channels are pointed at them.
     let mut imported = imported;
+    let mut texture_of: HashMap<grid4d_scene::TextureId, grid4d_scene::TextureId> = HashMap::new();
     if !imported.textures.is_empty() {
         let mut textures = doc.scene.textures().clone();
-        let mut texture_of: HashMap<grid4d_scene::TextureId, grid4d_scene::TextureId> = HashMap::new();
         for (old, texture) in imported.textures.iter() {
             let same = match &texture.source {
                 grid4d_scene::TextureSource::Linked(path) => textures.linked_to(path),
@@ -614,14 +614,9 @@ pub(crate) fn merge(path: &Path, doc: &mut Document, editor: &mut EditorState, v
         let parent = node.parent.and_then(|p| ids.get(p).copied());
         let mut data = node.data;
         grid4d_io::remap_materials(&mut data, |m| material_of.get(&m).copied());
+        grid4d_io::remap_object_textures(&mut data, |t| texture_of.get(&t).copied());
         data.layer = data.layer.and_then(|l| layer_of.get(&l).copied());
-        let refers = data.tags.iter().any(|t| {
-            matches!(
-                t,
-                grid4d_scene::Tag::Target { target: Some(_), .. } | grid4d_scene::Tag::Target { up: Some(_), .. }
-            )
-        }) || matches!(data.kind, ObjectKind::Cloner { object: Some(_), .. });
-        if refers {
+        if grid4d_io::refers_to_objects(&data) {
             later.push((index, data.clone()));
             grid4d_io::remap_objects(&mut data, |_| None);
         }

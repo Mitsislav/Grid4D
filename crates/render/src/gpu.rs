@@ -587,7 +587,7 @@ impl ViewportRenderer {
         {
             let view = shadow_view(light, min, max);
             rebind |= self.shadows.ensure(device, view.count);
-            self.shadows.write_faces(queue, &view);
+            self.shadows.write_faces(queue, &view, light.link[0]);
             shadow = ShadowUniform::new(&view, u16::try_from(index).unwrap_or(u16::MAX), hard);
             self.shadow_faces = view.count;
         }

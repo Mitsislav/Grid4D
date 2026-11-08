@@ -6,7 +6,8 @@
 use std::{collections::HashMap, path::Path};
 
 use grid4d_scene::{
-    Channel, Document, Layers, MaterialId, Materials, Node, NodeData, NodeId, ObjectKind, Tag, TextureId, Textures,
+    Channel, Document, Layers, MaterialId, MaterialTag, Materials, Node, NodeData, NodeId, ObjectKind, Tag, TextureId,
+    Textures,
 };
 
 use crate::{IoError, OPEN_EXTENSIONS, gltf_export, gltf_import, load, obj};
@@ -125,8 +126,9 @@ pub(crate) enum Look {
     Colour([u32; 3]),
 }
 
-/// Rewrites the object references in `data` (tags, a Cloner's object) through `map` (a reference
-/// `map` does not know is dropped).
+/// Rewrites the object references in `data` (tags, a Cloner's object and
+/// effectors, a light's linked objects) through `map` (a reference `map` does
+/// not know is dropped).
 pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>) {
     for tag in &mut data.tags {
         match tag {
@@ -138,9 +140,42 @@ pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>
             Tag::Phong { .. } | Tag::Protection { .. } | Tag::Dynamics(_) => {}
         }
     }
-    if let ObjectKind::Cloner { object, effectors, .. } = &mut data.kind {
-        *object = object.and_then(&map);
-        effectors.retain_mut(|id| map(*id).map(|new| *id = new).is_some());
+    match &mut data.kind {
+        ObjectKind::Cloner { object, effectors, .. } => {
+            *object = object.and_then(&map);
+            effectors.retain_mut(|id| map(*id).map(|new| *id = new).is_some());
+        }
+        ObjectKind::Light { linking, .. } => {
+            linking.objects.retain_mut(|id| map(*id).map(|new| *id = new).is_some());
+        }
+        _ => {}
+    }
+}
+
+/// Whether `data` refers to other objects (see [`remap_objects`]).
+#[must_use]
+pub fn refers_to_objects(data: &NodeData) -> bool {
+    let tags = data.tags.iter().any(|t| {
+        matches!(
+            t,
+            Tag::Target { target: Some(_), .. }
+                | Tag::Target { up: Some(_), .. }
+                | Tag::Material(MaterialTag { camera: Some(_), .. })
+        )
+    });
+    let kind = match &data.kind {
+        ObjectKind::Cloner { object, effectors, .. } => object.is_some() || !effectors.is_empty(),
+        ObjectKind::Light { linking, .. } => !linking.objects.is_empty(),
+        _ => false,
+    };
+    tags || kind
+}
+
+/// Rewrites an Environment's texture in `data` through `map` (a reference
+/// `map` does not know is dropped).
+pub fn remap_object_textures(data: &mut NodeData, map: impl Fn(TextureId) -> Option<TextureId>) {
+    if let ObjectKind::Environment(environment) = &mut data.kind {
+        environment.texture = environment.texture.and_then(map);
     }
 }
 
@@ -261,7 +296,7 @@ mod tests {
         let red = doc.scene.materials_mut().insert(Material::new("Red"));
         let id = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
         let (group, cube, boxed) = (id(&doc, "Group"), id(&doc, "Cube"), id(&doc, "Box"));
-        doc.scene.get_mut(group).unwrap().data.tags = vec![Tag::Material(grid4d_scene::MaterialTag::new(Some(red)))];
+        doc.scene.get_mut(group).unwrap().data.tags = vec![Tag::Material(MaterialTag::new(Some(red)))];
         // The Cube aims at the Box: an object reference.
         doc.scene.get_mut(cube).unwrap().data.tags = vec![Tag::Target {
             target: Some(boxed),

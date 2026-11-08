@@ -550,6 +550,7 @@ mod tests {
             falloff: Falloff::Linear,
             radius: 200.0,
             shadow: LightShadow::None,
+            link: None,
         };
         let mut rng = Rng::new(0, 0, 0, 0);
         let below = spot.arriving(Vec3::ZERO, &mut rng).unwrap();

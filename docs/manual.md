@@ -471,6 +471,19 @@ The light's settings are on the Attribute Manager's **Object** tab:
 | Shape, Size X, Size Y (Area) | **Rectangle** (Size X wide, Size Y high) and **Disc** (Size X across) lie in the light's X–Y plane and shine along its −Z axis; **Sphere** (Size X across) and **Tube** (Size X thick, Size Y long, along the light's Z axis) shine all round. |
 | Visible in Render (Area) | The renderer shows the light's shape itself — seen by the camera and in reflections — at its brightness. Off (the default): it lights the scene but is not seen. |
 | Two-Sided (Area: Rectangle, Disc) | Shines from both faces, each at full strength; off, only along −Z (it is dark from behind). |
+| Linking | **Exclude** (the default): the light lights everything except the objects listed below. **Include**: it lights only the objects listed. |
+| Objects | The objects the Linking applies to, each together with its children. Pick one from **Add…**; **×** takes it off the list. A deleted object shows as *(deleted)* and no longer counts. |
+| Light Group | A name: lights (and Skies or Environments) with the same name form a group, which renders will be able to output as a pass of its own (*planned*). |
+
+**Light linking.** An object a light does not light gets none of its light
+and casts no shadow of it — useful to brighten one product without
+flattening the backdrop, or to keep a rim light off the floor. Exclude with
+an empty list (the default) lights everything. Renders and the viewport (in
+Gouraud Shading, its shadow included) both follow the links. Up to 64 lights
+in a scene can be linked; a further linked light lights everything.
+Glowing materials, the Sky and the Environment always light everything.
+
+![A light linked to exclude the blue ball: the red ball is lit and casts a shadow, the blue one gets none of the light and casts no shadow; the light's Linking, Objects and Light Group in the Attribute Manager](images/manual/light_linking.png)
 
 **Area lights** give soft light and soft shadows: the larger the shape, the
 softer they are. The **size does not change how much light it gives**: a
@@ -537,6 +550,7 @@ The Environment's settings:
 | Intensity | Its brightness. |
 | Rotation | Turns the picture about the vertical axis; turning the Environment object turns it too. |
 | Visible to Camera | As for the Sky. |
+| Light Group | As for lights ([§4.1](#41-lights)); the Sky has it too. |
 
 - **One at a time**: the first visible Sky or Environment in the Object
   Manager lights the scene; the others are ignored (their Attribute Manager
@@ -2879,7 +2893,9 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   document.
 - **Lights**: the Square Spot, Parallel and IES types, visible light (fog),
   and the per-light switches (no illumination, ambient, diffuse or specular
-  only); an Area light's viewport shadow is not softened by its size.
+  only); an Area light's viewport shadow is not softened by its size;
+  linking objects by dragging them from the Object Manager, separate lists
+  for light and shadow, and the light groups' render passes.
 - **Sky and Environment**: no date, time and place for the sun, no clouds,
   fog, rainbows, moon or stars; only latitude-longitude panoramas (no cube
   maps); one surround at a time; parallel views keep their gradient.

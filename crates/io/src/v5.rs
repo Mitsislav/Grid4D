@@ -34,7 +34,7 @@ use grid4d_geom::{
     subdivision::{Boundary, MAX_LEVEL},
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
-use grid4d_scene::{AreaShape, Environment, Sky, SunPlacement};
+use grid4d_scene::{AreaShape, Environment, LinkMode, Linking, Sky, SunPlacement};
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
     FrameRange, ImageFormat, Inherit, Interpolation, Key, Layer, LayerId, LayerSwitches, LightDetails, LightShadow,
@@ -323,6 +323,7 @@ impl OverridesDto {
                 Override::Parameters(kind) => {
                     let mut parameters = KindDto::new(kind, "take", meshes);
                     parameters.link_texture(kind, &refs.textures);
+                    parameters.link_objects(kind, &refs.objects);
                     dto.parameters = Some(parameters);
                 }
                 Override::Tags(tags) => dto.tags = Some(tags.iter().map(|tag| TagDto::new(tag, refs)).collect()),
@@ -376,8 +377,10 @@ impl OverridesDto {
         }
         if let Some(kind) = self.parameters {
             let texture = kind.texture_index();
+            let linked = kind.linked_objects();
             let mut kind = kind.into_kind(meshes, "take")?;
             link_texture(&mut kind, texture, textures);
+            link_objects(&mut kind, &linked, ids);
             values.push(Override::Parameters(kind));
         }
         if let Some(tags) = self.tags {
@@ -1918,6 +1921,9 @@ enum KindDto {
         intensity: f32,
         rotation: f32,
         visible: bool,
+        /// Its light group (step 16.4); none when absent.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        group: String,
     },
     Cube {
         size: [f32; 3],
@@ -1984,6 +1990,13 @@ enum KindDto {
         /// step 16.2).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         area: Option<AreaDto>,
+        /// Which objects it lights (version 5, step 16.4); everything when
+        /// absent. Written by the object, resolved once every object exists.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        linking: Option<LinkingDto>,
+        /// Its light group (version 5, step 16.4); none when absent.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        group: String,
     },
     /// `mesh` indexes the file's `meshes`; objects sharing a mesh share an index.
     /// `selected` / `hidden` flag components (optional, added in step 4.1);
@@ -3127,10 +3140,13 @@ struct SkyDto {
     sun_size: f32,
     sun_intensity: f32,
     visible: bool,
+    /// Its light group (step 16.4); none when absent.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    group: String,
 }
 
 impl SkyDto {
-    const fn new(sky: &Sky) -> Self {
+    fn new(sky: &Sky) -> Self {
         Self {
             sun_placement: match sky.placement {
                 SunPlacement::FromObject => SunPlacementDto::Object,
@@ -3144,6 +3160,7 @@ impl SkyDto {
             sun_size: sky.sun_size,
             sun_intensity: sky.sun_intensity,
             visible: sky.visible,
+            group: sky.group.clone(),
         }
     }
 
@@ -3162,7 +3179,50 @@ impl SkyDto {
             sun_size: self.sun_size.clamp(Sky::MIN_SUN_SIZE, Sky::MAX_SUN_SIZE),
             sun_intensity: self.sun_intensity.clamp(0.0, Sky::MAX_INTENSITY),
             visible: self.visible,
+            group: self.group,
         }
+    }
+}
+
+/// Which objects a light lights (version 5, step 16.4), by index in
+/// `objects`.
+#[derive(Debug, Serialize, Deserialize)]
+struct LinkingDto {
+    mode: LinkModeDto,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    objects: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum LinkModeDto {
+    Exclude,
+    Include,
+}
+
+impl From<LinkMode> for LinkModeDto {
+    fn from(mode: LinkMode) -> Self {
+        match mode {
+            LinkMode::Exclude => Self::Exclude,
+            LinkMode::Include => Self::Include,
+        }
+    }
+}
+
+impl From<LinkModeDto> for LinkMode {
+    fn from(mode: LinkModeDto) -> Self {
+        match mode {
+            LinkModeDto::Exclude => Self::Exclude,
+            LinkModeDto::Include => Self::Include,
+        }
+    }
+}
+
+/// Links a light `kind` read from a file to the objects at `indices` of
+/// `ids` (an index the file lacks is left out).
+fn link_objects(kind: &mut ObjectKind, indices: &[usize], ids: &[NodeId]) {
+    if let ObjectKind::Light { linking, .. } = kind {
+        linking.objects = indices.iter().filter_map(|&i| ids.get(i).copied()).collect();
     }
 }
 
@@ -3788,10 +3848,12 @@ impl File {
         let object_layers: Vec<Option<usize>> = objects.iter().map(|o| o.layer).collect();
         let mut tags: Vec<Vec<TagDto>> = Vec::with_capacity(objects.len());
         let mut links: Vec<(Option<usize>, Vec<usize>)> = Vec::with_capacity(objects.len());
+        let mut light_links: Vec<Vec<usize>> = Vec::with_capacity(objects.len());
         let objects = objects
             .into_iter()
             .map(|object| {
                 object.check_finite()?;
+                light_links.push(object.kind.linked_objects());
                 links.push(match &object.kind {
                     KindDto::Cloner { object, effectors, .. } => (*object, effectors.clone()),
                     _ => (None, Vec::new()),
@@ -3833,6 +3895,13 @@ impl File {
             }
         }
         // Object links and tags last: they may refer to any object.
+        for (&id, linked) in ids.iter().zip(&light_links) {
+            if !linked.is_empty()
+                && let Some(node) = doc.scene.get_mut(id)
+            {
+                link_objects(&mut node.data.kind, linked, &ids);
+            }
+        }
         for (&id, (link, effector_links)) in ids.iter().zip(links) {
             if (link.is_some() || !effector_links.is_empty())
                 && let Some(node) = doc.scene.get_mut(id)
@@ -3885,6 +3954,7 @@ impl ObjectDto {
                     effectors.extend(links.iter().filter_map(|id| refs.objects.get(id).copied()));
                 }
                 kind.link_texture(&data.kind, &refs.textures);
+                kind.link_objects(&data.kind, &refs.objects);
                 kind
             },
             position: t.position.to_array(),
@@ -3957,6 +4027,28 @@ impl ObjectDto {
 }
 
 impl KindDto {
+    /// A light's linked objects, by index, as the file has them.
+    fn linked_objects(&self) -> Vec<usize> {
+        match self {
+            Self::Light {
+                linking: Some(linking), ..
+            } => linking.objects.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Writes a light's linked objects by their index in `objects` (a
+    /// deleted one is left out).
+    fn link_objects(&mut self, kind: &ObjectKind, objects: &HashMap<NodeId, usize>) {
+        if let (Self::Light { linking: Some(dto), .. }, ObjectKind::Light { linking, .. }) = (self, kind) {
+            dto.objects = linking
+                .objects
+                .iter()
+                .filter_map(|id| objects.get(id).copied())
+                .collect();
+        }
+    }
+
     /// An Environment's texture index, as the file has it.
     const fn texture_index(&self) -> Option<usize> {
         match self {
@@ -3975,13 +4067,14 @@ impl KindDto {
     fn new(kind: &ObjectKind, object: &str, meshes: &mut MeshTable) -> Self {
         match *kind {
             ObjectKind::Null => Self::Null,
-            ObjectKind::Sky(sky) => Self::Sky(SkyDto::new(&sky)),
-            ObjectKind::Environment(environment) => Self::Environment {
+            ObjectKind::Sky(ref sky) => Self::Sky(SkyDto::new(sky)),
+            ObjectKind::Environment(ref environment) => Self::Environment {
                 // Written by the object, which has the texture table.
                 texture: None,
                 intensity: environment.intensity,
                 rotation: environment.rotation,
                 visible: environment.visible,
+                group: environment.group.clone(),
             },
             ObjectKind::Plugin(ref plugin) => Self::Plugin {
                 plugin: plugin.type_id.clone(),
@@ -4076,6 +4169,8 @@ impl KindDto {
                 light_type,
                 details,
                 shadow,
+                ref linking,
+                ref group,
             } => Self::Light {
                 color,
                 intensity,
@@ -4083,6 +4178,13 @@ impl KindDto {
                 details: LightDetailsDto::new(details),
                 shadow: shadow.into(),
                 area: AreaDto::new(&details),
+                // Its objects are written by the object, which has their
+                // indices.
+                linking: (!linking.is_open()).then(|| LinkingDto {
+                    mode: linking.mode.into(),
+                    objects: Vec::new(),
+                }),
+                group: group.clone(),
             },
             ObjectKind::Polygon {
                 ref mesh,
@@ -4385,12 +4487,14 @@ impl KindDto {
                 intensity,
                 rotation,
                 visible,
+                group,
                 ..
             } => ObjectKind::Environment(Environment {
                 texture: None,
                 intensity: intensity.clamp(0.0, Sky::MAX_INTENSITY),
                 rotation,
                 visible,
+                group,
             }),
             Self::Light {
                 color,
@@ -4399,6 +4503,8 @@ impl KindDto {
                 details,
                 shadow,
                 area,
+                linking,
+                group,
             } => ObjectKind::Light {
                 color,
                 intensity,
@@ -4411,6 +4517,12 @@ impl KindDto {
                     details
                 },
                 shadow: shadow.into(),
+                // Its objects are linked by the caller, which knows them.
+                linking: Linking {
+                    mode: linking.map_or(LinkMode::Exclude, |l| l.mode.into()),
+                    objects: Vec::new(),
+                },
+                group,
             },
             Self::Polygon {
                 mesh,
@@ -6050,6 +6162,8 @@ mod tests {
                 ..LightDetails::default()
             },
             shadow: LightShadow::Raytraced,
+            linking: Linking::default(),
+            group: String::new(),
         };
         // An area light (version 5): its shape apart from the details.
         let panel = ObjectKind::Light {
@@ -6064,6 +6178,8 @@ mod tests {
                 ..LightDetails::default()
             },
             shadow: LightShadow::Area,
+            linking: Linking::default(),
+            group: String::new(),
         };
         let json = serde_json::to_value(KindDto::new(&panel, "Panel", &mut MeshTable::default())).unwrap();
         assert_eq!(json["light_type"], "area");
@@ -6089,6 +6205,8 @@ mod tests {
             light_type: LightType::Infinite,
             details: LightDetails::default(),
             shadow: LightShadow::Area,
+            linking: Linking::default(),
+            group: String::new(),
         };
         for (name, kind) in [
             ("Spot", spot),

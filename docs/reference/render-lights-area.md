@@ -63,9 +63,9 @@ each set of lights makes, for compositing.
 
 | Name | Type / range | Default | Effect |
 |------|--------------|---------|--------|
-| Mode | Exclude, Include | Exclude | Exclude: the light lights everything but the listed objects; Include: only the listed objects |
-| Objects | list of objects | empty | each entry counts with its children; dropped from the Object Manager or picked; deleted objects drop out (a dangling entry does nothing) |
-| Group | text | empty | the light's group: its light also goes into that group's pass (16.6) |
+| Linking | Exclude, Include | Exclude | Exclude: the light lights everything but the listed objects; Include: only the listed objects |
+| Objects | list of objects | empty | each entry counts with its children; added from a list of the document's objects (our choice: no dragging from the Object Manager yet), removed with ×; a deleted object shows as "(deleted)" and does nothing |
+| Light Group | text | empty | the light's group: its light also goes into that group's pass (16.6) |
 
 The Sky and Environment objects (16.3) have Group too.
 
@@ -133,14 +133,21 @@ The Sky and Environment objects (16.3) have Group too.
   reference's per-entry switches).
 - Linking applies to lights only; emissive surfaces, the Sky and the
   Environment light everything.
-- The viewport honours linking in Gouraud shading (a per-object light mask;
-  the 64 first lights of a scene can be linked — beyond that all light
-  everything in the viewport, the render stays exact).
+- The viewport honours linking in Gouraud shading, the key light's shadow
+  map included. Evaluation gives each linked light a bit and each object (and
+  clone, as the object it shows) a 64-bit mask of the linked lights that do
+  not light it; the viewport and the renderer read the same masks. Our
+  choice: the first 64 linked lights of a scene (in Object Manager order) are
+  linked; any further linked light lights everything, in the viewport and in
+  renders. Lights without linking need no bit.
+- Light found by a bounce on a visible area light counts only if that light
+  lights the surface the ray left.
+- Merge keeps the links among the merged objects (others are dropped).
 
 ### Groups (16.4)
 
-- A group is a name: every light (and Sky / Environment) with the same Group
-  belongs to it. The Render Settings' passes list one pass per group in use
+- A group is a name: every light (and Sky / Environment) with the same Light
+  Group belongs to it. 16.4 stores and saves it; the passes come with 16.6. The Render Settings' passes list one pass per group in use
   (16.6); light from lights without a group, and emission seen directly, goes
   into a **Default** group pass, so the group passes add up to the beauty.
 
@@ -156,8 +163,10 @@ The Sky and Environment objects (16.3) have Group too.
 
 | Piece | Where |
 |-------|-------|
-| `LightType::Area(AreaLight { shape, size, visible, two_sided })`, `LightLinking { mode, objects }`, `group: String` | `grid4d-scene::light` |
-| Evaluated lights with shape and linking (object sets resolved per render) | `grid4d-eval` (`EvaluatedScene::lights`) |
+| `LightType::Area` with `AreaShape` and the area fields of `LightDetails`; `Linking { mode: LinkMode, objects }` and `group: String` on `ObjectKind::Light` (and `group` on `Sky`, `Environment`) | `grid4d-scene::light`, `node.rs`, `sky.rs` |
+| Evaluated lights with shape and their link bit (`EvaluatedLight::link`), objects' and clones' `unlit` masks, resolved on every evaluation without allocating | `grid4d-eval` (`link_lights`) |
+| Masks in the viewport: the three free `w`s of `InstanceRaw::normal` (24 bits each), `LightRaw::link` (112 bytes), the shadow pass's face uniform | `grid4d-render` |
+| Linked lights in renders: `RenderScene::lit_by`, shadow rays passing objects a light does not light | `grid4d-raytrace` |
 | Light table by power, NEE + MIS, emissive triangles, area shapes | `grid4d-raytrace` (`scene.rs`, `trace.rs`, a new `lights.rs`) |
 | Viewport: representative point, size-softened shadow, light masks | `grid4d-render` (`mesh.wgsl`, `effects.rs`) |
 | Shapes as overlay lines | `ui/panels/viewport/overlay.rs` |
@@ -188,12 +197,12 @@ no separate diffuse / specular switches per light.
       found by bounces too, light the same.
 - [x] Emissive triangles light the scene; with the switch off the picture
       matches 1.1's behaviour.
-- [ ] A linked light lights only its objects (Include) or all but them
+- [x] A linked light lights only its objects (Include) or all but them
       (Exclude), children included; their shadows follow; dangling entries
       do nothing.
-- [ ] Group passes add up to the beauty within rounding.
+- [ ] Group passes add up to the beauty within rounding (16.6: the passes).
 - [x] Area lights are drawn in the viewport and light it; idle frames stay
       allocation-free.
-- [ ] Every new parameter is undoable, saved in v5, refused or stripped in v4.
+- [x] Every new parameter is undoable, saved in v5, refused or stripped in v4.
 - [x] A reference picture with each shape guards the renderer
       (`area_reference.png`).

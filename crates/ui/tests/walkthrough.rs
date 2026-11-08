@@ -425,6 +425,78 @@ fn sky_picture() {
     save(&mut h, &dir, "sky-viewport");
 }
 
+/// The manual's picture of light linking: a light that leaves out one of
+/// two balls (no light on it, no shadow from it), selected:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored light_linking_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn light_linking_picture() {
+    use glam::Vec3;
+    use grid4d_scene::{LightShadow, LinkMode, Node, ObjectKind};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::new("Linking");
+    doc.scene.insert(Node::new(
+        "Floor",
+        ObjectKind::Plane {
+            width: 800.0,
+            depth: 800.0,
+            width_segments: 1,
+            depth_segments: 1,
+        },
+    ));
+    let ball = |name: &str, x: f32, colour: [f32; 3]| {
+        Node::new(
+            name,
+            ObjectKind::Sphere {
+                radius: 60.0,
+                segments: 32,
+            },
+        )
+        .with_position(Vec3::new(x, 60.0, 0.0))
+        .with_color(colour)
+    };
+    doc.scene.insert(ball("Lit Ball", -110.0, [0.8, 0.25, 0.2]));
+    let skipped = doc.scene.insert(ball("Skipped Ball", 110.0, [0.2, 0.4, 0.8]));
+    let mut light = ObjectKind::light([1.0, 0.97, 0.9], 1.2);
+    if let ObjectKind::Light { linking, shadow, .. } = &mut light {
+        linking.mode = LinkMode::Exclude;
+        linking.objects.push(skipped);
+        *shadow = LightShadow::ShadowMaps;
+    }
+    let light = doc
+        .scene
+        .insert(Node::new("Key Light", light).with_position(Vec3::new(-150.0, 320.0, -120.0)));
+    let eye = Vec3::new(0.0, 260.0, -560.0);
+    let look = glam::camera::rh::view::look_at_mat4(eye, Vec3::new(0.0, 40.0, 0.0), Vec3::Y).inverse();
+    let camera = doc.scene.insert(
+        Node::new("Camera", ObjectKind::Camera { fov_y_deg: 40.0 })
+            .with_transform(grid4d_scene::Transform::from_matrix(&look)),
+    );
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    h.state_mut().editor.view_camera = Some(camera);
+    h.state_mut().editor.selection.set_single(light);
+    h.run_steps(4);
+    // Shadows on in the view (Options ▸ Shadows).
+    let options = h.get_by_label("Options").rect().center();
+    click(&mut h, options);
+    let shadows = h.get_by_label("Shadows").rect().center();
+    click(&mut h, shadows);
+    close_popups(&mut h);
+    let tab = h
+        .get_all_by_label("Object")
+        .map(|node| node.rect())
+        .filter(|rect| rect.top() > SIZE[1] * 0.5)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    click(&mut h, tab.center());
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "light-linking");
+}
+
 /// The manual's picture of the Texture Manager: a few pictures (one embedded,
 /// one missing), in the Animate layout where the bottom pane is tall:
 ///

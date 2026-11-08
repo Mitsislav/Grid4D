@@ -28,6 +28,8 @@ const SHADOW_MAP_PIXELS: f32 = 2048.0;
 const OMNI_FOV_DEG: f32 = 95.0;
 /// Uniform offsets must be multiples of this.
 const FACE_STRIDE: u64 = 256;
+/// A face's matrix and the key light's link (`Face` in `shadow.wgsl`).
+const FACE_BYTES: u64 = size_of::<[[f32; 4]; 5]>() as u64;
 const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// Where the key light's shadow map looks from.
@@ -158,7 +160,7 @@ impl ShadowMaps {
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: true,
-                    min_binding_size: wgpu::BufferSize::new(size_of::<[[f32; 4]; 4]>() as u64),
+                    min_binding_size: wgpu::BufferSize::new(FACE_BYTES),
                 },
                 count: None,
             }],
@@ -177,7 +179,7 @@ impl ShadowMaps {
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     buffer: &face_buffer,
                     offset: 0,
-                    size: wgpu::BufferSize::new(size_of::<[[f32; 4]; 4]>() as u64),
+                    size: wgpu::BufferSize::new(FACE_BYTES),
                 }),
             }],
         });
@@ -267,12 +269,17 @@ impl ShadowMaps {
     }
 
     /// Uploads the faces' view-projections for the shadow pass.
-    pub(crate) fn write_faces(&self, queue: &wgpu::Queue, view: &ShadowView) {
+    /// Writes the faces' matrices and the key light's `link` (its bit, −1
+    /// when it lights everything).
+    pub(crate) fn write_faces(&self, queue: &wgpu::Queue, view: &ShadowView, link: f32) {
         for (face, matrix) in view.faces.iter().take(6).enumerate() {
+            let mut data = [0.0f32; 20];
+            data[..16].copy_from_slice(&matrix.to_cols_array());
+            data[16] = link;
             queue.write_buffer(
                 &self.face_buffer,
                 FACE_STRIDE * face as u64,
-                bytemuck::cast_slice(&matrix.to_cols_array()),
+                bytemuck::cast_slice(&data),
             );
         }
     }
@@ -735,6 +742,7 @@ mod tests {
             falloff: [0.0; 4],
             area_x: [0.0; 4],
             area_y: [0.0; 4],
+            link: [-1.0, 0.0, 0.0, 0.0],
         }
     }
 

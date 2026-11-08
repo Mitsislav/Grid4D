@@ -200,6 +200,8 @@ fn textured() -> Image {
         light_type: LightType::Infinite,
         details: LightDetails::default(),
         shadow: LightShadow::Raytraced,
+        linking: grid4d_scene::Linking::default(),
+        group: String::new(),
     };
     doc.scene.insert(
         Node::new("Sun", sun).with_transform(Transform::default().with_rotation_deg(Vec3::new(30.0, -55.0, 0.0))),
@@ -284,6 +286,8 @@ fn areas() -> Image {
             ..LightDetails::default()
         },
         shadow: LightShadow::Area,
+        linking: grid4d_scene::Linking::default(),
+        group: String::new(),
     };
     let at = |position: Vec3, hpb: Vec3| Transform::from_position(position).with_rotation_deg(hpb);
     for (shape, size, visible, intensity, place) in [
@@ -496,6 +500,7 @@ fn environment_scene() -> (Document, Pictures) {
             intensity: 1.0,
             rotation: 0.6,
             visible: true,
+            group: String::new(),
         }),
     ));
     (doc, pictures)

@@ -15,7 +15,8 @@ use grid4d_scene::{Axis, Curve, Document, Key, Node, NodeData, NodeId, ObjectKin
 
 /// `count` primitives of every shape in groups of 100, every `animated`-th
 /// one moving and turning over frames 0–90, one polygon object, and a Sky
-/// whose sun rises over the frames (an Environment under it, unused). The
+/// whose sun rises over the frames (an Environment under it, unused), a light
+/// linked to leave out the first group. The
 /// groups take turns at a plain material, a textured one on the objects' UVs
 /// and the textured one through a Box projection.
 fn scene(count: usize, animated: usize) -> (Document, NodeId) {
@@ -87,6 +88,14 @@ fn scene(count: usize, animated: usize) -> (Document, NodeId) {
         "Environment",
         ObjectKind::Environment(grid4d_scene::Environment::default()),
     ));
+    // A light that leaves out the first group (linking is resolved on every
+    // evaluation).
+    let first = doc.scene.roots()[0];
+    let mut light = ObjectKind::light([1.0; 3], 1.0);
+    if let ObjectKind::Light { linking, .. } = &mut light {
+        linking.objects.push(first);
+    }
+    doc.scene.insert(Node::new("Linked", light));
     (doc, polygon)
 }
 

@@ -64,6 +64,11 @@ const ADDED: &[Added] = &[
         place: Place::Kind("light"),
         fields: &["area"],
     },
+    // Step 16.4: which objects a light lights, and its light group.
+    Added {
+        place: Place::Kind("light"),
+        fields: &["linking", "group"],
+    },
 ];
 
 /// A value version 5 adds to a field that held one of a closed set (a `type`

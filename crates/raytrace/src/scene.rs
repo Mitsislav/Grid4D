@@ -73,6 +73,8 @@ pub(crate) struct Light {
     pub falloff: Falloff,
     pub radius: f32,
     pub shadow: LightShadow,
+    /// Its bit in the objects' `unlit` masks (`None`: it lights everything).
+    pub link: Option<u8>,
 }
 
 impl Light {
@@ -94,6 +96,7 @@ impl Light {
             falloff: details.falloff,
             radius: details.radius,
             shadow: light.shadow,
+            link: light.link,
         }
     }
 }
@@ -205,6 +208,8 @@ struct Object {
     /// Its layers in `RenderScene::layers` (start, end), bottom first.
     layers: (usize, usize),
     first_triangle: usize,
+    /// The linked lights that do not light it (bits by their `link`).
+    unlit: u64,
 }
 
 /// Everything a render needs from the scene, built once per render.
@@ -268,6 +273,7 @@ struct Part<'a> {
     draw: &'a Drawable,
     bounds: Option<Aabb>,
     layers: MaterialLayers,
+    unlit: u64,
 }
 
 impl RenderScene {
@@ -294,12 +300,12 @@ impl RenderScene {
         let objects = evaluated
             .nodes()
             .iter()
-            .map(|n| (n.world, n.drawable, n.bounds, n.materials));
+            .map(|n| (n.world, n.drawable, n.bounds, n.materials, n.unlit));
         let clones = evaluated
             .instances()
             .iter()
-            .map(|c| (c.world, c.drawable, c.bounds, c.materials));
-        for (world, drawable, bounds, layers) in objects.chain(clones) {
+            .map(|c| (c.world, c.drawable, c.bounds, c.materials, c.unlit));
+        for (world, drawable, bounds, layers, unlit) in objects.chain(clones) {
             let Some(draw) = drawable.filter(|d| !d.marker) else {
                 continue;
             };
@@ -323,6 +329,7 @@ impl RenderScene {
                 draw: &draw,
                 bounds,
                 layers,
+                unlit,
             };
             b.add(evaluated, &part, texturing);
         }
@@ -521,6 +528,7 @@ impl Build {
             ),
             layers: (layer_start, self.layers.len()),
             first_triangle,
+            unlit: part.unlit,
         });
     }
 }
@@ -605,6 +613,18 @@ impl RenderScene {
         Some(SurfaceSample { source, point })
     }
 
+    /// Whether the light with `link` lights `triangle`'s object (every light
+    /// without a link does).
+    pub(crate) fn lit_by(&self, triangle: usize, link: Option<u8>) -> bool {
+        let Some(bit) = link else {
+            return true;
+        };
+        self.object_of
+            .get(triangle)
+            .and_then(|&o| self.objects.get(usize::try_from(o).ok()?))
+            .is_none_or(|object| object.unlit & (1u64 << bit) == 0)
+    }
+
     /// The area of `triangle`.
     pub(crate) fn triangle_area(&self, triangle: usize) -> f32 {
         self.triangles
@@ -636,11 +656,19 @@ impl RenderScene {
     }
 
     /// How much light passes along `origin + t · dir` before `distance`:
-    /// none through an opaque surface, all where surfaces are cut out,
-    /// tinted through transmitting ones when `through_glass` (lights: their
-    /// light cannot reach by refraction), none otherwise (emitting surfaces:
-    /// paths refracted through the glass find them).
-    pub(crate) fn transmittance(&self, origin: Vec3, dir: Vec3, distance: f32, through_glass: bool) -> Vec3 {
+    /// none through an opaque surface, all where surfaces are cut out or
+    /// belong to objects the light with `link` does not light (they cast no
+    /// shadow of it), tinted through transmitting ones when `through_glass`
+    /// (lights: their light cannot reach by refraction), none otherwise
+    /// (emitting surfaces: paths refracted through the glass find them).
+    pub(crate) fn transmittance(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        distance: f32,
+        through_glass: bool,
+        link: Option<u8>,
+    ) -> Vec3 {
         let mut start = origin;
         let mut left = distance;
         let mut passed = Vec3::ONE;
@@ -655,7 +683,12 @@ impl RenderScene {
                 return passed;
             };
             let position = start + dir * hit.t;
-            if let Some((surface, _)) = self.surface_at(triangle, position) {
+            let surface = if self.lit_by(triangle, link) {
+                self.surface_at(triangle, position)
+            } else {
+                None
+            };
+            if let Some((surface, _)) = surface {
                 let through = if through_glass { surface.transmitted() } else { 0.0 };
                 if through <= 0.0 {
                     return Vec3::ZERO;
@@ -845,8 +878,8 @@ mod tests {
         assert!(hit.position.abs_diff_eq(Vec3::new(10.0, 200.0, 20.0), 1e-3));
         assert!(hit.geometric.y.abs() > 0.999 && hit.shading.abs_diff_eq(Vec3::Y, 1e-4));
         let above = Vec3::new(10.0, 500.0, 20.0);
-        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 400.0, true), Vec3::ZERO);
-        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 250.0, true), Vec3::ONE);
+        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 400.0, true, None), Vec3::ZERO);
+        assert_eq!(scene.transmittance(above, Vec3::NEG_Y, 250.0, true, None), Vec3::ONE);
     }
 
     #[test]
@@ -906,9 +939,9 @@ mod tests {
         let scene = RenderScene::textured(&eval, &texturing);
         let (solid, cut) = (Vec3::new(-50.0, 100.0, 0.0), Vec3::new(50.0, 100.0, 0.0));
         assert!(scene.intersect(solid, Vec3::NEG_Y).is_some());
-        assert_eq!(scene.transmittance(solid, Vec3::NEG_Y, 200.0, true), Vec3::ZERO);
+        assert_eq!(scene.transmittance(solid, Vec3::NEG_Y, 200.0, true, None), Vec3::ZERO);
         assert!(scene.intersect(cut, Vec3::NEG_Y).is_none(), "cut out");
-        assert_eq!(scene.transmittance(cut, Vec3::NEG_Y, 200.0, true), Vec3::ONE);
+        assert_eq!(scene.transmittance(cut, Vec3::NEG_Y, 200.0, true, None), Vec3::ONE);
         // Without materials it is whole.
         assert!(RenderScene::new(&eval).intersect(cut, Vec3::NEG_Y).is_some());
     }

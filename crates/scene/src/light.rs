@@ -1,6 +1,9 @@
 //! Light parameters beyond colour and intensity (see
 //! `docs/reference/object-light.md` and `render-lights-area.md`): the type,
-//! and the cone, falloff and area shape of Cinema 4D's Details tab.
+//! the cone, falloff and area shape of Cinema 4D's Details tab, and which
+//! objects a light lights.
+
+use crate::{NodeId, Scene};
 
 /// How a light shines.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -208,5 +211,95 @@ impl Default for LightDetails {
             area_visible: false,
             two_sided: false,
         }
+    }
+}
+
+/// How a light's linked objects count.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum LinkMode {
+    /// The light lights everything but the listed objects.
+    #[default]
+    Exclude,
+    /// The light lights only the listed objects.
+    Include,
+}
+
+impl LinkMode {
+    pub const ALL: [Self; 2] = [Self::Exclude, Self::Include];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Exclude => "Exclude",
+            Self::Include => "Include",
+        }
+    }
+}
+
+/// Which objects a light lights (see `docs/reference/render-lights-area.md`):
+/// the listed objects with their children, or everything but them. An
+/// object a light does not light gets none of its light and casts no shadow
+/// of it. Ids of deleted objects simply do nothing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Linking {
+    pub mode: LinkMode,
+    pub objects: Vec<NodeId>,
+}
+
+impl Linking {
+    /// Lights everything (Exclude with nothing listed).
+    #[must_use]
+    pub fn is_open(&self) -> bool {
+        self.mode == LinkMode::Exclude && self.objects.is_empty()
+    }
+
+    /// Whether the light lights object `id` of `scene`: whether it or an
+    /// object above it is listed, as the mode counts it.
+    #[must_use]
+    pub fn lights(&self, scene: &Scene, id: NodeId) -> bool {
+        if self.is_open() {
+            return true;
+        }
+        let mut current = Some(id);
+        let mut listed = false;
+        while let Some(at) = current {
+            if self.objects.contains(&at) {
+                listed = true;
+                break;
+            }
+            current = scene.get(at).and_then(crate::Node::parent);
+        }
+        match self.mode {
+            LinkMode::Exclude => !listed,
+            LinkMode::Include => listed,
+        }
+    }
+}
+
+#[cfg(test)]
+mod linking_tests {
+    use super::*;
+    use crate::{Node, ObjectKind};
+
+    #[test]
+    fn linked_objects_count_with_their_children() {
+        let mut scene = Scene::new();
+        let group = scene.insert(Node::new("Group", ObjectKind::Null));
+        let child = scene.insert_child(group, Node::new("Child", ObjectKind::Null)).unwrap();
+        let other = scene.insert(Node::new("Other", ObjectKind::Null));
+        let mut linking = Linking::default();
+        assert!(linking.is_open() && linking.lights(&scene, child));
+        linking.objects.push(group);
+        assert!(!linking.lights(&scene, group) && !linking.lights(&scene, child));
+        assert!(linking.lights(&scene, other));
+        linking.mode = LinkMode::Include;
+        assert!(linking.lights(&scene, child) && !linking.lights(&scene, other));
+        // Include with nothing listed lights nothing; a deleted object does
+        // nothing.
+        linking.objects.clear();
+        assert!(!linking.lights(&scene, other));
+        scene.remove(group);
+        linking.objects.push(group);
+        assert!(!linking.lights(&scene, other));
     }
 }

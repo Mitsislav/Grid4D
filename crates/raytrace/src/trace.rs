@@ -283,6 +283,9 @@ impl Job<'_> {
         // direct sampling there is weighed against it, so without it light
         // would be missing.
         let last = self.bounces + u32::from(sampling);
+        // The triangle the path last left (linked lights do not light every
+        // object).
+        let mut from: Option<usize> = None;
         for depth in 0..=last {
             let completing = depth > self.bounces;
             if completing && last_pdf.is_none() {
@@ -294,7 +297,7 @@ impl Job<'_> {
                 .map_or(f32::INFINITY, |hit| (hit.position - origin).length());
             // A visible area light in front of the surface: its light, and
             // the path ends there (its shape is opaque).
-            if let Some(seen) = self.area_seen(origin, dir, reach, depth, last_pdf) {
+            if let Some(seen) = self.area_seen(origin, dir, reach, depth, last_pdf, from) {
                 radiance += self.capped(throughput * seen, depth);
                 break;
             }
@@ -362,8 +365,8 @@ impl Job<'_> {
             let lift = offset(hit.position);
             let lifted = hit.position + geometric * lift;
             for light in self.lights {
-                if light.kind == LightType::Area {
-                    continue; // sampled from the table
+                if light.kind == LightType::Area || !self.scene.lit_by(hit.triangle, light.link) {
+                    continue; // sampled from the table, or not lighting this object
                 }
                 let Some(incoming) = light.arriving(hit.position, rng) else {
                     continue;
@@ -374,7 +377,7 @@ impl Job<'_> {
                 }
                 let passed = if light.shadow.casts() {
                     self.scene
-                        .transmittance(lifted, incoming.direction, incoming.distance - lift, true)
+                        .transmittance(lifted, incoming.direction, incoming.distance - lift, true, light.link)
                 } else {
                     Vec3::ONE
                 };
@@ -425,14 +428,25 @@ impl Job<'_> {
                 lifted
             };
             dir = bounce.direction;
+            from = Some(hit.triangle);
         }
         Some(radiance)
     }
 
     /// The light of the nearest visible area light the ray meets before
     /// `reach`, weighed against direct sampling after a reflected bounce
-    /// (`last_pdf`); dark where its back is seen. `None` when it meets none.
-    fn area_seen(&self, origin: Vec3, dir: Vec3, reach: f32, depth: u32, last_pdf: Option<f32>) -> Option<Vec3> {
+    /// (`last_pdf`); dark where its back is seen, or where it does not light
+    /// the surface `from` (a triangle) the ray left. `None` when it meets
+    /// none.
+    fn area_seen(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        reach: f32,
+        depth: u32,
+        last_pdf: Option<f32>,
+        from: Option<usize>,
+    ) -> Option<Vec3> {
         let (index, light, t, normal) = self
             .scene
             .areas()
@@ -444,6 +458,9 @@ impl Job<'_> {
         let Some(cos) = light.emits(normal, -dir) else {
             return Some(Vec3::ZERO);
         };
+        if from.is_some_and(|triangle| !self.scene.lit_by(triangle, light.link)) {
+            return Some(Vec3::ZERO);
+        }
         let weight = match last_pdf {
             // Lights that are not weighed are found only by direct sampling
             // after a bounce (seen directly, or through glass, they show).
@@ -494,20 +511,23 @@ impl Job<'_> {
         }
         // What the light gives off towards the surface, whether bounces can
         // find it, whether things in the way stop it.
-        let (emitted, cos_light, weighed, shadowed) = match sample.source {
+        let (emitted, cos_light, weighed, shadowed, link) = match sample.source {
             Entry::Triangle(triangle) => {
                 let cos = point.normal.dot(l).abs();
                 let triangle = usize::try_from(triangle).unwrap_or(usize::MAX);
-                (self.scene.emission_at(triangle, point.position), cos, true, true)
+                (self.scene.emission_at(triangle, point.position), cos, true, true, None)
             }
             Entry::Area(index) => {
                 let Some(light) = usize::try_from(index).ok().and_then(|i| self.scene.areas().get(i)) else {
                     return Vec3::ZERO;
                 };
+                if !self.scene.lit_by(hit.triangle, light.link) {
+                    return Vec3::ZERO;
+                }
                 let Some(cos) = light.emits(point.normal, -l) else {
                     return Vec3::ZERO;
                 };
-                (light.radiance, cos, light.weighed(), light.shadow.casts())
+                (light.radiance, cos, light.weighed(), light.shadow.casts(), light.link)
             }
         };
         if cos_light <= 1e-6 || emitted.max_element() <= 0.0 {
@@ -535,7 +555,7 @@ impl Job<'_> {
             if reach <= f32::MIN_POSITIVE {
                 return Vec3::ZERO;
             }
-            self.scene.transmittance(lifted, shadow / reach, reach, !weighed)
+            self.scene.transmittance(lifted, shadow / reach, reach, !weighed, link)
         } else {
             Vec3::ONE
         };
@@ -602,7 +622,7 @@ fn sample_environment(
         return Vec3::ZERO;
     }
     // Out to infinity; glass stops it (refracted paths bring its light).
-    let passed = scene.transmittance(lifted, l, f32::INFINITY, false);
+    let passed = scene.transmittance(lifted, l, f32::INFINITY, false, None);
     if passed.max_element() <= 0.0 {
         return Vec3::ZERO;
     }
@@ -635,6 +655,7 @@ fn automatic_light(camera: &RenderCamera) -> Light {
         falloff: Falloff::None,
         radius: 1.0,
         shadow: LightShadow::None,
+        link: None,
     }
 }
 
@@ -718,6 +739,8 @@ mod tests {
             light_type: LightType::Infinite,
             details: LightDetails::default(),
             shadow,
+            linking: grid4d_scene::Linking::default(),
+            group: String::new(),
         };
         // Turned to shine straight down (−Z → −Y).
         doc.scene.insert(
@@ -949,6 +972,8 @@ mod tests {
                 ..LightDetails::default()
             },
             shadow: LightShadow::Area,
+            linking: grid4d_scene::Linking::default(),
+            group: String::new(),
         };
         doc.scene.insert(
             Node::new("Area", light).with_transform(
@@ -1344,6 +1369,8 @@ mod tests {
             light_type: LightType::Infinite,
             details: LightDetails::default(),
             shadow,
+            linking: grid4d_scene::Linking::default(),
+            group: String::new(),
         };
         doc.scene.insert(
             Node::new("Sun", sun).with_transform(grid4d_scene::Transform::default().with_rotation_deg(Vec3::new(
@@ -1617,7 +1644,7 @@ mod tests {
             azimuth: 90f32.to_radians(),
             ..grid4d_scene::Sky::default()
         };
-        doc.scene.insert(Node::new("Sky", ObjectKind::Sky(sky)));
+        doc.scene.insert(Node::new("Sky", ObjectKind::Sky(sky.clone())));
         let options = RenderOptions {
             clamp_indirect: false,
             ..options(60, 64, 0)
@@ -1632,5 +1659,50 @@ mod tests {
             shade > 0.02 && shade < lit * 0.4,
             "{shade} in the shadow, {lit} in the sun"
         );
+    }
+
+    #[test]
+    fn a_linked_light_lights_only_its_objects_and_shadows_only_them() {
+        use grid4d_scene::LinkMode;
+        // The sun turned 45° towards −Z: the cube's shadow falls on the floor
+        // beside it, where the top view sees it.
+        let mut doc = floor_scene(LightShadow::Raytraced);
+        let id = |doc: &Document, name: &str| doc.scene.iter().find(|(_, n)| n.data.name == name).unwrap().0;
+        let sun = id(&doc, "Sun");
+        doc.scene.get_mut(sun).unwrap().data.transform =
+            grid4d_scene::Transform::default().with_rotation_deg(Vec3::new(0.0, -45.0, 0.0));
+        let link = |doc: &mut Document, mode: LinkMode, objects: Vec<NodeId>| {
+            if let ObjectKind::Light { linking, .. } = &mut doc.scene.get_mut(sun).unwrap().data.kind {
+                *linking = grid4d_scene::Linking { mode, objects };
+            }
+        };
+        let look = |doc: &Document| {
+            let image = render(&scene_of(doc), &top_camera(), &options(60, 4, 0));
+            // The floor in the cube's shadow, in the open, and the cube's top.
+            [
+                at(&image, -100.0, -110.0)[0],
+                at(&image, 100.0, 0.0)[0],
+                at(&image, -100.0, 0.0)[0],
+            ]
+        };
+        let [shade, open, top] = look(&doc);
+        assert!(shade < 0.01 && open > 0.6 && top > 0.2, "{shade} {open} {top}");
+        // The cube left out: unlit, and its shadow gone.
+        let (cube, floor) = (id(&doc, "Cube"), id(&doc, "Floor"));
+        link(&mut doc, LinkMode::Exclude, vec![cube]);
+        let [shade, open, top] = look(&doc);
+        assert!((shade - open).abs() < 0.01 && top < 0.01, "{shade} {open} {top}");
+        // Only the floor: the same.
+        link(&mut doc, LinkMode::Include, vec![floor]);
+        assert_eq!(look(&doc), [shade, open, top]);
+        // The floor left out: dark.
+        link(&mut doc, LinkMode::Exclude, vec![floor]);
+        assert!(look(&doc)[1] < 0.01);
+        // A deleted object listed does nothing.
+        let gone = doc.scene.insert(Node::new("Gone", ObjectKind::Null));
+        doc.scene.remove(gone);
+        link(&mut doc, LinkMode::Exclude, vec![gone]);
+        let [shade, open, _] = look(&doc);
+        assert!(shade < 0.01 && open > 0.6);
     }
 }

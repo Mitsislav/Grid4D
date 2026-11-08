@@ -79,6 +79,8 @@ fn light(kind: LightType, intensity: f32, shadow: LightShadow, details: LightDet
         light_type: kind,
         details,
         shadow,
+        linking: grid4d_scene::Linking::default(),
+        group: String::new(),
     }
 }
 

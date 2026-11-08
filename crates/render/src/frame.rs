@@ -19,7 +19,9 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct InstanceRaw {
     pub model: [[f32; 4]; 4],
-    /// Inverse-transpose of the model's upper 3×3 (columns padded to vec4).
+    /// Inverse-transpose of the model's upper 3×3 (columns as vec4); the
+    /// three `w`s hold the object's `unlit` mask (the linked lights that do
+    /// not light it), 24 bits each, as whole numbers.
     pub normal: [[f32; 4]; 3],
     /// Linear RGB + alpha.
     pub color: [f32; 4],
@@ -142,6 +144,9 @@ pub struct LightRaw {
     /// An area light: `xyz` half of the shape along its second axis, `w` the
     /// radius of a Sphere or Tube.
     pub area_y: [f32; 4],
+    /// `x`: its bit in the objects' `unlit` masks, −1 when it lights
+    /// everything.
+    pub link: [f32; 4],
 }
 
 /// The distance at which an area light of intensity 1 lights a facing
@@ -179,6 +184,7 @@ impl LightRaw {
             falloff: [code(falloff), details.radius, 0.0, 0.0],
             area_x: [0.0; 4],
             area_y: [0.0; 4],
+            link: [light.link.map_or(-1.0, f32::from), 0.0, 0.0, 0.0],
         };
         if light.light_type == LightType::Area {
             raw.set_area(light);
@@ -196,6 +202,7 @@ impl LightRaw {
             falloff: [0.0, 1.0, 0.0, 0.0],
             area_x: [0.0; 4],
             area_y: [0.0; 4],
+            link: [-1.0, 0.0, 0.0, 0.0],
         }
     }
 
@@ -515,13 +522,13 @@ impl FrameData {
             .nodes()
             .iter()
             .filter(|n| filter.shows_object(n.kind))
-            .map(|n| (n.id, n.world, n.bounds, n.drawable, n.materials));
+            .map(|n| (n.id, n.world, n.bounds, n.drawable, n.materials, n.unlit));
         let clones = scene
             .instances()
             .iter()
             .filter(|c| filter.shows_object(ObjectKindTag::Cloner) && filter.shows_object(c.kind))
-            .map(|c| (c.owner, c.world, c.bounds, c.drawable, c.materials));
-        for (id, world, object_bounds, drawable, layers) in objects.chain(clones) {
+            .map(|c| (c.owner, c.world, c.bounds, c.drawable, c.materials, c.unlit));
+        for (id, world, object_bounds, drawable, layers, unlit) in objects.chain(clones) {
             let Some(draw) = drawable else {
                 continue;
             };
@@ -547,7 +554,7 @@ impl FrameData {
             let surface = &draw.surface;
             let plain = InstanceRaw {
                 model: model.to_cols_array_2d(),
-                normal: normal_matrix(&model),
+                normal: normal_matrix(&model, unlit),
                 color: [draw.color[0], draw.color[1], draw.color[2], 1.0],
                 params: [
                     selected,
@@ -726,18 +733,29 @@ impl FrameData {
     }
 }
 
-fn normal_matrix(model: &Mat4) -> [[f32; 4]; 3] {
+fn normal_matrix(model: &Mat4, unlit: u64) -> [[f32; 4]; 3] {
     let m = Mat3::from_mat4(*model);
     let n = if m.determinant().abs() > f32::EPSILON {
         m.inverse().transpose()
     } else {
         Mat3::IDENTITY
     };
+    let [a, b, c] = unlit_chunks(unlit);
     [
-        n.x_axis.extend(0.0).to_array(),
-        n.y_axis.extend(0.0).to_array(),
-        n.z_axis.extend(0.0).to_array(),
+        n.x_axis.extend(a).to_array(),
+        n.y_axis.extend(b).to_array(),
+        n.z_axis.extend(c).to_array(),
     ]
+}
+
+/// A 64-bit mask as three whole numbers of 24 bits (exact in an f32).
+fn unlit_chunks(mask: u64) -> [f32; 3] {
+    std::array::from_fn(|i| {
+        let chunk = (mask >> (24 * i)) & 0xFF_FFFF;
+        // Below 2²⁴: exact.
+        f32::from(u16::try_from(chunk >> 8).unwrap_or(u16::MAX)) * 256.0
+            + f32::from(u8::try_from(chunk & 0xFF).unwrap_or(u8::MAX))
+    })
 }
 
 #[cfg(test)]
@@ -798,6 +816,8 @@ mod tests {
             light_type: LightType::Omni,
             details: grid4d_scene::LightDetails::default(),
             shadow,
+            linking: grid4d_scene::Linking::default(),
+            group: String::new(),
         };
         for (name, shadow) in [
             ("Fill", LightShadow::None),
@@ -934,8 +954,17 @@ mod tests {
     }
 
     #[test]
-    fn light_layout_is_96_bytes() {
-        assert_eq!(size_of::<LightRaw>(), 96);
+    fn light_layout_is_112_bytes() {
+        assert_eq!(size_of::<LightRaw>(), 112);
+        // The unlit mask survives its trip through floats.
+        let mask = 0xA5A5_5A5A_DEAD_BEEF_u64;
+        let chunks = unlit_chunks(mask);
+        let back = chunks
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| u64::from(c as u32) << (24 * i))
+            .fold(0, |a, b| a | b);
+        assert_eq!(back, mask);
     }
 
     #[test]
@@ -954,6 +983,8 @@ mod tests {
                 ..LightDetails::default()
             },
             shadow: grid4d_scene::LightShadow::None,
+            linking: grid4d_scene::Linking::default(),
+            group: String::new(),
         };
         // Turned 90° about X: its −Z axis points down.
         doc.scene.insert(Node::new("Spot", spot).with_transform(
@@ -1250,5 +1281,31 @@ mod tests {
         frame.extract(&eval, |_| false);
         assert_eq!(frame.surround.unwrap().background, crate::sky::Background::None);
         assert_eq!(frame.lights().len(), 1, "hidden, it still lights");
+    }
+
+    #[test]
+    fn linked_lights_reach_the_frame_with_their_bit_and_objects_with_their_mask() {
+        let mut doc = Document::new("links");
+        let cube = doc.scene.insert(Node::new("Cube", ObjectKindTag::Cube.default_kind()));
+        doc.scene
+            .insert(Node::new("Sphere", ObjectKindTag::Sphere.default_kind()));
+        let mut light = ObjectKind::light([1.0; 3], 1.0);
+        if let ObjectKind::Light { linking, .. } = &mut light {
+            linking.objects.push(cube);
+        }
+        doc.scene.insert(Node::new("Plain", ObjectKind::light([1.0; 3], 1.0)));
+        doc.scene.insert(Node::new("Linked", light));
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let mut frame = FrameData::new();
+        frame.extract(&eval, |_| false);
+        let links: Vec<f32> = frame.lights().iter().map(|l| l.link[0]).collect();
+        assert_eq!(links, [-1.0, 0.0]);
+        let masks: Vec<f32> = frame
+            .batches()
+            .flat_map(|(_, _, instances)| instances.iter().filter(|i| i.emission[3] < 0.5))
+            .map(|i| i.normal[0][3])
+            .collect();
+        assert!(masks.contains(&1.0) && masks.contains(&0.0), "{masks:?}");
     }
 }

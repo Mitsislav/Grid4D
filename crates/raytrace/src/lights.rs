@@ -37,6 +37,8 @@ pub(crate) struct AreaLight {
     pub radiance: Vec3,
     /// The area that gives off light.
     pub area: f32,
+    /// Its bit in the objects' `unlit` masks (`None`: it lights everything).
+    pub link: Option<u8>,
 }
 
 /// A point chosen on a light with a surface.
@@ -100,6 +102,7 @@ impl AreaLight {
             shadow: light.shadow,
             radiance: Vec3::from(light.color) * scale,
             area,
+            link: light.link,
         })
     }
 
@@ -390,6 +393,7 @@ mod tests {
                 ..LightDetails::default()
             },
             shadow: LightShadow::Area,
+            link: None,
         };
         AreaLight::new(&light).unwrap()
     }

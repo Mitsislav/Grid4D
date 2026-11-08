@@ -73,8 +73,8 @@ pub use crate::{
     gltf_export::{export_gltf, glb_bytes, gltf_document},
     gltf_import::import_gltf,
     import::{
-        EXPORT_EXTENSIONS, IMPORT_EXTENSIONS, ObjectEntry, Objects, export, import, is_importable, remap_materials,
-        remap_objects, remap_textures,
+        EXPORT_EXTENSIONS, IMPORT_EXTENSIONS, ObjectEntry, Objects, export, import, is_importable, refers_to_objects,
+        remap_materials, remap_object_textures, remap_objects, remap_textures,
     },
     obj::{export_obj, import_obj, obj_text},
     picture::{Channels, exr_bytes, png_bytes, save_exr, save_png},

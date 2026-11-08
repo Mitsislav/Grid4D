@@ -524,6 +524,8 @@ fn camera_or_light(node: &gltf::Node<'_>) -> Option<ObjectKind> {
         details,
         // glTF lights have no shadow setting.
         shadow: grid4d_scene::LightShadow::None,
+        linking: grid4d_scene::Linking::default(),
+        group: String::new(),
     })
 }
 
