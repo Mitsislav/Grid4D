@@ -264,6 +264,47 @@ impl AttributesPanel {
             ui.end_row();
             load = load.or(texture_rows(ui, &mut material, Channel::Transmission, textures));
         });
+        section_heading(ui, "Subsurface");
+        material_grid(ui, "grid4d.attr.material.subsurface", |ui| {
+            fraction_row(ui, key("Subsurface"), &mut material.subsurface);
+            let mut base = material.subsurface_color.is_none();
+            check_row(ui, "Use Base Color", &mut base);
+            material.subsurface_color = match (base, material.subsurface_color) {
+                (true, _) => None,
+                (false, None) => Some(material.color),
+                (false, colour) => colour,
+            };
+            if let Some(colour) = &mut material.subsurface_color {
+                attr_label(ui, "Subsurface Color", LABEL_WIDTH);
+                let field = widgets::colour_button(ui, colour);
+                name_field(ui, &field, "Subsurface Color");
+                ui.end_row();
+            }
+            for (index, label) in [key("Radius Red"), key("Radius Green"), key("Radius Blue")]
+                .into_iter()
+                .enumerate()
+            {
+                attr_label(ui, label, LABEL_WIDTH);
+                let field = ui.add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    widgets::length(ui, &mut material.subsurface_radius[index])
+                        .speed(0.01)
+                        .range(0.0..=Material::MAX_SUBSURFACE_RADIUS),
+                );
+                name_field(ui, &field, label);
+                ui.end_row();
+            }
+            attr_label(ui, "Radius Scale", LABEL_WIDTH);
+            let field = ui.add_sized(
+                [FIELD_WIDTH, 19.0],
+                DragValue::new(&mut material.subsurface_scale)
+                    .speed(0.01)
+                    .range(0.0..=Material::MAX_SUBSURFACE_RADIUS)
+                    .suffix(" ×"),
+            );
+            name_field(ui, &field, "Radius Scale");
+            ui.end_row();
+        });
         section_heading(ui, "Coat");
         material_grid(ui, "grid4d.attr.material.coat", |ui| {
             fraction_row(ui, key("Clearcoat"), &mut material.clearcoat);

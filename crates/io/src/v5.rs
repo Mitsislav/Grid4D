@@ -487,9 +487,29 @@ struct MaterialDto {
     clearcoat_roughness: f32,
     #[serde(default, skip_serializing_if = "is_false")]
     two_sided: bool,
+    /// Added in version 5 (step 16.10): subsurface scattering, 0 when absent.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    subsurface: f32,
+    /// Added in version 5 (step 16.10): the Base Color's when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subsurface_color: Option<[f32; 3]>,
+    /// Added in version 5 (step 16.10): [1, 0.2, 0.1] cm when absent.
+    #[serde(default = "subsurface_radius", skip_serializing_if = "is_subsurface_radius")]
+    subsurface_radius: [f32; 3],
+    /// Added in version 5 (step 16.10): 1 when absent.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    subsurface_scale: f32,
     /// The channels' textures, by channel name; absent when there are none.
     #[serde(default, skip_serializing_if = "MapsDto::is_empty")]
     maps: MapsDto,
+}
+
+const fn subsurface_radius() -> [f32; 3] {
+    Material::SUBSURFACE_RADIUS
+}
+
+fn is_subsurface_radius(value: &[f32; 3]) -> bool {
+    *value == Material::SUBSURFACE_RADIUS
 }
 
 const fn half() -> f32 {
@@ -731,6 +751,10 @@ impl MaterialDto {
             clearcoat: material.clearcoat,
             clearcoat_roughness: material.clearcoat_roughness,
             two_sided: material.two_sided,
+            subsurface: material.subsurface,
+            subsurface_color: material.subsurface_color,
+            subsurface_radius: material.subsurface_radius,
+            subsurface_scale: material.subsurface_scale,
             maps,
         }
     }
@@ -755,6 +779,12 @@ impl MaterialDto {
         material.clearcoat = unit(self.clearcoat);
         material.clearcoat_roughness = unit(self.clearcoat_roughness);
         material.two_sided = self.two_sided;
+        material.subsurface = unit(self.subsurface);
+        material.subsurface_color = self.subsurface_color.map(|c| c.map(unit));
+        material.subsurface_radius = self
+            .subsurface_radius
+            .map(|r| r.clamp(0.0, Material::MAX_SUBSURFACE_RADIUS));
+        material.subsurface_scale = self.subsurface_scale.clamp(0.0, Material::MAX_SUBSURFACE_RADIUS);
         for channel in Channel::ALL {
             let Some(slot) = self.maps.get(channel) else {
                 continue;

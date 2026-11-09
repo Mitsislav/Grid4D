@@ -15,9 +15,10 @@ use crate::{
     environment::EnvironmentLight,
     lights::{Entry, LightTable},
     passes::{First, Layout, Part, Split},
-    sample::Rng,
+    sample::{Rng, cosine_hemisphere},
     scene::{Hit, Light},
     shade::{Lobe, Material},
+    subsurface,
 };
 
 /// The largest picture side, in pixels.
@@ -617,6 +618,21 @@ struct Job<'a> {
     layout: Option<&'a Layout>,
 }
 
+/// A surface a path meets, as lighting it needs it: the hit, its material,
+/// the shading and geometric normals turned towards the path, the direction
+/// back along it, the point lifted off the surface (and by how much), and
+/// whether the path met its front.
+struct At<'a> {
+    hit: &'a Hit,
+    material: &'a Material,
+    n: Vec3,
+    v: Vec3,
+    geometric: Vec3,
+    lifted: Vec3,
+    lift: f32,
+    entering: bool,
+}
+
 /// One sample's light as it is gathered: the total, and the passes' split
 /// when they are asked for.
 struct Gather<'a> {
@@ -651,8 +667,8 @@ const fn found_part(depth: u32, lobe: Option<Lobe>) -> Part {
         (Some(Lobe::Transmission), _) => Part::Transmission,
         (Some(Lobe::Specular), true) => Part::SpecularDirect,
         (Some(Lobe::Specular), false) => Part::SpecularIndirect,
-        (_, true) => Part::DiffuseDirect,
-        (_, false) => Part::DiffuseIndirect,
+        (Some(Lobe::Diffuse | Lobe::Subsurface) | None, true) => Part::DiffuseDirect,
+        (Some(Lobe::Diffuse | Lobe::Subsurface) | None, false) => Part::DiffuseIndirect,
     }
 }
 
@@ -662,7 +678,7 @@ const fn sampled_part(lobe: Option<Lobe>) -> Part {
     match lobe {
         Some(Lobe::Transmission) => Part::Transmission,
         Some(Lobe::Specular) => Part::SpecularIndirect,
-        Some(Lobe::Diffuse) | None => Part::DiffuseIndirect,
+        Some(Lobe::Diffuse | Lobe::Subsurface) | None => Part::DiffuseIndirect,
     }
 }
 
@@ -860,69 +876,17 @@ impl Job<'_> {
 
             let lift = offset(hit.position);
             let lifted = hit.position + geometric * lift;
-            for light in self.lights {
-                if light.kind == LightType::Area || !self.scene.lit_by(hit.triangle, light.link) {
-                    continue; // sampled from the table, or not lighting this object
-                }
-                let Some(incoming) = light.arriving(hit.position, rng) else {
-                    continue;
-                };
-                let reflected = material.reflect(n, v, incoming.direction);
-                if reflected.max_element() <= 0.0 || incoming.direction.dot(geometric) <= 0.0 {
-                    continue;
-                }
-                let passed = if light.shadow.casts() {
-                    self.scene.transmittance(
-                        lifted,
-                        incoming.direction,
-                        incoming.distance - lift,
-                        true,
-                        light.link,
-                        time,
-                    )
-                } else {
-                    Vec3::ONE
-                };
-                if passed.max_element() <= 0.0 {
-                    continue;
-                }
-                let light_out = self.capped(throughput * reflected * incoming.strength * passed, depth);
-                if direct {
-                    let diffuse =
-                        throughput * material.reflect_diffuse(n, v, incoming.direction) * incoming.strength * passed;
-                    gather.add_direct(light.group, light_out, diffuse);
-                } else {
-                    gather.add(sampled_part(first_lobe), light.group, light_out);
-                }
-            }
-            if !self.table.is_empty() {
-                let lit = self.sample_surface_lights(&hit, &material, n, v, geometric, lifted, entering, rng, direct);
-                let light_out = self.capped(throughput * lit.total, depth);
-                if direct {
-                    gather.add_direct(lit.group, light_out, throughput * lit.diffuse);
-                } else {
-                    gather.add(sampled_part(first_lobe), lit.group, light_out);
-                }
-            }
-            if let Some(environment) = self.scene.environment() {
-                let lit = sample_environment(
-                    self.scene,
-                    environment,
-                    &material,
-                    (n, v, geometric),
-                    lifted,
-                    entering,
-                    time,
-                    rng,
-                    direct,
-                );
-                let light_out = self.capped(throughput * lit.total, depth);
-                if direct {
-                    gather.add_direct(environment.group, light_out, throughput * lit.diffuse);
-                } else {
-                    gather.add(sampled_part(first_lobe), environment.group, light_out);
-                }
-            }
+            let at = At {
+                hit: &hit,
+                material: &material,
+                n,
+                v,
+                geometric,
+                lifted,
+                lift,
+                entering,
+            };
+            self.light_at(&at, (throughput, depth, first_lobe), direct, time, rng, &mut gather);
 
             if depth == self.bounces && !sampling {
                 break;
@@ -930,6 +894,54 @@ impl Job<'_> {
             let Some(bounce) = material.bounce(n, v, entering, rng) else {
                 break;
             };
+            if bounce.lobe == Lobe::Subsurface {
+                // Into the surface: a walk inside, then out wherever it
+                // leaves, lit there as a white matte surface (the walk gave
+                // the light its colour), and on from there.
+                throughput *= bounce.weight;
+                if depth == 0 {
+                    first_lobe = Some(Lobe::Subsurface);
+                }
+                let Some(medium) = material.medium() else {
+                    break;
+                };
+                let inside = hit.position - geometric * lift;
+                let Some(exit) = subsurface::walk(self.scene, inside, bounce.direction, medium, time, rng) else {
+                    break;
+                };
+                throughput *= exit.weight;
+                if throughput.max_element() <= 1e-4 {
+                    break;
+                }
+                let out = if exit.hit.geometric.dot(exit.direction) > 0.0 {
+                    exit.hit.geometric
+                } else {
+                    -exit.hit.geometric
+                };
+                let white = Material::exit();
+                let exit_lift = offset(exit.hit.position);
+                let at = At {
+                    hit: &exit.hit,
+                    material: &white,
+                    n: out,
+                    v: out,
+                    geometric: out,
+                    lifted: exit.hit.position + out * exit_lift,
+                    lift: exit_lift,
+                    entering: false,
+                };
+                // The walk belongs to this surface: its light is not capped
+                // as light after a bounce is.
+                self.light_at(&at, (throughput, depth, first_lobe), false, time, rng, &mut gather);
+                if depth >= self.bounces && !sampling {
+                    break;
+                }
+                dir = cosine_hemisphere(out, rng.next_f32(), rng.next_f32());
+                last_pdf = sampling.then(|| white.pdf(out, out, dir, false));
+                origin = at.lifted;
+                from = Some(exit.hit.triangle);
+                continue;
+            }
             // Reflected paths stay on the side they came from, refracted ones
             // cross the surface.
             let side = bounce.direction.dot(geometric);
@@ -953,6 +965,95 @@ impl Job<'_> {
             from = Some(hit.triangle);
         }
         Some(gather.radiance)
+    }
+
+    /// The light that reaches the surface `at` straight from the lights,
+    /// glowing surfaces and the surround, reflected towards the path, added
+    /// to `gather` (`throughput`: the path's weight so far; at `depth`; the
+    /// first bounce's lobe for passes; `direct`: split into the matte and
+    /// glossy shares).
+    fn light_at(
+        &self,
+        at: &At<'_>,
+        (throughput, depth, first_lobe): (Vec3, u32, Option<Lobe>),
+        direct: bool,
+        time: f32,
+        rng: &mut Rng,
+        gather: &mut Gather<'_>,
+    ) {
+        let &At {
+            hit,
+            material,
+            n,
+            v,
+            geometric,
+            lifted,
+            lift,
+            entering,
+        } = at;
+        for light in self.lights {
+            if light.kind == LightType::Area || !self.scene.lit_by(hit.triangle, light.link) {
+                continue; // sampled from the table, or not lighting this object
+            }
+            let Some(incoming) = light.arriving(hit.position, rng) else {
+                continue;
+            };
+            let reflected = material.reflect(n, v, incoming.direction);
+            if reflected.max_element() <= 0.0 || incoming.direction.dot(geometric) <= 0.0 {
+                continue;
+            }
+            let passed = if light.shadow.casts() {
+                self.scene.transmittance(
+                    lifted,
+                    incoming.direction,
+                    incoming.distance - lift,
+                    true,
+                    light.link,
+                    time,
+                )
+            } else {
+                Vec3::ONE
+            };
+            if passed.max_element() <= 0.0 {
+                continue;
+            }
+            let light_out = self.capped(throughput * reflected * incoming.strength * passed, depth);
+            if direct {
+                let diffuse =
+                    throughput * material.reflect_diffuse(n, v, incoming.direction) * incoming.strength * passed;
+                gather.add_direct(light.group, light_out, diffuse);
+            } else {
+                gather.add(sampled_part(first_lobe), light.group, light_out);
+            }
+        }
+        if !self.table.is_empty() {
+            let lit = self.sample_surface_lights(hit, material, n, v, geometric, lifted, entering, rng, direct);
+            let light_out = self.capped(throughput * lit.total, depth);
+            if direct {
+                gather.add_direct(lit.group, light_out, throughput * lit.diffuse);
+            } else {
+                gather.add(sampled_part(first_lobe), lit.group, light_out);
+            }
+        }
+        if let Some(environment) = self.scene.environment() {
+            let lit = sample_environment(
+                self.scene,
+                environment,
+                material,
+                (n, v, geometric),
+                lifted,
+                entering,
+                time,
+                rng,
+                direct,
+            );
+            let light_out = self.capped(throughput * lit.total, depth);
+            if direct {
+                gather.add_direct(environment.group, light_out, throughput * lit.diffuse);
+            } else {
+                gather.add(sampled_part(first_lobe), environment.group, light_out);
+            }
+        }
     }
 
     /// The light of the nearest visible area light the ray meets before
@@ -2840,6 +2941,84 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A box `size` wide and deep, `height` high (its top at `height`), of a
+    /// white material (`subsurface` of it scattering inside, light travelling
+    /// `radius` cm), lit by a sun turned `tilt` degrees from straight down
+    /// (180: from straight below).
+    fn slab(size: f32, height: f32, subsurface: f32, radius: f32, tilt: f32) -> Document {
+        let mut doc = Document::new("slab");
+        let mut white = SceneMaterial::new("White");
+        (white.color, white.roughness, white.specular) = ([0.9; 3], 1.0, 0.0);
+        white.subsurface = subsurface;
+        white.subsurface_radius = [radius; 3];
+        let white = doc.scene.materials_mut().insert(white);
+        let mut node = Node::new(
+            "Slab",
+            ObjectKind::Cube {
+                size: Vec3::new(size, height, size),
+                segments: [1, 1, 1],
+            },
+        )
+        .with_position(Vec3::new(0.0, height / 2.0, 0.0));
+        node.data.tags = vec![Tag::Material(MaterialTag::new(Some(white)))];
+        doc.scene.insert(node);
+        let sun = ObjectKind::Light {
+            color: [1.0; 3],
+            intensity: 1.0,
+            light_type: LightType::Infinite,
+            details: LightDetails::default(),
+            shadow: LightShadow::Raytraced,
+            linking: grid4d_scene::Linking::default(),
+            group: String::new(),
+        };
+        doc.scene.insert(
+            Node::new("Sun", sun).with_transform(grid4d_scene::Transform::default().with_rotation_deg(Vec3::new(
+                0.0,
+                tilt - 90.0,
+                0.0,
+            ))),
+        );
+        doc
+    }
+
+    /// The average colour of the middle quarter of a top view of `doc`.
+    fn middle(doc: &Document, samples: u32) -> Vec3 {
+        let image = render(
+            &textured_scene(doc, &Pictures::new(), top_camera(), &[]),
+            &top_camera(),
+            &options(32, samples, 8),
+        );
+        let mut sum = Vec3::ZERO;
+        for y in 12..20 {
+            for x in 12..20 {
+                let p = image.pixels[y * 32 + x];
+                sum += Vec3::new(p[0], p[1], p[2]);
+            }
+        }
+        sum / 64.0
+    }
+
+    #[test]
+    fn subsurface_keeps_the_light_a_white_slab_reflects() {
+        // A wide, thick slab lit from above: light that goes in comes out
+        // again near where it went in, so the top is about as bright as a
+        // matte one of the same colour (within the albedo relation's few %).
+        let matte = middle(&slab(500.0, 200.0, 0.0, 5.0, 0.0), 16);
+        let inside = middle(&slab(500.0, 200.0, 1.0, 5.0, 0.0), 64);
+        let ratio = inside.x / matte.x;
+        assert!((0.93..=1.05).contains(&ratio), "{inside} against {matte}");
+    }
+
+    #[test]
+    fn a_thin_slab_with_subsurface_glows_lit_from_behind() {
+        // Lit from straight below, a 2 cm slab's top is dark when matte and
+        // glows with light that went through it when it scatters inside.
+        let matte = middle(&slab(500.0, 2.0, 0.0, 5.0, 180.0), 8);
+        let inside = middle(&slab(500.0, 2.0, 1.0, 5.0, 180.0), 32);
+        assert!(matte.max_element() < 1e-3, "{matte}");
+        assert!(inside.x > 0.1, "{inside}");
     }
 
     #[test]

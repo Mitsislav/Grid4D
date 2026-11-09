@@ -78,7 +78,8 @@ struct GpuTexture {
 pub(crate) struct MaterialUniform {
     /// Emission strength, opacity, opacity threshold, specular.
     header: [f32; 4],
-    /// Normal strength, bump height (cm), unused, unused.
+    /// Normal strength, bump height (cm), how far the matte lighting wraps
+    /// round (subsurface), unused.
     shape: [f32; 4],
     /// Per channel: tiling (u, v), offset (u, v); range (from, to),
     /// strength, flags (1: a picture, 2: a grey one).
@@ -316,7 +317,14 @@ impl Textures {
             material.opacity_threshold,
             material.specular,
         ];
-        uniform.shape = [material.normal_strength, material.bump_height, 0.0, 0.0];
+        // Subsurface softens the matte part: lighting wraps up to half way
+        // round to the shadow side.
+        uniform.shape = [
+            material.normal_strength,
+            material.bump_height,
+            material.subsurface.clamp(0.0, 1.0) * 0.5,
+            0.0,
+        ];
         let mut views = [&self.white.view; 10];
         for (index, channel) in Channel::ALL.into_iter().enumerate() {
             let Some(slot) = material.maps[index] else { continue };

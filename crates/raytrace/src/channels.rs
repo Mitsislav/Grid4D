@@ -124,8 +124,9 @@ impl Channels {
             };
             emitted.lerp(pictured, read.slot.strength)
         });
+        let color = self.colour(Channel::BaseColor, Vec3::from(m.color), uv);
         Surface {
-            color: self.colour(Channel::BaseColor, Vec3::from(m.color), uv),
+            color,
             roughness: self.scalar(Channel::Roughness, m.roughness, uv),
             metallic: self.scalar(Channel::Metallic, m.metallic, uv),
             specular: self.scalar(Channel::Specular, m.specular, uv),
@@ -134,6 +135,9 @@ impl Channels {
             ior: m.ior,
             clearcoat: self.scalar(Channel::Clearcoat, m.clearcoat, uv),
             clearcoat_roughness: m.clearcoat_roughness,
+            subsurface: m.subsurface,
+            subsurface_color: m.subsurface_color.map_or(color, Vec3::from),
+            subsurface_radius: Vec3::from(m.subsurface_radius) * m.subsurface_scale,
         }
     }
 

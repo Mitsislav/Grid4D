@@ -34,6 +34,11 @@ pub(crate) struct Surface {
     /// A varnish over the rest (0 – 1) and its roughness.
     pub clearcoat: f32,
     pub clearcoat_roughness: f32,
+    /// How much of the matte part scatters inside (0 – 1), the colour light
+    /// takes there and how far each colour travels (cm).
+    pub subsurface: f32,
+    pub subsurface_color: Vec3,
+    pub subsurface_radius: Vec3,
 }
 
 impl Surface {
@@ -49,6 +54,9 @@ impl Surface {
             ior: 1.5,
             clearcoat: 0.0,
             clearcoat_roughness: 0.03,
+            subsurface: 0.0,
+            subsurface_color: color,
+            subsurface_radius: Vec3::new(1.0, 0.2, 0.1),
         }
     }
 

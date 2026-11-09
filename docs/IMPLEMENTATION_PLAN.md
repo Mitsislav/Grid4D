@@ -1753,5 +1753,6 @@ done (2026-11-08); step 16.3 — the Sky and Environment objects
 16.7 — adaptive sampling, the surface-area BVH (16.7a) and the denoiser
 (16.7b) — is done (2026-11-09); step 16.8 — the render region (16.8a) and
 the Render Queue (16.8b) — is done (2026-11-09); step 16.9 — the
-interactive Render View — is done (2026-11-09); next is 16.10, subsurface
-scattering and displacement (may move to 1.3, R5).
+interactive Render View — is done (2026-11-09); step 16.10a — subsurface
+scattering — is done (2026-11-09); next is 16.10b, displacement at render
+time ([`material-subsurface-displacement.md`](reference/material-subsurface-displacement.md)).

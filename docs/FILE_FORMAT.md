@@ -202,6 +202,10 @@ out while it has its default:
 | `clearcoat` | 0 | a varnish over the base (0 – 1) |
 | `clearcoat_roughness` | 0.03 | 0 – 1 |
 | `two_sided` | false | both sides of each polygon shaded alike |
+| `subsurface` | 0 | version 5: how much of the matte part scatters inside (0 – 1) |
+| `subsurface_color` | none | version 5: the colour light comes back with (linear RGB, 0 – 1); none: the Base Color's |
+| `subsurface_radius` | [1, 0.2, 0.1] | version 5: how far red, green and blue travel inside (cm, 0 – 1000) |
+| `subsurface_scale` | 1 | version 5: multiplies the radii (0 – 1000) |
 | `maps` | `{}` | the channels' textures, by channel: `base_color`, `metallic`, `roughness`, `specular`, `normal`, `bump`, `emission`, `opacity`, `transmission`, `clearcoat` |
 
 A channel's texture: `texture` (an index into `textures`), `tiling`
@@ -332,6 +336,7 @@ Phase 16; each step adds its row):
 | the render settings' `passes` (none when absent) and `png_passes` (`beauty_only` when absent) | step 16.6 |
 | the render settings' `adaptive` (false when absent), `min_samples` (16), `noise_threshold` (0.01), `denoise` (`off`) and `denoise_strength` (100) | step 16.7 |
 | the render settings' `region` (none when absent) and `region_final` (false) | step 16.8 |
+| the materials' `subsurface`, `subsurface_color`, `subsurface_radius`, `subsurface_scale` | step 16.10 |
 
 A version 4 file is therefore read as a version 5 file with the version
 number changed, minus any field this table lists (version 4 readers ignore

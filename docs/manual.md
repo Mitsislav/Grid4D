@@ -2186,7 +2186,24 @@ that replaces the value across the surface.
 | Emission | Emission, Strength | light the surface gives off, and how much |
 | Opacity | Opacity, Threshold | cut-out: where opacity is below the threshold the surface is not there (leaves, fences) |
 | Transmission | Transmission, IOR | light passing through (glass, water); IOR bends it (1.5 for glass, 1.33 for water) |
+| Subsurface | Subsurface, Use Base Color / Subsurface Color, Radius Red / Green / Blue, Radius Scale | light that goes into the surface and comes out elsewhere: skin, wax, marble, milk, leaves (below) |
 | Coat | Clearcoat, Coat Roughness | a thin varnish over the base (car paint, lacquered wood) |
+
+**Subsurface.** With **Subsurface** above 0 %, that share of the matte
+light goes into the surface, wanders inside and comes out somewhere else:
+edges and thin parts glow when lit from behind, shadows are softer and the
+surface looks deep rather than painted. **Subsurface Color** (the Base
+Color unless you untick **Use Base Color**) is the colour the light comes
+back with; the **Radius** of each colour says how far it travels inside on
+average, in cm (red farther, as in skin), and **Radius Scale** multiplies
+all three — set it to about the size of the details that should look soft.
+Metal and glass parts do not scatter inside. Use it on **closed** objects:
+light reaching a hole leaves there. Renders show it; the viewport shows a
+softer matte shading only. Light that travels far comes back in one colour
+at a time, so few samples look speckled with colour — the denoiser or more
+samples clean it.
+
+![A wax ball (right) and a matte one of the same colour, lit from behind: the wax glows where light came through it](images/manual/render-subsurface.png)
 
 **A channel's texture.** Under each channel, choose a texture of the
 document in the list, or click **Load…** to pick a picture file (it is added

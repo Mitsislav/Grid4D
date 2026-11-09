@@ -98,12 +98,28 @@ share is subdivided less, with a note in the render's information line.
 
 | Piece | Where |
 |-------|-------|
-| `Material::{subsurface, subsurface_color, subsurface_radius, subsurface_scale, displacement_amount, displacement_mid, displacement_level}`; `Channel::{Subsurface, SubsurfaceColor, Displacement}` | `grid4d-scene` (`material.rs`) |
+| `Material::{subsurface, subsurface_color, subsurface_radius, subsurface_scale}` (16.10a), the displacement fields (16.10b) | `grid4d-scene` (`material.rs`) |
 | Flat subdivision + displacement at render time | `grid4d-geom` (`subdivision.rs`, a `displace` function) and `grid4d-raytrace` (`scene.rs`, when building triangles) |
-| Random walk | `grid4d-raytrace` (`shade.rs`, a new `subsurface.rs`) |
+| Random walk | `grid4d-raytrace` (`shade.rs`: `Lobe::Subsurface`, `Material::exit`; `subsurface.rs`: `Medium`, `walk`; `trace.rs`: `light_at`, shared by surfaces and walk exits) |
 | Viewport: wrapped diffuse, displacement as bump | `grid4d-render` (`mesh.wgsl`) |
 | The channels' rows | `ui/panels/attributes.rs` (material page) |
 | `.g4d` v5 fields; glTF and OBJ | `grid4d-io` |
+
+As built, subsurface (16.10a), our choices: Subsurface and Subsurface
+Color are values without a picture (no texture slot: the viewport's material
+already binds ten pictures, and a picture of either is rare; a later
+step may add them); glTF's `KHR_materials_volume` is not mapped yet. The
+walk picks the colour it flies by as often as that colour still carries
+light, scatters isotropically, ends at 256 steps or by Russian roulette
+after 8; the medium comes from the colour by van de Hulst's relation
+inverted (a thick white slab gives back its colour within a few %). Where it
+comes out the light is gathered as by a white matte surface and the path
+goes on from there; that light is not capped by Clamp Indirect (it belongs
+to the surface the light went into). Light that travels far comes back in
+one colour at a time, so low sample counts show coloured speckles; the
+denoiser cleans them. The viewport wraps the matte lighting round to the
+shadow side by up to half (Subsurface × 0.5), in the Base Color, not the
+Subsurface Color.
 
 Deliberate differences: no adaptive (screen-space) subdivision, no vector
 displacement, no displacement in the viewport, no separate subsurface
@@ -111,7 +127,7 @@ methods (only the random walk), no subsurface anisotropy.
 
 ## Acceptance criteria
 
-- [ ] A sphere with Subsurface lit from behind lets light through at its
+- [x] A sphere with Subsurface lit from behind lets light through at its
       thin edge; a white slab with a large radius approaches its diffuse
       albedo (energy test); Subsurface 0 renders exactly as before.
 - [ ] A plane displaced by a stripes picture shows ridges of the right

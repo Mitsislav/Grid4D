@@ -25,6 +25,7 @@ mod picture;
 mod sample;
 mod scene;
 mod shade;
+mod subsurface;
 mod trace;
 
 pub use camera::{CameraProjection, RenderCamera, ThinLens};

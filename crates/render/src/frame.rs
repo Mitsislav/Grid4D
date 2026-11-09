@@ -80,6 +80,9 @@ pub(crate) struct MaterialData {
     pub specular: f32,
     pub normal_strength: f32,
     pub bump_height: f32,
+    /// Subsurface scattering (0 – 1): the view wraps the matte lighting
+    /// round the shadow side, softly.
+    pub subsurface: f32,
 }
 
 impl MaterialData {
@@ -92,7 +95,9 @@ impl MaterialData {
     /// `None` for a material the shader draws from the instance alone (no
     /// texture, nothing cut out).
     fn of(id: MaterialId, material: &Material) -> Option<Self> {
-        let needed = material.maps().next().is_some() || material.opacity < material.opacity_threshold;
+        let needed = material.maps().next().is_some()
+            || material.opacity < material.opacity_threshold
+            || material.subsurface > 0.0;
         needed.then(|| Self {
             id,
             maps: Channel::ALL.map(|channel| material.map(channel).copied()),
@@ -102,6 +107,7 @@ impl MaterialData {
             specular: material.specular,
             normal_strength: material.normal_strength,
             bump_height: material.bump_height,
+            subsurface: material.subsurface,
         })
     }
 }

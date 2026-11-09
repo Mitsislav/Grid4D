@@ -63,6 +63,11 @@ sampling and a denoiser, a render queue).
   guided by each pixel's surface colour, direction and distance so edges,
   textures and shadows stay; Denoise Strength blends it with the original.
   On for new documents; the picture before denoising is kept as a pass.
+- **Subsurface scattering** — a material's Subsurface lets light go in,
+  wander and come out elsewhere: skin, wax, marble and leaves glow at thin
+  edges and look soft. Subsurface Color and a radius per colour say what
+  colour comes back and how far light travels. Renders show it; the
+  viewport shows a softer matte shading.
 - **Interactive Render View** — the Render View (Ctrl+R) keeps rendering
   while you work: orbiting re-renders at once from the scene already
   prepared, edits prepare it again in the background, and the old picture

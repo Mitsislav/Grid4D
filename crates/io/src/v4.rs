@@ -90,6 +90,16 @@ const ADDED: &[Added] = &[
         place: Place::Render,
         fields: &["region", "region_final"],
     },
+    // Step 16.10: subsurface scattering.
+    Added {
+        place: Place::Material,
+        fields: &[
+            "subsurface",
+            "subsurface_color",
+            "subsurface_radius",
+            "subsurface_scale",
+        ],
+    },
     Added {
         place: Place::Kind("camera"),
         fields: &["lens"],

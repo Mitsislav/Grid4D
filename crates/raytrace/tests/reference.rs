@@ -36,6 +36,7 @@ const FOCUS: &str = concat!(
     "/tests/fixtures/depth_of_field_reference.png"
 );
 const WHEEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/motion_blur_reference.png");
+const WAX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/subsurface_reference.png");
 
 fn demo() -> Image {
     let doc = Document::with_demo_scene();
@@ -779,6 +780,115 @@ fn area_lights_match_their_reference() {
 #[test]
 fn depth_of_field_matches_its_reference() {
     matches_reference(&depth_of_field_at(96, 54, 64), FOCUS);
+}
+
+/// A wax ball beside a matte one of the same colour on a grey floor, lit
+/// from behind and low, with a dim overcast sky: the wax glows at its edge
+/// and its shadow side is lit from inside.
+fn wax_scene() -> Document {
+    let mut doc = Document::new("wax");
+    let mut grey = Material::new("Grey");
+    (grey.color, grey.roughness) = ([0.4, 0.4, 0.4], 0.9);
+    let grey = doc.scene.materials_mut().insert(grey);
+    let colour = [0.9, 0.7, 0.45];
+    let mut wax = Material::new("Wax");
+    (wax.color, wax.roughness, wax.subsurface) = (colour, 0.4, 1.0);
+    wax.subsurface_radius = [3.0, 1.5, 0.8];
+    wax.subsurface_scale = 2.0;
+    let wax = doc.scene.materials_mut().insert(wax);
+    let mut matte = Material::new("Matte");
+    (matte.color, matte.roughness) = (colour, 0.4);
+    let matte = doc.scene.materials_mut().insert(matte);
+    doc.scene.insert(tagged(
+        ObjectKind::Plane {
+            width: 1200.0,
+            depth: 1200.0,
+            width_segments: 1,
+            depth_segments: 1,
+        },
+        Vec3::ZERO,
+        vec![MaterialTag::new(Some(grey))],
+    ));
+    let ball = ObjectKind::Sphere {
+        radius: 45.0,
+        segments: 48,
+    };
+    doc.scene.insert(tagged(
+        ball.clone(),
+        Vec3::new(-80.0, 45.0, 20.0),
+        vec![MaterialTag::new(Some(wax))],
+    ));
+    doc.scene.insert(tagged(
+        ball,
+        Vec3::new(60.0, 45.0, 60.0),
+        vec![MaterialTag::new(Some(matte))],
+    ));
+    // Behind the balls, low, shining towards the camera.
+    let place =
+        glam::camera::rh::view::look_at_mat4(Vec3::new(300.0, 120.0, 500.0), Vec3::new(0.0, 40.0, 0.0), Vec3::Y)
+            .inverse();
+    doc.scene.insert(
+        Node::new(
+            "Back Light",
+            ObjectKind::Light {
+                color: [1.0, 0.95, 0.9],
+                intensity: 3.0,
+                light_type: LightType::Infinite,
+                details: LightDetails::default(),
+                shadow: LightShadow::Raytraced,
+                linking: grid4d_scene::Linking::default(),
+                group: String::new(),
+            },
+        )
+        .with_transform(Transform::from_matrix(&place)),
+    );
+    doc.scene.insert(Node::new(
+        "Sky",
+        ObjectKind::Sky(Sky {
+            sun: false,
+            intensity: 0.25,
+            ..Sky::default()
+        }),
+    ));
+    doc
+}
+
+#[test]
+fn subsurface_scattering_matches_its_reference() {
+    matches_reference(&still_life_at(&wax_scene(), &Pictures::new(), 96, 54, 64), WAX);
+}
+
+/// The manual's picture of subsurface scattering (`render-subsurface.png`,
+/// before it is reduced to 256 colours):
+///
+/// `GRID4D_MANUAL_PICTURES=<folder> cargo test --release -p grid4d-raytrace --test reference -- --ignored subsurface_for`
+#[test]
+#[ignore = "renders a picture for the manual"]
+fn subsurface_for_the_manual() {
+    let dir = std::env::var_os("GRID4D_MANUAL_PICTURES").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    // As the editor renders it for new documents: denoised.
+    let doc = wax_scene();
+    let (scene, camera, options) = still_life_view(&doc, &Pictures::new(), 640, 360, 256);
+    let mut progressive = grid4d_raytrace::Progressive::new(&options).with_denoising();
+    progressive.add_samples(
+        &scene,
+        &camera,
+        &options,
+        u32::MAX,
+        &grid4d_raytrace::RenderControl::default(),
+    );
+    let mut image = progressive.image();
+    grid4d_raytrace::denoise(&mut image, 1.0);
+    let path = dir.join("render-subsurface.png");
+    let mut encoder = png::Encoder::new(BufWriter::new(File::create(&path).unwrap()), 640, 360);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&image.to_rgb8())
+        .unwrap();
+    println!("{}", path.display());
 }
 
 #[test]

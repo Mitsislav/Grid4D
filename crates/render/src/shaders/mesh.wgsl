@@ -88,7 +88,8 @@ struct ChannelSettings {
 struct MaterialUniform {
     // x: emission strength, y: opacity, z: opacity threshold, w: specular.
     header: vec4<f32>,
-    // x: normal strength, y: bump height (cm).
+    // x: normal strength, y: bump height (cm), z: how far matte lighting
+    // wraps round (subsurface).
     shape: vec4<f32>,
     // In `Channel::ALL` order.
     channels: array<ChannelSettings, 10>,
@@ -277,15 +278,19 @@ fn surround_light(d_world: vec3<f32>) -> vec3<f32> {
 
 // What one light reflects towards the viewer: diffuse, and a highlight whose size
 // follows the roughness (Blinn-Phong with a normalised exponent, Schlick Fresnel).
+// With subsurface (`material.shape.z`), the matte part wraps round towards
+// the shadow side, as light scattered inside reaches it.
 fn reflected(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>, diffuse: vec3<f32>, f0: vec3<f32>, shininess: f32) -> vec3<f32> {
     let n_dot_l = dot(n, l);
+    let wrap = material.shape.z;
+    let matte = max((n_dot_l + wrap) / (1.0 + wrap), 0.0);
     if (n_dot_l <= 0.0) {
-        return vec3<f32>(0.0);
+        return diffuse * radiance * matte;
     }
     let h = normalize(l + v);
     let fresnel = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
     let highlight = fresnel * ((shininess + 8.0) / 8.0) * pow(max(dot(n, h), 0.0), shininess);
-    return (diffuse + highlight) * radiance * n_dot_l;
+    return diffuse * radiance * matte + highlight * radiance * n_dot_l;
 }
 
 // The direction towards `light` from `p` (xyz) and how much of it arrives (w):

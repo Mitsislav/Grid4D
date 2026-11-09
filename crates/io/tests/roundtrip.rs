@@ -338,6 +338,7 @@ proptest! {
         adaptive in prop::option::of((1u32..4097, 1u32..501)),
         denoise in (0usize..3, 0u32..101),
         region in prop::option::of((0u16..5000, 0u16..5000, 5001u16..10001, 5001u16..10001, any::<bool>())),
+        subsurface in prop::option::of((0.0f32..=1.0, prop::option::of(colour()), colour(), 0.0f32..=10.0)),
         lens in prop::option::of((any::<bool>(), 1.0f32..5000.0, 0.5f32..64.0, 0u32..17, -6.0f32..6.0, 0.0f32..2.0, 0usize..3, any::<bool>())),
     ) {
         let mut doc = document(objects, Vec::new(), Vec::new());
@@ -386,6 +387,15 @@ proptest! {
             doc.render.noise_threshold = grid4d_scene::NoiseThreshold::from_thousandths(threshold);
         }
         (doc.render.denoise, doc.render.denoise_strength) = (grid4d_scene::Denoise::ALL[denoise.0], denoise.1);
+        // Step 16.10: a material scattering inside.
+        if let Some((amount, colour, radius, scale)) = subsurface {
+            let mut wax = Material::new("Wax");
+            wax.subsurface = amount;
+            wax.subsurface_color = colour;
+            wax.subsurface_radius = radius.map(|r| r * 100.0);
+            wax.subsurface_scale = scale;
+            doc.scene.materials_mut().insert(wax);
+        }
         // Step 16.8: the render region.
         if let Some((left, top, right, bottom, last)) = region {
             doc.render.region = grid4d_scene::RenderRegion::new(left, top, right, bottom);
@@ -470,6 +480,12 @@ proptest! {
             (expected.region, expected.region_final) = (None, false);
             let as_v4 = as_v4.unwrap();
             prop_assert_eq!(&as_v4.render, &expected);
+            // Materials scatter nothing inside.
+            for (_, material) in as_v4.scene.materials().iter() {
+                prop_assert_eq!(material.subsurface, 0.0);
+                prop_assert_eq!(material.subsurface_color, None);
+                prop_assert_eq!(material.subsurface_radius, Material::SUBSURFACE_RADIUS);
+            }
             // Lights light everything, in no group; cameras are pinholes.
             for (_, node) in as_v4.scene.iter() {
                 if let ObjectKind::Light { linking, group, .. } = &node.data.kind {

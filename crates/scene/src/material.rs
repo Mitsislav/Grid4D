@@ -193,6 +193,16 @@ pub struct Material {
     pub clearcoat_roughness: f32,
     /// Both sides of each polygon shaded alike.
     pub two_sided: bool,
+    /// How much of the matte part scatters inside instead of reflecting at
+    /// the surface (0 – 1): skin, wax, marble (see
+    /// `docs/reference/material-subsurface-displacement.md`).
+    pub subsurface: f32,
+    /// The colour light takes inside; `None`: the Base Color's.
+    pub subsurface_color: Option<[f32; 3]>,
+    /// How far red, green and blue light travel inside on average (cm),
+    /// times [`Self::subsurface_scale`].
+    pub subsurface_radius: [f32; 3],
+    pub subsurface_scale: f32,
     /// The texture on each channel, in [`Channel::ALL`] order.
     maps: [Option<TextureSlot>; 10],
 }
@@ -202,6 +212,10 @@ impl Material {
     pub const DEFAULT_COLOR: [f32; 3] = [0.604, 0.604, 0.604];
     /// The refractive index range offered (glass is about 1.5).
     pub const IOR_RANGE: (f32, f32) = (1.0, 3.0);
+    /// Skin-like: red travels farthest.
+    pub const SUBSURFACE_RADIUS: [f32; 3] = [1.0, 0.2, 0.1];
+    /// The largest radius and scale offered.
+    pub const MAX_SUBSURFACE_RADIUS: f32 = 1000.0;
 
     /// A material with the defaults.
     #[must_use]
@@ -223,6 +237,10 @@ impl Material {
             clearcoat: 0.0,
             clearcoat_roughness: 0.03,
             two_sided: false,
+            subsurface: 0.0,
+            subsurface_color: None,
+            subsurface_radius: Self::SUBSURFACE_RADIUS,
+            subsurface_scale: 1.0,
             maps: [None; 10],
         }
     }
@@ -272,7 +290,11 @@ impl Material {
             self.ior,
             self.clearcoat,
             self.clearcoat_roughness,
+            self.subsurface,
+            self.subsurface_scale,
         ]);
+        out.extend(self.subsurface_color.unwrap_or_default());
+        out.extend(self.subsurface_radius);
         for (_, slot) in self.maps() {
             out.extend(slot.numbers());
         }

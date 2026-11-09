@@ -142,6 +142,13 @@ fn full_document() -> (Document, SimulationCache) {
     // Step 16.8: a render region, used for final renders too.
     doc.render.region = grid4d_scene::RenderRegion::new(1000, 2000, 6000, 8000);
     doc.render.region_final = true;
+    // Step 16.10: a material with subsurface scattering.
+    let mut wax = Material::new("Wax");
+    wax.subsurface = 0.8;
+    wax.subsurface_color = Some([0.9, 0.6, 0.3]);
+    wax.subsurface_radius = [2.0, 1.0, 0.5];
+    wax.subsurface_scale = 3.0;
+    doc.scene.materials_mut().insert(wax);
     let sphere = doc.scene.iter().find(|(_, n)| n.data.name == "Sphere").unwrap().0;
     doc.scene.insert(Node::new(
         "Lens Camera",

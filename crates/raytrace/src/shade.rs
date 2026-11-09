@@ -10,6 +10,7 @@ use grid4d_scene::{Falloff, LightType};
 use crate::{
     sample::{Rng, cosine_hemisphere, frame, in_ball, in_cone},
     scene::{Light, Surface},
+    subsurface::Medium,
 };
 
 /// A soft shadow's light is a ball this wide (Omni and Spot), in cm.
@@ -39,6 +40,8 @@ pub(crate) enum Lobe {
     Specular,
     /// Through glass.
     Transmission,
+    /// Into the surface, scattered inside (counted as matte in passes).
+    Subsurface,
 }
 
 /// A surface's reflection, ready to evaluate: an opaque part (a diffuse
@@ -59,6 +62,11 @@ pub(crate) struct Material {
     ior: f32,
     coat: f32,
     coat_alpha: f32,
+    /// The share of the light the matte part sends inside, the colour it
+    /// comes back with, and the medium it walks through.
+    subsurface: f32,
+    subsurface_color: Vec3,
+    medium: Option<Medium>,
 }
 
 /// A clear coat reflects like glass of index 1.5: 4 % straight on.
@@ -73,12 +81,11 @@ impl Material {
         // Of the opaque part, the share that is a matte dielectric.
         let dielectric = (1.0 - metallic) * (1.0 - surface.transmission.clamp(0.0, 1.0));
         let coat_roughness = surface.clearcoat_roughness.clamp(0.05, 1.0);
+        let matte = if opaque > 1e-6 { dielectric / opaque } else { 0.0 };
+        // Of the matte part, the share that scatters inside.
+        let inside = surface.subsurface.clamp(0.0, 1.0);
         Self {
-            diffuse: if opaque > 1e-6 {
-                surface.color * (dielectric / opaque)
-            } else {
-                Vec3::ZERO
-            },
+            diffuse: surface.color * (matte * (1.0 - inside)),
             f0: Vec3::splat(0.08 * surface.specular.clamp(0.0, 1.0)).lerp(surface.color, metallic),
             alpha: roughness * roughness,
             glass,
@@ -86,7 +93,38 @@ impl Material {
             ior: surface.ior.clamp(1.0, 3.0),
             coat: surface.clearcoat.clamp(0.0, 1.0),
             coat_alpha: coat_roughness * coat_roughness,
+            subsurface: matte * inside,
+            subsurface_color: surface.subsurface_color.clamp(Vec3::ZERO, Vec3::ONE),
+            medium: (matte * inside > 0.0).then(|| Medium::new(surface.subsurface_color, surface.subsurface_radius)),
         }
+    }
+
+    /// A white matte surface: where a subsurface walk comes out, the light
+    /// leaves evenly in every direction (the walk gave it its colour).
+    pub(crate) fn exit() -> Self {
+        Self {
+            diffuse: Vec3::ONE,
+            f0: Vec3::ZERO,
+            alpha: 1.0,
+            glass: 0.0,
+            tint: Vec3::ONE,
+            ior: 1.5,
+            coat: 0.0,
+            coat_alpha: 1.0,
+            subsurface: 0.0,
+            subsurface_color: Vec3::ONE,
+            medium: None,
+        }
+    }
+
+    /// What light scattering inside walks through (subsurface).
+    pub(crate) const fn medium(&self) -> Option<Medium> {
+        self.medium
+    }
+
+    /// The subsurface part's weight for choosing it, beside the matte part.
+    fn inside(&self) -> f32 {
+        luminance(self.subsurface_color) * self.subsurface
     }
 
     /// What light of unit strength from `l` reflects towards `v` (both unit,
@@ -167,16 +205,30 @@ impl Material {
         }
         let specular = luminance(schlick(self.f0, n_v));
         let diffuse = luminance(self.diffuse);
-        if specular + diffuse <= 0.0 {
+        let inside = self.inside();
+        if specular + diffuse + inside <= 0.0 {
             return None;
         }
-        let p_specular = (specular / (specular + diffuse)).clamp(0.05, 0.95);
+        let p_specular = (specular / (specular + diffuse + inside)).clamp(0.05, 0.95);
         let (direction, weight, lobe) = if rng.next_f32() < p_specular {
             let (l, weight, v_h) = mirror(n, v, self.alpha, rng)?;
             (l, schlick(self.f0, v_h) * weight / p_specular, Lobe::Specular)
         } else {
+            // Into the surface, as often as it scatters light there (no
+            // random number drawn without subsurface: pictures stay as they
+            // were).
+            let p_inside = if inside > 0.0 { inside / (diffuse + inside) } else { 0.0 };
+            if p_inside > 0.0 && rng.next_f32() < p_inside {
+                let l = cosine_hemisphere(-n, rng.next_f32(), rng.next_f32());
+                return Some(Bounce {
+                    direction: l,
+                    weight: Vec3::splat(self.subsurface * scale / ((1.0 - p_specular) * p_inside)),
+                    through: true,
+                    lobe: Lobe::Subsurface,
+                });
+            }
             let l = cosine_hemisphere(n, rng.next_f32(), rng.next_f32());
-            (l, self.diffuse / (1.0 - p_specular), Lobe::Diffuse)
+            (l, self.diffuse / ((1.0 - p_specular) * (1.0 - p_inside)), Lobe::Diffuse)
         };
         Some(Bounce {
             direction,
@@ -218,9 +270,11 @@ impl Material {
         }
         let specular = luminance(schlick(self.f0, n_v));
         let diffuse = luminance(self.diffuse);
-        if specular + diffuse > 0.0 {
-            let p_specular = (specular / (specular + diffuse)).clamp(0.05, 0.95);
-            pdf += rest * (p_specular * lobe(self.alpha) + (1.0 - p_specular) * n_l / PI);
+        let inside = self.inside();
+        if specular + diffuse + inside > 0.0 {
+            let p_specular = (specular / (specular + diffuse + inside)).clamp(0.05, 0.95);
+            let p_inside = if inside > 0.0 { inside / (diffuse + inside) } else { 0.0 };
+            pdf += rest * (p_specular * lobe(self.alpha) + (1.0 - p_specular) * (1.0 - p_inside) * n_l / PI);
         }
         pdf
     }
