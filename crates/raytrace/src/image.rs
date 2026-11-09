@@ -31,6 +31,23 @@ impl Image {
         }
     }
 
+    /// The picture at `width` × `height`, each pixel the nearest of this
+    /// one's (a quick, small render shown at full size). Passes are left out.
+    #[must_use]
+    pub fn scaled_nearest(&self, width: u32, height: u32) -> Self {
+        let mut out = Self::new(width, height);
+        let (sw, sh) = (u64::from(self.width.max(1)), u64::from(self.height.max(1)));
+        let (w, h) = (u64::from(width.max(1)), u64::from(height.max(1)));
+        for (i, pixel) in out.pixels.iter_mut().enumerate() {
+            let i = u64::try_from(i).unwrap_or(0);
+            let (x, y) = (i % w * sw / w, i / w * sh / h);
+            if let Some(source) = usize::try_from(y * sw + x).ok().and_then(|j| self.pixels.get(j)) {
+                *pixel = *source;
+            }
+        }
+        out
+    }
+
     /// The pixel at (`x`, `y`), if inside.
     #[must_use]
     pub fn pixel(&self, x: u32, y: u32) -> Option<[f32; 4]> {

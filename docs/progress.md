@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 16 — Render quality (v1.2): in progress |
-| Last step done | 16.8 — the render region (16.8a) and the Render Queue (16.8b: saved documents rendered one after another in the background, kept by the app) (2026-11-09) |
-| Next step | 16.9 — the interactive Render View |
-| Tests | 948 (and 15 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region and Render Queue pictures), all passing; clippy and rustfmt clean |
+| Last step done | 16.9 — the interactive Render View: follows camera moves without building the scene again, edits rebuilt on its worker, the old picture kept until a quick first pass (2026-11-09) |
+| Next step | 16.10 — subsurface scattering and displacement (may move to 1.3, R5) |
+| Tests | 949 (and 15 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region and Render Queue pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2742,6 +2742,7 @@ risks R5 – R8 go with it.
 | 16.7b | The denoiser: `RenderSettings::{denoise: Denoise (Off, Final Picture, Final and Render View), denoise_strength}`; `grid4d_raytrace::denoise(&mut Image, strength)` (`denoise.rs`): five à-trous rounds (B3 kernel, holes 1 – 16), weights from normals, depth against its gradient, albedo and brightness within 4 σ of the noise (filtered along), light divided by albedo and multiplied back, background pixels untouched, lighting and group passes filtered with the picture's weights, the picture before kept as a `Noisy` pass; `Progressive::with_denoising` gathers albedo / normal / depth and each pixel's noise (`Image::guides`); renders denoise each finished frame, the Render View from 4 samples when asked; new documents Final Picture; `.g4d` v5 `denoise`, `denoise_strength`; Greek; the manual's §20.1 with a picture; the budget with the denoiser | 940 |
 | 16.8a | The render region: `RenderSettings::{region: Option<RenderRegion>, region_final}` (`RenderRegion` in ten-thousandths of the picture, `pixels(width, height)`); `RenderOptions::region` and `rendered` / `pixel_count`: `Progressive` samples only inside (inside pixels exactly those of a whole render; adaptive states inactive outside), progress counts only the region; Render ▸ Render Region / Clear Render Region (`EditorCommand::{DrawRenderRegion, ClearRenderRegion}`, `EditorState::drawing_region`); `viewport/render_region.rs`: drawn by a drag, edges and corners reshaped (cursor shows which), Esc restores, one `CommitLive` per drag, a dashed frame; the Render View draws only its region over the view; the Output page's Render Region row and Use for Final Render; `.g4d` v5 `region`, `region_final`; Greek; the manual's §20.4 with a picture (walkthrough) | 944 |
 | 16.8b | The Render Queue: `ui::render_queue` (`RenderQueue`, `QueueJob` with take — Render Take, Main or by name —, frames — from the document or manual —, own output, status and message); a loader thread per job reads the file, switches the take, decodes its pictures (`textures::decode_all`) and prepares its simulation, then `Renders::start_frames` renders it as Shift+R does (a Stopped job skips frames whose file exists); `RenderQueue::update` once a frame after the frames are saved; Shift+R refused while it runs, Start refused while a Picture Viewer render runs; the window (`panels/render_queue.rs`: Start, Stop, Add Current Document, Add All Takes, Add Files…, per row Up / Down / Duplicate / Remove / Reset / Show), Render ▸ Render Queue… and Window ▸ Render Queue; the job list kept by the binary in eframe storage (Rendering comes back Stopped); `FileDialogs::pick_documents`; Greek; the manual's §20.5 with a picture | 948 |
+| 16.9 | The interactive Render View: a worker per Render View (`rendering.rs`: `ViewJob`, `view_worker`, `ViewOrder::{Scene, Camera}`) that keeps its built scene; `build_frame` shared with final renders; each start sends `Update::Restart` and renders a quarter-size picture first (`Image::scaled_nearest`), then sharpens (denoised as the settings say); the editor cancels the running pass when it sends something; `ViewportPanel::follow_render_view` sends a camera when only the view's camera moved, else the scene (`Renders::view_camera` / `view_scene`), keeps the picture meanwhile, clears it for another view; Ctrl+R stops it, Esc and a new document clear it; Render ▸ Interactive Render View (`EditorState::interactive_render_view`, off: 1.1's behaviour); `Picture::builds`; Greek; the manual's §20.3 | 949 |
 | 16.4 | Light linking and the light-group name: `Linking { mode: Exclude / Include, objects }` and `group` on lights (`group` on the Sky and Environment too); evaluation gives each linked light a bit (the first 64) and every object and clone a mask of the linked lights that skip it (`link_lights`, allocation-free); renders skip those lights and let their shadow rays through such objects (`RenderScene::lit_by`); the viewport carries the mask in `InstanceRaw::normal`'s free `w`s (24 bits each), each light its bit (`LightRaw` 112 bytes) and the shadow pass the key light's; `.g4d` v5 `linking` (object indices) and `group` (stripped from a version 4 file); Merge keeps links and, newly, an Environment's picture; the Attribute Manager's Linking, Objects and Light Group rows; Greek; the manual's §4.1 with a picture | 912 |
 | 16.2b | Area lights: `LightType::Area` and `AreaShape` (Rectangle, Disc, Sphere, Tube) with Size X / Y (animatable as `Size . X / Y`), Visible in Render and Two-Sided in `LightDetails`; `.g4d` v5 `light_type: "area"` and an `area` object (a version 4 file with them is refused / stripped); the Attribute Manager's rows; glTF export as a wide spot or a point; in the tracer one power table for area lights and emitting triangles (`lights.rs`: `AreaLight`, `LightTable`), a Sphere sampled over the cone it fills and a Tube over its facing half, visible lights seen by camera rays and bounces with MIS, others sampled only; brightness matched to an Omni light with Inverse Square falloff at 500 cm; in the viewport the shapes as lines and an approximate light from the shape's nearest point (`LightRaw` 96 bytes); a third reference picture; Greek; the manual's §4.1 with a render | 887 |
 
@@ -2920,6 +2921,30 @@ risks R5 – R8 go with it.
 - **The Greek table's long entries, again.** New entries landed after a
   multi-line one; the table is now re-sorted by a script that reads both
   forms.
+
+**16.9 — The interactive Render View**
+
+*Problems and solutions:*
+- **A render that outlives a change.** The Render View was a job that
+  rendered one picture and ended; it is now a worker that lives as long as
+  the view's render and waits for what comes next. The editor tells it a
+  new camera or a new scene and cancels the pass running; the worker takes
+  only the newest, so a fast drag never piles up work.
+- **What may skip the rebuild.** Only the view's own camera moving keeps
+  the built scene; a camera object the view looks through is part of the
+  scene (it moves through an edit), and a Camera projection without a
+  camera object projects through the render's camera, so then the scene is
+  built again too.
+- **Never blank, yet quick.** Nothing is drawn anew until the first pass
+  of the new start is in, and that pass is a quarter-size picture with one
+  sample, shown scaled up, so it arrives at once; the full-size passes
+  follow. A size change shows the old picture stretched meanwhile.
+- **The same building for both.** Building a frame's render scene (motion
+  blur moments, the simulation, the camera) moved out of the final
+  render's loop into `build_frame`, used by both.
+- **Tests that waited for the end.** The Render View no longer "ends": the
+  tests wait until it is not rendering (every sample in), and count builds
+  (`Picture::builds`) to check that a camera move builds nothing.
 
 **16.8b — The Render Queue**
 

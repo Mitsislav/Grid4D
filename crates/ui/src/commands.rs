@@ -128,6 +128,8 @@ pub enum EditorCommand {
     /// Render ▸ Render Region: the next drag in the active view draws the
     /// render region (again: no longer).
     DrawRenderRegion,
+    /// Render ▸ Interactive Render View: on or off.
+    ToggleInteractiveRenderView,
     /// The Render Queue: adds the current document as saved (with
     /// `all_takes`, one job per take, Main first); unsaved: asks to save.
     QueueCurrentDocument {
@@ -571,6 +573,16 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                 .start(shown, pictures, viewport.camera(), camera, editor.file.path(), replay);
             editor.renders.viewer_open = true;
         }
+        // Interactive: Ctrl+R again stops the Render View following the view.
+        EditorCommand::RenderView
+            if editor.interactive_render_view
+                && editor
+                    .renders
+                    .view_render()
+                    .is_some_and(|view| view.is_live() && view.key.view == viewport.view_key(doc).view) =>
+        {
+            editor.renders.clear_view();
+        }
         EditorCommand::RenderView => {
             let key = viewport.view_key(doc);
             let replay = editor.simulation.replay(doc);
@@ -581,6 +593,9 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::ClearSimulation => editor.simulation.clear(),
         EditorCommand::StopRender => editor.renders.stop(),
         EditorCommand::DrawRenderRegion => editor.drawing_region = !editor.drawing_region,
+        EditorCommand::ToggleInteractiveRenderView => {
+            editor.interactive_render_view = !editor.interactive_render_view;
+        }
         EditorCommand::ClearRenderRegion => {
             if doc.render.region.is_some() {
                 let settings = grid4d_scene::RenderSettings {

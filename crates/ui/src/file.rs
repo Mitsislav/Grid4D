@@ -478,6 +478,8 @@ fn replace(
 ) {
     editor.history.clear(doc);
     *doc = new;
+    // Another document: the Render View showed the old one.
+    editor.renders.clear_view();
     editor.selection.clear();
     viewport.reset_view();
     editor.file.path = path;

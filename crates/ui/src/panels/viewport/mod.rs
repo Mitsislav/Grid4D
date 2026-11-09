@@ -357,6 +357,44 @@ impl ViewportPanel {
         }
     }
 
+    /// The Render View against the view as it is now: unchanged, it stays;
+    /// interactive (Render ▸ Interactive Render View) and still on the
+    /// active view, it renders again — through the new camera alone when
+    /// only the view's camera moved, else from a scene built anew — keeping
+    /// its picture meanwhile; otherwise it goes away.
+    fn follow_render_view(&mut self, doc: &Document, editor: &mut EditorState) {
+        let Some(view) = editor.renders.view_render() else {
+            return;
+        };
+        let key = self.view_key(doc);
+        if view.key == key {
+            return;
+        }
+        let follow = editor.interactive_render_view && view.is_live() && view.key.view == key.view;
+        // Only the camera: nothing about the scene the worker built changed
+        // (a Camera projection without a camera object looks through it).
+        let camera_only = follow
+            && key.object.is_none()
+            && crate::rendering::ViewKey {
+                camera: view.key.camera,
+                ..key.clone()
+            } == view.key
+            && !looks_through_the_view(doc);
+        let kept = if camera_only {
+            editor.renders.view_camera(&self.camera, key)
+        } else if follow {
+            let replay = editor.simulation.replay(doc);
+            let pictures = editor.textures.pictures(doc.scene.textures());
+            editor.renders.view_scene(doc, pictures, &self.camera, key, replay)
+        } else {
+            false
+        };
+        if !kept {
+            editor.renders.clear_view();
+            self.render_view = None;
+        }
+    }
+
     #[must_use]
     pub fn camera(&self) -> &OrbitCamera {
         &self.camera
@@ -608,15 +646,9 @@ impl ViewportPanel {
         self.follow_view_camera(doc, editor);
         self.swap_view(0);
         self.pixels_per_point = ui.ctx().pixels_per_point();
-        // A Render View that no longer shows the view as it is goes away.
-        if editor
-            .renders
-            .view_render()
-            .is_some_and(|view| view.key != self.view_key(doc))
-        {
-            editor.renders.clear_view();
-            self.render_view = None;
-        }
+        // A Render View that no longer shows the view as it is follows it
+        // (interactive), or goes away.
+        self.follow_render_view(doc, editor);
 
         let several = cells.iter().flatten().count() > 1;
         self.camera_moved = false;
@@ -1660,6 +1692,17 @@ fn framing_bounds(shown: &HashMap<NodeId, Aabb>, id: NodeId, node: &grid4d_scene
     node.world_bounds(world)
 }
 
+/// Whether a Material tag projects through the render's own camera (Camera
+/// projection without a camera object): the renderer's scene then depends
+/// on the view's camera.
+fn looks_through_the_view(doc: &Document) -> bool {
+    doc.scene.iter().any(|(_, node)| {
+        node.data.tags.iter().any(|tag| {
+            matches!(tag, grid4d_scene::Tag::Material(t)
+                if t.projection == grid4d_geom::uv::Projection::Camera && t.camera.is_none())
+        })
+    })
+}
 #[cfg(test)]
 mod tests {
     use egui::{Event, Modifiers, RawInput, Vec2, vec2};
@@ -1691,6 +1734,16 @@ mod tests {
                 doc,
                 editor,
                 viewport: ViewportPanel::new(None),
+            }
+        }
+
+        /// Runs frames until the Render View has every sample.
+        fn render_view_wait(&mut self) {
+            let deadline = Instant::now() + std::time::Duration::from_secs(20);
+            while self.editor.renders.view_render().is_some_and(|v| v.is_rendering()) {
+                assert!(Instant::now() < deadline, "the Render View did not finish");
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                self.frame(Vec::new());
             }
         }
 
@@ -3084,8 +3137,63 @@ mod tests {
     }
 
     #[test]
+    fn the_interactive_render_view_follows_the_view_and_never_goes_blank() {
+        let mut h = Harness::new();
+        h.doc.render.samples = 2;
+        h.frame(Vec::new());
+        h.render_view();
+        let builds = |h: &Harness| h.editor.renders.view_render().unwrap().picture.builds;
+        assert_eq!(builds(&h), 1);
+        // Idle frames and selecting change nothing: no new run.
+        h.editor.selection.clear();
+        for _ in 0..3 {
+            h.frame(Vec::new());
+        }
+        assert!(!h.editor.renders.view_render().unwrap().is_rendering());
+
+        // Moving the camera: the same scene through the new camera, the old
+        // picture shown until the first pass is in.
+        h.viewport.camera.orbit(0.2, 0.0);
+        h.frame(Vec::new());
+        let view = h.editor.renders.view_render().expect("it follows");
+        assert!(view.is_rendering() && view.picture.has_pixels(), "never blank");
+        h.render_view_wait();
+        assert_eq!(builds(&h), 1, "a camera move builds nothing");
+        assert_eq!(h.editor.renders.view_render().unwrap().key, h.viewport.view_key(&h.doc));
+
+        // An edit, a frame change, the Render Settings: built again.
+        let cube = h.doc.scene.roots()[0];
+        let mut data = h.doc.scene.get(cube).unwrap().data.clone();
+        data.transform.position.x += 50.0;
+        h.editor.commands.push(EditorCommand::Edit {
+            edit: grid4d_scene::SceneEdit::SetData { id: cube, data },
+            label: "Move",
+        });
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        assert!(h.editor.renders.view_render().unwrap().picture.has_pixels());
+        h.render_view_wait();
+        assert_eq!(builds(&h), 2);
+        h.doc.time.set_frame(5);
+        h.frame(Vec::new());
+        h.render_view_wait();
+        h.doc.render.samples = 3;
+        h.frame(Vec::new());
+        h.render_view_wait();
+        assert_eq!(builds(&h), 4);
+        assert_eq!(h.editor.renders.view_render().unwrap().picture.samples, 3);
+
+        // Ctrl+R again stops it.
+        h.editor.commands.push(EditorCommand::RenderView);
+        h.frame(Vec::new());
+        assert!(h.editor.renders.view_render().is_none());
+    }
+
+    #[test]
     fn the_render_view_goes_away_when_what_it_shows_changes() {
         let mut h = Harness::new();
+        // Render › Interactive Render View off: the 1.1 behaviour.
+        h.editor.interactive_render_view = false;
         h.doc.render.samples = 1;
         h.frame(Vec::new());
         h.render_view();

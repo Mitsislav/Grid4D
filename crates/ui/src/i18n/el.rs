@@ -883,6 +883,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Ένθεση: σύρετε αριστερά/δεξιά για ένθεση των επιλεγμένων πολυγώνων (όλων αν δεν υπάρχει επιλογή) · κλικ επιλέγει · Esc ακυρώνει",
     ),
     ("Intensity", "Ένταση"),
+    ("Interactive Render View", "Διαδραστικό Render View"),
     ("Interface", "Περιβάλλον"),
     (
         "Interface in English and Greek (Preferences › Interface › Language)",
@@ -1993,6 +1994,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Η ουρά render ξεκινά όταν το render του Picture Viewer τελειώσει ή σταματήσει.",
     ),
     ("The Render View is not saved.", "Η Προβολή απόδοσης δεν αποθηκεύεται."),
+    (
+        "The Render View keeps rendering while you work; off, it goes away on any change",
+        "Το Render View συνεχίζει να αποδίδει ενώ δουλεύετε· κλειστό, φεύγει σε κάθε αλλαγή",
+    ),
     (
         "The Sky or Environment seen directly",
         "Ο Ουρανός ή το Περιβάλλον όπως φαίνεται απευθείας",

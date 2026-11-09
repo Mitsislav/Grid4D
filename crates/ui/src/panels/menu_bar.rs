@@ -481,6 +481,17 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
 
         ui.menu_button(tr("Render"), |ui| {
             command(ui, editor, "Render View", "Ctrl+R", EditorCommand::RenderView);
+            let interactive = Button::new(tr("Interactive Render View")).selected(editor.interactive_render_view);
+            if ui
+                .add(interactive)
+                .on_hover_text(tr(
+                    "The Render View keeps rendering while you work; off, it goes away on any change",
+                ))
+                .clicked()
+            {
+                editor.commands.push(EditorCommand::ToggleInteractiveRenderView);
+                ui.close();
+            }
             command(
                 ui,
                 editor,

@@ -63,6 +63,11 @@ sampling and a denoiser, a render queue).
   guided by each pixel's surface colour, direction and distance so edges,
   textures and shadows stay; Denoise Strength blends it with the original.
   On for new documents; the picture before denoising is kept as a pass.
+- **Interactive Render View** — the Render View (Ctrl+R) keeps rendering
+  while you work: orbiting re-renders at once from the scene already
+  prepared, edits prepare it again in the background, and the old picture
+  stays until a quick first one of the new arrives, so the view never goes
+  blank. Render ▸ Interactive Render View turns it off (1.1's behaviour).
 - **Render region** — Render ▸ Render Region: drag a rectangle in the
   view and the Render View renders only inside it; drag its edges to
   change it. Saved with the document; with Use for Final Render, final

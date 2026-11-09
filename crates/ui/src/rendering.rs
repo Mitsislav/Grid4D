@@ -133,6 +133,9 @@ pub struct Picture {
     pub passes: Vec<grid4d_raytrace::PassLayer>,
     /// The pass shown instead of the picture (an index into `passes`).
     pub pass: Option<usize>,
+    /// The Render View: how many times its scene was built (a camera move
+    /// alone builds none).
+    pub builds: u32,
     /// With adaptive sampling: the samples a pixel got on average, and the
     /// share of pixels (0…1) that got every sample.
     pub sampling: Option<(f32, f32)>,
@@ -182,7 +185,13 @@ enum Update {
         samples: u32,
         frame: i32,
         sampling: Option<(f32, f32)>,
+        /// The picture's size in pixels.
+        size: [u32; 2],
     },
+    /// The Render View starts again (its time counts from now); the old
+    /// picture stays until the next pass. `built`: from a scene built anew
+    /// (else through a new camera only).
+    Restart { built: bool },
     /// Every sample of `frame` is in.
     Frame {
         frame: i32,
@@ -356,10 +365,37 @@ impl Job {
     /// `finished`. Returns whether the picture changed, and whether the render
     /// ended (`Some(stopped)`).
     fn drain(&self, picture: &mut Picture, finished: &mut Vec<FinishedFrame>) -> (bool, Option<bool>) {
+        let (changed, ended) = drain(&self.updates, self.number, picture, finished, &mut false);
+        picture.elapsed = self.started.elapsed();
+        (changed, ended)
+    }
+
+    /// How far the render is (0…1).
+    fn fraction(&self) -> f32 {
+        let done = self.control.progress().min(self.total);
+        // Display only: the precision of f32 is plenty.
+        #[expect(clippy::cast_precision_loss, reason = "a progress bar")]
+        let fraction = done as f32 / self.total.max(1) as f32;
+        fraction
+    }
+}
+
+/// Takes a worker's news from `updates` into `picture` (render `number`),
+/// adding finished frames to `finished`. Returns whether the picture changed,
+/// and whether the render ended (`Some(stopped)`); `restarted` is set when
+/// the Render View started again.
+fn drain(
+    updates: &Receiver<Update>,
+    number: u32,
+    picture: &mut Picture,
+    finished: &mut Vec<FinishedFrame>,
+    restarted: &mut bool,
+) -> (bool, Option<bool>) {
+    {
         let mut changed = false;
         let mut ended = None;
         loop {
-            let update = match self.updates.try_recv() {
+            let update = match updates.try_recv() {
                 Ok(update) => update,
                 Err(mpsc::TryRecvError::Empty) => break,
                 // The worker is gone without saying so (it panicked).
@@ -375,8 +411,10 @@ impl Job {
                     samples,
                     frame,
                     sampling,
+                    size,
                 } => {
                     (picture.rgba, picture.rgb, picture.samples, picture.frame) = (rgba, rgb, samples, frame);
+                    [picture.width, picture.height] = size;
                     picture.sampling = sampling;
                     picture.version += 1;
                     changed = true;
@@ -404,7 +442,7 @@ impl Job {
                         picture.version += 1;
                     }
                     finished.push(FinishedFrame {
-                        number: self.number,
+                        number,
                         frame,
                         image,
                         objects,
@@ -415,19 +453,13 @@ impl Job {
                     ended = Some(stopped);
                     break;
                 }
+                Update::Restart { built } => {
+                    *restarted = true;
+                    picture.builds += u32::from(built);
+                }
             }
         }
-        picture.elapsed = self.started.elapsed();
         (changed, ended)
-    }
-
-    /// How far the render is (0…1).
-    fn fraction(&self) -> f32 {
-        let done = self.control.progress().min(self.total);
-        // Display only: the precision of f32 is plenty.
-        #[expect(clippy::cast_precision_loss, reason = "a progress bar")]
-        let fraction = done as f32 / self.total.max(1) as f32;
-        fraction
     }
 }
 
@@ -451,19 +483,25 @@ pub struct ViewKey {
 pub struct ViewRender {
     pub key: ViewKey,
     pub picture: Picture,
-    job: Option<Job>,
+    job: Option<ViewJob>,
 }
 
 impl ViewRender {
     #[must_use]
     pub fn is_rendering(&self) -> bool {
+        self.job.as_ref().is_some_and(|job| job.busy)
+    }
+
+    /// Whether its worker is alive: it can follow the view (interactive).
+    #[must_use]
+    pub fn is_live(&self) -> bool {
         self.job.is_some()
     }
 
-    /// How far the render is (0…1), if it runs.
+    /// How far the render is (0…1), while it renders.
     #[must_use]
     pub fn progress(&self) -> Option<f32> {
-        self.job.as_ref().map(Job::fraction)
+        self.job.as_ref().and_then(ViewJob::fraction)
     }
 }
 
@@ -571,23 +609,7 @@ impl Renders {
             region: settings.region.map(|region| region.pixels(key.size[0], key.size[1])),
             ..RenderOptions::from(&settings)
         };
-        let job = Job::spawn(
-            0,
-            doc.scene.clone(),
-            pictures,
-            vec![doc.time.frame()],
-            key.object.map_or(Eye::Fixed(render_camera(view)), |id| {
-                Eye::Object(id, render_camera(view))
-            }),
-            Look {
-                options,
-                replay,
-                segments: settings.motion_blur.then_some(settings.segments),
-                // The Render View shows the picture only.
-                passes: Passes::NONE,
-                denoising: Denoising::view(&settings),
-            },
-        );
+        let job = ViewJob::spawn(view_scene(doc, pictures, view, &key, replay));
         let picture = Picture {
             number: 0,
             width: options.width,
@@ -613,8 +635,59 @@ impl Renders {
             passes: Vec::new(),
             pass: None,
             sampling: None,
+            builds: 0,
         };
         self.view = Some(ViewRender { key, picture, job });
+    }
+
+    /// The Render View follows the view (interactive): its camera only moved
+    /// to `key` — the scene it built is rendered through the new camera.
+    /// `false` if it cannot (no live Render View).
+    pub fn view_camera(&mut self, view: &OrbitCamera, key: ViewKey) -> bool {
+        let Some(render) = &mut self.view else {
+            return false;
+        };
+        let Some(job) = &mut render.job else {
+            return false;
+        };
+        let total = job.total;
+        if !job.send(ViewOrder::Camera(render_camera(view)), total) {
+            return false;
+        }
+        render.key = key;
+        render.picture.state = RenderState::Rendering;
+        true
+    }
+
+    /// The Render View follows the view (interactive): the scene, the frame,
+    /// the settings or the size changed to `key` — the worker builds it
+    /// again, the old picture showing until the new one's first pass.
+    /// `false` if it cannot (no live Render View).
+    pub fn view_scene(
+        &mut self,
+        doc: &Document,
+        pictures: Pictures,
+        view: &OrbitCamera,
+        key: ViewKey,
+        replay: Option<Replay>,
+    ) -> bool {
+        let Some(render) = &mut self.view else {
+            return false;
+        };
+        let Some(job) = &mut render.job else {
+            return false;
+        };
+        let scene = view_scene(doc, pictures, view, &key, replay);
+        let options = &scene.look.options;
+        let total = options.pixel_count() * u64::from(options.samples.clamp(1, RenderSettings::MAX_SAMPLES));
+        let samples = options.samples;
+        if !job.send(ViewOrder::Scene(Box::new(scene)), total) {
+            return false;
+        }
+        render.key = key;
+        render.picture.state = RenderState::Rendering;
+        render.picture.total_samples = samples;
+        true
     }
 
     /// Removes the Render View, stopping its render.
@@ -681,6 +754,7 @@ impl Renders {
             passes: Vec::new(),
             pass: None,
             sampling: None,
+            builds: 0,
         });
         self.shown = None;
 
@@ -731,20 +805,31 @@ impl Renders {
         let mut changed = false;
         let mut finished = Vec::new();
         if let Some(view) = &mut self.view
-            && let Some(job) = &view.job
+            && let Some(job) = &mut view.job
         {
-            let (passed, ended) = job.drain(&mut view.picture, &mut finished);
+            let mut restarted = false;
+            let (passed, ended) = drain(&job.updates, 0, &mut view.picture, &mut finished, &mut restarted);
+            if restarted {
+                job.started = Instant::now();
+            }
+            view.picture.elapsed = job.started.elapsed();
             // The Render View is never saved.
             finished.clear();
             changed |= passed;
-            if let Some(stopped) = ended {
-                view.job = None;
-                view.picture.state = if stopped {
-                    RenderState::Stopped
-                } else {
-                    RenderState::Finished
-                };
-                changed = true;
+            match ended {
+                // Every sample in: the worker waits for what comes next.
+                Some(false) => {
+                    job.busy = false;
+                    view.picture.state = RenderState::Finished;
+                    changed = true;
+                }
+                // The worker is gone.
+                Some(true) => {
+                    view.job = None;
+                    view.picture.state = RenderState::Stopped;
+                    changed = true;
+                }
+                None => {}
             }
         }
         let Some(job) = &self.job else {
@@ -906,6 +991,41 @@ fn strength(settings: &RenderSettings) -> f32 {
     f32::from(u16::try_from(settings.denoise_strength.min(100)).unwrap_or(100)) / 100.0
 }
 
+/// What the Render View renders for `key`: `doc` at its frame through `view`
+/// (or the camera object it looks through), at the view's size, with the
+/// Render Settings' quality and region.
+fn view_scene(
+    doc: &Document,
+    pictures: Pictures,
+    view: &OrbitCamera,
+    key: &ViewKey,
+    replay: Option<Replay>,
+) -> ViewScene {
+    let settings = doc.render.clone().validated();
+    let options = RenderOptions {
+        width: key.size[0],
+        height: key.size[1],
+        region: settings.region.map(|region| region.pixels(key.size[0], key.size[1])),
+        ..RenderOptions::from(&settings)
+    };
+    ViewScene {
+        scene: doc.scene.clone(),
+        pictures,
+        frame: doc.time.frame(),
+        eye: key.object.map_or(Eye::Fixed(render_camera(view)), |id| {
+            Eye::Object(id, render_camera(view))
+        }),
+        look: Look {
+            options,
+            replay,
+            segments: settings.motion_blur.then_some(settings.segments),
+            // The Render View shows the picture only.
+            passes: Passes::NONE,
+            denoising: Denoising::view(&settings),
+        },
+    }
+}
+
 /// What a render worker renders: the scene, its texture pictures, its frames
 /// and its eye.
 struct Input<'a> {
@@ -961,49 +1081,16 @@ fn work(
         frames,
         eye,
     } = input;
-    let mut evaluated = EvaluatedScene::for_render();
-    let mut simulated = grid4d_eval::Overrides::default();
+    let mut evaluation = Evaluation::default();
     for &frame in frames {
-        let at = f64::from(frame);
-        // With motion blur, the scene at moments of the shutter interval.
-        let (moments, base) = match segments {
-            Some(segments) => shutter_moments(&eye.shutter(scene, at), at, segments),
-            None => (vec![at], 0),
-        };
-        let mut scenes = Vec::with_capacity(moments.len());
-        let mut placements = Vec::with_capacity(moments.len());
-        for &time in &moments {
-            // The simulation then (simulated here if the cache lacks it).
-            if let Some(replay) = replay.as_mut() {
-                replay.overrides_at(time, &mut simulated);
-                evaluated.set_overrides(&simulated);
-            }
-            evaluated.set_frame(time);
-            evaluated.update(scene);
-            let camera = eye.at(scene, &evaluated, time);
-            let cameras = camera_objects(scene, &evaluated);
-            let texturing = Texturing {
-                materials: scene.materials(),
-                pictures,
-                camera,
-                aspect: aspect(options),
-                cameras: &cameras,
-            };
-            scenes.push(RenderScene::textured(&evaluated, &texturing));
-            placements.push(camera);
-        }
-        let (render_scene, still) = RenderScene::moving(scenes, base);
-        if still > 0 {
-            log::info!("frame {frame}: {still} objects not motion blurred (their shape changes over the shutter)");
-        }
-        // Through the camera at the frame, moving from the shutter's opening
-        // to its closing.
-        let (first, last) = (placements[0], placements[placements.len() - 1]);
-        let camera = RenderCamera {
-            world: first.world,
-            end: (last.world != first.world).then_some(last.world),
-            ..placements[base]
-        };
+        let (render_scene, camera) = build_frame(
+            &mut evaluation,
+            (scene, pictures),
+            frame,
+            eye,
+            options,
+            (segments, replay.as_mut()),
+        );
         let mut progressive = Progressive::with_passes(options, passes, &render_scene);
         if denoising != Denoising::Off {
             progressive = progressive.with_denoising();
@@ -1027,6 +1114,7 @@ fn work(
                 samples: progressive.samples(),
                 frame,
                 sampling: sampling_of(&image, options.samples),
+                size: [image.width, image.height],
             };
             if sender.send(update).is_err() {
                 return;
@@ -1071,6 +1159,325 @@ fn work(
         }
     }
     let _ = sender.send(Update::Done { stopped: false });
+}
+
+/// What building render scenes keeps between frames: the evaluated scene
+/// and the simulation's placements (their buffers reused).
+#[derive(Default)]
+struct Evaluation {
+    evaluated: Option<EvaluatedScene>,
+    simulated: grid4d_eval::Overrides,
+}
+
+/// `scene` (with its texture `pictures`) at `frame` as the renderer sees it,
+/// and the camera through `eye` then: with motion blur (`segments`), at
+/// moments of the shutter, `replay` giving the simulation's placements.
+fn build_frame(
+    evaluation: &mut Evaluation,
+    (scene, pictures): (&Scene, &Pictures),
+    frame: i32,
+    eye: Eye,
+    options: &RenderOptions,
+    (segments, mut replay): (Option<u32>, Option<&mut Replay>),
+) -> (RenderScene, RenderCamera) {
+    let evaluated = evaluation.evaluated.get_or_insert_with(EvaluatedScene::for_render);
+    let simulated = &mut evaluation.simulated;
+    let at = f64::from(frame);
+    // With motion blur, the scene at moments of the shutter interval.
+    let (moments, base) = match segments {
+        Some(segments) => shutter_moments(&eye.shutter(scene, at), at, segments),
+        None => (vec![at], 0),
+    };
+    let mut scenes = Vec::with_capacity(moments.len());
+    let mut placements = Vec::with_capacity(moments.len());
+    for &time in &moments {
+        // The simulation then (simulated here if the cache lacks it).
+        if let Some(replay) = replay.as_deref_mut() {
+            replay.overrides_at(time, simulated);
+            evaluated.set_overrides(simulated);
+        }
+        evaluated.set_frame(time);
+        evaluated.update(scene);
+        let camera = eye.at(scene, evaluated, time);
+        let cameras = camera_objects(scene, evaluated);
+        let texturing = Texturing {
+            materials: scene.materials(),
+            pictures,
+            camera,
+            aspect: aspect(options),
+            cameras: &cameras,
+        };
+        scenes.push(RenderScene::textured(evaluated, &texturing));
+        placements.push(camera);
+    }
+    let (render_scene, still) = RenderScene::moving(scenes, base);
+    if still > 0 {
+        log::info!("frame {frame}: {still} objects not motion blurred (their shape changes over the shutter)");
+    }
+    // Through the camera at the frame, moving from the shutter's opening to
+    // its closing.
+    let (first, last) = (placements[0], placements[placements.len() - 1]);
+    let camera = RenderCamera {
+        world: first.world,
+        end: (last.world != first.world).then_some(last.world),
+        ..placements[base]
+    };
+    (render_scene, camera)
+}
+
+/// What the Render View's worker is told while it runs.
+enum ViewOrder {
+    /// The scene (or the frame, the settings, the size) changed: build it again.
+    Scene(Box<ViewScene>),
+    /// Only the view's camera moved: render the built scene through this one.
+    Camera(RenderCamera),
+}
+
+/// Everything the Render View renders.
+struct ViewScene {
+    scene: Scene,
+    pictures: Pictures,
+    frame: i32,
+    eye: Eye,
+    look: Look,
+}
+
+/// How a run of the Render View's passes ended.
+enum RunEnd {
+    /// Every sample is in.
+    Done,
+    /// The editor sent something new (the pass was cut short).
+    Interrupted,
+    /// The editor is gone.
+    Gone,
+}
+
+/// The Render View's worker: renders `first`, then whatever the editor sends
+/// — a new camera through the scene it has built, or a scene to build anew —
+/// until the editor drops its end. Before each new start the old picture
+/// stays: nothing is sent until the first pass is in.
+fn view_worker(
+    first: ViewScene,
+    orders: &Receiver<ViewOrder>,
+    current: &std::sync::Mutex<Arc<RenderControl>>,
+    sender: &Sender<Update>,
+) {
+    let mut evaluation = Evaluation::default();
+    let mut state = first;
+    let mut rebuild = true;
+    let mut built: Option<(RenderScene, RenderCamera)> = None;
+    loop {
+        let fresh = rebuild;
+        if rebuild {
+            let ViewScene {
+                scene,
+                pictures,
+                frame,
+                eye,
+                look,
+            } = &mut state;
+            built = Some(build_frame(
+                &mut evaluation,
+                (scene, pictures),
+                *frame,
+                *eye,
+                &look.options,
+                (look.segments, look.replay.as_mut()),
+            ));
+            rebuild = false;
+        }
+        let control = Arc::new(RenderControl::default());
+        if let Ok(mut slot) = current.lock() {
+            *slot = Arc::clone(&control);
+        }
+        let Some((render_scene, camera)) = &built else {
+            return;
+        };
+        let end = view_passes(render_scene, camera, (&state, fresh), &control, sender);
+        let first = match end {
+            RunEnd::Gone => return,
+            RunEnd::Done => {
+                if sender.send(Update::Done { stopped: false }).is_err() {
+                    return;
+                }
+                // Idle until the editor sends something.
+                match orders.recv() {
+                    Ok(order) => Some(order),
+                    Err(_) => return,
+                }
+            }
+            RunEnd::Interrupted => None,
+        };
+        // The newest of what came: a scene replaces the scene, a camera the
+        // camera (one after a scene is applied to it).
+        let mut pending = first.into_iter().collect::<Vec<_>>();
+        loop {
+            match orders.try_recv() {
+                Ok(order) => pending.push(order),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => return,
+            }
+        }
+        for order in pending {
+            match order {
+                ViewOrder::Scene(scene) => {
+                    state = *scene;
+                    rebuild = true;
+                }
+                ViewOrder::Camera(camera) => {
+                    if let Eye::Fixed(_) = state.eye {
+                        state.eye = Eye::Fixed(camera);
+                        if let Some((_, through)) = &mut built
+                            && !rebuild
+                        {
+                            *through = camera;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The Render View's passes through `camera`: first a quick picture at a
+/// quarter of the size (shown blocky, so moves keep up), then the real one
+/// sharpening, denoised as the settings say.
+fn view_passes(
+    render_scene: &RenderScene,
+    camera: &RenderCamera,
+    (state, built): (&ViewScene, bool),
+    control: &RenderControl,
+    sender: &Sender<Update>,
+) -> RunEnd {
+    let options = &state.look.options;
+    let (width, height) = options.size();
+    let send = |image: &Image, samples: u32| {
+        let update = Update::Pass {
+            rgba: image.to_rgba8(),
+            rgb: image.to_rgb8(),
+            samples,
+            frame: state.frame,
+            sampling: None,
+            size: [width, height],
+        };
+        sender.send(update).is_ok()
+    };
+    if sender.send(Update::Restart { built }).is_err() {
+        return RunEnd::Gone;
+    }
+    // The blocky first picture (not with a region: it is small already).
+    if options.region.is_none() && width >= 8 && height >= 8 {
+        let small = RenderOptions {
+            width: width.div_ceil(4),
+            height: height.div_ceil(4),
+            samples: 1,
+            adaptive: None,
+            ..*options
+        };
+        let mut quick = Progressive::new(&small);
+        if !quick.add_samples(render_scene, camera, &small, 1, control) {
+            return RunEnd::Interrupted;
+        }
+        if !send(&quick.image().scaled_nearest(width, height), 0) {
+            return RunEnd::Gone;
+        }
+    }
+    let mut progressive = Progressive::new(options);
+    if state.look.denoising != Denoising::Off {
+        progressive = progressive.with_denoising();
+    }
+    while !progressive.is_complete(options) {
+        let pass = progressive.samples().clamp(1, MAX_PASS);
+        if !progressive.add_samples(render_scene, camera, options, pass, control) {
+            return RunEnd::Interrupted;
+        }
+        let mut image = progressive.image();
+        if let Denoising::Live(strength) = state.look.denoising
+            && progressive.samples() >= 4
+        {
+            grid4d_raytrace::denoise(&mut image, strength);
+        }
+        if !send(&image, progressive.samples()) {
+            return RunEnd::Gone;
+        }
+    }
+    RunEnd::Done
+}
+
+/// The Render View's worker as the editor holds it.
+struct ViewJob {
+    orders: Sender<ViewOrder>,
+    updates: Receiver<Update>,
+    /// The current run's control: cancelled to cut a pass short.
+    current: Arc<std::sync::Mutex<Arc<RenderControl>>>,
+    /// Since the last start (the line shows the time of this run).
+    started: Instant,
+    /// Work of the current run, in pixels × samples.
+    total: u64,
+    /// Rendering (not yet every sample in).
+    busy: bool,
+}
+
+impl Drop for ViewJob {
+    /// The view going away stops the worker's pass; dropping `orders` ends it.
+    fn drop(&mut self) {
+        if let Ok(slot) = self.current.lock() {
+            slot.cancel();
+        }
+    }
+}
+
+impl ViewJob {
+    /// Starts the worker on `first`; `None` if no thread could start.
+    fn spawn(first: ViewScene) -> Option<Self> {
+        let total = first.look.options.pixel_count()
+            * u64::from(first.look.options.samples.clamp(1, RenderSettings::MAX_SAMPLES));
+        let current = Arc::new(std::sync::Mutex::new(Arc::new(RenderControl::default())));
+        let (orders, inbox) = mpsc::channel();
+        let (sender, updates) = mpsc::channel();
+        let worker_current = Arc::clone(&current);
+        let spawned = thread::Builder::new()
+            .name("grid4d render view".into())
+            .spawn(move || view_worker(first, &inbox, &worker_current, &sender));
+        if let Err(err) = spawned {
+            log::error!("could not start the Render View's thread: {err}");
+            return None;
+        }
+        Some(Self {
+            orders,
+            updates,
+            current,
+            started: Instant::now(),
+            total,
+            busy: true,
+        })
+    }
+
+    /// Sends `order`, cutting the current pass short; `false` if the worker
+    /// is gone.
+    fn send(&mut self, order: ViewOrder, total: u64) -> bool {
+        if self.orders.send(order).is_err() {
+            return false;
+        }
+        if let Ok(slot) = self.current.lock() {
+            slot.cancel();
+        }
+        self.total = total;
+        self.busy = true;
+        true
+    }
+
+    /// How far the current run is (0…1), while it renders.
+    fn fraction(&self) -> Option<f32> {
+        if !self.busy {
+            return None;
+        }
+        let done = self.current.lock().map_or(0, |slot| slot.progress()).min(self.total);
+        // Display only: the precision of f32 is plenty.
+        #[expect(clippy::cast_precision_loss, reason = "a progress bar")]
+        let fraction = done as f32 / self.total.max(1) as f32;
+        Some(fraction)
+    }
 }
 
 /// With adaptive sampling: the samples `image`'s pixels got on average, and
@@ -1395,6 +1802,7 @@ pub(crate) mod tests {
                 passes: Vec::new(),
                 pass: None,
                 sampling: None,
+                builds: 0,
             });
         }
         renders.shown = Some(1);

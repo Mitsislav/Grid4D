@@ -112,6 +112,15 @@ change.
 - It stops with Esc, Ctrl+R again, another view becoming active (it moves
   with Ctrl+R), or a new document. Interactive off: the 1.1 behaviour (the
   picture goes away on any change).
+- As built (16.9): one worker thread lives as long as the Render View; the
+  editor sends it a new camera (only the view's own camera moved — not a
+  camera object it looks through, and no Camera projection uses the
+  render's camera) or a new scene (anything else in the view's key), and
+  cancels the pass running; the worker takes the newest of what came. Every
+  start renders a quarter-size picture first (one sample, shown scaled up)
+  — on every restart, not only during drags (our choice: simpler, and
+  cheap); with a render region it starts at full size. Interactive Render
+  View is an editor switch (not saved).
 - Adaptive sampling and the denoiser (Final and Render View) apply as their
   settings say; the view's progress line shows samples and time since the
   last restart.
@@ -155,7 +164,8 @@ the blocky first pass.
 - [x] The queue and Shift+R never render at once.
 - [x] The region renders only its pixels (Render View; final render with the
       switch); it is undoable and saved in v5.
-- [ ] The interactive Render View restarts on camera moves without
+- [x] The interactive Render View restarts on camera moves without
       rebuilding the scene, rebuilds on edits on the worker, never shows a
       blank view, and ignores selection changes (interface tests).
-- [ ] The interface never waits for a render or a rebuild.
+- [x] The interface never waits for a render or a rebuild (the worker
+      builds; the editor clones the document for it once per change).

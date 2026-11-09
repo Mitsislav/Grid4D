@@ -824,6 +824,9 @@ pub struct EditorState {
     pub render_queue: crate::render_queue::RenderQueue,
     /// The Render Queue window is open.
     pub show_render_queue: bool,
+    /// Render ▸ Interactive Render View: the Render View follows changes
+    /// (on by default); off, it goes away on any change.
+    pub interactive_render_view: bool,
     /// The session's renders and the Picture Viewer (Shift+R).
     pub renders: crate::rendering::Renders,
     /// The rigid body simulation and its cache.
@@ -906,6 +909,7 @@ impl Default for EditorState {
             drawing_region: false,
             render_queue: Default::default(),
             show_render_queue: Default::default(),
+            interactive_render_view: true,
         }
     }
 }

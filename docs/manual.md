@@ -2661,13 +2661,28 @@ time. The toolbar button stays lit while a Render View shows.
 
 ![The Render View: the active view rendered in place, the gizmo still on top](images/manual/render-view.png)
 
-It is a quick look, so it goes away as soon as it would no longer be true:
-when you move the view, edit the scene (or undo), change the Render Settings or
-the frame, resize the view or switch views — a render that runs then stops.
-**Esc** clears it too. Selecting objects keeps it, and the gizmo and the other
-overlays stay on top, so you can carry on working. **Ctrl+R** again renders
-afresh. The Render View is never saved and does not appear in the Picture
-Viewer's history; use **Shift+R** for a picture to keep.
+It **keeps rendering while you work** (Render ▸ **Interactive Render
+View**, on by default):
+
+- **orbit, pan or zoom** the view and it renders again through the new
+  view at once, without preparing the scene again;
+- **edit** the scene, undo, change the frame, the Render Settings or the
+  view's size, and it prepares the scene again in the background, then
+  renders it;
+- the picture you see **stays until the new one's first pass is in** — a
+  quick, blocky picture at a quarter of the size, which then sharpens — so
+  the view never goes blank while you drag;
+- selecting objects, switching panels and idle moments change nothing.
+
+The gizmo and the other overlays stay on top, so you can carry on working.
+It stops with **Esc**, **Ctrl+R** again, when another view becomes active
+(press Ctrl+R there to render that one), or when you open or start another
+document. With **Interactive Render View** off, it goes away as soon as it
+would no longer be true (any of the changes above), and Ctrl+R renders
+afresh.
+
+The Render View is never saved and does not appear in the Picture Viewer's
+history; use **Shift+R** for a picture to keep.
 
 ### 20.4 The render region
 
