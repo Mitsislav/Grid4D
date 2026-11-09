@@ -148,6 +148,11 @@ fn full_document() -> (Document, SimulationCache) {
     wax.subsurface_color = Some([0.9, 0.6, 0.3]);
     wax.subsurface_radius = [2.0, 1.0, 0.5];
     wax.subsurface_scale = 3.0;
+    // A displaced material.
+    wax.displace = true;
+    wax.displacement_mid = 0.25;
+    wax.displacement_level = 5;
+    doc.render.displacement_budget = 50;
     doc.scene.materials_mut().insert(wax);
     let sphere = doc.scene.iter().find(|(_, n)| n.data.name == "Sphere").unwrap().0;
     doc.scene.insert(Node::new(

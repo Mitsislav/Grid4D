@@ -103,6 +103,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         camera,
         aspect: options.width.max(1) as f32 / options.height.max(1) as f32,
         cameras: &cameras,
+        displacement_budget: 20_000_000,
     };
     let scene = RenderScene::textured(&evaluated, &texturing);
     let built = started.elapsed();

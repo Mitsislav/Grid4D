@@ -206,6 +206,9 @@ out while it has its default:
 | `subsurface_color` | none | version 5: the colour light comes back with (linear RGB, 0 – 1); none: the Base Color's |
 | `subsurface_radius` | [1, 0.2, 0.1] | version 5: how far red, green and blue travel inside (cm, 0 – 1000) |
 | `subsurface_scale` | 1 | version 5: multiplies the radii (0 – 1000) |
+| `displace` | false | version 5: renders move the surface by the Bump picture |
+| `displacement_mid` | 0.5 | version 5: the picture value that stays in place (0 – 1) |
+| `displacement_level` | 3 | version 5: times each triangle is split in four (0 – 8) |
 | `maps` | `{}` | the channels' textures, by channel: `base_color`, `metallic`, `roughness`, `specular`, `normal`, `bump`, `emission`, `opacity`, `transmission`, `clearcoat` |
 
 A channel's texture: `texture` (an index into `textures`), `tiling`
@@ -272,7 +275,8 @@ thousandths, 0.001 – 0.5); `denoise` (`off`, the default, `final`,
 `final_and_view`) and `denoise_strength` (percent, 100 when absent);
 `region` (the render region as [left, top, right, bottom] fractions of the
 picture, kept to ten-thousandths; none when absent) and `region_final`
-(false when absent).
+(false when absent); `displacement_budget` (millions of triangles, 1 – 100;
+20 when absent).
 
 ### Takes
 
@@ -336,7 +340,7 @@ Phase 16; each step adds its row):
 | the render settings' `passes` (none when absent) and `png_passes` (`beauty_only` when absent) | step 16.6 |
 | the render settings' `adaptive` (false when absent), `min_samples` (16), `noise_threshold` (0.01), `denoise` (`off`) and `denoise_strength` (100) | step 16.7 |
 | the render settings' `region` (none when absent) and `region_final` (false) | step 16.8 |
-| the materials' `subsurface`, `subsurface_color`, `subsurface_radius`, `subsurface_scale` | step 16.10 |
+| the materials' `subsurface`, `subsurface_color`, `subsurface_radius`, `subsurface_scale`, `displace`, `displacement_mid`, `displacement_level`; the render settings' `displacement_budget` (millions of triangles, 20 when absent) | step 16.10 |
 
 A version 4 file is therefore read as a version 5 file with the version
 number changed, minus any field this table lists (version 4 readers ignore

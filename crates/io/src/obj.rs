@@ -5,7 +5,7 @@
 //! in OBJ and at the top left in Grid4D, so V is flipped both ways (a picture's
 //! `-o` offset in V too). Materials go through the `.mtl`: colours, the PBR
 //! extension's numbers (`Pr`, `Pm`, `Pc`, `Pcr`) and the pictures (`map_Kd`,
-//! `map_Ke`, `map_d`, `bump`, `norm`, `map_Pr`, `map_Pm`) with their `-s`, `-o`,
+//! `map_Ke`, `map_d`, `bump`, `disp`, `norm`, `map_Pr`, `map_Pm`) with their `-s`, `-o`,
 //! `-bm` and `-imfchan` options.
 
 use std::{
@@ -147,12 +147,15 @@ fn read_material(m: &tobj::Material, taken: &Materials, pictures: &mut MtlPictur
     }
 
     let unknown = |key: &str| m.unknown_param.get(key).map(String::as_str);
-    let maps: [(Channel, Option<&str>); 7] = [
+    let maps: [(Channel, Option<&str>); 8] = [
         (Channel::BaseColor, m.diffuse_texture.as_deref()),
         (Channel::Emission, unknown("map_Ke")),
         (Channel::Opacity, m.dissolve_texture.as_deref()),
         // `tobj` files `bump` and `map_Bump` (height pictures) as its normal texture.
         (Channel::Bump, m.normal_texture.as_deref()),
+        // A displacement picture is the height renders move the surface by
+        // (it takes the Bump slot, over a bump picture).
+        (Channel::Bump, unknown("disp")),
         (Channel::Normal, unknown("norm")),
         (Channel::Roughness, unknown("map_Pr")),
         (Channel::Metallic, unknown("map_Pm")),
@@ -181,6 +184,7 @@ fn read_material(m: &tobj::Material, taken: &Materials, pictures: &mut MtlPictur
         }
         *material.map_mut(channel) = Some(slot);
     }
+    material.displace = unknown("disp").and_then(MapLine::parse).is_some();
     material
 }
 
@@ -549,6 +553,10 @@ fn material_lines(mtl: &mut String, m: &Material, textures: &Textures, names: &m
             let _ = write!(line, " -imfchan {name}");
         }
         let _ = writeln!(mtl, "{line} {file}");
+        // Displaced in renders: the same picture as `disp` too.
+        if channel == Channel::Bump && m.displace {
+            let _ = writeln!(mtl, "disp {file}");
+        }
     }
 }
 
@@ -1104,6 +1112,7 @@ l 5 6
         });
         let mut painted = Material::new("Painted");
         (painted.roughness, painted.metallic, painted.bump_height) = (0.4, 0.2, 0.7);
+        painted.displace = true;
         *painted.map_mut(Channel::BaseColor) = Some(TextureSlot {
             tiling: [3.0, 2.0],
             offset: [0.25, 0.5],
@@ -1124,6 +1133,7 @@ l 5 6
         let mtl = fs::read_to_string(dir.join("scene.mtl")).unwrap();
         assert!(mtl.contains("map_Kd -s 3 2 1 -o 0.25 -1.5 0 maps/wood.png"), "{mtl}");
         assert!(mtl.contains("bump -bm 0.7 stamp.png"), "{mtl}");
+        assert!(mtl.contains("disp stamp.png"), "{mtl}");
         assert!(mtl.contains("map_Pr -imfchan b stamp.png"), "{mtl}");
         assert_eq!(
             fs::read(dir.join("stamp.png")).unwrap(),
@@ -1134,6 +1144,7 @@ l 5 6
         let back = import_obj(&fs::read(&path).unwrap(), Some(&dir), "scene").unwrap();
         let (_, found) = back.materials.iter().find(|(_, m)| m.name == "Painted").unwrap();
         assert_eq!((found.roughness, found.metallic, found.bump_height), (0.4, 0.2, 0.7));
+        assert!(found.displace, "disp read back");
         let base = *found.map(Channel::BaseColor).unwrap();
         assert_eq!(
             (base.tiling, base.offset),

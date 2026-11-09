@@ -499,6 +499,15 @@ struct MaterialDto {
     /// Added in version 5 (step 16.10): 1 when absent.
     #[serde(default = "one", skip_serializing_if = "is_one")]
     subsurface_scale: f32,
+    /// Added in version 5 (step 16.10): displacement in renders, off when absent.
+    #[serde(default, skip_serializing_if = "is_false")]
+    displace: bool,
+    /// Added in version 5 (step 16.10): 0.5 when absent.
+    #[serde(default = "half", skip_serializing_if = "is_half")]
+    displacement_mid: f32,
+    /// Added in version 5 (step 16.10): 3 when absent.
+    #[serde(default = "three", skip_serializing_if = "is_three")]
+    displacement_level: u32,
     /// The channels' textures, by channel name; absent when there are none.
     #[serde(default, skip_serializing_if = "MapsDto::is_empty")]
     maps: MapsDto,
@@ -755,6 +764,9 @@ impl MaterialDto {
             subsurface_color: material.subsurface_color,
             subsurface_radius: material.subsurface_radius,
             subsurface_scale: material.subsurface_scale,
+            displace: material.displace,
+            displacement_mid: material.displacement_mid,
+            displacement_level: material.displacement_level,
             maps,
         }
     }
@@ -785,6 +797,9 @@ impl MaterialDto {
             .subsurface_radius
             .map(|r| r.clamp(0.0, Material::MAX_SUBSURFACE_RADIUS));
         material.subsurface_scale = self.subsurface_scale.clamp(0.0, Material::MAX_SUBSURFACE_RADIUS);
+        material.displace = self.displace;
+        material.displacement_mid = unit(self.displacement_mid);
+        material.displacement_level = self.displacement_level.min(Material::MAX_DISPLACEMENT_LEVEL);
         for channel in Channel::ALL {
             let Some(slot) = self.maps.get(channel) else {
                 continue;
@@ -893,6 +908,18 @@ struct RenderDto {
     /// Added in version 5 (step 16.8): off when absent.
     #[serde(default, skip_serializing_if = "is_false")]
     region_final: bool,
+    /// Added in version 5 (step 16.10): millions of triangles, 20 when absent.
+    #[serde(default = "twenty", skip_serializing_if = "is_twenty")]
+    displacement_budget: u32,
+}
+
+const fn twenty() -> u32 {
+    20
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde's signature")]
+const fn is_twenty(value: &u32) -> bool {
+    *value == 20
 }
 
 /// Which pictures are denoised (version 5, step 16.7).
@@ -1113,6 +1140,7 @@ impl RenderDto {
             denoise_strength,
             region,
             region_final,
+            displacement_budget,
         } = *settings;
         Some(Self {
             width,
@@ -1159,6 +1187,7 @@ impl RenderDto {
             denoise_strength,
             region: region.map(RenderRegion::fractions),
             region_final,
+            displacement_budget,
         })
     }
 
@@ -1210,6 +1239,7 @@ impl RenderDto {
                 .region
                 .and_then(|[left, top, right, bottom]| RenderRegion::from_fractions([left, top], [right, bottom])),
             region_final: self.region_final,
+            displacement_budget: self.displacement_budget,
         }
         .validated()
     }
@@ -6980,6 +7010,7 @@ mod tests {
             denoise_strength: 70,
             region: RenderRegion::new(2500, 1000, 7500, 9000),
             region_final: true,
+            displacement_budget: 5,
         };
         assert_eq!(round_trip(&doc).render, doc.render);
         doc.render.frames = FrameRange::All;

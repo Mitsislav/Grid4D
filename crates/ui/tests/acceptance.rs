@@ -255,6 +255,7 @@ fn phase_15_from_a_textured_model_to_a_render_and_back() {
         camera,
         aspect: 1.5,
         cameras: &[],
+        displacement_budget: 20_000_000,
     };
     let options = RenderOptions {
         width: 48,
@@ -267,6 +268,7 @@ fn phase_15_from_a_textured_model_to_a_render_and_back() {
         emissive_lights: true,
         adaptive: None,
         region: None,
+        displacement_budget: 20_000_000,
     };
     let image = grid4d_raytrace::render(&RenderScene::textured(&evaluated, &texturing), &camera, &options);
     let covered = image.pixels.iter().filter(|p| p[3] > 0.5).count();

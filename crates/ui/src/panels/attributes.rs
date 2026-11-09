@@ -227,6 +227,19 @@ impl AttributesPanel {
             );
             name_field(ui, &field, "Bump Height");
             ui.end_row();
+            check_row(ui, "Displace in Renders", &mut material.displace);
+            if material.displace {
+                fraction_row(ui, key("Mid Level"), &mut material.displacement_mid);
+                attr_label(ui, "Subdivision", LABEL_WIDTH);
+                let field = ui
+                    .add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut material.displacement_level).range(0..=Material::MAX_DISPLACEMENT_LEVEL),
+                    )
+                    .on_hover_text(tr("Each level splits every triangle in four before moving it"));
+                name_field(ui, &field, "Subdivision");
+                ui.end_row();
+            }
         });
         section_heading(ui, "Emission");
         material_grid(ui, "grid4d.attr.material.emission", |ui| {

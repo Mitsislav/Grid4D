@@ -36,6 +36,7 @@ const FOCUS: &str = concat!(
     "/tests/fixtures/depth_of_field_reference.png"
 );
 const WHEEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/motion_blur_reference.png");
+const BRICKS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/displacement_reference.png");
 const WAX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/subsurface_reference.png");
 
 fn demo() -> Image {
@@ -69,6 +70,7 @@ fn demo() -> Image {
         emissive_lights: true,
         adaptive: None,
         region: None,
+        displacement_budget: 20_000_000,
     };
     render(&RenderScene::new(&evaluated), &camera, &options)
 }
@@ -233,6 +235,7 @@ fn textured() -> Image {
         emissive_lights: true,
         adaptive: None,
         region: None,
+        displacement_budget: 20_000_000,
     };
     let texturing = Texturing {
         materials: doc.scene.materials(),
@@ -240,6 +243,7 @@ fn textured() -> Image {
         camera,
         aspect: 160.0 / 90.0,
         cameras: &[],
+        displacement_budget: 20_000_000,
     };
     render(&RenderScene::textured(&evaluated, &texturing), &camera, &options)
 }
@@ -357,6 +361,7 @@ fn areas_view(width: u32, height: u32, samples: u32) -> (RenderScene, RenderCame
         emissive_lights: true,
         adaptive: None,
         region: None,
+        displacement_budget: 20_000_000,
     };
     let pictures = Pictures::new();
     let texturing = Texturing {
@@ -365,6 +370,7 @@ fn areas_view(width: u32, height: u32, samples: u32) -> (RenderScene, RenderCame
         camera,
         aspect: f32::from(u16::try_from(width).unwrap()) / f32::from(u16::try_from(height).unwrap()),
         cameras: &[],
+        displacement_budget: 20_000_000,
     };
     (RenderScene::textured(&eval, &texturing), camera, options)
 }
@@ -463,6 +469,7 @@ fn still_life_view(
         emissive_lights: true,
         adaptive: None,
         region: None,
+        displacement_budget: 20_000_000,
     };
     let texturing = Texturing {
         materials: doc.scene.materials(),
@@ -470,6 +477,7 @@ fn still_life_view(
         camera,
         aspect: f32::from(u16::try_from(width).unwrap()) / f32::from(u16::try_from(height).unwrap()),
         cameras: &[],
+        displacement_budget: 20_000_000,
     };
     (RenderScene::textured(&eval, &texturing), camera, options)
 }
@@ -647,6 +655,7 @@ fn depth_of_field_at(width: u32, height: u32, samples: u32) -> Image {
         emissive_lights: true,
         adaptive: None,
         region: None,
+        displacement_budget: 20_000_000,
     };
     render(&RenderScene::new(&eval), &camera, &options)
 }
@@ -727,6 +736,7 @@ fn spinning_wheel_at(width: u32, height: u32, samples: u32) -> Image {
         emissive_lights: true,
         adaptive: None,
         region: None,
+        displacement_budget: 20_000_000,
     };
     render(&scene, &camera, &options)
 }
@@ -851,6 +861,106 @@ fn wax_scene() -> Document {
         }),
     ));
     doc
+}
+
+/// A brick pavement whose height picture displaces it (bricks up, mortar
+/// down), lit low from the side so the bricks cast shadows, a ball on it.
+fn bricks_scene() -> (Document, Pictures) {
+    let mut doc = Document::new("bricks");
+    let mut pictures = Pictures::new();
+    // 64 × 64: four rows of bricks, every other one shifted half a brick.
+    let height = picture(64, false, |x, y| {
+        let row = y / 16;
+        let shifted = (x + row * 16) % 32;
+        let mortar = y % 16 < 2 || shifted < 2;
+        let v = if mortar {
+            0
+        } else {
+            200 + u8::try_from((x * 7 + y * 3) % 40).unwrap()
+        };
+        [v, v, v, 255]
+    });
+    let (_, mut slot) = add(&mut doc, &mut pictures, "Bricks", height);
+    slot.tiling = [6.0, 6.0];
+    let mut brick = Material::new("Brick");
+    (brick.color, brick.roughness) = ([0.55, 0.22, 0.14], 0.8);
+    (brick.displace, brick.bump_height, brick.displacement_level) = (true, 6.0, 8);
+    *brick.map_mut(Channel::Bump) = Some(slot);
+    let brick = doc.scene.materials_mut().insert(brick);
+    doc.scene.insert(tagged(
+        ObjectKind::Plane {
+            width: 600.0,
+            depth: 600.0,
+            width_segments: 1,
+            depth_segments: 1,
+        },
+        Vec3::ZERO,
+        vec![MaterialTag::new(Some(brick))],
+    ));
+    let mut grey = Material::new("Grey");
+    (grey.color, grey.roughness) = ([0.7, 0.7, 0.7], 0.3);
+    let grey = doc.scene.materials_mut().insert(grey);
+    doc.scene.insert(tagged(
+        ObjectKind::Sphere {
+            radius: 40.0,
+            segments: 32,
+        },
+        Vec3::new(40.0, 43.0, 40.0),
+        vec![MaterialTag::new(Some(grey))],
+    ));
+    let place = glam::camera::rh::view::look_at_mat4(Vec3::new(-400.0, 90.0, 100.0), Vec3::ZERO, Vec3::Y).inverse();
+    doc.scene.insert(
+        Node::new(
+            "Low Sun",
+            ObjectKind::Light {
+                color: [1.0, 0.95, 0.85],
+                intensity: 2.0,
+                light_type: LightType::Infinite,
+                details: LightDetails::default(),
+                shadow: LightShadow::Raytraced,
+                linking: grid4d_scene::Linking::default(),
+                group: String::new(),
+            },
+        )
+        .with_transform(Transform::from_matrix(&place)),
+    );
+    doc.scene.insert(Node::new(
+        "Sky",
+        ObjectKind::Sky(Sky {
+            sun: false,
+            intensity: 0.3,
+            ..Sky::default()
+        }),
+    ));
+    (doc, pictures)
+}
+
+#[test]
+fn displacement_matches_its_reference() {
+    let (doc, pictures) = bricks_scene();
+    matches_reference(&still_life_at(&doc, &pictures, 96, 54, 16), BRICKS);
+}
+
+/// The manual's picture of displacement (`render-displacement.png`, before
+/// it is reduced to 256 colours):
+///
+/// `GRID4D_MANUAL_PICTURES=<folder> cargo test --release -p grid4d-raytrace --test reference -- --ignored displacement_for`
+#[test]
+#[ignore = "renders a picture for the manual"]
+fn displacement_for_the_manual() {
+    let dir = std::env::var_os("GRID4D_MANUAL_PICTURES").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let (doc, pictures) = bricks_scene();
+    let image = still_life_at(&doc, &pictures, 640, 360, 128);
+    let path = dir.join("render-displacement.png");
+    let mut encoder = png::Encoder::new(BufWriter::new(File::create(&path).unwrap()), 640, 360);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&image.to_rgb8())
+        .unwrap();
+    println!("{}", path.display());
 }
 
 #[test]

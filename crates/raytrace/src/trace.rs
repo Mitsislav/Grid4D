@@ -70,6 +70,9 @@ pub struct RenderOptions {
     /// Only the pixels from (`x0`, `y0`) up to, not including, (`x1`, `y1`)
     /// are rendered; the rest stay transparent. `None`: all.
     pub region: Option<[u32; 4]>,
+    /// The most triangles displacement may make (for [`Texturing`]
+    /// (crate::Texturing) when the scene is built).
+    pub displacement_budget: usize,
 }
 
 impl RenderOptions {
@@ -114,6 +117,7 @@ impl Default for RenderOptions {
             emissive_lights: true,
             adaptive: None,
             region: None,
+            displacement_budget: 20_000_000,
         }
     }
 }
@@ -139,6 +143,9 @@ impl From<&RenderSettings> for RenderOptions {
                 .region
                 .filter(|_| settings.region_final)
                 .map(|region| region.pixels(settings.width, settings.height)),
+            displacement_budget: usize::try_from(settings.displacement_budget)
+                .unwrap_or(1)
+                .saturating_mul(1_000_000),
         }
     }
 }
@@ -1384,6 +1391,7 @@ mod tests {
             emissive_lights: true,
             adaptive: None,
             region: None,
+            displacement_budget: 20_000_000,
         }
     }
 
@@ -1833,6 +1841,7 @@ mod tests {
                 emissive_lights: false,
                 adaptive: None,
                 region: None,
+                displacement_budget: 20_000_000,
             }
         );
         let defaults = RenderOptions::from(&RenderSettings::default());
@@ -2142,6 +2151,7 @@ mod tests {
             camera,
             aspect: 1.0,
             cameras,
+            displacement_budget: 20_000_000,
         };
         RenderScene::textured(&eval, &texturing)
     }

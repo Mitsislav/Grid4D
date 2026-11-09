@@ -79,6 +79,7 @@ pub fn render_preview(material: &Material, pictures: &Pictures) -> Image {
         emissive_lights: true,
         adaptive: None,
         region: None,
+        displacement_budget: 20_000_000,
     };
     let render = |doc: &Document| {
         let mut evaluated = EvaluatedScene::for_render();
@@ -89,6 +90,7 @@ pub fn render_preview(material: &Material, pictures: &Pictures) -> Image {
             camera,
             aspect: 1.0,
             cameras: &[],
+            displacement_budget: 20_000_000,
         };
         grid4d_raytrace::render(&RenderScene::textured(&evaluated, &texturing), &camera, &options)
     };

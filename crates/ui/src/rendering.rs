@@ -1206,6 +1206,7 @@ fn build_frame(
             camera,
             aspect: aspect(options),
             cameras: &cameras,
+            displacement_budget: options.displacement_budget,
         };
         scenes.push(RenderScene::textured(evaluated, &texturing));
         placements.push(camera);

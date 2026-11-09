@@ -98,7 +98,14 @@ const ADDED: &[Added] = &[
             "subsurface_color",
             "subsurface_radius",
             "subsurface_scale",
+            "displace",
+            "displacement_mid",
+            "displacement_level",
         ],
+    },
+    Added {
+        place: Place::Render,
+        fields: &["displacement_budget"],
     },
     Added {
         place: Place::Kind("camera"),

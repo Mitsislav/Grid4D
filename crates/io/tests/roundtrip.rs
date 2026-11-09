@@ -394,6 +394,8 @@ proptest! {
             wax.subsurface_color = colour;
             wax.subsurface_radius = radius.map(|r| r * 100.0);
             wax.subsurface_scale = scale;
+            (wax.displace, wax.displacement_mid, wax.displacement_level) = (amount > 0.5, amount, 8 - (scale as u32).min(8));
+            doc.render.displacement_budget = 1 + (scale as u32) * 9;
             doc.scene.materials_mut().insert(wax);
         }
         // Step 16.8: the render region.
@@ -478,6 +480,7 @@ proptest! {
                 (false, 16, grid4d_scene::NoiseThreshold::default());
             (expected.denoise, expected.denoise_strength) = (grid4d_scene::Denoise::Off, 100);
             (expected.region, expected.region_final) = (None, false);
+            expected.displacement_budget = 20;
             let as_v4 = as_v4.unwrap();
             prop_assert_eq!(&as_v4.render, &expected);
             // Materials scatter nothing inside.
@@ -485,6 +488,8 @@ proptest! {
                 prop_assert_eq!(material.subsurface, 0.0);
                 prop_assert_eq!(material.subsurface_color, None);
                 prop_assert_eq!(material.subsurface_radius, Material::SUBSURFACE_RADIUS);
+                prop_assert!(!material.displace);
+                prop_assert_eq!((material.displacement_mid, material.displacement_level), (0.5, 3));
             }
             // Lights light everything, in no group; cameras are pinholes.
             for (_, node) in as_v4.scene.iter() {

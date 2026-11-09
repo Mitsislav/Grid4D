@@ -499,6 +499,20 @@ fn sampling_page(ui: &mut Ui, s: &mut RenderSettings) {
                     .accesskit_node_builder(field.id, |node| node.set_label(tr("Denoise Strength")));
                 ui.end_row();
             }
+            attr_label(ui, "Displacement Budget", LABEL_WIDTH);
+            let field = ui
+                .add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    DragValue::new(&mut s.displacement_budget)
+                        .range(1..=RenderSettings::MAX_DISPLACEMENT_BUDGET)
+                        .suffix(" M"),
+                )
+                .on_hover_text(tr(
+                    "The most triangles displacement may make, in millions: objects beyond are split less",
+                ));
+            ui.ctx()
+                .accesskit_node_builder(field.id, |node| node.set_label(tr("Displacement Budget")));
+            ui.end_row();
             attr_label(ui, "Bounces", LABEL_WIDTH);
             ui.add_sized(
                 [FIELD_WIDTH, 19.0],

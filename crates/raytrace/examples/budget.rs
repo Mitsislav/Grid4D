@@ -332,6 +332,7 @@ fn build(scene: &Scene, aspect: f32) -> RenderScene {
         camera: scene.camera,
         aspect,
         cameras: &[],
+        displacement_budget: 20_000_000,
     };
     RenderScene::textured(&evaluated, &texturing)
 }
@@ -348,6 +349,7 @@ fn options(scene: &Scene, width: u32, height: u32, samples: u32, seed: u32) -> R
         emissive_lights: true,
         adaptive: None,
         region: None,
+        displacement_budget: 20_000_000,
     }
 }
 

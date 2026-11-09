@@ -203,6 +203,14 @@ pub struct Material {
     /// times [`Self::subsurface_scale`].
     pub subsurface_radius: [f32; 3],
     pub subsurface_scale: f32,
+    /// Renders move the surface by the Bump picture (white
+    /// [`Self::bump_height`] out from [`Self::displacement_mid`]) instead of
+    /// only bending its shading; the viewport keeps showing it as bump.
+    pub displace: bool,
+    /// The Bump picture's value that stays in place (0 – 1).
+    pub displacement_mid: f32,
+    /// Each level splits every triangle in four before moving (0 – 8).
+    pub displacement_level: u32,
     /// The texture on each channel, in [`Channel::ALL`] order.
     maps: [Option<TextureSlot>; 10],
 }
@@ -216,6 +224,8 @@ impl Material {
     pub const SUBSURFACE_RADIUS: [f32; 3] = [1.0, 0.2, 0.1];
     /// The largest radius and scale offered.
     pub const MAX_SUBSURFACE_RADIUS: f32 = 1000.0;
+    /// The most displacement levels (each four times the triangles).
+    pub const MAX_DISPLACEMENT_LEVEL: u32 = 8;
 
     /// A material with the defaults.
     #[must_use]
@@ -241,6 +251,9 @@ impl Material {
             subsurface_color: None,
             subsurface_radius: Self::SUBSURFACE_RADIUS,
             subsurface_scale: 1.0,
+            displace: false,
+            displacement_mid: 0.5,
+            displacement_level: 3,
             maps: [None; 10],
         }
     }
@@ -292,6 +305,7 @@ impl Material {
             self.clearcoat_roughness,
             self.subsurface,
             self.subsurface_scale,
+            self.displacement_mid,
         ]);
         out.extend(self.subsurface_color.unwrap_or_default());
         out.extend(self.subsurface_radius);

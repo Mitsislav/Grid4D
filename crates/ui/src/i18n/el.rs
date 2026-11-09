@@ -532,6 +532,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Disc", "Δίσκος"),
     ("Disc Segments", "Τμήματα δίσκου"),
     ("Discard", "Απόρριψη"),
+    ("Displace in Renders", "Μετατόπιση στα render"),
+    ("Displacement Budget", "Όριο μετατόπισης"),
     ("Display", "Εμφάνιση"),
     ("Display Color", "Χρώμα εμφάνισης"),
     ("Dissolve", "Διάλυση"),
@@ -575,6 +577,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Drop to open {0}", "Αφήστε για άνοιγμα: {0}"),
     ("Duplicate", "Διπλότυπο"),
     ("Dynamic", "Δυναμικό"),
+    (
+        "Each level splits every triangle in four before moving it",
+        "Κάθε επίπεδο χωρίζει κάθε τρίγωνο σε τέσσερα πριν το μετακινήσει",
+    ),
     ("Edge", "Ακμή"),
     ("Edge Mid Point", "Μέσο ακμής"),
     ("Edge and Corner", "Ακμή και γωνία"),
@@ -1104,6 +1110,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Metallic", "Μεταλλικότητα"),
     ("Metallic Texture", "Υφή μεταλλικότητας"),
     ("Metres", "Μέτρα"),
+    ("Mid Level", "Μεσαίο επίπεδο"),
     (
         "Middle-click a view to show it alone or in place",
         "Μεσαίο κλικ σε προβολή για να φανεί μόνη ή στη θέση της",
@@ -2053,6 +2060,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "The most a pixel gets: noisy pixels get up to this many",
         "Τα περισσότερα που παίρνει ένα pixel: τα θορυβώδη παίρνουν έως τόσα",
+    ),
+    (
+        "The most triangles displacement may make, in millions: objects beyond are split less",
+        "Τα περισσότερα τρίγωνα που μπορεί να φτιάξει η μετατόπιση, σε εκατομμύρια: πέρα από αυτά τα αντικείμενα χωρίζονται λιγότερο",
     ),
     (
         "The object and its children without a Material tag of their own show this material; later Material tags lie over earlier ones. Drag a material onto an object to assign it (Shift: as a new layer)",

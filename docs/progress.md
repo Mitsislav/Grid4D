@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 16 — Render quality (v1.2): in progress |
-| Last step done | 16.10a — subsurface scattering: a random walk inside closed objects, the material's Subsurface rows, a softer viewport shading (2026-11-09) |
-| Next step | 16.10b — displacement at render time |
-| Tests | 954 (and 16 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue and subsurface pictures), all passing; clippy and rustfmt clean |
+| Last step done | 16.10 — subsurface scattering (16.10a) and displacement at render time (16.10b: the Bump picture moves split surfaces, within a budget) (2026-11-09) |
+| Next step | 16.11 — the manual's Rendering chapter, the walkthrough and acceptance test, the render budget; release v1.2 (`.g4d` v5 frozen) |
+| Tests | 960 (and 17 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2744,6 +2744,7 @@ risks R5 – R8 go with it.
 | 16.8b | The Render Queue: `ui::render_queue` (`RenderQueue`, `QueueJob` with take — Render Take, Main or by name —, frames — from the document or manual —, own output, status and message); a loader thread per job reads the file, switches the take, decodes its pictures (`textures::decode_all`) and prepares its simulation, then `Renders::start_frames` renders it as Shift+R does (a Stopped job skips frames whose file exists); `RenderQueue::update` once a frame after the frames are saved; Shift+R refused while it runs, Start refused while a Picture Viewer render runs; the window (`panels/render_queue.rs`: Start, Stop, Add Current Document, Add All Takes, Add Files…, per row Up / Down / Duplicate / Remove / Reset / Show), Render ▸ Render Queue… and Window ▸ Render Queue; the job list kept by the binary in eframe storage (Rendering comes back Stopped); `FileDialogs::pick_documents`; Greek; the manual's §20.5 with a picture | 948 |
 | 16.9 | The interactive Render View: a worker per Render View (`rendering.rs`: `ViewJob`, `view_worker`, `ViewOrder::{Scene, Camera}`) that keeps its built scene; `build_frame` shared with final renders; each start sends `Update::Restart` and renders a quarter-size picture first (`Image::scaled_nearest`), then sharpens (denoised as the settings say); the editor cancels the running pass when it sends something; `ViewportPanel::follow_render_view` sends a camera when only the view's camera moved, else the scene (`Renders::view_camera` / `view_scene`), keeps the picture meanwhile, clears it for another view; Ctrl+R stops it, Esc and a new document clear it; Render ▸ Interactive Render View (`EditorState::interactive_render_view`, off: 1.1's behaviour); `Picture::builds`; Greek; the manual's §20.3 | 949 |
 | 16.10a | Subsurface scattering: `Material::{subsurface, subsurface_color, subsurface_radius, subsurface_scale}`; the tracer's `Lobe::Subsurface` (chosen beside the matte part as often as it scatters; no random number drawn without it, so other pictures are unchanged), `subsurface.rs` (`Medium` by van de Hulst's relation inverted, `walk`: flights drawn by a colour chosen as often as it carries light, isotropic scattering, Russian roulette), the exit lit as a white matte surface through `light_at` (the surface lighting moved into a method shared by both) and the path going on from there; the viewport wraps the matte lighting round (`MaterialUniform::shape.z`); the material page's Subsurface section; `.g4d` v5 fields; Greek; a reference picture (`subsurface_reference.png`) and the manual's §19 with a picture | 954 |
+| 16.10b | Displacement: `Material::{displace, displacement_mid, displacement_level}` (the Bump picture as height, the Bump Height as amount), `RenderSettings::displacement_budget`; `grid4d_geom::displace` (`subdivide_flat` with every UV set, `displacement_directions` weighed by angle, `displace` with normals found again up to 60°); the tracer's `Build::add` reworked (layers and their coordinates first, the object in world space, `Build::displace` by the top displacing layer within the budget, bump no longer bending a displaced layer), `Texturing::displacement_budget`, `RenderOptions::displacement_budget`, `RenderScene::split_less`; the material page's Displace rows, the Sampling page's Displacement Budget; OBJ `disp` both ways; `.g4d` v5 fields; Greek; a reference picture (`displacement_reference.png`) and the manual's §19 with a picture | 960 |
 | 16.4 | Light linking and the light-group name: `Linking { mode: Exclude / Include, objects }` and `group` on lights (`group` on the Sky and Environment too); evaluation gives each linked light a bit (the first 64) and every object and clone a mask of the linked lights that skip it (`link_lights`, allocation-free); renders skip those lights and let their shadow rays through such objects (`RenderScene::lit_by`); the viewport carries the mask in `InstanceRaw::normal`'s free `w`s (24 bits each), each light its bit (`LightRaw` 112 bytes) and the shadow pass the key light's; `.g4d` v5 `linking` (object indices) and `group` (stripped from a version 4 file); Merge keeps links and, newly, an Environment's picture; the Attribute Manager's Linking, Objects and Light Group rows; Greek; the manual's §4.1 with a picture | 912 |
 | 16.2b | Area lights: `LightType::Area` and `AreaShape` (Rectangle, Disc, Sphere, Tube) with Size X / Y (animatable as `Size . X / Y`), Visible in Render and Two-Sided in `LightDetails`; `.g4d` v5 `light_type: "area"` and an `area` object (a version 4 file with them is refused / stripped); the Attribute Manager's rows; glTF export as a wide spot or a point; in the tracer one power table for area lights and emitting triangles (`lights.rs`: `AreaLight`, `LightTable`), a Sphere sampled over the cone it fills and a Tube over its facing half, visible lights seen by camera rays and bounces with MIS, others sampled only; brightness matched to an Omni light with Inverse Square falloff at 500 cm; in the viewport the shapes as lines and an approximate light from the shape's nearest point (`LightRaw` 96 bytes); a third reference picture; Greek; the manual's §4.1 with a render | 887 |
 
@@ -2922,6 +2923,29 @@ risks R5 – R8 go with it.
 - **The Greek table's long entries, again.** New entries landed after a
   multi-line one; the table is now re-sorted by a script that reads both
   forms.
+
+**16.10b — Displacement**
+
+*Problems and solutions:*
+- **One picture, two uses.** A separate Displacement channel would need a
+  new picture binding in the viewport (it binds one per channel); the Bump
+  picture is already the height the viewport shows, so Displace in Renders
+  makes the renderer move the surface by it instead (and stops it bending
+  the shading there).
+- **Coordinates after the split.** A layer's coordinates were made while
+  its triangles were stored; displacement needs them before, and every
+  layer's must follow the split. The object's layers are now planned first
+  (material, coordinates), the mesh moved to world space (displacement is
+  in cm of the world), split and displaced, and then stored.
+- **Tilted corners.** A cube's corner first moved off its diagonal: each
+  face is two triangles, and weighing normals by area counted one face
+  twice where its diagonal met the corner. Weighed by the angle each
+  triangle has there, a face counts the same however it was split.
+- **Inside out.** A mirrored object's triangles wind the other way, so the
+  directions and the new normals are turned round for it.
+- **Soft bricks.** At level 7 the pavement's two triangles had fewer
+  points than the picture has texels, and the bricks came out rounded; the
+  picture's scene uses level 8 (131 072 triangles).
 
 **16.10a — Subsurface scattering**
 

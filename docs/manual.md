@@ -2183,6 +2183,7 @@ that replaces the value across the surface.
 | | Specular | how strongly a non-metal reflects (50 % is the usual) |
 | Normal and Bump | Normal Texture, Strength | a normal map: fine relief without more polygons |
 | | Bump Texture, Height | a height map, used when there is no normal map |
+| | Displace in Renders, Mid Level, Subdivision | renders move the surface by the Bump picture instead (below) |
 | Emission | Emission, Strength | light the surface gives off, and how much |
 | Opacity | Opacity, Threshold | cut-out: where opacity is below the threshold the surface is not there (leaves, fences) |
 | Transmission | Transmission, IOR | light passing through (glass, water); IOR bends it (1.5 for glass, 1.33 for water) |
@@ -2204,6 +2205,22 @@ at a time, so few samples look speckled with colour — the denoiser or more
 samples clean it.
 
 ![A wax ball (right) and a matte one of the same colour, lit from behind: the wax glows where light came through it](images/manual/render-subsurface.png)
+
+**Displacement.** A Bump picture only bends the light: silhouettes and
+shadows stay flat. Tick **Displace in Renders** (under Normal and Bump) and
+renders move the surface itself by the picture: white out by the **Bump
+Height** from the **Mid Level** (the picture value that stays in place,
+50 % by default), darker in. Each **Subdivision** level splits every
+triangle in four first (level 3: 64 per triangle), so the picture's detail
+has points to move — a flat plane of two triangles wants a high level, a
+detailed model a low one. Points shared by polygons move together, so the
+surface stays closed; where a picture differs across a UV seam a small crack
+may open there. The viewport keeps showing the picture as bump, and Current
+State to Object does not bake it. Render Settings ▸ Sampling ▸
+**Displacement Budget** (20 million triangles by default) keeps a render
+within memory: objects that would make more are split less.
+
+![A brick pavement displaced by its height picture, lit low from the side: the bricks stand out, cast shadows and break the far edge](images/manual/render-displacement.png)
 
 **A channel's texture.** Under each channel, choose a texture of the
 document in the list, or click **Load…** to pick a picture file (it is added

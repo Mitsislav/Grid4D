@@ -65,6 +65,26 @@ impl Channels {
         m.emitted().iter().any(|&v| v > 0.0) || (self.picture(Channel::Emission).is_some() && m.emission_strength > 0.0)
     }
 
+    /// Whether its Bump picture moves the surface in renders (Displace).
+    pub(crate) fn displaces(&self) -> bool {
+        self.material.displace && self.picture(Channel::Bump).is_some()
+    }
+
+    /// How far the surface moves out at `uv` (cm; in from below the Mid
+    /// Level): the Bump picture's value there, mapped by its range, from the
+    /// Mid Level, times the Bump Height and the slot's strength.
+    pub(crate) fn displacement(&self, uv: Vec2) -> Option<f32> {
+        let read = self.read(Channel::Bump, Some(uv))?;
+        let [from, to] = read.slot.range;
+        let value = from + (to - from) * read.value[read.slot.source.index()];
+        Some((value - self.material.displacement_mid) * self.material.bump_height * read.slot.strength)
+    }
+
+    /// How many times its displacement splits triangles in four.
+    pub(crate) fn displacement_level(&self) -> u32 {
+        self.material.displacement_level.min(Material::MAX_DISPLACEMENT_LEVEL)
+    }
+
     /// Whether a Bump picture bends its shading (only without a Normal one).
     pub(crate) fn has_bump_map(&self) -> bool {
         !self.has_normal_map() && self.picture(Channel::Bump).is_some()

@@ -99,7 +99,7 @@ share is subdivided less, with a note in the render's information line.
 | Piece | Where |
 |-------|-------|
 | `Material::{subsurface, subsurface_color, subsurface_radius, subsurface_scale}` (16.10a), the displacement fields (16.10b) | `grid4d-scene` (`material.rs`) |
-| Flat subdivision + displacement at render time | `grid4d-geom` (`subdivision.rs`, a `displace` function) and `grid4d-raytrace` (`scene.rs`, when building triangles) |
+| Flat subdivision + displacement at render time | `grid4d-geom` (`displace.rs`: `subdivide_flat`, `displacement_directions`, `displace`) and `grid4d-raytrace` (`scene.rs`: `Build::displace`; `Texturing::displacement_budget`, `RenderScene::split_less`) |
 | Random walk | `grid4d-raytrace` (`shade.rs`: `Lobe::Subsurface`, `Material::exit`; `subsurface.rs`: `Medium`, `walk`; `trace.rs`: `light_at`, shared by surfaces and walk exits) |
 | Viewport: wrapped diffuse, displacement as bump | `grid4d-render` (`mesh.wgsl`) |
 | The channels' rows | `ui/panels/attributes.rs` (material page) |
@@ -121,6 +121,20 @@ denoiser cleans them. The viewport wraps the matte lighting round to the
 shadow side by up to half (Subsurface × 0.5), in the Base Color, not the
 Subsurface Color.
 
+As built, displacement (16.10b), our choices: the height is the **Bump
+picture** — Displace in Renders turns it from shading into geometry
+(Blender's way) — so there is no separate Displacement slot; **Amount** is
+the Bump Height, Mid Level and Subdivision are new fields. The renderer
+displaces an object by the top Material tag that displaces, through its
+coordinates (Camera projections do not displace); every layer's coordinates
+are split alike. Points at the same place move along one direction (the
+normals of the triangles meeting there, weighed by their angles); normals
+are found again from the moved surface, smoothed across edges up to 60°.
+The budget is spent object by object in the order they are built; an
+object that would exceed what is left is split less (counted, not yet shown
+in the information line). OBJ `disp` reads into the Bump slot with
+Displace on, and is written beside `bump` for displaced materials.
+
 Deliberate differences: no adaptive (screen-space) subdivision, no vector
 displacement, no displacement in the viewport, no separate subsurface
 methods (only the random walk), no subsurface anisotropy.
@@ -130,13 +144,13 @@ methods (only the random walk), no subsurface anisotropy.
 - [x] A sphere with Subsurface lit from behind lets light through at its
       thin edge; a white slab with a large radius approaches its diffuse
       albedo (energy test); Subsurface 0 renders exactly as before.
-- [ ] A plane displaced by a stripes picture shows ridges of the right
-      height in silhouette (measured in a render); Mid Level keeps mid-grey
-      in place; a closed mesh stays closed after displacement.
-- [ ] The budget limits the triangles made; level 0 moves the original
+- [x] A plane displaced by a stripes picture shows ridges of the right
+      height (measured by rays); Mid Level keeps mid-grey in place; a
+      closed mesh stays closed after displacement.
+- [x] The budget limits the triangles made; level 0 moves the original
       points only.
-- [ ] The viewport shows displacement as bump and subsurface as soft
+- [x] The viewport shows displacement as bump and subsurface as soft
       diffuse; no viewport allocation in steady frames.
-- [ ] Every field undoable, saved in v5, stripped from v4; OBJ `disp` both
+- [x] Every field undoable, saved in v5, stripped from v4; OBJ `disp` both
       ways.
-- [ ] Reference pictures: a wax figure, a displaced brick wall.
+- [x] Reference pictures: a wax ball, a displaced brick pavement.

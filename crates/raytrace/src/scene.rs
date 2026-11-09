@@ -228,6 +228,9 @@ pub struct Texturing<'a> {
     pub aspect: f32,
     /// Camera objects, where they are this frame.
     pub cameras: &'a [(NodeId, RenderCamera)],
+    /// The most triangles displacement may make (Render Settings'
+    /// Displacement Budget); objects beyond are split less.
+    pub displacement_budget: usize,
 }
 
 /// Where a layer's texture coordinates come from.
@@ -249,6 +252,8 @@ struct Layer {
     coords: Coords,
     /// Three per triangle, from this index of `tangents` (Normal pictures).
     tangents: Option<usize>,
+    /// Its Bump picture moved the surface (it no longer bends the shading).
+    displaced: bool,
 }
 
 /// One drawn object or clone.
@@ -298,6 +303,8 @@ pub struct RenderScene {
     /// Render passes: the object IDs in use and the objects they name.
     object_ids: Vec<(u32, NodeId)>,
     /// The light groups' names (a light's `group` n names entry n − 1).
+    /// Objects displacement split less than asked (the budget ran out).
+    split_less: usize,
     light_groups: Vec<String>,
 }
 
@@ -326,6 +333,10 @@ struct Build {
     corner_tangents: Vec<Vec4>,
     /// Render passes: the object IDs in use and their objects.
     object_ids: Vec<(u32, NodeId)>,
+    /// Triangles displacement may still make.
+    budget: usize,
+    /// Objects displacement split less than asked (the budget ran out).
+    split_less: usize,
 }
 
 /// One object to add: its mesh at unit size and how it is drawn.
@@ -358,7 +369,10 @@ impl RenderScene {
     }
 
     fn build(evaluated: &EvaluatedScene, texturing: Option<&Texturing<'_>>) -> Self {
-        let mut b = Build::default();
+        let mut b = Build {
+            budget: texturing.map_or(0, |t| t.displacement_budget),
+            ..Build::default()
+        };
         // Object IDs (render passes): the place in the evaluated order + 1;
         // clones take their Cloner's.
         let place: HashMap<NodeId, u32> = evaluated
@@ -437,6 +451,7 @@ impl RenderScene {
             bounds: b.bounds,
             motion: None,
             object_ids: b.object_ids,
+            split_less: b.split_less,
             light_groups: evaluated.light_groups().to_vec(),
         }
         .with_light_tables()
@@ -516,6 +531,13 @@ impl RenderScene {
     #[must_use]
     pub fn object_ids(&self) -> &[(u32, NodeId)] {
         &self.object_ids
+    }
+
+    /// How many objects displacement split less than their materials ask:
+    /// the Displacement Budget ran out.
+    #[must_use]
+    pub fn split_less(&self) -> usize {
+        self.split_less
     }
 
     /// The light groups' names, as the Light Groups pass names its layers
@@ -638,8 +660,24 @@ impl RenderScene {
     }
 }
 
+/// A layer of the object being added, before its triangles are stored: its
+/// material and the coordinates its pictures are read through.
+struct Planned {
+    /// Into `Build::materials`.
+    slot: usize,
+    /// Seen through a camera.
+    camera: Option<(RenderCamera, Affine2)>,
+    /// One per corner of `Build::tri`, for pictures read through coordinates.
+    uvs: Option<Vec<Vec2>>,
+}
+
+/// Displaced surfaces: normals averaged across edges up to this angle.
+const DISPLACED_SMOOTHING: f32 = 60.0 * std::f32::consts::PI / 180.0;
+
 impl Build {
-    /// Adds `part`'s triangles, and its layers when `texturing`.
+    /// Adds `part`'s triangles, and its layers when `texturing`: a layer
+    /// that displaces splits and moves them first (see
+    /// `docs/reference/material-subsurface-displacement.md`).
     fn add(&mut self, evaluated: &EvaluatedScene, part: &Part<'_>, texturing: Option<&Texturing<'_>>) {
         let draw = part.draw;
         let model = part.world * Mat4::from_scale(draw.scale);
@@ -651,24 +689,9 @@ impl Build {
         let normal_matrix = linear.inverse().transpose();
         self.triangulator
             .triangulate(part.mesh, draw.shading.smoothing(), &mut self.tri);
-        let index = u32::try_from(self.objects.len()).unwrap_or(u32::MAX);
-        let first_triangle = self.object_of.len();
-        let tri = &self.tri;
-        for triangle in tri.indices.as_chunks::<3>().0 {
-            for &corner in triangle {
-                let corner = usize::try_from(corner).unwrap_or(usize::MAX);
-                let (Some(&p), Some(&n)) = (tri.positions.get(corner), tri.normals.get(corner)) else {
-                    continue;
-                };
-                let p = model.transform_point3(p);
-                self.points.push(p);
-                self.normals.push((normal_matrix * n).normalize_or_zero());
-                self.bounds = Some(self.bounds.map_or((p, p), |(min, max)| (min.min(p), max.max(p))));
-            }
-            self.object_of.push(index);
-        }
 
-        let layer_start = self.layers.len();
+        // The layers and their coordinates, on the mesh as triangulated.
+        let mut planned = Vec::new();
         if let Some(texturing) = texturing {
             for layer in evaluated.material_layers(part.layers) {
                 let Some(material) = texturing.materials.get(layer.material) else {
@@ -678,18 +701,18 @@ impl Build {
                     self.materials.push(Channels::new(material, texturing.pictures));
                     self.materials.len() - 1
                 });
-                let Some(channels) = self.materials.get(slot) else {
-                    continue;
+                let pictured = self.materials.get(slot).is_some_and(Channels::has_pictures);
+                let mut plan = Planned {
+                    slot,
+                    camera: None,
+                    uvs: None,
                 };
-                let (pictured, normal_map) = (channels.has_pictures(), channels.has_normal_map());
-                let mut coords = Coords::None;
-                let mut tangents = None;
                 if pictured && layer.projection == Projection::Camera {
                     let camera = layer
                         .camera
                         .and_then(|id| texturing.cameras.iter().find(|(c, _)| *c == id))
                         .map_or(texturing.camera, |&(_, camera)| camera);
-                    coords = Coords::Camera(camera, layer.uv_transform);
+                    plan.camera = Some((camera, layer.uv_transform));
                 } else if pictured {
                     // The mesh is the object's at unit size: its scale first.
                     let projected = layer
@@ -702,36 +725,74 @@ impl Build {
                             *uv = layer.uv_transform.transform_point2(*uv);
                         }
                     }
-                    coords = Coords::Corners(self.uvs.len());
-                    let tri = &self.tri;
+                    plan.uvs = Some(corner_uvs);
+                }
+                planned.push(plan);
+            }
+        }
+
+        // In world space from here (displacement is in cm of the world).
+        for p in &mut self.tri.positions {
+            *p = model.transform_point3(*p);
+        }
+        for n in &mut self.tri.normals {
+            *n = (normal_matrix * *n).normalize_or_zero();
+        }
+        let displaced = self.displace(&mut planned, determinant < 0.0);
+
+        let index = u32::try_from(self.objects.len()).unwrap_or(u32::MAX);
+        let first_triangle = self.object_of.len();
+        let tri = &self.tri;
+        for triangle in tri.indices.as_chunks::<3>().0 {
+            for &corner in triangle {
+                let corner = usize::try_from(corner).unwrap_or(usize::MAX);
+                let (Some(&p), Some(&n)) = (tri.positions.get(corner), tri.normals.get(corner)) else {
+                    continue;
+                };
+                self.points.push(p);
+                self.normals.push(n);
+                self.bounds = Some(self.bounds.map_or((p, p), |(min, max)| (min.min(p), max.max(p))));
+            }
+            self.object_of.push(index);
+        }
+
+        let layer_start = self.layers.len();
+        for (i, plan) in planned.iter().enumerate() {
+            let normal_map = self.materials.get(plan.slot).is_some_and(Channels::has_normal_map);
+            let mut coords = Coords::None;
+            let mut tangents = None;
+            if let Some((camera, transform)) = plan.camera {
+                coords = Coords::Camera(camera, transform);
+            } else if let Some(corner_uvs) = &plan.uvs {
+                coords = Coords::Corners(self.uvs.len());
+                let tri = &self.tri;
+                for &corner in &tri.indices {
+                    let corner = usize::try_from(corner).unwrap_or(usize::MAX);
+                    self.uvs.push(corner_uvs.get(corner).copied().unwrap_or(Vec2::ZERO));
+                }
+                if normal_map {
+                    // In world space already.
+                    uv::tangents(
+                        &tri.positions,
+                        &tri.normals,
+                        corner_uvs,
+                        &tri.indices,
+                        &mut self.corner_tangents,
+                    );
+                    tangents = Some(self.tangents.len());
                     for &corner in &tri.indices {
                         let corner = usize::try_from(corner).unwrap_or(usize::MAX);
-                        self.uvs.push(corner_uvs.get(corner).copied().unwrap_or(Vec2::ZERO));
-                    }
-                    if normal_map {
-                        uv::tangents(
-                            &tri.positions,
-                            &tri.normals,
-                            &corner_uvs,
-                            &tri.indices,
-                            &mut self.corner_tangents,
-                        );
-                        tangents = Some(self.tangents.len());
-                        // A mirrored object turns the picture's up around.
-                        let side = if determinant < 0.0 { -1.0 } else { 1.0 };
-                        for &corner in &tri.indices {
-                            let corner = usize::try_from(corner).unwrap_or(usize::MAX);
-                            let t = self.corner_tangents.get(corner).copied().unwrap_or(Vec4::X);
-                            self.tangents.push((linear * t.truncate()).extend(t.w * side));
-                        }
+                        let t = self.corner_tangents.get(corner).copied().unwrap_or(Vec4::X);
+                        self.tangents.push(t);
                     }
                 }
-                self.layers.push(Layer {
-                    material: slot,
-                    coords,
-                    tangents,
-                });
             }
+            self.layers.push(Layer {
+                material: plan.slot,
+                coords,
+                tangents,
+                displaced: displaced == Some(i),
+            });
         }
         self.objects.push(Object {
             plain: Surface::plain(
@@ -752,6 +813,55 @@ impl Build {
                 })
                 .unwrap_or(0),
         });
+    }
+
+    /// Displaces `self.tri` (in world space) by the top layer of `planned`
+    /// whose Bump picture moves the surface, read through its coordinates:
+    /// split to its level (less when the budget would run out), moved along
+    /// the smoothed normals, its normals found again; every layer's
+    /// coordinates split alike. `mirrored`: the object is turned inside out
+    /// (its normals follow the corners', not the winding). Returns the
+    /// layer's place, if one displaced.
+    fn displace(&mut self, planned: &mut [Planned], mirrored: bool) -> Option<usize> {
+        let index = planned
+            .iter()
+            .rposition(|plan| plan.uvs.is_some() && self.materials.get(plan.slot).is_some_and(Channels::displaces))?;
+        let wanted = self.materials.get(planned[index].slot)?.displacement_level();
+        let triangles = self.tri.indices.len() / 3;
+        let made = |level: u32| triangles.saturating_mul(1usize << (2 * level.min(15)));
+        let mut level = wanted;
+        while level > 0 && made(level) > self.budget {
+            level -= 1;
+        }
+        if level < wanted {
+            self.split_less += 1;
+        }
+        self.budget = self.budget.saturating_sub(made(level));
+        // Every layer's coordinates follow the split.
+        let mut sets: Vec<Vec<Vec2>> = planned.iter_mut().filter_map(|plan| plan.uvs.take()).collect();
+        grid4d_geom::displace::subdivide_flat(&mut self.tri, &mut sets, level);
+        let mut sets = sets.into_iter();
+        for plan in planned.iter_mut() {
+            if plan.camera.is_none() && self.materials.get(plan.slot).is_some_and(Channels::has_pictures) {
+                plan.uvs = sets.next();
+            }
+        }
+        let channels = self.materials.get(planned[index].slot)?;
+        let uvs = planned[index].uvs.as_ref()?;
+        let mut directions = grid4d_geom::displace::displacement_directions(&self.tri);
+        if mirrored {
+            for d in &mut directions {
+                *d = -*d;
+            }
+        }
+        let offsets: Vec<f32> = uvs.iter().map(|&uv| channels.displacement(uv).unwrap_or(0.0)).collect();
+        grid4d_geom::displace::displace(&mut self.tri, &directions, &offsets, DISPLACED_SMOOTHING);
+        if mirrored {
+            for n in &mut self.tri.normals {
+                *n = -*n;
+            }
+        }
+        Some(index)
     }
 }
 
@@ -988,7 +1098,8 @@ impl RenderScene {
                     if let Some(tangent) = tangent {
                         bend = Bend::Normal { tangent, bent };
                     }
-                } else if channels.has_bump_map()
+                } else if !layer.displaced
+                    && channels.has_bump_map()
                     && let Some((pu, pv)) = derivatives(points, corner_uvs)
                     && let Some((_, step)) = channels.height(uv)
                 {
@@ -1163,6 +1274,7 @@ mod tests {
             camera: RenderCamera::framing(Vec3::splat(-1.0), Vec3::ONE, 1.0),
             aspect: 1.0,
             cameras: &[],
+            displacement_budget: 20_000_000,
         };
         let scene = RenderScene::textured(&eval, &texturing);
         let id_of = |node| scene.object_ids().iter().find(|&&(_, n)| n == node).map(|&(id, _)| id);
@@ -1184,6 +1296,91 @@ mod tests {
         // Without materials, no material IDs.
         let plain = RenderScene::new(&eval);
         assert!((0..plain.triangle_count()).all(|t| plain.ids_of(t).1 == 0));
+    }
+
+    /// A 100 cm plane whose Bump picture (`texels`, linear grey, `width`
+    /// wide, one high) displaces it by 10 cm from mid grey, split `level`
+    /// times, within `budget` triangles.
+    fn displaced_plane(width: u32, texels: Vec<u8>, level: u32, budget: usize) -> RenderScene {
+        use std::sync::Arc;
+
+        use grid4d_scene::{Channel, Material, MaterialTag, Tag, Texture, TextureSlot};
+
+        use crate::picture::{Picture, Texels};
+
+        let mut doc = Document::new("displaced");
+        let height = doc.scene.textures_mut().insert(Texture::linked("height.png".into()));
+        let mut material = Material::new("Relief");
+        *material.map_mut(Channel::Bump) = Some(TextureSlot::new(height));
+        (material.displace, material.bump_height, material.displacement_level) = (true, 10.0, level);
+        let material = doc.scene.materials_mut().insert(material);
+        let mut plane = Node::new(
+            "Plane",
+            ObjectKind::Plane {
+                width: 100.0,
+                depth: 100.0,
+                width_segments: 1,
+                depth_segments: 1,
+            },
+        );
+        plane.data.tags = vec![Tag::Material(MaterialTag::new(Some(material)))];
+        doc.scene.insert(plane);
+        let mut eval = EvaluatedScene::for_render();
+        eval.update(&doc.scene);
+        let mut pictures = Pictures::new();
+        let rgba: Vec<u8> = texels.iter().flat_map(|&v| [v, v, v, 255]).collect();
+        let texels = Texels::Linear8(Arc::from(rgba));
+        pictures.insert(height, Arc::new(Picture::new(width, 1, texels).unwrap()));
+        let texturing = Texturing {
+            materials: doc.scene.materials(),
+            pictures: &pictures,
+            camera: RenderCamera::framing(Vec3::splat(-1.0), Vec3::ONE, 1.0),
+            aspect: 1.0,
+            cameras: &[],
+            displacement_budget: budget,
+        };
+        RenderScene::textured(&eval, &texturing)
+    }
+
+    #[test]
+    fn a_height_picture_raises_and_lowers_the_surface() {
+        // Stripes: black, white, black, white across the plane.
+        let scene = displaced_plane(8, vec![0, 0, 255, 255, 0, 0, 255, 255], 5, usize::MAX);
+        assert_eq!(scene.triangle_count(), 2 * 4usize.pow(5));
+        let (min, max) = scene.bounds().unwrap();
+        assert!((max.y - 5.0).abs() < 0.2 && (min.y + 5.0).abs() < 0.2, "{min} {max}");
+        // A ray straight down on a white stripe meets the ridge's top, on a
+        // black one the groove's bottom.
+        let across = |x: f32| {
+            scene
+                .intersect(Vec3::new(x, 50.0, 0.0), Vec3::NEG_Y, 0.0)
+                .unwrap()
+                .position
+                .y
+        };
+        let (ridge, groove) = (across(-12.5), across(-37.5));
+        assert!(
+            (ridge - 5.0).abs() < 0.2 && (groove + 5.0).abs() < 0.2,
+            "{ridge} {groove}"
+        );
+        // Mid grey stays where it was.
+        let flat = displaced_plane(1, vec![128], 3, usize::MAX);
+        let (min, max) = flat.bounds().unwrap();
+        assert!(min.y.abs() < 0.05 && max.y.abs() < 0.05, "{min} {max}");
+        assert_eq!(flat.split_less(), 0);
+    }
+
+    #[test]
+    fn the_budget_limits_the_split_and_level_zero_moves_the_points_only() {
+        let white = vec![255];
+        let limited = displaced_plane(1, white.clone(), 6, 200);
+        // 2 × 4³ = 128 fits in 200; 2 × 4⁴ = 512 would not.
+        assert_eq!(limited.triangle_count(), 128);
+        assert_eq!(limited.split_less(), 1);
+        let moved = displaced_plane(1, white, 0, usize::MAX);
+        assert_eq!(moved.triangle_count(), 2);
+        let (min, max) = moved.bounds().unwrap();
+        assert!((min.y - 5.0).abs() < 1e-3 && (max.y - 5.0).abs() < 1e-3, "{min} {max}");
     }
 
     #[test]
@@ -1214,6 +1411,7 @@ mod tests {
             camera: RenderCamera::framing(Vec3::splat(-1.0), Vec3::ONE, 1.0),
             aspect: 1.0,
             cameras: &[],
+            displacement_budget: 20_000_000,
         };
         let scene = RenderScene::textured(&eval, &texturing);
         let (solid, cut) = (Vec3::new(-50.0, 100.0, 0.0), Vec3::new(50.0, 100.0, 0.0));

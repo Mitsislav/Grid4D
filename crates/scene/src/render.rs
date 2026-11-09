@@ -171,6 +171,9 @@ pub struct RenderSettings {
     pub region: Option<RenderRegion>,
     /// Final renders (Shift+R, the Render Queue) render only the region too.
     pub region_final: bool,
+    /// The most triangles displacement may make in a render, in millions
+    /// (1 … [`Self::MAX_DISPLACEMENT_BUDGET`]): objects are split less beyond.
+    pub displacement_budget: u32,
 }
 
 /// A rectangle of the picture, in ten-thousandths of its width and height
@@ -538,6 +541,7 @@ impl Default for RenderSettings {
             denoise_strength: 100,
             region: None,
             region_final: false,
+            displacement_budget: 20,
         }
     }
 }
@@ -549,6 +553,7 @@ impl RenderSettings {
     pub const MAX_FRAME_STEP: u32 = 10_000;
     pub const MIN_SEGMENTS: u32 = 2;
     pub const MAX_SEGMENTS: u32 = 8;
+    pub const MAX_DISPLACEMENT_BUDGET: u32 = 100;
 
     /// The settings a new document starts with: the defaults (what a file
     /// without these settings means) with Adaptive on and the final
@@ -575,6 +580,7 @@ impl RenderSettings {
         self.min_samples = self.min_samples.clamp(1, Self::MAX_SAMPLES);
         self.noise_threshold = NoiseThreshold::from_thousandths(self.noise_threshold.thousandths());
         self.denoise_strength = self.denoise_strength.min(100);
+        self.displacement_budget = self.displacement_budget.clamp(1, Self::MAX_DISPLACEMENT_BUDGET);
         if let FrameRange::Manual { from, to } = &mut self.frames {
             *to = (*to).max(*from);
         }
