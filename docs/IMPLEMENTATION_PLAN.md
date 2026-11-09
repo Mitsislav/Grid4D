@@ -1895,7 +1895,7 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 | R6 | Robust mesh booleans | Coplanar and degenerate cases break naive booleans; Phase 17 starts with a spike on exact predicates and a fuzzed test corpus before any interface. 17.2: the plane-based method passes the corpus, property tests and a fuzz target; its speed is 17.3's work (the product shell 29 – 38 ms against a target of 8 ms) | Phase 17 |
 | R7 | GPU compute portability | Shader behaviour differs between Vulkan, Metal and DX12; CI renders the reference scenes on every backend it has and compares with the CPU tracer | Phase 23 |
 | R8 | Feature names | Other products' feature names are often trademarks; every new feature gets a plain, descriptive name of our own (reviewed with R2 at each release) | ongoing |
-| R9 | Live generators under a drag | A Boolean or Reduce rebuilt on every frame of an input's drag can drop the viewport below its budget; measured from 17.1, and if one rebuild exceeds its share the drag shows the last result and rebuilds on release (said in the status bar) | Phase 17 |
+| R9 | Live generators under a drag | A Boolean or Reduce rebuilt on every frame of an input's drag can drop the viewport below its budget; measured from 17.1, and if one rebuild exceeds its share the drag shows the last result and rebuilds on release (said in the status bar). 17.3: built — a generator whose last rebuild took over 33 ms keeps its result while any pointer button is held | Phase 17 |
 
 ---
 
@@ -1905,6 +1905,7 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 `docs/reference/`, the names reviewed, `.g4d` v6 written with version 5
 frozen and upgraded as JSON, the modelling budget measured), and so is the
 boolean spike, 17.2 (`grid4d-geom::boolean` and `exact`: the plane-based
-method chosen, D39). Next: the Boolean generator (17.3) — speed first (work
-only near the cut, reuse buffers) to meet the budget, then n-gons merged
-back, UVs, the generator, its interface and file data.
+method chosen, D39), and the Boolean generator, 17.3 (work only near the
+cut, n-gons merged back, UVs, cut edges, weld; the generator with nesting,
+its page, Make Editable, `.g4d` v6 `boolean`, the drag fallback of R9).
+Next: Symmetry, Instance and Join (17.4).

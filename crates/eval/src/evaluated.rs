@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use glam::{Mat4, Vec3};
 use grid4d_geom::{
@@ -17,7 +20,7 @@ use crate::{
     curve::{CachedCurve, CurveSource},
     deform::{self, Active, Base, Deformed, Link},
     drawable,
-    generator::{self, Input, Options},
+    generator::{self, GeneratorNote, Input, Options},
 };
 
 /// How picking tests a ray against a node, in its object space.
@@ -216,6 +219,13 @@ pub struct EvaluatedScene {
     /// Scratch space for gathering a generator's inputs.
     inputs: Vec<Input>,
     cage_stack: Vec<NodeId>,
+    /// Scratch space: the roots of cages the walk has still to reach (a
+    /// Subdivision Surface's first child, a Boolean's first two).
+    pending_cages: Vec<NodeId>,
+    /// While an input is dragged, generators slower than [`SLOW_REBUILD`]
+    /// keep their last result ([`set_deferring`](Self::set_deferring)).
+    deferring: bool,
+    /// Whether a generator kept an out-of-date result in the last update.
     walk_stack: Vec<WalkItem>,
     /// Scratch space for Target tags: node index by id, and the corrections of
     /// turned objects whose subtree is being visited.
@@ -238,11 +248,17 @@ pub struct EvaluatedScene {
     material_layers: Vec<MaterialLayer>,
     /// Scratch space for layers: the layer each current ancestor is on.
     layer_stack: Vec<(u32, Option<LayerId>)>,
+    stale: bool,
     /// [`Scene::revision`] of the scene `nodes` were built from.
     revision: Option<u64>,
     /// The viewport, or the final render.
     purpose: Purpose,
 }
+
+/// A generator whose last rebuild took longer than this keeps its result
+/// while one of its inputs is dragged (risk R9: the drag stays smooth; the
+/// result is rebuilt on release).
+pub const SLOW_REBUILD: Duration = Duration::from_millis(33);
 
 /// Pushes the layers of `tags`' Material tags that link an existing material
 /// onto `layers`; the run they take.
@@ -291,6 +307,37 @@ impl EvaluatedScene {
         }
     }
 
+    /// While `deferring`, a generator whose last rebuild took longer than
+    /// [`SLOW_REBUILD`] keeps its result when its inputs change (the
+    /// interface sets it while something is dragged). Ending it re-evaluates
+    /// whatever was kept.
+    pub fn set_deferring(&mut self, deferring: bool) {
+        if self.deferring && !deferring && self.stale {
+            self.revision = None;
+        }
+        self.deferring = deferring;
+    }
+
+    /// Whether the last update kept an out-of-date generator result (see
+    /// [`set_deferring`](Self::set_deferring)).
+    #[must_use]
+    pub const fn is_stale(&self) -> bool {
+        self.stale
+    }
+
+    /// Every generator with something to say about its last result.
+    pub fn generator_notes(&self) -> impl Iterator<Item = (NodeId, GeneratorNote)> + '_ {
+        self.generated
+            .iter()
+            .filter_map(|(&id, entry)| entry.note.map(|note| (id, note)))
+    }
+
+    /// What generator `id` has to say about its last result, if anything.
+    #[must_use]
+    pub fn generator_note(&self, id: NodeId) -> Option<GeneratorNote> {
+        self.generated.get(&id).and_then(|entry| entry.note)
+    }
+
     /// Sets the frame animation is evaluated at; the next [`update`](Self::update)
     /// re-evaluates if it changed and something is animated.
     pub fn set_frame(&mut self, frame: f64) {
@@ -328,6 +375,10 @@ impl EvaluatedScene {
         let (nodes, meshes, polygons, shown) = (&mut self.nodes, &mut self.meshes, &mut self.polygons, &mut self.shown);
         let (curves, curve_cache, splines) = (&mut self.curves, &mut self.curve_cache, &mut self.splines);
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
+        let deferring = self.deferring;
+        let mut stale = false;
+        let pending_cages = &mut self.pending_cages;
+        pending_cages.clear();
         let plugin_meshes = &mut self.plugin_meshes;
         let material_stack = &mut self.material_stack;
         material_stack.clear();
@@ -342,8 +393,8 @@ impl EvaluatedScene {
         let (deformed, active, links) = (&mut self.deformed, &mut self.active, &mut self.links);
         active.clear();
         let materials = scene.materials();
-        // The next cage root to consume, and the depth of the cage being consumed.
-        let mut next_cage: Option<NodeId> = None;
+        // The depth of the cage being consumed (its roots wait in
+        // `pending_cages`).
         let mut cage_depth: Option<u32> = None;
         scene.walk(&mut self.walk_stack, |id, node, world, depth| {
             if cage_depth.is_some_and(|d| depth <= d) {
@@ -380,9 +431,11 @@ impl EvaluatedScene {
                 return false;
             }
             layer_stack.push((depth, layer));
-            if next_cage == Some(id) {
-                cage_depth = Some(depth);
-                next_cage = None;
+            if let Some(at) = pending_cages.iter().position(|&c| c == id) {
+                pending_cages.swap_remove(at);
+                if cage_depth.is_none() {
+                    cage_depth = Some(depth);
+                }
             }
             // Its deformer children reach it and everything below it.
             deform::push_children(scene, id, depth, frame, active);
@@ -512,8 +565,9 @@ impl EvaluatedScene {
             }
             if let Some(options) = generator.filter(|_| data.enabled) {
                 if let Some(result) = generated_mesh(
-                    generated, inputs, cage_stack, scene, id, options, revision, purpose, frame,
+                    generated, inputs, cage_stack, scene, id, options, revision, purpose, frame, deferring,
                 ) {
+                    stale |= result.stale;
                     let mesh = &result.mesh;
                     if mesh.mesh().face_count() > 0 {
                         surface = Some(mesh.clone());
@@ -547,11 +601,14 @@ impl EvaluatedScene {
                         });
                     }
                 }
-                // Only a Subdivision Surface hides its cage: the spline
-                // generators' inputs are curves, drawn anyway, and anything
-                // else under them is not used and stays as it is.
-                if matches!(options, Options::Subdivision(_)) {
-                    next_cage = scene.children(id).first().copied();
+                // A Subdivision Surface hides its cage, a Boolean its two
+                // inputs: the spline generators' inputs are curves, drawn
+                // anyway, and anything else under them is not used and stays
+                // as it is.
+                match options {
+                    Options::Subdivision(_) => pending_cages.extend(scene.children(id).first()),
+                    Options::Boolean(_) => pending_cages.extend(scene.children(id).iter().take(2)),
+                    Options::Extrude { .. } | Options::Lathe(_) | Options::Sweep(_) | Options::Loft(_) => {}
                 }
             }
             // Deformers reaching it reshape its surface (not a cage's: the
@@ -718,6 +775,7 @@ impl EvaluatedScene {
         // Objects gone, hidden or with nothing hidden any more.
         self.shown.retain(|_, entry| self.meshes.contains_key(&entry.mesh.id()));
         self.generated.retain(|_, entry| entry.seen == revision);
+        self.stale = stale;
         self.plugin_meshes.retain(|_, entry| entry.seen == revision);
         self.deformed.retain(|_, entry| entry.seen == revision);
         self.curve_cache.retain(|_, entry| entry.seen == revision);
@@ -1220,6 +1278,11 @@ struct Generated {
     inputs: Vec<Input>,
     colour: [f32; 3],
     mesh: MeshHandle,
+    note: Option<GeneratorNote>,
+    /// How long it took to build.
+    took: Duration,
+    /// Kept while its inputs changed (see [`SLOW_REBUILD`]).
+    stale: bool,
     /// The scene revision of the last update that used it.
     seen: u64,
 }
@@ -1273,7 +1336,8 @@ fn link_lights(
     }
 }
 
-/// Generator `id`'s cached result, rebuilt if its options or inputs changed.
+/// Generator `id`'s cached result, rebuilt if its options or inputs changed
+/// (unless `deferring` and its last build was slow: then kept, marked stale).
 /// `None` when it has no cage.
 #[expect(clippy::too_many_arguments, reason = "the evaluation's scratch space, passed apart")]
 fn generated_mesh<'a>(
@@ -1286,22 +1350,39 @@ fn generated_mesh<'a>(
     revision: u64,
     purpose: Purpose,
     frame: f64,
+    deferring: bool,
 ) -> Option<&'a Generated> {
     let colour = generator::gather(scene, id, &options, purpose, frame, stack, inputs)?;
     let fresh = generated
         .get(&id)
         .is_some_and(|entry| entry.options == options && entry.inputs == *inputs);
-    if !fresh {
-        let mesh = MeshHandle::new(generator::build(inputs, &options));
+    let keep = deferring
+        && generated
+            .get(&id)
+            .is_some_and(|entry| entry.took > SLOW_REBUILD && entry.options == options);
+    if let Some(entry) = generated.get_mut(&id) {
+        entry.stale = !fresh && keep;
+    }
+    if !fresh && !keep {
+        let start = Instant::now();
+        let built = generator::build_all(inputs, &options);
+        let took = start.elapsed();
+        let mesh = MeshHandle::new(built.mesh);
         let entry = generated.entry(id).or_insert_with(|| Generated {
             options,
             inputs: Vec::new(),
             colour,
             mesh: mesh.clone(),
+            note: None,
+            took,
+            stale: false,
             seen: revision,
         });
         entry.options = options;
         entry.mesh = mesh;
+        entry.note = built.note;
+        entry.took = took;
+        entry.stale = false;
         // Keep the inputs; the old list (with its capacity) becomes the scratch.
         std::mem::swap(&mut entry.inputs, inputs);
     }
@@ -1375,6 +1456,7 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Lathe(_)
         | ObjectKind::Sweep(_)
         | ObjectKind::Loft(_)
+        | ObjectKind::Boolean(_)
         | ObjectKind::Bend(_)
         | ObjectKind::Twist(_)
         | ObjectKind::Taper(_)
@@ -2638,7 +2720,7 @@ mod tests {
                 K::Cube | K::Sphere | K::Cylinder | K::Plane | K::Cone | K::Torus | K::Disc | K::Capsule => {
                     assert_good_uvs(tag.label(), &crate::editable_mesh(&kind).unwrap());
                 }
-                K::SubdivisionSurface | K::Extrude | K::Lathe | K::Sweep | K::Loft => {
+                K::SubdivisionSurface | K::Extrude | K::Lathe | K::Sweep | K::Loft | K::Boolean => {
                     let mut doc = Document::new("uvs");
                     let id = doc.scene.insert(Node::new(tag.label(), kind));
                     let children = match tag {
@@ -2646,6 +2728,7 @@ mod tests {
                         K::Extrude => vec![at(K::Rectangle, Vec3::ZERO)],
                         K::Lathe => vec![at(K::Rectangle, Vec3::new(300.0, 0.0, 0.0))],
                         K::Sweep => vec![at(K::Circle, Vec3::ZERO), at(K::Helix, Vec3::ZERO)],
+                        K::Boolean => vec![at(K::Cube, Vec3::ZERO), at(K::Sphere, Vec3::new(80.0, 60.0, 40.0))],
                         _ => vec![at(K::Circle, Vec3::ZERO), at(K::Circle, Vec3::new(0.0, 0.0, 300.0))],
                     };
                     for child in children {
@@ -3476,5 +3559,126 @@ mod tests {
         let unlit = |id| eval.nodes().iter().find(|n| n.id == id).unwrap().unlit;
         assert_eq!(unlit(inside), 0b01, "the excluding light skips the group's child");
         assert_eq!(unlit(outside), 0b10, "the including light lights only the group");
+    }
+
+    /// A Boolean (Subtract by default) of a cube and a sphere over its
+    /// corner, with a third child. Returns (doc, boolean, cube, sphere, third).
+    fn boolean_scene() -> (Document, NodeId, NodeId, NodeId, NodeId) {
+        let mut doc = Document::new("boolean");
+        let boolean = doc
+            .scene
+            .insert(Node::new("Boolean", ObjectKindTag::Boolean.default_kind()));
+        let cube = doc
+            .scene
+            .insert_child(boolean, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        let mut sphere = Node::new("Sphere", ObjectKindTag::Sphere.default_kind());
+        sphere.data.transform.position = Vec3::splat(100.0);
+        let sphere = doc.scene.insert_child(boolean, sphere).unwrap();
+        let third = doc
+            .scene
+            .insert_child(boolean, Node::new("Third", ObjectKindTag::Cone.default_kind()))
+            .unwrap();
+        (doc, boolean, cube, sphere, third)
+    }
+
+    #[test]
+    fn a_boolean_cuts_its_first_child_by_its_second_and_hides_both() {
+        let (doc, boolean, cube, sphere, third) = boolean_scene();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let result = result_of(&eval, boolean);
+        let mesh = result.mesh();
+        assert!(grid4d_geom::boolean::is_closed(mesh));
+        let cube_volume =
+            grid4d_geom::boolean::volume(&crate::editable_mesh(&ObjectKindTag::Cube.default_kind()).unwrap());
+        let volume = grid4d_geom::boolean::volume(mesh);
+        assert!(
+            volume > 0.5 * cube_volume && volume < 0.99 * cube_volume,
+            "{volume} of {cube_volume}"
+        );
+        for input in [cube, sphere] {
+            let shown = node(&eval, input);
+            assert_eq!(
+                (shown.drawable, shown.pick),
+                (None, PickShape::None),
+                "an input is not drawn"
+            );
+        }
+        assert!(node(&eval, third).drawable.is_some(), "a third child is drawn as it is");
+        assert_eq!(eval.generator_note(boolean), None);
+        assert!(mesh.uvs().is_some(), "the inputs' UVs carried");
+        let built = crate::generator_built(&doc.scene, boolean, 0.0).unwrap();
+        assert_eq!(built.mesh, *mesh);
+        assert!(!built.cut_edges.is_empty());
+    }
+
+    #[test]
+    fn a_boolean_with_one_child_shows_it_and_says_why() {
+        let (mut doc, boolean, _, sphere, third) = boolean_scene();
+        for id in [sphere, third] {
+            doc.scene.detach(id).unwrap();
+        }
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        assert_eq!(result_of(&eval, boolean).mesh().face_count(), 6, "the cube as it is");
+        assert_eq!(eval.generator_note(boolean), Some(GeneratorNote::MissingInput));
+        assert_eq!(eval.generator_notes().count(), 1);
+    }
+
+    #[test]
+    fn a_boolean_takes_another_generators_result() {
+        let (mut doc, boolean, cube, _, _) = boolean_scene();
+        // The cube moves into an inner Boolean (Union with a second cube).
+        let inner = doc.scene.insert_child(
+            boolean,
+            Node::new(
+                "Inner",
+                ObjectKind::Boolean(grid4d_scene::Boolean {
+                    mode: grid4d_scene::BooleanMode::Union,
+                    ..grid4d_scene::Boolean::default()
+                }),
+            ),
+        );
+        let inner = inner.unwrap();
+        doc.scene.reparent_at(inner, Some(boolean), 0, false).unwrap();
+        doc.scene.reparent(cube, Some(inner), false).unwrap();
+        let mut other = Node::new("Other", ObjectKindTag::Cube.default_kind());
+        other.data.transform.position = Vec3::new(-150.0, 0.0, 0.0);
+        doc.scene.insert_child(inner, other).unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let mesh = result_of(&eval, boolean);
+        assert!(grid4d_geom::boolean::is_closed(mesh.mesh()));
+        let volume = grid4d_geom::boolean::volume(mesh.mesh());
+        let cube_volume = 200.0f64.powi(3);
+        assert!(volume > cube_volume, "the union of two cubes, cut: {volume}");
+        assert_eq!(node(&eval, inner).drawable, None, "the inner Boolean is an input");
+    }
+
+    #[test]
+    fn a_slow_boolean_keeps_its_result_while_something_is_dragged() {
+        let (mut doc, boolean, _, sphere, _) = boolean_scene();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let before = result_of(&eval, boolean).id();
+        // As if its last rebuild had been slow.
+        eval.generated.get_mut(&boolean).unwrap().took = SLOW_REBUILD * 2;
+        eval.set_deferring(true);
+        doc.scene.get_mut(sphere).unwrap().data.transform.position.x += 20.0;
+        eval.update(&doc.scene);
+        assert_eq!(result_of(&eval, boolean).id(), before, "kept during the drag");
+        assert!(eval.is_stale());
+        // Released: rebuilt without any change to the document.
+        eval.set_deferring(false);
+        assert!(eval.update(&doc.scene), "the release re-evaluates");
+        assert_ne!(result_of(&eval, boolean).id(), before);
+        assert!(!eval.is_stale());
+        // A fast one is never kept.
+        eval.set_deferring(true);
+        doc.scene.get_mut(sphere).unwrap().data.transform.position.x += 20.0;
+        let fast = result_of(&eval, boolean).id();
+        eval.update(&doc.scene);
+        assert_ne!(result_of(&eval, boolean).id(), fast);
     }
 }

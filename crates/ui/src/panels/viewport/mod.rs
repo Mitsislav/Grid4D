@@ -618,6 +618,9 @@ impl ViewportPanel {
         }
         editor.simulation.overrides(frame, &mut self.simulated);
         self.evaluated.set_overrides(&self.simulated);
+        // While anything is held (a gizmo, a field, a drag), slow generators
+        // keep their result; it is rebuilt on release (risk R9).
+        self.evaluated.set_deferring(ui.input(|i| i.pointer.any_down()));
         let mut cells = self.cells(area);
         // The active view must be on show.
         if !cells.iter().flatten().any(|&(i, _)| i == self.active)
@@ -796,6 +799,12 @@ impl ViewportPanel {
             overlay::brush(&painter, pos, editor.selection_settings.radius);
         }
 
+        editor.generator_notes.clear();
+        editor.generator_notes.extend(self.evaluated.generator_notes());
+        editor.generators_waiting = self.evaluated.is_stale();
+        if editor.generators_waiting {
+            ui.ctx().request_repaint();
+        }
         if response.hovered() {
             let alt = ui.input(|i| i.modifiers.alt);
             editor.status_hint = Some(match (alt, editor.mode.component()) {

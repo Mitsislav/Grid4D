@@ -18,6 +18,7 @@
 //! * Colours are linear RGB.
 
 mod anim;
+mod boolean;
 mod bounds;
 mod document;
 mod dynamics;
@@ -46,6 +47,7 @@ mod test_util;
 pub use anim::{
     Axis, Curve, Interpolation, Key, KeyState, Param, ParamSet, TangentPreset, Tangents, Track, Tracks, Unkeyed,
 };
+pub use boolean::{Boolean, BooleanMode};
 pub use bounds::Aabb;
 pub use document::Document;
 pub use dynamics::{Body, CachedBody, CollisionShape, Inherit, MassMode, Motion, SimulationCache, SimulationSettings};

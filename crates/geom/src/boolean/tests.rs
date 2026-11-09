@@ -1,11 +1,13 @@
-//! The boolean corpus (step 17.2): hard cases for both methods. Every result
+//! The boolean corpus (steps 17.2 – 17.3): hard cases. Every result
 //! of closed inputs must be closed, and volumes must agree with the inputs'
 //! (`V(A ∪ B) + V(A ∩ B) = V(A) + V(B)`, `V(A − B) = V(A) − V(A ∩ B)`) or with
 //! the expected value.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
-use glam::{Quat, Vec3};
+use std::collections::{HashMap, HashSet};
+
+use glam::{Quat, Vec2, Vec3};
 
 use super::*;
 use crate::primitives;
@@ -62,17 +64,21 @@ fn open_edges(mesh: &PolyMesh) -> Vec<(Vec3, Vec3, i32)> {
     open
 }
 
-const METHODS: [Method; 2] = [Method::Exact, Method::Rounded];
+/// Exact results: no weld, so nothing is decided by a distance.
+const EXACT: BooleanOptions = BooleanOptions {
+    merge_faces: true,
+    weld: 0.0,
+};
 
 /// Every mode of `a` and `b`: the results' volumes, each checked closed
 /// (Without: open, from A only). `None` when a result was not closed.
-fn run(a: &PolyMesh, b: &PolyMesh, method: Method) -> Result<[f64; 3], String> {
+fn run(a: &PolyMesh, b: &PolyMesh, options: BooleanOptions) -> Result<[f64; 3], String> {
     let mut volumes = [0.0; 3];
     for (slot, mode) in [BooleanMode::Union, BooleanMode::Subtract, BooleanMode::Intersect]
         .into_iter()
         .enumerate()
     {
-        let result = boolean(a, b, mode, method).map_err(|e| format!("{mode:?}: {e:?}"))?;
+        let result = boolean(a, b, mode, options).map_err(|e| format!("{mode:?}: {e:?}"))?;
         if !is_closed(&result.mesh) {
             return Err(format!(
                 "{mode:?} is not closed ({} faces); open edges: {:?}",
@@ -83,28 +89,39 @@ fn run(a: &PolyMesh, b: &PolyMesh, method: Method) -> Result<[f64; 3], String> {
         assert_eq!(result.origins.len(), result.mesh.face_count());
         volumes[slot] = volume(&result.mesh);
     }
-    let without = boolean(a, b, BooleanMode::Without, method).map_err(|e| format!("{e:?}"))?;
+    let without = boolean(a, b, BooleanMode::Without, options).map_err(|e| format!("{e:?}"))?;
     assert!(without.origins.iter().all(|o| o.input == Input::A));
     Ok(volumes)
 }
 
-fn close(a: f64, b: f64, scale: f64) -> bool {
-    (a - b).abs() <= 1e-5 * scale.max(1.0)
+/// Volumes agree to 10⁻⁵ of the inputs' exactly, to 2 % once welded (a
+/// weld moves points by up to its distance).
+fn close(a: f64, b: f64, scale: f64, options: BooleanOptions) -> bool {
+    let tolerance = if options.weld > 0.0 { 2e-2 } else { 1e-5 };
+    (a - b).abs() <= tolerance * scale.max(1.0)
 }
 
-/// Checks the identities for `method`; `expected` = (union, subtract,
+/// Checks the identities with `options`; `expected` = (union, subtract,
 /// intersect) when known.
-fn check(name: &str, a: &PolyMesh, b: &PolyMesh, method: Method, expected: Option<[f64; 3]>) -> Result<(), String> {
-    let [union, subtract, intersect] = run(a, b, method).map_err(|e| format!("{name}: {e}"))?;
+fn check(
+    name: &str,
+    a: &PolyMesh,
+    b: &PolyMesh,
+    options: BooleanOptions,
+    expected: Option<[f64; 3]>,
+) -> Result<(), String> {
+    let [union, subtract, intersect] = run(a, b, options).map_err(|e| format!("{name}: {e}"))?;
     let (va, vb) = (volume(a), volume(b));
     let scale = va.abs() + vb.abs();
-    if !close(union + intersect, va + vb, scale) || !close(subtract, va - intersect, scale) {
+    if !close(union + intersect, va + vb, scale, options) || !close(subtract, va - intersect, scale, options) {
         return Err(format!(
             "{name}: volumes disagree: union {union}, subtract {subtract}, intersect {intersect}, A {va}, B {vb}"
         ));
     }
     if let Some([u, s, i]) = expected
-        && !(close(union, u, scale) && close(subtract, s, scale) && close(intersect, i, scale))
+        && !(close(union, u, scale, options)
+            && close(subtract, s, scale, options)
+            && close(intersect, i, scale, options))
     {
         return Err(format!(
             "{name}: expected {u}, {s}, {i}; got {union}, {subtract}, {intersect}"
@@ -247,25 +264,116 @@ fn the_inputs_are_closed() {
 fn the_exact_method_passes_the_whole_corpus() {
     let failures: Vec<String> = corpus()
         .into_iter()
-        .filter_map(|(name, a, b, expected)| check(name, &a, &b, Method::Exact, expected).err())
+        .filter_map(|(name, a, b, expected)| check(name, &a, &b, EXACT, expected).err())
         .collect();
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// The rounded method: what it gets wrong is the spike's finding (reported,
-/// not required to pass).
 #[test]
-fn the_rounded_method_on_the_corpus() {
-    let mut failures = Vec::new();
-    for (name, a, b, expected) in corpus() {
-        if let Err(e) = check(name, &a, &b, Method::Rounded, expected) {
-            failures.push(e);
+fn the_corpus_passes_welded_too() {
+    let failures: Vec<String> = corpus()
+        .into_iter()
+        .filter_map(|(name, a, b, expected)| check(name, &a, &b, BooleanOptions::default(), expected).err())
+        .collect();
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A cube with a corner cut away: what is left of each face is one polygon.
+#[test]
+fn cut_faces_are_merged_back_into_polygons() {
+    let a = cube(2.0);
+    let b = moved(cube(2.0), Vec3::splat(1.0));
+    let result = boolean(&a, &b, BooleanMode::Subtract, EXACT).unwrap();
+    assert!(is_closed(&result.mesh));
+    assert!((volume(&result.mesh) - 7.0).abs() < 1e-6);
+    assert_eq!(result.mesh.face_count(), 9, "6 of A (3 cut, 3 whole), 3 of B");
+    let from_b = result.origins.iter().filter(|o| o.input == Input::B).count();
+    assert_eq!(from_b, 3);
+    // Merging off: only triangles.
+    let options = BooleanOptions {
+        merge_faces: false,
+        ..EXACT
+    };
+    let triangles = boolean(&a, &b, BooleanMode::Subtract, options).unwrap();
+    assert!(is_closed(&triangles.mesh));
+    let cut_faces = triangles.mesh.faces().zip(&triangles.origins);
+    for (face, origin) in cut_faces {
+        let whole = origin.input == Input::A && a.face_center(us(origin.face)).min_element() < -0.5;
+        assert!(whole || face.len() == 3, "{origin:?} has {} corners", face.len());
+    }
+}
+
+#[test]
+fn uvs_follow_the_faces() {
+    let a = cube(2.0);
+    assert!(a.uvs().is_some(), "primitives have UVs");
+    let b = moved(cube(2.0), Vec3::new(1.0, 0.6, 0.3));
+    let result = boolean(&a, &b, BooleanMode::Subtract, EXACT).unwrap();
+    let uvs = result.mesh.uvs().unwrap();
+    let mut corner = 0;
+    for (face, origin) in result.mesh.faces().zip(&result.origins) {
+        let source = if origin.input == Input::A { &a } else { &b };
+        let range = source.corner_range(us(origin.face));
+        for &p in face {
+            let uv = uvs[corner];
+            corner += 1;
+            assert!(uv.is_finite() && uv.cmpge(Vec2::splat(-1e-4)).all() && uv.cmple(Vec2::splat(1.0001)).all());
+            // At an input point, the input's own UV.
+            let position = result.mesh.points()[us(p)];
+            for c in range.clone() {
+                if source.points()[us(source.corner_points()[c])] == position {
+                    // B's faces are seen from inside: their pictures mirrored back.
+                    let mut expected = source.uvs().unwrap()[c];
+                    if origin.input == Input::B {
+                        expected.x = 1.0 - expected.x;
+                    }
+                    assert!((expected - uv).length() < 1e-5, "{origin:?}");
+                }
+            }
         }
     }
-    println!("rounded method: {} of {} cases fail", failures.len(), corpus().len());
-    for f in &failures {
-        println!("  {f}");
+}
+
+#[test]
+fn the_cut_edges_are_listed() {
+    let a = cube(2.0);
+    let b = moved(cube(2.0), Vec3::splat(1.0));
+    for options in [EXACT, BooleanOptions::default()] {
+        let result = boolean(&a, &b, BooleanMode::Subtract, options).unwrap();
+        let length: f32 = result
+            .cut_edges
+            .iter()
+            .map(|&[u, v]| result.mesh.points()[us(u)].distance(result.mesh.points()[us(v)]))
+            .sum();
+        assert!(
+            (length - 6.0).abs() < 1e-5,
+            "two unit edges on each of A's three faces: {length}"
+        );
+        let edges: HashSet<(u32, u32)> = result
+            .mesh
+            .faces()
+            .flat_map(|f| (0..f.len()).map(move |i| (f[i].min(f[(i + 1) % f.len()]), f[i].max(f[(i + 1) % f.len()]))))
+            .collect();
+        assert!(result.cut_edges.iter().all(|&[u, v]| edges.contains(&(u, v))));
     }
+}
+
+#[test]
+fn a_weld_joins_what_is_closer_than_it() {
+    // B's face 0.001 inside A's: the sliver between them is welded away.
+    let a = cube(2.0);
+    let b = moved(cube(2.0), Vec3::new(1.999, 0.5, 0.25));
+    let exact = boolean(&a, &b, BooleanMode::Union, EXACT).unwrap();
+    let welded = boolean(&a, &b, BooleanMode::Union, BooleanOptions::default()).unwrap();
+    assert!(is_closed(&welded.mesh));
+    let shortest = |mesh: &PolyMesh| {
+        mesh.faces()
+            .flat_map(|f| (0..f.len()).map(move |i| (f[i], f[(i + 1) % f.len()])))
+            .map(|(u, v)| mesh.points()[us(u)].distance(mesh.points()[us(v)]))
+            .fold(f32::INFINITY, f32::min)
+    };
+    assert!(shortest(&exact.mesh) < 0.01);
+    assert!(shortest(&welded.mesh) >= 0.01, "{}", shortest(&welded.mesh));
 }
 
 #[test]
@@ -276,11 +384,11 @@ fn an_open_cutter_still_cuts() {
     let full = moved(cube(2.0), Vec3::new(1.5, 0.3, 0.2));
     let open = full.with_faces_where(|f| full.face_center(f).x < 2.4);
     assert!(!is_closed(&open));
-    for method in METHODS {
-        let result = boolean(&a, &open, BooleanMode::Subtract, method).unwrap();
-        assert!(is_closed(&result.mesh), "{method:?}");
+    {
+        let result = boolean(&a, &open, BooleanMode::Subtract, EXACT).unwrap();
+        assert!(is_closed(&result.mesh));
         let expected = 8.0 - 0.5 * 1.7 * 1.8;
-        assert!((volume(&result.mesh) - expected).abs() < 1e-4, "{method:?}");
+        assert!((volume(&result.mesh) - expected).abs() < 1e-4);
     }
 }
 
@@ -288,7 +396,7 @@ fn an_open_cutter_still_cuts() {
 fn faces_remember_their_input_and_face() {
     let a = cube(2.0);
     let b = moved(cube(2.0), Vec3::new(1.0, 1.0, 1.0));
-    let result = boolean(&a, &b, BooleanMode::Subtract, Method::Exact).unwrap();
+    let result = boolean(&a, &b, BooleanMode::Subtract, EXACT).unwrap();
     for (face, origin) in result.mesh.faces().zip(&result.origins) {
         let source = if origin.input == Input::A { &a } else { &b };
         let normal = source.face_normal(us(origin.face));
@@ -306,13 +414,13 @@ fn bad_and_empty_inputs() {
     let mut bad = cube(1.0);
     bad.points_mut()[0].x = f32::NAN;
     assert_eq!(
-        boolean(&a, &bad, BooleanMode::Union, Method::Exact).unwrap_err(),
+        boolean(&a, &bad, BooleanMode::Union, EXACT).unwrap_err(),
         BooleanError::NotFinite
     );
     let empty = PolyMesh::new();
-    let union = boolean(&a, &empty, BooleanMode::Union, Method::Exact).unwrap();
+    let union = boolean(&a, &empty, BooleanMode::Union, EXACT).unwrap();
     assert!((volume(&union.mesh) - 8.0).abs() < 1e-6);
-    let none = boolean(&empty, &a, BooleanMode::Subtract, Method::Exact).unwrap();
+    let none = boolean(&empty, &a, BooleanMode::Subtract, EXACT).unwrap();
     assert_eq!(none.mesh.face_count(), 0);
 }
 
@@ -368,34 +476,6 @@ mod random {
             })
     }
 
-    /// The spike's comparison on random shapes: how often each method's
-    /// results are wrong (open or with volumes that disagree), and its time.
-    #[test]
-    #[ignore = "the spike's report (cargo test -p grid4d-geom --release -- --ignored spike_report --nocapture)"]
-    fn spike_report() {
-        use proptest::{strategy::ValueTree, test_runner::TestRunner};
-        let mut runner = TestRunner::deterministic();
-        let cases: Vec<(PolyMesh, PolyMesh)> = (0..1000)
-            .map(|_| {
-                let a = shape().new_tree(&mut runner).unwrap().current();
-                let b = shape().new_tree(&mut runner).unwrap().current();
-                (a, b)
-            })
-            .collect();
-        for method in METHODS {
-            let start = Instant::now();
-            let failed = cases
-                .iter()
-                .filter(|(a, b)| check("random", a, b, method, None).is_err())
-                .count();
-            println!(
-                "{method:?}: {failed} of {} random pairs wrong; {:.0} ms for all (4 modes each)",
-                cases.len(),
-                start.elapsed().as_secs_f64() * 1000.0
-            );
-        }
-    }
-
     proptest! {
         #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
 
@@ -407,14 +487,14 @@ mod random {
             b in garbage(),
             mode in prop::sample::select(BooleanMode::ALL.to_vec()),
         ) {
-            prop_assert!(boolean(&a, &b, mode, Method::Exact).is_ok());
-            prop_assert!(boolean(&cube(2.0), &b, mode, Method::Exact).is_ok());
+            prop_assert!(boolean(&a, &b, mode, EXACT).is_ok());
+            prop_assert!(boolean(&cube(2.0), &b, mode, EXACT).is_ok());
         }
 
         /// Closed in, closed out; the volumes agree with the inputs'.
         #[test]
         fn the_exact_method_keeps_random_shapes_closed(a in shape(), b in shape()) {
-            let result = check("random", &a, &b, Method::Exact, None);
+            let result = check("random", &a, &b, EXACT, None);
             prop_assert!(result.is_ok(), "{:?}", result);
         }
     }

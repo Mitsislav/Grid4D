@@ -2064,6 +2064,39 @@ mod tests {
     }
 
     #[test]
+    fn a_boolean_is_rendered_with_its_hole() {
+        let mut doc = Document::new("t");
+        let boolean = doc
+            .scene
+            .insert(Node::new("Boolean", ObjectKindTag::Boolean.default_kind()));
+        doc.scene
+            .insert_child(boolean, Node::new("Cube", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        // A cylinder taller than the cube, through its middle.
+        let drill = ObjectKind::Cylinder {
+            radius: 50.0,
+            height: 400.0,
+            rotation_segments: 32,
+            height_segments: 1,
+        };
+        doc.scene.insert_child(boolean, Node::new("Drill", drill)).unwrap();
+        let scene = scene_of(&doc);
+        let down = Vec3::NEG_Y;
+        assert!(
+            scene.intersect(Vec3::new(0.0, 500.0, 0.0), down, 0.0).is_none(),
+            "through the hole"
+        );
+        let wall = scene.intersect(Vec3::new(75.0, 500.0, 0.0), down, 0.0);
+        assert!(
+            wall.is_some_and(|hit| (hit.position.y - 100.0).abs() < 1e-3),
+            "the top beside the hole"
+        );
+        // Seen from the side inside the hole: the hole's wall.
+        let inside = scene.intersect(Vec3::new(0.0, 0.0, 0.0), Vec3::X, 0.0);
+        assert!(inside.is_some_and(|hit| (hit.position.x - 50.0).abs() < 1.0));
+    }
+
+    #[test]
     fn a_swept_spline_is_rendered() {
         let mut doc = Document::new("t");
         let sweep = doc

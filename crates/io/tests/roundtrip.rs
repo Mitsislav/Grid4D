@@ -45,7 +45,12 @@ fn colour() -> impl Strategy<Value = [f32; 3]> {
 fn version_4_kinds() -> Vec<ObjectKindTag> {
     ObjectKindTag::ALL
         .into_iter()
-        .filter(|t| !matches!(t, ObjectKindTag::Sky | ObjectKindTag::Environment))
+        .filter(|t| {
+            !matches!(
+                t,
+                ObjectKindTag::Sky | ObjectKindTag::Environment | ObjectKindTag::Boolean
+            )
+        })
         .collect()
 }
 
@@ -507,6 +512,33 @@ proptest! {
                 }
             }
         }
+    }
+
+    /// What version 6 adds round-trips; a version 5 file naming it is
+    /// refused, as Grid4D 1.2 refused it.
+    #[test]
+    fn version_6_additions_round_trip_and_a_version_5_file_refuses_them(
+        objects in prop::collection::vec(object(), 0..6),
+        mode in 0usize..4,
+        merge_faces in any::<bool>(),
+        select_cut_edges in any::<bool>(),
+        weld in prop_oneof![Just(0.01f32), 0.0f32..100.0],
+    ) {
+        let mut doc = document(objects, Vec::new(), Vec::new());
+        let boolean = grid4d_scene::Boolean {
+            mode: grid4d_scene::BooleanMode::ALL[mode],
+            merge_faces,
+            select_cut_edges,
+            weld,
+        };
+        let id = doc.scene.insert(Node::new("Boolean", ObjectKind::Boolean(boolean)));
+        doc.scene.insert_child(id, Node::new("A", ObjectKindTag::Cube.default_kind())).unwrap();
+        let bytes = grid4d_io::to_bytes(&doc).unwrap();
+        let loaded = grid4d_io::from_bytes(&bytes).unwrap();
+        let back = loaded.scene.iter().find(|(_, n)| n.data.name == "Boolean").unwrap().1;
+        prop_assert_eq!(&back.data.kind, &ObjectKind::Boolean(boolean));
+        prop_assert!(grid4d_io::to_bytes(&loaded).unwrap() == bytes);
+        prop_assert!(grid4d_io::from_bytes(&labelled(&bytes, 5)).is_err());
     }
 
     /// Written as version 3 (Grid4D 1.0) would have: the same document comes

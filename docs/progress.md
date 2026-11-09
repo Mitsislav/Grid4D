@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 17 — Modelling 2 (v1.3) |
-| Last step done | 17.2 — the boolean spike: exact arithmetic, one Boolean pipeline with two ways to hold made points, the corpus, property tests and a fuzz target; the plane-based method chosen (D39) (2026-11-09) |
-| Next step | 17.3 — the Boolean generator: fast enough near the cut, n-gons merged back, UVs, the generator, its interface and file data |
-| Tests | 979 (and 18 ignored, run by hand: three timings, the boolean spike's report, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
+| Last step done | 17.3 — the Boolean generator: the geometry fast near the cut with faces merged back and UVs, the object with nested inputs, its page, Make Editable, `.g4d` v6 `boolean`, the drag fallback (2026-11-09) |
+| Next step | 17.4 — Symmetry, Instance and Join |
+| Tests | 990 (and 18 ignored, run by hand: three timings, the walkthrough, the Boolean's picture, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2736,6 +2736,7 @@ risks R5 – R8 go with it.
 | — | Phase 17 planned in detail (`docs/IMPLEMENTATION_PLAN.md`): live Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce generators; soft selection, Slide, Plane Cut, the Polygon Pen, Extrude along Spline, Mirror, Array, bevel profiles; edge creases, hard edges and weighted normals; Wrap, Follow Spline, Displace, Project to Surface, Smooth and Explode deformers; `.g4d` v6; decisions D38 – D45, risk R9; a boolean spike (17.2) before any interface | 961 |
 | 17.1 | Nine specs (the format version 6, the Boolean, Symmetry / Instance / Join, the Spline Boolean, Reduce, soft selection, the modelling tools 2, creases and normals, the deformers 2); the names reviewed (R8: plain words kept, the reference's own names replaced — Join, Spline Boolean, Reduce, Crease, Hard Edges, Follow Spline, Displace, Project to Surface, Explode, Point Offsets); `.g4d` version 6 written (version 5's module moved to `v6.rs`; `v5.rs` and `v4.rs` now only list what the next version adds, applied by the shared `upgrade.rs`; versions 3 – 5 upgraded one at a time); `FILE_FORMAT.md` for version 6, golden `demo_v6.g4d` / `full_v6.g4d`, the version 5 fixtures frozen and checked to read exactly as before, the property tests relabel documents as version 5 too; the modelling budget measured (`grid4d-eval` example `modeling_budget`, `docs/performance.md`) and targets set for the Boolean, Symmetry and Reduce | 966 |
 | 17.2 | The boolean spike: `grid4d-geom::exact` (intervals rounded outwards as a filter, Shewchuk's expansions for exact signs) and `grid4d-geom::boolean` — one pipeline (box-touching triangle pairs, triangles cut by the other input's planes into convex pieces bounded by planes, equal points joined exactly, points on edges stitched in exact order, groups classified by the generalised winding number, pieces in the other's surface by the mode's rule, face origins) with two ways to hold the points a cut makes: implicit (three planes, plane-based) or rounded; a corpus of 14 hard cases, an open cutter, property tests (20 000 random pairs checked closed and by volume identities; garbage meshes never panic), a `boolean` cargo-fuzz target in CI and the weekly Fuzz workflow; both timed (`modeling_budget`). **D39: the plane-based method** — the only one passing everything (rounding: 4 of 14 cases and 185 of 1 000 random pairs wrong) and faster on large inputs; its speed (29 – 38 ms for the product shell, target 8) is 17.3's work | 979 |
+| 17.3 | The Boolean generator. Geometry: only triangles near the other input are cut (faces with no cut pass through whole, getting the cut's points on their edges by lookup), equal support planes shared, one edge plane and partner plane per input edge (an edge's crossings are then one point from both sides), known incidences, equality tested by sides, a small hasher; kept pieces merged back into polygons per face, UVs interpolated (turned faces' pictures mirrored back), cut edges listed, a weld that splits pinched faces so closed stays closed; the spike's rounded method removed; the shell 38 → 11 ms, 50k spheres 0.67 → 0.18 s, a million triangles 11 → 4 s. The object: `ObjectKind::Boolean` (Mode, Merge Faces, Select Cut Edges, Weld), its operands each a subtree, another generator as an input (nested Booleans), both hidden, a note when an input is missing; the drag fallback (R9: a rebuild over 33 ms keeps the last result while a pointer is held, the status bar says so); Make Editable selects the cut edges; `.g4d` v6 `boolean` (refused in v5), golden fixtures, property tests; renders see it; icon, page, tooltip, Greek; the manual's §12.5 with a picture | 990 |
 
 **17.1 — Specs, the format version 6, the modelling budget**
 
@@ -2825,6 +2826,53 @@ risks R5 – R8 go with it.
   machine lacks; the target is checked to compile, and its two halves have
   stable counterparts in `cargo test` (closed shapes stay closed; any
   points and faces never panic, 5 000 cases run once).
+
+**17.3 — The Boolean generator**
+
+*Problems and solutions:*
+- **Fast enough meant working only where the cut is.** The spike gave every
+  triangle planes, pieces, stitching and a place in the classification. Now
+  triangles whose boxes miss the other input are never looked at, and faces
+  with no cut triangle pass through as their own polygons — quads stay
+  quads. Such a face still needs the points a neighbouring cut put on its
+  shared edge; they come from a table of points inside input edges, filled
+  while stitching, not from geometry.
+- **Most exact signs were true zeros.** No filter can decide a point lying
+  on a plane. Three fixes removed most of them: coplanar triangles share one
+  plane; every input edge has one edge plane and one partner plane, so the
+  point where a cut crosses an edge is the same point (the same three
+  planes) from both triangles beside it; and (point, plane) incidences are
+  noted when they are known by construction or found once. Point equality
+  became "does it lie on the other's three planes". The shell's exact signs
+  fell from 8 068 to 526.
+- **Two measured traps.** Classifying the million triangles took 5.6 s
+  because the drill's long side triangles each touched thousands of the
+  sphere's, and every edge of their pieces was tested exactly against all of
+  them; a box test first took it to 0.3 s. And the "largest piece first"
+  rule still computed four winding numbers per group, 30 ms each against a
+  million triangles.
+- **A weld must not open what was closed.** Welding the result made some
+  faces visit a point twice; dropping such a face left a hole. Splitting it
+  at the repeated point into the loops either side keeps every edge, so a
+  closed surface stays closed by construction.
+- **Turned faces showed mirrored pictures.** The UV test every generator
+  passes found that B's faces in Subtract, turned to face the hole, had
+  their UVs turned with them; their U is now mirrored back.
+- **Two cages, and generators inside them.** The walk hid one cage (the
+  Subdivision Surface's first child); the Boolean has two, and a Boolean
+  inside its first input would have overwritten the outer one's pending
+  second. Cages now wait in a small list.
+- **The note needed a way to the Attribute Manager.** Only the viewport's
+  evaluation knows a generator's note, and panels never call each other;
+  the viewport copies the notes (and whether a slow result was kept) into
+  the editor state each frame.
+- **The 8 ms target is not met** (11 ms for the shell). Stitching is the
+  largest stage; indexing points by the planes they lie on would remove its
+  grid search, but finding every point that way is not yet proven complete.
+  The drag fallback covers slow cases; at 11 ms a drag still runs at about
+  60 fps.
+- **Builds broke twice from locked files** (the linker's 1181, then
+  unreadable metadata); a clean build fixed them.
 
 ## Phase 16 — Render quality (2026-11-07 – 2026-11-09)
 

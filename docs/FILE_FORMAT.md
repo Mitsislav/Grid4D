@@ -123,6 +123,7 @@ The `kind` of an object, by its `type`:
 | `lathe` | `angle`, `subdivision`, `movement` (0), `scaling` (1), `reverse_normals` (false), `start_cap` (true), `end_cap` (true), `cap_type` |
 | `sweep` | `end_scale` (1), `end_rotation` (0), `start_growth` (0), `end_growth` (1), `parallel_movement` (false), `constant_cross_section` (true), `banking` (true), `reverse_normals` (false), `start_cap` (true), `end_cap` (true), `cap_type` |
 | `loft` | `subdivision_u`, `subdivision_v`, `organic`, `per_segment`, `looped`, `linear`, `reverse_normals` (all false), `start_cap`, `end_cap` (true), `cap_type` |
+| `boolean` | Version 6: `mode` (`union`, `subtract`, `intersect`, `without`; `subtract` when absent), `merge_faces`, `select_cut_edges` (true when absent), `weld` (cm, 0 – 100; 0.01 when absent). Its first two children are its inputs, each with its own children |
 | `cloner` | `layout` (below), `object` (index, Object mode's surface; none), `effectors` (indices; `[]`), `clones`: `iterate` (default), `random`; `seed`; `reset_coordinates` (true) |
 | `plain_effector`, `random_effector` | `strength` (fraction); `position`, `scale` (fraction), `rotation`, `color` (each optional: off when absent); `uniform_scale` (false); `seed`; `falloff` (default Infinite): `shape` (`infinite`, `sphere`, `box`, `linear`), `size`, `soft` |
 | `bend` | `size`, `strength`, `angle` (0), `keep_length` (false), `origin`: `bottom` (default), `center_c`, `center_s`, `top`; `mode` |
@@ -334,6 +335,7 @@ each step arrives:
 | Addition | Since |
 |----------|-------|
 | nothing yet but the version number | step 17.1 |
+| the kind `boolean` (`mode`, `merge_faces`, `select_cut_edges`, `weld`) | step 17.3 |
 
 A version 5 file is read as a version 6 file with the version number
 changed, minus any field this table lists; a `type` or other value version 6

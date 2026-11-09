@@ -33,8 +33,14 @@ pub(crate) const VERSION: u32 = 5;
 /// 17.1 makes the version, later steps fill it).
 const ADDED: &[Added] = &[];
 
-/// Every value version 6 adds to a closed set, by step of Phase 17 (none yet).
-const NEW_VALUES: &[NewValue] = &[];
+/// Every value version 6 adds to a closed set, by step of Phase 17.
+const NEW_VALUES: &[NewValue] = &[
+    // Step 17.3: the Boolean generator.
+    NewValue {
+        field: "type",
+        value: "boolean",
+    },
+];
 
 /// A version 5 `document.json`, already parsed, as version 6 (see the module
 /// documentation).

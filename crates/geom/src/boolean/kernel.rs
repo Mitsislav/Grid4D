@@ -3,25 +3,17 @@
 //! Every plane comes from the inputs: a triangle's own plane (its *support*)
 //! or a plane through one of its edges (*edge planes*, which bound it within
 //! its support). Every point is either an **input point** (its `f64`
-//! coordinates) or, when the inputs cross, a point made by the cut:
-//!
-//! * [`Method::Exact`] keeps a made point **implicit**, as the meeting point
-//!   of three planes, so every later test on it is exact (the plane-based
-//!   representation);
-//! * [`Method::Rounded`] rounds it to `f64` coordinates at once and treats it
-//!   as an input point afterwards — exact tests on rounded points, the usual
-//!   way, which the spike compares against.
+//! coordinates) or, when the inputs cross, a point made by the cut, kept
+//! **implicit** as the meeting point of three planes, so every later test on
+//! it is exact (the plane-based representation, chosen by step 17.2's spike).
 //!
 //! Signs are found with [`Interval`]s first and with [`Expansion`]s only when
 //! an interval cannot decide.
 
-use std::collections::HashMap;
-
 use glam::DVec3;
 
+use super::fast_hash::{FastMap, FastSet};
 use crate::exact::{Expansion, Interval, Num, cross, det3, dot};
-
-use super::Method;
 
 /// How a plane was made, from input coordinates.
 #[derive(Clone, Copy, Debug)]
@@ -62,7 +54,7 @@ struct PlaneData {
 /// Where a point is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PointKind {
-    /// Input coordinates (or, with [`Method::Rounded`], a made point rounded).
+    /// Input coordinates.
     Explicit,
     /// The meeting point of three planes (sorted ids).
     Implicit([u32; 3]),
@@ -81,12 +73,22 @@ struct PointData {
 
 /// The planes and points of one Boolean, and the predicates on them.
 pub(super) struct Kernel {
-    method: Method,
     planes: Vec<PlaneData>,
     points: Vec<PointData>,
-    implicit: HashMap<[u32; 3], u32>,
-    explicit: HashMap<[u64; 3], u32>,
-    /// How many signs the intervals could not decide (for the spike's report).
+    implicit: FastMap<[u32; 3], u32>,
+    explicit: FastMap<[u64; 3], u32>,
+    /// Support planes by their rounded normal and offset, to find the same
+    /// plane made again by another triangle.
+    supports: FastMap<[i64; 4], Vec<u32>>,
+    /// Edge planes by the edge's points (smaller first) and axis, each with
+    /// the support plane of the triangle that made it: with it, the plane
+    /// pair every triangle along the edge names the edge's line by.
+    edges: FastMap<(u32, u32, usize), (u32, u32)>,
+    partners: FastMap<u32, u32>,
+    /// (point, plane) pairs known to meet: a triangle's corners on its own
+    /// planes. Such signs are 0 without arithmetic.
+    incident: FastSet<(u32, u32)>,
+    /// How many signs the intervals could not decide.
     pub(super) exact_calls: usize,
 }
 
@@ -126,19 +128,18 @@ fn side_of<N: Num>(c: &[N; 4], x: &[N; 3], w: &N) -> N {
 }
 
 impl Kernel {
-    pub(super) fn new(method: Method) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            method,
             planes: Vec::new(),
             points: Vec::new(),
-            implicit: HashMap::new(),
-            explicit: HashMap::new(),
+            implicit: FastMap::default(),
+            explicit: FastMap::default(),
+            supports: FastMap::default(),
+            edges: FastMap::default(),
+            partners: FastMap::default(),
+            incident: FastSet::default(),
             exact_calls: 0,
         }
-    }
-
-    pub(super) fn method(&self) -> Method {
-        self.method
     }
 
     pub(super) fn add_plane(&mut self, def: PlaneDef) -> u32 {
@@ -151,12 +152,81 @@ impl Kernel {
         id
     }
 
-    /// An input point (the same id for the same coordinates).
-    pub(super) fn input_point(&mut self, p: DVec3) -> u32 {
-        self.explicit_point(p, false)
+    /// The plane through three input points (`ids` their kernel points):
+    /// one already made by another triangle when it is exactly the same
+    /// plane, facing the same way (coplanar triangles then share a plane, and
+    /// every test between them is free). The points are noted as on it.
+    pub(super) fn support_plane(&mut self, corners: [DVec3; 3], ids: [u32; 3]) -> u32 {
+        let c: [Interval; 4] = coefficients(&PlaneDef::Support(corners));
+        let n = DVec3::new(c[0].mid(), c[1].mid(), c[2].mid());
+        let length = n.length();
+        let key = if length > 0.0 && length.is_finite() {
+            let unit = n / length;
+            let d = c[3].mid() / length;
+            let scale = corners.iter().map(|p| p.abs().max_element()).fold(1.0, f64::max);
+            Some([
+                (unit.x * 1e6).round() as i64,
+                (unit.y * 1e6).round() as i64,
+                (unit.z * 1e6).round() as i64,
+                (d / scale * 1e6).round() as i64,
+            ])
+        } else {
+            None
+        };
+        if let Some(key) = key {
+            for candidate in self.supports.get(&key).cloned().unwrap_or_default() {
+                if ids.iter().all(|&p| self.side(p, candidate) == 0) && self.normal(candidate).dot(n) > 0.0 {
+                    for p in ids {
+                        self.incident.insert((p, candidate));
+                    }
+                    return candidate;
+                }
+            }
+        }
+        let id = self.add_plane(PlaneDef::Support(corners));
+        if let Some(key) = key {
+            self.supports.entry(key).or_default().push(id);
+        }
+        for p in ids {
+            self.incident.insert((p, id));
+        }
+        id
     }
 
-    fn explicit_point(&mut self, p: DVec3, made: bool) -> u32 {
+    /// The plane through input points `a` and `b` along `axis` — one per
+    /// edge, whichever triangle asks (the first one's `support` becomes its
+    /// partner). Both points are noted as on it.
+    pub(super) fn edge_plane(&mut self, ids: [u32; 2], points: [DVec3; 2], axis: usize, support: u32) -> u32 {
+        let key = (ids[0].min(ids[1]), ids[0].max(ids[1]), axis);
+        if let Some(&(plane, _)) = self.edges.get(&key) {
+            return plane;
+        }
+        let (a, b) = if ids[0] < ids[1] {
+            (points[0], points[1])
+        } else {
+            (points[1], points[0])
+        };
+        let plane = self.add_plane(PlaneDef::Edge([a, b], axis));
+        self.edges.insert(key, (plane, support));
+        self.partners.insert(plane, support);
+        for p in ids {
+            self.incident.insert((p, plane));
+        }
+        plane
+    }
+
+    /// The plane an edge plane is paired with to name its edge's line.
+    pub(super) fn partner(&self, edge: u32) -> Option<u32> {
+        self.partners.get(&edge).copied()
+    }
+
+    /// Notes that `point` lies on `plane`.
+    pub(super) fn note_on(&mut self, point: u32, plane: u32) {
+        self.incident.insert((point, plane));
+    }
+
+    /// An input point (the same id for the same coordinates).
+    pub(super) fn input_point(&mut self, p: DVec3) -> u32 {
         let key = bits(p);
         if let Some(&id) = self.explicit.get(&key) {
             return id;
@@ -167,7 +237,7 @@ impl Kernel {
             approx: p + DVec3::ZERO,
             interval: None,
             exact: None,
-            made,
+            made: false,
         });
         self.explicit.insert(key, id);
         id
@@ -213,18 +283,13 @@ impl Kernel {
             && x.iter()
                 .chain([&w])
                 .all(|v| v.relative_width() < 1e-10 || v.sign() == Some(0));
-        let approx = if decided && self.method == Method::Exact {
+        let approx = if decided {
             DVec3::new(x[0].mid(), x[1].mid(), x[2].mid()) / w.mid()
         } else {
             let [p, q, r] = key.map(|k| self.plane_exact(k));
             let (x, w) = meeting(&p, &q, &r);
             DVec3::new(x[0].approx(), x[1].approx(), x[2].approx()) / w.approx()
         };
-        if self.method == Method::Rounded {
-            let id = self.explicit_point(approx, true);
-            self.implicit.insert(key, id);
-            return id;
-        }
         let id = crate::u32_index(self.points.len());
         self.points.push(PointData {
             kind: PointKind::Implicit(key),
@@ -270,6 +335,9 @@ impl Kernel {
         {
             return 0;
         }
+        if self.incident.contains(&(point, plane)) {
+            return 0;
+        }
         let (x, w) = self.point_interval(point);
         let c = self.planes[crate::us(plane)].interval;
         if let (Some(s), Some(ws)) = (side_of(&c, &x, &w).sign(), w.sign())
@@ -298,9 +366,28 @@ impl Kernel {
         if differs {
             return false;
         }
-        self.exact_calls += 1;
-        let ((xa, wa), (xb, wb)) = (self.point_exact(a), self.point_exact(b));
-        (0..3).all(|i| xa[i].mul(&wb).sub(&xb[i].mul(&wa)).sign() == 0)
+        // A made point is where its three planes meet: another point is the
+        // same exactly when it lies on all three (side tests are cheaper
+        // than comparing coordinates, and often known).
+        let (point, planes) = match (ka, kb) {
+            (_, PointKind::Implicit(planes)) => (a, planes),
+            (PointKind::Implicit(planes), _) => (b, planes),
+            (PointKind::Explicit, PointKind::Explicit) => return false,
+        };
+        let same = planes.iter().all(|&plane| self.side(point, plane) == 0);
+        if same {
+            // Each now counts as lying on the other's planes.
+            let other = if point == a { b } else { a };
+            if let PointKind::Implicit(own) = self.kind(point) {
+                for plane in own {
+                    self.incident.insert((other, plane));
+                }
+            }
+            for plane in planes {
+                self.incident.insert((point, plane));
+            }
+        }
+        same
     }
 
     /// −1, 0 or 1: the sign of `a`'s coordinate minus `b`'s along `axis`.
@@ -336,24 +423,6 @@ impl Kernel {
         DVec3::new(c[0].mid(), c[1].mid(), c[2].mid())
     }
 
-    /// [`side`](Self::side) for classification: exact with
-    /// [`Method::Exact`]; with [`Method::Rounded`] a point within `tolerance`
-    /// of the plane counts as on it (rounded points are almost never exactly
-    /// on anything).
-    pub(super) fn side_within(&mut self, point: u32, plane: u32, tolerance: f64) -> i8 {
-        if self.method == Method::Exact {
-            return self.side(point, plane);
-        }
-        let c = self.planes[crate::us(plane)].interval;
-        let n = DVec3::new(c[0].mid(), c[1].mid(), c[2].mid());
-        let distance = (n.dot(self.approx(point)) + c[3].mid()) / n.length().max(f64::MIN_POSITIVE);
-        if distance.abs() <= tolerance {
-            0
-        } else {
-            self.side(point, plane)
-        }
-    }
-
     /// The exact sign of the dot product of two planes' normals.
     pub(super) fn normals_agree(&mut self, a: u32, b: u32) -> i8 {
         let n = |c: [Interval; 4]| [c[0], c[1], c[2]];
@@ -380,8 +449,8 @@ mod tests {
 
     #[test]
     fn three_planes_meet_where_they_should_and_sides_are_exact() {
-        for method in [Method::Exact, Method::Rounded] {
-            let mut k = Kernel::new(method);
+        {
+            let mut k = Kernel::new();
             // x = 1, y = 2, z = 3 as planes through points.
             let px = support(&mut k, [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [1.0, 0.0, 1.0]);
             let py = support(&mut k, [0.0, 2.0, 0.0], [0.0, 2.0, 1.0], [1.0, 2.0, 0.0]);
@@ -402,8 +471,8 @@ mod tests {
     #[test]
     fn a_meeting_point_on_a_skew_plane_is_exactly_on_it() {
         // A plane through awkward points; the line x = 1/3-ish, y = 0.1 meets
-        // it at a point no f64 can hold. Exact: on the plane. Rounded: off.
-        let mut k = Kernel::new(Method::Exact);
+        // it at a point no f64 can hold, which still lies exactly on it.
+        let mut k = Kernel::new();
         let skew = support(&mut k, [0.1, 0.7, 0.3], [1.9, 0.2, 0.55], [0.4, 1.3, 2.1]);
         let a = support(
             &mut k,
@@ -418,20 +487,5 @@ mod tests {
         let again = support(&mut k, [1.9, 0.2, 0.55], [0.4, 1.3, 2.1], [0.1, 0.7, 0.3]);
         assert_eq!(k.side(p, again), 0);
         assert!(k.exact_calls > 0, "the filter cannot decide a point on the plane");
-        let mut rounded = Kernel::new(Method::Rounded);
-        let skew = support(&mut rounded, [0.1, 0.7, 0.3], [1.9, 0.2, 0.55], [0.4, 1.3, 2.1]);
-        let a = support(
-            &mut rounded,
-            [1.0 / 3.0, 0.0, 0.0],
-            [1.0 / 3.0, 1.0, 0.0],
-            [1.0 / 3.0, 0.0, 1.0],
-        );
-        let b = support(&mut rounded, [0.0, 0.1, 0.0], [0.0, 0.1, 1.0], [1.0, 0.1, 0.0]);
-        let q = rounded.meet(a, b, skew);
-        assert!(
-            rounded.approx(q).distance(k.approx(p)) < 1e-12,
-            "rounded, it is next to the exact point"
-        );
-        assert_eq!(rounded.kind(q), PointKind::Explicit);
     }
 }

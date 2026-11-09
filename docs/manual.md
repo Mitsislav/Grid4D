@@ -22,7 +22,7 @@ screenshots come from the application itself.
 9. [Files](#9-files)
 10. [Timeline and playback](#10-timeline-and-playback)
 11. [Polygon modelling](#11-polygon-modelling)
-12. [Generators: Subdivision Surface](#12-generators-subdivision-surface)
+12. [Generators: Subdivision Surface and Boolean](#12-generators-subdivision-surface-and-boolean)
 13. [Splines](#13-splines)
 14. [Deformers](#14-deformers)
 15. [The Cloner](#15-the-cloner)
@@ -460,7 +460,7 @@ any time. To edit their points and polygons, make them editable
 
 **Generators** (Create ▸ Generator, or the green buttons at the right end of the
 command palette) build their shape from their children. The Subdivision Surface
-smooths a polygon mesh ([§12](#12-generators-subdivision-surface)); the Extrude
+smooths a polygon mesh ([§12](#12-generators-subdivision-surface-and-boolean)); the Extrude
 turns a spline into a solid ([§13.4](#134-extrude-from-outline-to-solid)) and
 the Lathe turns one around an axis ([§13.5](#135-lathe-turning-a-profile)) and
 the Sweep moves one along another ([§13.6](#136-sweep-a-profile-along-a-path))
@@ -1337,10 +1337,11 @@ Polygons that collapse are removed.
 - It works on the selected points (or those of the selected edges or polygons), or
   on the whole object when nothing is selected.
 
-## 12. Generators: Subdivision Surface
+## 12. Generators: Subdivision Surface and Boolean
 
 A **generator** is an object that builds its shape from its children. This
-section covers the **Subdivision Surface**; the spline generators (Extrude,
+section covers the **Subdivision Surface** and the **Boolean** (§12.5); the
+spline generators (Extrude,
 Lathe, Sweep, Loft) are in [§13.4–13.7](#134-extrude-from-outline-to-solid).
 The Subdivision Surface turns a coarse polygon mesh, the **cage**,
 into a smooth, rounded surface. The result updates live while you keep modelling
@@ -1406,6 +1407,63 @@ Select the generator and open **Attribute Manager ▸ Object**:
 - **Make Editable** (C) on the generator replaces it with one polygon object holding
   the smooth mesh, at the **Subdivision Viewport** level. The cage is removed. One
   undo step brings both back. A generator that is switched off is left as it is.
+
+### 12.5 Boolean: cutting and joining solids
+
+The **Boolean** combines two objects as solids, live: a block with holes
+drilled by cylinders, two parts joined into one, the piece two shapes share.
+The objects stay ordinary objects — move, turn, scale or reshape either, and
+the result follows.
+
+![A block with two holes: the Boolean's second input is a group of two cylinders](images/manual/boolean.png)
+
+**Creating one**: select the object to cut and **Alt + click** the Boolean
+button in the command palette (or hold Alt while choosing **Create ▸
+Generator ▸ Boolean**): the Boolean takes the object's place and the object
+becomes its first child. Then drag the cutting object onto the Boolean in the
+Object Manager, below the first. Without Alt you get an empty Boolean to drag
+both onto.
+
+What it uses:
+
+- Its **first child** is the object that is kept (A), its **second child**
+  the one that cuts or joins (B). Each counts **with its own children**: to
+  cut several holes at once, put the cutters in a group (a Null) and make
+  the group the second child, as in the picture.
+- Either input may be any object with a surface — a primitive, a polygon
+  object, a deformed object, or **another generator**, such as a second
+  Boolean or a Subdivision Surface. Further children are drawn as they are.
+- Both inputs are hidden while the Boolean is on; switch it off (**Q**, or
+  its check mark) to see and edit them as they are.
+
+Its settings, in **Attribute Manager ▸ Object**:
+
+| Parameter | Meaning |
+|-----------|---------|
+| Mode | **Subtract** (the default): A with B's volume cut away, closed where B cut. **Union**: everything inside either, as one surface. **Intersect**: only what is inside both. **Without**: A's surface outside B, left **open** where B cut it (no walls from B). |
+| Merge Faces | The pieces each face was cut into become polygons again, so a cut square stays a few clean polygons. Off: triangles. |
+| Select Cut Edges | Make Editable leaves the edges along the cut selected, ready for a bevel. |
+| Weld | Points of the result closer than this are joined (0.01 cm). |
+
+Good to know:
+
+- The inputs should be **closed** solids, facing out. Slightly open ones
+  (a missing cap, small gaps) still work: what counts as inside is decided
+  the way a closed one would be.
+- Faces lying in each other's plane, shared edges, inputs that only touch:
+  all are handled exactly, never by guessing.
+- When something is wrong — fewer than two inputs with a surface, a broken
+  input — the Boolean shows its first input as it is, and the line under its
+  settings says why.
+- The result's texture coordinates come from the inputs' own.
+- A very heavy Boolean (one that takes longer than about a thirtieth of a
+  second to rebuild) keeps its last result **while you drag** one of its
+  inputs, and rebuilds when you let go; the status bar says *A slow
+  generator updates when you release*. Light ones follow every movement.
+- **Make Editable** (C) replaces the Boolean with one polygon object (its cut
+  edges selected when *Select Cut Edges* is on) and removes both inputs; one
+  undo step brings everything back. **Current State to Object** makes a copy
+  and keeps the Boolean. Renders and exported files use the result.
 
 ## 13. Splines
 

@@ -40,6 +40,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("A Render Is Running", "Τρέχει ένα render"),
     (
+        "A child has a point that is not a number: the first is shown as it is",
+        "Ένα παιδί έχει σημείο που δεν είναι αριθμός: το πρώτο εμφανίζεται όπως είναι",
+    ),
+    (
         "A click sets it from where the cursor is on the edge",
         "Ένα κλικ το ορίζει από το σημείο του δείκτη πάνω στην ακμή",
     ),
@@ -76,6 +80,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "A skin over its child splines",
         "Μια επιφάνεια πάνω από τις θυγατρικές καμπύλες του",
     ),
+    (
+        "A slow generator updates when you release",
+        "Ένας αργός παραγωγός ενημερώνεται όταν αφήσετε",
+    ),
     ("A toothed wheel", "Ένας οδοντωτός τροχός"),
     ("Absolute", "Απόλυτη"),
     ("Adaptive", "Προσαρμοστική"),
@@ -84,6 +92,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Add Bend (Shift: under the selected object, fitted to it)",
         "Προσθήκη Κάμψης (Shift: κάτω από το επιλεγμένο αντικείμενο, προσαρμοσμένη σε αυτό)",
+    ),
+    (
+        "Add Boolean: its first two children as solids (Alt: around the selected object)",
+        "Προσθήκη λογικής πράξης: τα δύο πρώτα παιδιά της ως στερεά (Alt: γύρω από το επιλεγμένο αντικείμενο)",
     ),
     (
         "Add Bulge (Shift: under the selected object, fitted to it)",
@@ -308,6 +320,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Blue", "Μπλε"),
     ("Bookmarks", "Σελιδοδείκτες"),
     ("Bookmarks — planned", "Σελιδοδείκτες — προγραμματίζεται"),
+    ("Boolean", "Λογική πράξη"),
     ("Bottom", "Κάτω"),
     ("Bottom Radius", "Κάτω ακτίνα"),
     ("Bounce", "Αναπήδηση"),
@@ -419,6 +432,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Collider Body Tag", "Ετικέτα Σώματος σύγκρουσης"),
     ("Color", "Χρώμα"),
     ("Colour Space", "Χρωματικός χώρος"),
+    (
+        "Combines its first two children as solids",
+        "Συνδυάζει τα δύο πρώτα παιδιά της ως στερεά",
+    ),
     (
         "Component modes work on a polygon object: select one, or press C to make a primitive editable",
         "Οι λειτουργίες στοιχείων δουλεύουν σε πολυγωνικό αντικείμενο: επιλέξτε ένα ή πατήστε C για να γίνει επεξεργάσιμο ένα πρωτογενές",
@@ -896,6 +913,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Intermediate Points", "Ενδιάμεσα σημεία"),
     ("Interpolation", "Παρεμβολή"),
+    ("Intersect", "Τομή"),
     ("Inverse Square", "Αντίστροφο τετράγωνο"),
     ("Invert", "Αντιστροφή"),
     (
@@ -1095,6 +1113,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Maximum Time", "Μέγιστος χρόνος"),
     ("Melt", "Τήξη"),
     ("Merge", "Συγχώνευση"),
+    ("Merge Faces", "Συγχώνευση όψεων"),
     ("Merge a file into the document", "Συγχώνευση αρχείου στο έγγραφο"),
     (
         "Merge points closer than the tolerance",
@@ -1169,6 +1188,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Name0000", "Όνομα0000"),
     ("Name_0000", "Όνομα_0000"),
     ("Natural", "Φυσική"),
+    (
+        "Needs two children with surfaces: the first is shown as it is",
+        "Χρειάζεται δύο παιδιά με επιφάνειες: το πρώτο εμφανίζεται όπως είναι",
+    ),
     ("New", "Νέο"),
     (
         "New / open / save / save as",
@@ -1760,6 +1783,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Select All", "Επιλογή όλων"),
     ("Select Connected", "Επιλογή συνδεδεμένων"),
+    ("Select Cut Edges", "Επιλογή ακμών τομής"),
     ("Select Cuts", "Επιλογή τομών"),
     ("Select Edges", "Επιλογή ακμών"),
     ("Select Objects", "Επιλογή αντικειμένων"),
@@ -1962,6 +1986,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Subdivision Viewport", "Υποδιαίρεση προβολής"),
     ("Subsurface", "Υποεπιφανειακή σκέδαση"),
     ("Subsurface Color", "Χρώμα σκέδασης"),
+    ("Subtract", "Αφαίρεση"),
     ("Sun", "Ήλιος"),
     ("Sun Direction", "Θέση ήλιου"),
     ("Sun Intensity", "Ένταση ήλιου"),
@@ -2083,6 +2108,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "The render pass shown (data passes mapped to colours)",
         "Το πέρασμα που φαίνεται (τα περάσματα δεδομένων ως χρώματα)",
+    ),
+    (
+        "The result would be too large: the first child is shown as it is",
+        "Το αποτέλεσμα θα ήταν πολύ μεγάλο: το πρώτο παιδί εμφανίζεται όπως είναι",
     ),
     (
         "The same seed always gives the same result",
@@ -2220,6 +2249,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Unhide All", "Εμφάνιση όλων"),
     ("Uniform", "Ομοιόμορφη"),
     ("Uniform Scale", "Ομοιόμορφη κλίμακα"),
+    ("Union", "Ένωση"),
     ("Units", "Μονάδες"),
     ("Unlimited", "Απεριόριστο"),
     (
@@ -2317,6 +2347,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Χωρίς επιλογή, σύρετε ένα σημείο, ακμή ή πολύγωνο για να μετακινηθεί μόνο αυτό",
     ),
     ("Within Box", "Μέσα στο κουτί"),
+    ("Without", "Χωρίς"),
     (
         "Works on the points, edges or polygons of a polygon object",
         "Δουλεύει στα σημεία, τις ακμές ή τα πολύγωνα ενός πολυγωνικού αντικειμένου",

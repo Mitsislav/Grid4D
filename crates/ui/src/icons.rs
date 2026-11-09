@@ -434,6 +434,13 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
                 c.line((0.5, y), (0.5, y + 0.1));
             }
         }
+        ObjectKindTag::Boolean => {
+            // A block and a disc overlapping its corner: two solids combined.
+            let block = [(0.1, 0.34), (0.74, 0.34), (0.74, 0.9), (0.1, 0.9)];
+            c.fill_with(&block, soft);
+            c.polyline(&block, true);
+            c.ellipse((0.7, 0.32), (0.22, 0.22));
+        }
         ObjectKindTag::Sweep => {
             // A tube following a curve: its two edges and its end opening.
             let curve = |offset: f32| -> Vec<P> {

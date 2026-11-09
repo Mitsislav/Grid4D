@@ -4,17 +4,20 @@
 //! pushes its first child spline (or, hierarchical, every spline below it) into
 //! a solid; the Lathe turns its first child spline around its Y axis; the
 //! Sweep moves its first child spline (the profile) along its second (the path);
-//! the Loft stretches a skin over all its child splines.
+//! the Loft stretches a skin over all its child splines; the Boolean combines
+//! its first two children (each with its own children, other generators'
+//! results included) as solids.
 
 use glam::Mat4;
 use grid4d_geom::{
     PolyMesh,
+    boolean::{self, BooleanError},
     spline::{Interpolation, Polyline, SplinePrimitive, Text},
     subdivision::{self, SubdivisionOptions},
     surface::{self, Extrusion, Lathe, Loft, Sweep},
     uv,
 };
-use grid4d_scene::{MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
+use grid4d_scene::{Boolean, MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
 
 use crate::{
     Purpose,
@@ -30,7 +33,32 @@ pub(crate) enum Options {
     Lathe(Lathe),
     Sweep(Sweep),
     Loft(Loft),
+    Boolean(Boolean),
 }
+
+/// Something a generator wants its user to know about its result (shown in
+/// the Attribute Manager).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GeneratorNote {
+    /// A Boolean lacks one of its two inputs (it shows the first).
+    MissingInput,
+    /// An input has a point that is not a number (the first input is shown).
+    NotANumber,
+    /// The result would be too large for a mesh (the first input is shown).
+    TooLarge,
+}
+
+/// A generator's result, built.
+#[derive(Clone, Debug, Default)]
+pub struct Built {
+    pub mesh: PolyMesh,
+    /// A Boolean's edges along the cut (point pairs of `mesh`).
+    pub cut_edges: Vec<[u32; 2]>,
+    pub note: Option<GeneratorNote>,
+}
+
+/// How deep generators inside a Boolean's inputs are followed.
+const MAX_NESTING: u32 = 16;
 
 /// One input of a generator, in the generator's space: what decides the result,
 /// so an unchanged list means an unchanged result (a selection change in the
@@ -42,6 +70,8 @@ pub(crate) struct Input {
     matrix: Mat4,
     /// The deformers inside the input reaching this node (empty for most).
     links: Vec<Link>,
+    /// Which of a Boolean's two inputs it belongs to (0 for others).
+    operand: u8,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -56,6 +86,9 @@ enum Source {
     Text(Text),
     /// An editable spline (compared by id) and how it is sampled.
     Spline(SplineHandle, Interpolation),
+    /// Another generator inside a Boolean's input: its options and inputs
+    /// (in its own space; its result is built when needed).
+    Generated(Options, Vec<Input>),
 }
 
 impl Source {
@@ -65,7 +98,7 @@ impl Source {
             Self::SplinePrimitive(primitive) => Some(primitive.polyline()),
             Self::Text(text) => Some(grid4d_text::text_spline(text).sample(text.interpolation)),
             Self::Spline(spline, interpolation) => Some(spline.spline().sample(*interpolation)),
-            Self::Mesh(_) | Self::Primitive(_) => None,
+            Self::Mesh(_) | Self::Primitive(_) | Self::Generated(..) => None,
         }
     }
 }
@@ -97,6 +130,7 @@ pub(crate) fn options(kind: &ObjectKind, purpose: Purpose) -> Option<Options> {
         ObjectKind::Lathe(lathe) => Some(Options::Lathe(lathe)),
         ObjectKind::Sweep(sweep) => Some(Options::Sweep(sweep)),
         ObjectKind::Loft(loft) => Some(Options::Loft(loft)),
+        ObjectKind::Boolean(boolean) => Some(Options::Boolean(boolean)),
         _ => None,
     }
 }
@@ -120,6 +154,7 @@ pub(crate) fn gather(
     match options {
         Options::Sweep(_) => return gather_sweep(scene, id, purpose, frame, inputs),
         Options::Loft(_) => return gather_loft(scene, id, purpose, frame, inputs),
+        Options::Boolean(_) => return gather_boolean(scene, id, purpose, frame, 0, inputs),
         Options::Subdivision(_) | Options::Extrude { .. } | Options::Lathe(_) => {}
     }
     let &first = scene.children(id).first()?;
@@ -129,7 +164,7 @@ pub(crate) fn gather(
         // Its own: a spline's line colour would not suit a solid.
         Options::Extrude { hierarchical, .. } => (scene.get(id)?.data.display_color, hierarchical),
         Options::Lathe(_) => (scene.get(id)?.data.display_color, false),
-        Options::Sweep(_) | Options::Loft(_) => return None,
+        Options::Sweep(_) | Options::Loft(_) | Options::Boolean(_) => return None,
     };
     let into_generator = scene.world_matrix_at(id, frame).inverse();
     stack.push(first);
@@ -162,12 +197,13 @@ pub(crate) fn gather(
         if let Some(source) = source {
             let links = match source {
                 Source::Mesh(_) | Source::Primitive(_) => deform::input_chain(scene, node_id, id, frame),
-                Source::SplinePrimitive(_) | Source::Text(_) | Source::Spline(..) => Vec::new(),
+                Source::SplinePrimitive(_) | Source::Text(_) | Source::Spline(..) | Source::Generated(..) => Vec::new(),
             };
             inputs.push(Input {
                 source,
                 matrix: into_generator * scene.world_matrix_at(node_id, frame),
                 links,
+                operand: 0,
             });
         }
         if walk {
@@ -208,6 +244,7 @@ fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs:
             source,
             matrix,
             links: Vec::new(),
+            operand: 0,
         });
     }
     if inputs.len() < 2 {
@@ -239,30 +276,104 @@ fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs: 
                 source,
                 matrix: into_generator * scene.world_matrix_at(child, frame),
                 links: Vec::new(),
+                operand: 0,
             });
         }
     }
     Some(colour)
 }
 
-/// The generator's result from `inputs`, in its space: the Subdivision
-/// Surface's merged and smoothed cage, the Extrude's solids merged, or the
-/// Lathe's body.
-pub(crate) fn build(inputs: &[Input], options: &Options) -> PolyMesh {
+/// The Boolean's inputs: its first two children, each with its visible,
+/// enabled descendants that have a surface (operand 0 and 1), in the
+/// generator's space. A generator among them enters with its own inputs
+/// (its children are its, not the Boolean's), up to [`MAX_NESTING`] deep.
+fn gather_boolean(
+    scene: &Scene,
+    id: NodeId,
+    purpose: Purpose,
+    frame: f64,
+    nesting: u32,
+    inputs: &mut Vec<Input>,
+) -> Option<[f32; 3]> {
+    let colour = scene.get(id)?.data.display_color;
+    let into_generator = scene.world_matrix_at(id, frame).inverse();
+    let mut stack = Vec::new();
+    for (operand, &child) in (0u8..).zip(scene.children(id).iter().take(2)) {
+        stack.push(child);
+        while let Some(node_id) = stack.pop() {
+            let Some(node) = scene.get(node_id) else { continue };
+            let data = &node.data;
+            if !purpose.shows(data)
+                || !scene.layers().shows_own(data.layer, purpose == Purpose::Render)
+                || !data.enabled
+            {
+                continue;
+            }
+            let kind = data.kind_at(frame);
+            let matrix = into_generator * scene.world_matrix_at(node_id, frame);
+            if let Some(options) = options(&kind, purpose).filter(|_| nesting < MAX_NESTING) {
+                // A generator: its result stands in for it and its children.
+                let mut nested = Vec::new();
+                let gathered = match options {
+                    Options::Boolean(_) => gather_boolean(scene, node_id, purpose, frame, nesting + 1, &mut nested),
+                    _ => gather(scene, node_id, &options, purpose, frame, &mut Vec::new(), &mut nested),
+                };
+                if gathered.is_some() {
+                    inputs.push(Input {
+                        source: Source::Generated(options, nested),
+                        matrix,
+                        links: Vec::new(),
+                        operand,
+                    });
+                }
+                continue;
+            }
+            let source = match &*kind {
+                ObjectKind::Polygon { mesh, .. } => Some(Source::Mesh(mesh.clone())),
+                kind if editable_mesh_exists(kind) => Some(Source::Primitive(kind.clone())),
+                _ => None,
+            };
+            if let Some(source) = source {
+                inputs.push(Input {
+                    source,
+                    matrix,
+                    links: deform::input_chain(scene, node_id, id, frame),
+                    operand,
+                });
+            }
+            stack.extend(node.children().iter().rev());
+        }
+    }
+    Some(colour)
+}
+
+/// Adds a mesh input (a polygon object, a primitive, another generator's
+/// result) to `merged`; curves add nothing.
+fn add_surface(merged: &mut Merged, input: &Input) {
+    match &input.source {
+        Source::Mesh(handle) if input.links.is_empty() => merged.add(handle.mesh(), input.matrix),
+        Source::Mesh(handle) => merged.add(&deform::deform_mesh(handle.mesh(), &input.links), input.matrix),
+        Source::Primitive(kind) => {
+            if let Some(mesh) = editable_mesh(kind) {
+                merged.add(&deform::deform_mesh(&mesh, &input.links), input.matrix);
+            }
+        }
+        Source::Generated(options, inputs) => merged.add(&build_all(inputs, options).mesh, input.matrix),
+        Source::SplinePrimitive(_) | Source::Text(_) | Source::Spline(..) => {}
+    }
+}
+
+/// The generator's result from `inputs`, in its space — the Subdivision
+/// Surface's merged and smoothed cage, the Extrude's solids merged, the
+/// Lathe's body, the Boolean's combination — with what else it has to say
+/// (a Boolean's cut edges and note).
+pub(crate) fn build_all(inputs: &[Input], options: &Options) -> Built {
     let mut merged = Merged::default();
-    match options {
+    let mesh = match options {
+        Options::Boolean(settings) => return build_boolean(inputs, *settings),
         Options::Subdivision(options) => {
             for input in inputs {
-                match &input.source {
-                    Source::Mesh(handle) if input.links.is_empty() => merged.add(handle.mesh(), input.matrix),
-                    Source::Mesh(handle) => merged.add(&deform::deform_mesh(handle.mesh(), &input.links), input.matrix),
-                    Source::Primitive(kind) => {
-                        if let Some(mesh) = editable_mesh(kind) {
-                            merged.add(&deform::deform_mesh(&mesh, &input.links), input.matrix);
-                        }
-                    }
-                    Source::SplinePrimitive(_) | Source::Text(_) | Source::Spline(..) => {}
-                }
+                add_surface(&mut merged, input);
             }
             subdivision::subdivide(&merged.finish(), options)
         }
@@ -292,10 +403,10 @@ pub(crate) fn build(inputs: &[Input], options: &Options) -> PolyMesh {
         }
         Options::Sweep(sweep) => {
             let [profile, path] = inputs else {
-                return PolyMesh::new();
+                return Built::default();
             };
             let (Some(contour), Some(mut route)) = (profile.source.polyline(), path.source.polyline()) else {
-                return PolyMesh::new();
+                return Built::default();
             };
             for point in &mut route.points {
                 *point = path.matrix.transform_point3(*point);
@@ -315,6 +426,44 @@ pub(crate) fn build(inputs: &[Input], options: &Options) -> PolyMesh {
                 .collect();
             surface::loft(&sections, loft)
         }
+    };
+    Built {
+        mesh,
+        cut_edges: Vec::new(),
+        note: None,
+    }
+}
+
+/// The Boolean of its two operands; the first alone (with a note) when the
+/// second is missing or the Boolean cannot be made.
+fn build_boolean(inputs: &[Input], settings: Boolean) -> Built {
+    let mut operands = [Merged::default(), Merged::default()];
+    for input in inputs {
+        add_surface(&mut operands[usize::from(input.operand.min(1))], input);
+    }
+    let [a, b] = operands;
+    let (a, b) = (a.finish(), b.finish());
+    if b.face_count() == 0 || a.face_count() == 0 {
+        return Built {
+            mesh: a,
+            cut_edges: Vec::new(),
+            note: Some(GeneratorNote::MissingInput),
+        };
+    }
+    match boolean::boolean(&a, &b, settings.mode, settings.options()) {
+        Ok(result) => Built {
+            mesh: result.mesh,
+            cut_edges: result.cut_edges,
+            note: None,
+        },
+        Err(error) => Built {
+            mesh: a,
+            cut_edges: Vec::new(),
+            note: Some(match error {
+                BooleanError::NotFinite => GeneratorNote::NotANumber,
+                BooleanError::TooLarge => GeneratorNote::TooLarge,
+            }),
+        },
     }
 }
 
@@ -379,7 +528,7 @@ pub fn generator_color(scene: &Scene, id: NodeId) -> Option<[f32; 3]> {
             .first()
             .and_then(|&cage| scene.get(cage))
             .map(|cage| cage.data.display_color),
-        Options::Extrude { .. } | Options::Lathe(_) | Options::Sweep(_) | Options::Loft(_) => {
+        Options::Extrude { .. } | Options::Lathe(_) | Options::Sweep(_) | Options::Loft(_) | Options::Boolean(_) => {
             Some(node.data.display_color)
         }
     }
@@ -390,6 +539,13 @@ pub fn generator_color(scene: &Scene, id: NodeId) -> Option<[f32; 3]> {
 /// generator or has no children.
 #[must_use]
 pub fn generator_mesh(scene: &Scene, id: NodeId, frame: f64) -> Option<PolyMesh> {
+    generator_built(scene, id, frame).map(|built| built.mesh)
+}
+
+/// [`generator_mesh`] with what else the generator has to say (a Boolean's
+/// cut edges, for Make Editable to select).
+#[must_use]
+pub fn generator_built(scene: &Scene, id: NodeId, frame: f64) -> Option<Built> {
     let options = options(&scene.get(id)?.data.kind_at(frame), Purpose::Editor)?;
     let mut inputs = Vec::new();
     gather(
@@ -401,7 +557,7 @@ pub fn generator_mesh(scene: &Scene, id: NodeId, frame: f64) -> Option<PolyMesh>
         &mut Vec::new(),
         &mut inputs,
     )?;
-    Some(build(&inputs, &options))
+    Some(build_all(&inputs, &options))
 }
 
 fn editable_mesh_exists(kind: &ObjectKind) -> bool {

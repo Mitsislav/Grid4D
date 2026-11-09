@@ -432,6 +432,7 @@ impl ObjectKind {
             | Self::Polygon { .. }
             | Self::SubdivisionSurface { .. }
             | Self::Loft(_)
+            | Self::Boolean(_)
             | Self::Spline { .. }
             // The lattice is edited, not keyed.
             | Self::Ffd { .. } => &[],

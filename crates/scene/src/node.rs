@@ -127,6 +127,9 @@ pub enum ObjectKind {
     Sweep(grid4d_geom::surface::Sweep),
     /// Loft generator: stretches a skin over its child splines, in order.
     Loft(grid4d_geom::surface::Loft),
+    /// Boolean generator: its first two children (each with its own
+    /// children) combined as solids (`docs/reference/generator-boolean.md`).
+    Boolean(crate::Boolean),
     /// Repeats its children along a line, a circle or a grid
     /// (`docs/reference/mograph-cloner.md`). The clones are instances made by
     /// evaluation, not nodes.
@@ -200,6 +203,7 @@ pub enum ObjectKindTag {
     Lathe,
     Sweep,
     Loft,
+    Boolean,
     Cloner,
     PlainEffector,
     RandomEffector,
@@ -223,7 +227,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -243,6 +247,7 @@ impl ObjectKindTag {
         Self::Lathe,
         Self::Sweep,
         Self::Loft,
+        Self::Boolean,
         Self::Cloner,
         Self::PlainEffector,
         Self::RandomEffector,
@@ -276,12 +281,13 @@ impl ObjectKindTag {
 
     /// Generators: objects that build their geometry from their children (the
     /// Cloner repeats them).
-    pub const GENERATORS: [Self; 6] = [
+    pub const GENERATORS: [Self; 7] = [
         Self::SubdivisionSurface,
         Self::Extrude,
         Self::Lathe,
         Self::Sweep,
         Self::Loft,
+        Self::Boolean,
         Self::Cloner,
     ];
 
@@ -326,6 +332,7 @@ impl ObjectKindTag {
             Self::Lathe => "Lathe",
             Self::Sweep => "Sweep",
             Self::Loft => "Loft",
+            Self::Boolean => "Boolean",
             Self::Cloner => "Cloner",
             Self::PlainEffector => "Plain",
             Self::RandomEffector => "Random",
@@ -428,6 +435,8 @@ impl ObjectKindTag {
             Self::Sweep => ObjectKind::Sweep(grid4d_geom::surface::Sweep::default()),
             // docs/reference/generator-loft.md: 30 × 10, through the sections.
             Self::Loft => ObjectKind::Loft(grid4d_geom::surface::Loft::default()),
+            // docs/reference/generator-boolean.md: Subtract, merged, welded.
+            Self::Boolean => ObjectKind::Boolean(crate::Boolean::default()),
             // docs/reference/mograph-cloner.md: three clones in a row, 250 cm apart.
             Self::Cloner => ObjectKind::cloner(grid4d_geom::cloner::Cloner::default()),
             // docs/reference/mograph-effectors.md: the clones lifted 100 cm / moved up to 50 cm.
@@ -576,6 +585,7 @@ impl ObjectKind {
             Self::Lathe(_) => ObjectKindTag::Lathe,
             Self::Sweep(_) => ObjectKindTag::Sweep,
             Self::Loft(_) => ObjectKindTag::Loft,
+            Self::Boolean(_) => ObjectKindTag::Boolean,
             Self::Cloner { .. } => ObjectKindTag::Cloner,
             Self::PlainEffector(_) => ObjectKindTag::PlainEffector,
             Self::RandomEffector(_) => ObjectKindTag::RandomEffector,
@@ -611,7 +621,7 @@ impl ObjectKind {
     pub const fn generator_inputs(&self) -> usize {
         match self {
             Self::Loft(_) | Self::Cloner { .. } => usize::MAX,
-            Self::Sweep(_) => 2,
+            Self::Sweep(_) | Self::Boolean(_) => 2,
             Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) => 1,
             Self::Null
             | Self::Cube { .. }
@@ -745,6 +755,7 @@ impl ObjectKind {
                 | Self::Lathe(_)
                 | Self::Sweep(_)
                 | Self::Loft(_)
+                | Self::Boolean(_)
                 | Self::Cloner { .. }
         )
     }
@@ -766,6 +777,7 @@ impl ObjectKind {
             | Self::Lathe(_)
             | Self::Sweep(_)
             | Self::Loft(_)
+            | Self::Boolean(_)
             | Self::Cloner { .. }
             // A plugin's mesh: evaluation knows its extent.
             | Self::Plugin(_)

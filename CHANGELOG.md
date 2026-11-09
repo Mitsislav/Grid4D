@@ -12,8 +12,16 @@ instances, joined and reduced meshes, spline booleans, soft selection, new
 modelling tools, edge creases, hard edges and weighted normals, new
 deformers).
 
-- **Files** — documents are saved in `.g4d` format version 6. It holds
-  nothing new yet; Grid4D 1.3's features will add to it until 1.3 is
+- **Boolean** — a new generator combines its first two children as solids,
+  live: Subtract (holes and cut-outs), Union, Intersect, or Without (the
+  first's surface outside the second, left open). Either input may be a
+  group or another generator (a Boolean of a Boolean); cut faces are merged
+  back into clean polygons with their texture coordinates; Make Editable
+  leaves the cut edges selected. Coplanar faces, shared edges and touching
+  shapes are handled exactly. A very heavy Boolean keeps its last result
+  while you drag and updates when you let go.
+- **Files** — documents are saved in `.g4d` format version 6, which holds
+  the Boolean; Grid4D 1.3's other features will add to it until 1.3 is
   released. Every earlier file opens unchanged; Grid4D 1.2 cannot open
   version 6 files and says they come from a newer Grid4D.
 

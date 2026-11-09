@@ -289,6 +289,9 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Lathe => key("Add Lathe (Alt: around the selected spline)"),
         ObjectKindTag::Sweep => key("Add Sweep: profile first, path second (Alt: around the selected spline)"),
         ObjectKindTag::Loft => key("Add Loft: a skin over its child splines (Alt: around the selected splines)"),
+        ObjectKindTag::Boolean => {
+            key("Add Boolean: its first two children as solids (Alt: around the selected object)")
+        }
         ObjectKindTag::Cloner => key("Add Cloner: repeats its children (Alt: around the selected object)"),
         ObjectKindTag::PlainEffector => key("Add Plain effector: moves, turns, scales the selected Cloner's clones"),
         ObjectKindTag::RandomEffector => key("Add Random effector: varies the selected Cloner's clones at random"),

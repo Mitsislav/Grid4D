@@ -801,6 +801,12 @@ pub struct EditorState {
     /// One-line help for the status bar; set by whatever the pointer is over,
     /// cleared every frame.
     pub status_hint: Option<&'static str>,
+    /// What generators have to say about their results (copied from the
+    /// viewport's evaluation each frame; the Attribute Manager shows it).
+    pub generator_notes: Vec<(NodeId, grid4d_eval::GeneratorNote)>,
+    /// A slow generator kept its last result while something is dragged
+    /// (rebuilt on release; the status bar says so).
+    pub generators_waiting: bool,
     /// Graphics adapter description shown in the status bar.
     pub renderer_info: String,
     pub show_about: bool,
@@ -891,6 +897,8 @@ impl Default for EditorState {
             history: History::default(),
             file: DocumentFile::default(),
             status_hint: None,
+            generator_notes: Vec::new(),
+            generators_waiting: false,
             renderer_info: String::new(),
             show_about: false,
             show_licences: false,

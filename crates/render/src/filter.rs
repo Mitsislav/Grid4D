@@ -62,6 +62,7 @@ impl FilterItem {
             | ObjectKindTag::Lathe
             | ObjectKindTag::Sweep
             | ObjectKindTag::Loft
+            | ObjectKindTag::Boolean
             | ObjectKindTag::Cloner
             // Plugin objects are parametric too.
             | ObjectKindTag::Plugin => Some(Self::Generator),

@@ -2672,16 +2672,21 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId], simulated: &grid4d_
             cages.extend(inputs(node));
             continue;
         }
+        let mut state = ComponentState::default();
         let mesh = if node.data.kind.is_generator() {
             // A disabled generator shows its children as they are: nothing to bake.
             if enabled_generator(id).is_none() {
                 continue;
             }
-            let Some(mesh) = grid4d_eval::generator_mesh(&doc.scene, id, frame) else {
+            let Some(built) = grid4d_eval::generator_built(&doc.scene, id, frame) else {
                 continue;
             };
+            // A Boolean's cut edges come selected, ready for a bevel.
+            if matches!(&*kind, ObjectKind::Boolean(boolean) if boolean.select_cut_edges) {
+                select_edges(&built.mesh, &built.cut_edges, &mut state);
+            }
             cages.extend(inputs(node));
-            mesh
+            built.mesh
         } else {
             let Some(mesh) = grid4d_eval::editable_mesh(&kind) else {
                 continue;
@@ -2689,7 +2694,10 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId], simulated: &grid4d_
             mesh
         };
         let mut data = node.data.clone();
-        data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
+        data.kind = ObjectKind::Polygon {
+            mesh: MeshHandle::new(mesh),
+            components: Components::new(state),
+        };
         edits.push(SceneEdit::SetData {
             id,
             data: without_lost_tracks(data),
@@ -2697,6 +2705,22 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId], simulated: &grid4d_
     }
     edits.extend(cages.into_iter().map(|root| SceneEdit::Detach { root }));
     edits
+}
+
+/// Selects in `state` the edges of `mesh` listed in `edges` (point pairs),
+/// by corner as edge selections are kept.
+fn select_edges(mesh: &PolyMesh, edges: &[[u32; 2]], state: &mut ComponentState) {
+    let wanted: std::collections::HashSet<(u32, u32)> = edges.iter().map(|&[a, b]| (a.min(b), a.max(b))).collect();
+    for f in 0..mesh.face_count() {
+        let range = mesh.corner_range(f);
+        for c in range.clone() {
+            let next = if c + 1 == range.end { range.start } else { c + 1 };
+            let (a, b) = (mesh.corner_points()[c], mesh.corner_points()[next]);
+            if wanted.contains(&(a.min(b), a.max(b))) {
+                state.selected.edges.insert(c);
+            }
+        }
+    }
 }
 
 /// Sizes the deformer in `data` to `parent`'s extent at the current frame and
@@ -2818,6 +2842,7 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Lathe
         | ObjectKindTag::Sweep
         | ObjectKindTag::Loft
+        | ObjectKindTag::Boolean
         | ObjectKindTag::Cloner => {}
     }
     data
@@ -2868,6 +2893,7 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Lathe
         | ObjectKindTag::Sweep
         | ObjectKindTag::Loft
+        | ObjectKindTag::Boolean
         | ObjectKindTag::Cloner => palette().icon_generator,
         ObjectKindTag::Circle
         | ObjectKindTag::Rectangle
@@ -5135,6 +5161,61 @@ mod tests {
         assert_eq!(doc.scene.get(empty).unwrap().parent(), None);
         assert!(doc.scene.children(empty).is_empty());
         assert_eq!(doc.scene.get(empty).unwrap().data.name, "Subdivision Surface.1");
+    }
+
+    #[test]
+    fn make_editable_on_a_boolean_bakes_it_with_the_cut_edges_selected() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let cube = id_of(&doc, "Cube");
+        let sphere = id_of(&doc, "Sphere");
+        editor.selection.set_single(cube);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::WrapInGenerator(ObjectKindTag::Boolean)],
+        );
+        let boolean = editor.selection.active().unwrap();
+        assert_eq!(doc.scene.get(boolean).unwrap().data.name, "Boolean");
+        // The sphere becomes the second input, over the cube's corner.
+        doc.scene.reparent(sphere, Some(boolean), true).unwrap();
+        let world = doc.scene.world_matrix_at(cube, 0.0);
+        let corner = world.transform_point3(Vec3::splat(100.0));
+        let into_parent = doc.scene.world_matrix_at(boolean, 0.0).inverse();
+        doc.scene.get_mut(sphere).unwrap().data.transform.position = into_parent.transform_point3(corner);
+        let before = doc.scene.get(boolean).unwrap().data.clone();
+        let built = grid4d_eval::generator_built(&doc.scene, boolean, 0.0).unwrap();
+        assert!(!built.cut_edges.is_empty());
+
+        editor.selection.set_single(boolean);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let ObjectKind::Polygon { mesh, components } = &doc.scene.get(boolean).unwrap().data.kind else {
+            panic!("not baked")
+        };
+        assert_eq!(mesh.mesh(), &built.mesh);
+        let selected = components.selected().edges.len();
+        assert!(
+            selected >= built.cut_edges.len(),
+            "each cut edge selected (by its corners)"
+        );
+        assert!(
+            !doc.scene.contains(cube) && !doc.scene.contains(sphere),
+            "both inputs go"
+        );
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(boolean).unwrap().data, before);
+        assert_eq!(doc.scene.get(sphere).unwrap().parent(), Some(boolean));
+
+        // Without Select Cut Edges, nothing comes selected.
+        if let ObjectKind::Boolean(settings) = &mut doc.scene.get_mut(boolean).unwrap().data.kind {
+            settings.select_cut_edges = false;
+        }
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let ObjectKind::Polygon { components, .. } = &doc.scene.get(boolean).unwrap().data.kind else {
+            panic!("not baked")
+        };
+        assert!(components.selected().edges.is_empty());
     }
 
     #[test]

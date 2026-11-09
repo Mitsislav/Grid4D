@@ -117,12 +117,29 @@ fn golden_with(mesh: grid4d_geom::PolyMesh) -> Document {
 /// The kinds of object version 5 adds ([`full_v5_document`] has them).
 const VERSION_5_KINDS: [ObjectKindTag; 2] = [ObjectKindTag::Sky, ObjectKindTag::Environment];
 /// The kinds of object version 6 adds ([`full_document`] has them; none yet).
-const VERSION_6_KINDS: [ObjectKindTag; 0] = [];
+const VERSION_6_KINDS: [ObjectKindTag; 1] = [ObjectKindTag::Boolean];
 
 /// Everything a version 6 file can hold (see `docs/FILE_FORMAT.md`): version
-/// 5's, and what Phase 17 adds as it arrives (nothing yet in 17.1).
+/// 5's, and what Phase 17 adds as it arrives — a Boolean with every setting
+/// changed and its two inputs (17.3).
 fn full_document() -> (Document, SimulationCache) {
-    full_v5_document()
+    let (mut doc, cache) = full_v5_document();
+    let boolean = doc.scene.insert(Node::new(
+        "Boolean",
+        ObjectKind::Boolean(grid4d_scene::Boolean {
+            mode: grid4d_scene::BooleanMode::Intersect,
+            merge_faces: false,
+            select_cut_edges: false,
+            weld: 0.5,
+        }),
+    ));
+    doc.scene
+        .insert_child(boolean, Node::new("Block", ObjectKindTag::Cube.default_kind()))
+        .unwrap();
+    doc.scene
+        .insert_child(boolean, Node::new("Ball", ObjectKindTag::Sphere.default_kind()))
+        .unwrap();
+    (doc, cache)
 }
 
 /// Everything a version 5 file can hold, which 1.2 froze (`full_v5.g4d`; never

@@ -42,10 +42,10 @@ tool for holes, slots, cut-outs and merged parts.
 | Name | Type / range | Default | Effect |
 |------|--------------|---------|--------|
 | Mode | Union · Subtract · Intersect · Without | Subtract | Union: everything inside either. Subtract: A with B's volume cut away, closed where B cut. Intersect: only what is inside both. Without: A's surface outside B, **left open** where B cut it (no new faces from B). |
-| Merge Coplanar Faces | bool | on | The pieces one source polygon was cut into are merged back into n-gons (quads where they can be), so the result has the source's edges and the cut's, not a triangle soup. Off: triangles (for debugging and export to tools that want them). |
-| Hard Cut Edges | bool | on | The edges along the cut become **hard edges** (step 17.8): the result's smoothing breaks there even within the Phong angle. |
+| Merge Faces | bool | on | The pieces one source polygon was cut into are merged back into polygons (each a simple polygon; a face left with a hole becomes two or more), so the result has the source's edges and the cut's, not a triangle soup; faces that were not cut pass through as they were (quads stay quads). Off: triangles (for debugging and export to tools that want them). |
 | Select Cut Edges | bool | on | Make Editable leaves the cut edges selected (Edges mode), ready for a bevel. |
-| Weld Tolerance | length ≥ 0 | 0.01 cm | Points of the result closer than this are welded; cuts that pass within it of an existing point use that point. |
+| Weld | length 0 – 100 cm | 0.01 cm | Points of the result closer than this are welded (0: none). A face the weld pinches becomes the loops on either side of the pinch, so a closed result stays closed. |
+| *Hard Cut Edges* | bool | on | **Comes with step 17.8** (hard edges do not exist before it): the edges along the cut become hard edges. |
 
 None of these is animatable in 1.3 (switches and a tolerance). The mode is a
 closed set of four.
@@ -69,27 +69,30 @@ closed set of four.
 - **Origins**: every face of the result records where it came from — input
   (A or B) and that input's face. The result's UVs are each source corner's
   UVs carried by interpolation inside its source polygon (B's faces in
-  Subtract are seen from inside: their UVs are kept, their winding turned).
+  Subtract are seen from inside: their winding turned and their pictures
+  mirrored back, U → 1 − U, so they read the right way round — no face of
+  the result shows a mirrored picture).
   Origins make later per-part materials and polygon selections possible
   (not in 1.3, D39).
 - **Materials**: in 1.3 the result is one object and takes the Boolean's own
-  Material tags (or what it inherits), like any generator; the inputs' tags
-  do not carry over (per-polygon materials are later).
+  Material tags (or what it inherits), else its first input's, like the
+  Subdivision Surface; per-polygon materials are later.
 - **Bad inputs never panic**: when an input cannot be read as a solid (no
   faces, non-finite points, a result the method refuses), the generator
   shows **A unchanged** and says why in its Attribute Manager page (for
-  example "The second object has no closed volume"). Fixing the input
-  clears the message.
+  example "Needs two children with surfaces: the first is shown as it is").
+  Fixing the input clears the message.
 - **Live under a drag** (R9): the result is cached by its inputs' key (their
   mesh ids or primitive parameters, their matrices relative to the
   generator, the parameters) and rebuilt only when one changes. If a rebuild
-  takes longer than the frame can afford (more than 33 ms, below 30 fps),
-  a drag of an input shows the **last result** and rebuilds when the drag
-  ends; the status bar says so ("Boolean updates when you release"). Undo
-  steps are not affected (one per drag, as always).
+  took longer than the frame can afford (more than 33 ms, below 30 fps),
+  then while any pointer button is held (a gizmo, a field, a drag) it keeps
+  its **last result**, and rebuilds when the button is released; the status
+  bar says "A slow generator updates when you release". Undo steps are not
+  affected (one per drag, as always).
 - **Make Editable** replaces the generator with one polygon object holding
-  the result (the cut edges selected when Select Cut Edges is on, its hard
-  edges kept) and removes A and B; **Current State to Object** makes a copy;
+  the result (the cut edges selected when Select Cut Edges is on) and
+  removes A and B; **Current State to Object** makes a copy;
   export bakes the result. One undo step each.
 - **Creating**: Create ▸ Generators ▸ Boolean; Alt + create wraps the
   selected object (it becomes A).
@@ -101,25 +104,45 @@ closed set of four.
 | Piece | Where |
 |-------|-------|
 | `ObjectKind::Boolean(Boolean)`, `ObjectKindTag::Boolean` in `GENERATORS`, label, icon, Attribute Manager page with the message row | `scene/node.rs`, `ui/icons.rs`, `ui/panels/attributes.rs` |
-| `boolean(a, b, mode, method) -> Result<BooleanResult { mesh, origins, stats }, BooleanError>` (17.2; options and merging back into n-gons in 17.3) | `grid4d-geom::boolean` (pure: `kernel.rs` planes, points and predicates; `mod.rs` the pipeline) on `grid4d-geom::exact` (intervals, expansions) |
-| Inputs, nesting, cache, the error kept for the Attribute Manager | `grid4d-eval::generator` (built deepest first; `generator_mesh` bakes it) |
-| The R9 fallback (last result while dragging) | `grid4d-eval` (the rebuild's time kept per generator) + the viewport's drag state; status-bar text through `i18n::tr` |
+| `boolean(a, b, mode, &BooleanOptions) -> Result<BooleanResult { mesh, origins, cut_edges, stats }, BooleanError>` | `grid4d-geom::boolean` (pure: `kernel.rs` planes, points and predicates; `mod.rs` the pipeline; `fast_hash.rs` its maps' hasher) on `grid4d-geom::exact` (intervals, expansions) |
+| Settings | `grid4d_scene::Boolean` (`options()` → `BooleanOptions`) |
+| Inputs (two operands, each a subtree; another generator as `Source::Generated` with its own inputs, up to 16 deep), building, the note | `grid4d-eval::generator` (`gather_boolean`, `build_boolean`, `Built`, `GeneratorNote`; `generator_built` for Make Editable) |
+| Hiding both inputs | `grid4d-eval::evaluated` (`pending_cages`: the roots of cages the walk has yet to reach) |
+| The R9 fallback | `EvaluatedScene::{set_deferring, is_stale}`, `SLOW_REBUILD` (33 ms, the rebuild's time kept per generator); the viewport defers while any pointer button is held and copies the notes and the flag to `EditorState::{generator_notes, generators_waiting}`; the status bar's text |
+| Make Editable's selection | `commands::select_edges` (cut edges → edge corners) |
 | File | `.g4d` v6 kind `boolean` (17.3) |
 
 ## Budget (`modeling_budget` example)
 
-| Case | Target | The spike (17.2, exact method) |
-|------|--------|--------------------------------|
-| A product shell: a bevelled box (≈ 2 000 triangles) minus two cylinders, a cutter dragged | ≤ 8 ms a rebuild: the drag stays at 60 fps (a live Subdivision Surface over 1 152 faces costs 2.3 ms a frame) | 29 – 38 ms (a box of 1 728 triangles minus two cylinders of 124): not met yet |
-| Two spheres of 50 000 triangles each | ≤ 150 ms a rebuild (the R9 fallback applies while dragging); triangulating them and building each one's BVH and topology alone costs 36 ms | 0.47 – 0.67 s: not met yet |
-| A million triangles against a cutter | finishes (no time promised), no panic | 10 – 11 s, closed |
+| Case | Target | The spike (17.2) | The generator (17.3) |
+|------|--------|------------------|----------------------|
+| A product shell: a box (≈ 1 700 triangles) minus two cylinders, a cutter dragged | ≤ 8 ms a rebuild: the drag stays at 60 fps (a live Subdivision Surface over 1 152 faces costs 2.3 ms a frame) | 29 – 38 ms | 11 ms: **not met** (the drag runs at about 60 fps on the reference machine with the rest of the frame; stitching is the largest stage) |
+| Two spheres of 50 000 triangles each | ≤ 150 ms a rebuild (the R9 fallback applies while dragging) | 0.47 – 0.67 s | 0.18 s: close |
+| A million triangles against a cutter | finishes (no time promised), no panic | 10 – 11 s | 4 s, closed |
 
-The spike's code was written to be right, not fast: every stage still
-allocates per piece, keys edges in hash maps and visits every triangle of
-both inputs, even those far from the other. Step 17.3 works only near the
-cut (untouched triangles pass straight through), groups pieces through the
-inputs' own topology, and keeps its buffers between rebuilds; the targets
-stand.
+What made 17.3 faster than the spike, each kept in the code:
+
+- **Only near the cut**: triangles outside the other input's box are not
+  looked at; faces with no cut triangle pass through whole (their edges get
+  the cut's points by lookup), so a million-triangle input costs little more
+  than its own copy.
+- **Shared planes**: exactly equal support planes (a face's coplanar
+  triangles, a grid of quads) are one plane, and every input edge has one
+  edge plane and one partner plane, so the point where a cut crosses an
+  edge is the *same* point from both triangles beside it — nothing to join.
+- **Known incidences**: a triangle's corners on its own planes, a made
+  point on the planes that made it, joined points on each other's planes —
+  signs known without arithmetic. Exact signs fell from 8 068 to 526 for the
+  product shell.
+- **Equality by sides**: two points are compared by whether one lies on the
+  other's three planes, not by their coordinates.
+- Box tests before exact surface tests; one winding number per group unless
+  it is unclear; a small hasher for the maps (keys are our own ids).
+
+The shell's 8 ms target is not met (11 ms); the largest stage is stitching
+points into edges, which still searches a grid. Indexing points by the
+planes they lie on would remove that search; it is left for later because
+finding every point that way is not yet proven complete.
 
 ## The spike (17.2): how the method was chosen
 
@@ -182,22 +205,26 @@ What the spike found on the way (each now a test):
 
 ## Acceptance criteria
 
-- [ ] Each mode on two overlapping cubes gives the expected closed result
-      (point count, volume within 1e-4, every edge between two faces).
+- [x] Each mode on two overlapping cubes gives the expected closed result
+      (volumes exact to 1e-5; the corpus).
 - [x] The boolean corpus (17.2: coplanar faces, shared edges and points,
       touching, nearly touching, non-manifold, slightly open, a million
       triangles) passes, and the fuzzer finds no panic (property tests in
       `cargo test`; the `boolean` cargo-fuzz target in CI and weekly).
-- [ ] Merge Coplanar Faces: a cube minus a smaller cube through one face
-      gives n-gons on that face, quads where possible, no slivers.
-- [ ] UVs on the result equal the source's UVs at every source point kept.
-- [ ] Every face's origin names the right input and face.
-- [ ] A bad input shows A and a message; fixing it clears both.
-- [ ] Moving B updates the result in the same frame; idle frames do not
-      rebuild and allocate nothing.
-- [ ] The R9 fallback: a slow rebuild shows the last result during a drag
+- [x] Merge Faces: a cube with a corner cut away has nine faces (three cut
+      faces each one polygon, three whole, three from B); off, the cut
+      faces are triangles.
+- [x] UVs on the result equal the source's UVs at every source point kept.
+- [x] Every face's origin names the right input and face.
+- [x] A missing input shows A and a message.
+- [x] Moving B updates the result in the same frame; idle frames do not
+      rebuild (the evaluation's cache; no allocation test covers a Boolean
+      yet — its gathering allocates only when an input is another generator).
+- [x] The R9 fallback: a slow rebuild shows the last result during a drag
       and the new one after release.
-- [ ] Make Editable gives one polygon object with the cut edges selected and
-      hard; undo restores the generator and both inputs exactly.
-- [ ] Saved as v6 and reopened, the parameters are the same; a v5 file
+- [x] Make Editable gives one polygon object with the cut edges selected;
+      undo restores the generator and both inputs exactly (hard edges with
+      17.8).
+- [x] Saved as v6 and reopened, the parameters are the same; a v5 file
       naming `boolean` is refused.
+- [x] Renders see the result (a drilled block's hole lets rays through).

@@ -251,6 +251,7 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
         | ObjectKind::Lathe(_)
         | ObjectKind::Sweep(_)
         | ObjectKind::Loft(_)
+        | ObjectKind::Boolean(_)
         // A Cloner draws its clones (instances evaluation makes).
         | ObjectKind::Cloner { .. }
         // An effector draws its falloff as lines, sampled during evaluation.
@@ -305,6 +306,7 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
         | ObjectKind::Lathe(_)
         | ObjectKind::Sweep(_)
         | ObjectKind::Loft(_)
+        | ObjectKind::Boolean(_)
         | ObjectKind::Cloner { .. }
         | ObjectKind::PlainEffector(_)
         | ObjectKind::RandomEffector(_)
@@ -361,6 +363,7 @@ mod tests {
                     | ObjectKindTag::Lathe
                     | ObjectKindTag::Sweep
                     | ObjectKindTag::Loft
+                    | ObjectKindTag::Boolean
                     | ObjectKindTag::Cloner
                     | ObjectKindTag::PlainEffector
                     | ObjectKindTag::RandomEffector

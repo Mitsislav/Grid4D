@@ -8,6 +8,7 @@
 //! typed value, a click) is recorded as one undo step through [`LiveEdit`].
 
 use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdit, Ui, Vec2};
+use grid4d_eval::GeneratorNote;
 use grid4d_geom::cloner::{CloneOrder, Cloner, Distribution, Layout, StepMode};
 use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode, Ffd, Shape};
 use grid4d_geom::effector::{Effector, FalloffShape};
@@ -18,10 +19,10 @@ use grid4d_geom::spline::{
 };
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_scene::{
-    AreaShape, Axis, Body, Channel, CollisionShape, Document, Environment, Falloff, Inherit, KeyState, Lens,
-    LightDetails, LightShadow, LightType, LinkMode, Linking, MassMode, Material, MaterialId, MaterialTag, Motion,
-    NodeData, NodeId, ObjectKind, ObjectParam, Param, Placement, Projection, Scene, SceneEdit, ShutterPosition,
-    SimulationSettings, Sky, SplineHandle, SunPlacement, Tag, TagKind, TextureSlot, TimeSettings,
+    AreaShape, Axis, Body, Boolean, BooleanMode, Channel, CollisionShape, Document, Environment, Falloff, Inherit,
+    KeyState, Lens, LightDetails, LightShadow, LightType, LinkMode, Linking, MassMode, Material, MaterialId,
+    MaterialTag, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, Placement, Projection, Scene, SceneEdit,
+    ShutterPosition, SimulationSettings, Sky, SplineHandle, SunPlacement, Tag, TagKind, TextureSlot, TimeSettings,
 };
 
 use crate::i18n::{key, tr, trf};
@@ -140,6 +141,11 @@ impl AttributesPanel {
                                 tag: editor.selected_tag(doc).map(|(tag, index)| (tag.kind, index)),
                                 selection_len: editor.selection.len(),
                                 keying: Keying::of(doc, editor),
+                                note: editor
+                                    .generator_notes
+                                    .iter()
+                                    .find(|(node, _)| *node == id)
+                                    .map(|&(_, note)| note),
                             };
                             self.node_ui(ui, doc, id, shown, &mut editor.commands);
                         }
@@ -357,6 +363,7 @@ impl AttributesPanel {
             tag,
             selection_len,
             keying,
+            note,
         } = shown;
         // Widgets edit a copy; the scene is only written (and its revision only
         // bumped) when a value actually changed, so idle frames stay idle.
@@ -441,7 +448,7 @@ impl AttributesPanel {
             Tab::Coord => label = coord_tab(ui, &mut data, keying).unwrap_or(label),
             Tab::Object => {
                 let mut fit = false;
-                label = object_tab_at(ui, &mut data, keying, &mut fit, Some((&doc.scene, id))).unwrap_or(label);
+                label = object_tab_at(ui, &mut data, keying, &mut fit, Some((&doc.scene, id)), note).unwrap_or(label);
                 if fit {
                     commands.push(EditorCommand::FitToParent(id));
                 }
@@ -705,6 +712,8 @@ struct Shown {
     tag: Option<(TagKind, usize)>,
     selection_len: usize,
     keying: Keying,
+    /// What the object's generator has to say about its result.
+    note: Option<GeneratorNote>,
 }
 
 /// The Object tab at the current frame (`keying`): the parameters as they are
@@ -717,12 +726,13 @@ fn object_tab_at(
     keying: Keying,
     fit: &mut bool,
     links: Option<(&Scene, NodeId)>,
+    note: Option<GeneratorNote>,
 ) -> Option<&'static str> {
     let frame = keying.frame;
     let shown = data.kind_at(frame).into_owned();
     let mut edited = shown.clone();
     let mut keys = KeyRows::new(data, &shown, frame);
-    object_tab(ui, &mut edited, &mut keys, links);
+    object_tab(ui, &mut edited, &mut keys, links, note);
     *fit = keys.fit_to_parent;
     if edited != shown {
         data.set_kind_at(&edited, frame, keying.autokey);
@@ -788,8 +798,15 @@ impl KeyRows {
 }
 
 /// `links`: the document and the object shown, for rows that link another
-/// object (none: such rows are left out).
-fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option<(&Scene, NodeId)>) {
+/// object (none: such rows are left out). `note`: what its generator has to
+/// say about its result.
+fn object_tab(
+    ui: &mut Ui,
+    kind: &mut ObjectKind,
+    k: &mut KeyRows,
+    links: Option<(&Scene, NodeId)>,
+    note: Option<GeneratorNote>,
+) {
     section_heading(ui, "Object Properties");
     Grid::new("grid4d.attr.object")
         .num_columns(3)
@@ -1022,6 +1039,7 @@ fn object_tab(ui: &mut Ui, kind: &mut ObjectKind, k: &mut KeyRows, links: Option
             }
             ObjectKind::Sweep(sweep) => sweep_rows(ui, k, sweep),
             ObjectKind::Loft(loft) => loft_rows(ui, loft),
+            ObjectKind::Boolean(boolean) => boolean_rows(ui, boolean, note),
             ObjectKind::Cloner {
                 cloner,
                 object,
@@ -2665,6 +2683,58 @@ fn loft_rows(ui: &mut Ui, loft: &mut Loft) {
     ui.end_row();
 }
 
+/// The Boolean's rows (`docs/reference/generator-boolean.md`), and what it
+/// has to say about its result.
+fn boolean_rows(ui: &mut Ui, boolean: &mut Boolean, note: Option<GeneratorNote>) {
+    attr_label(ui, "Mode", LABEL_WIDTH);
+    let label = |mode: BooleanMode| match mode {
+        BooleanMode::Union => key("Union"),
+        BooleanMode::Subtract => key("Subtract"),
+        BooleanMode::Intersect => key("Intersect"),
+        BooleanMode::Without => key("Without"),
+    };
+    let combo = egui::ComboBox::from_id_salt("grid4d.attr.boolean.mode")
+        .selected_text(tr(label(boolean.mode)))
+        .show_ui(ui, |ui| {
+            for mode in BooleanMode::ALL {
+                ui.selectable_value(&mut boolean.mode, mode, tr(label(mode)));
+            }
+        })
+        .response;
+    ui.ctx()
+        .accesskit_node_builder(combo.id, |node| node.set_label(tr("Mode")));
+    ui.end_row();
+    check_row(ui, "Merge Faces", &mut boolean.merge_faces);
+    check_row(ui, "Select Cut Edges", &mut boolean.select_cut_edges);
+    attr_label(ui, "Weld", LABEL_WIDTH);
+    ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        widgets::length(ui, &mut boolean.weld)
+            .speed(0.01)
+            .range(0.0..=Boolean::MAX_WELD)
+            .max_decimals(3),
+    );
+    ui.end_row();
+    ui.label("");
+    let (text, colour) = match note {
+        None => (tr("Combines its first two children as solids"), p().text_dim),
+        Some(GeneratorNote::MissingInput) => (
+            tr("Needs two children with surfaces: the first is shown as it is"),
+            p().warning,
+        ),
+        Some(GeneratorNote::NotANumber) => (
+            tr("A child has a point that is not a number: the first is shown as it is"),
+            p().warning,
+        ),
+        Some(GeneratorNote::TooLarge) => (
+            tr("The result would be too large: the first child is shown as it is"),
+            p().warning,
+        ),
+    };
+    ui.label(RichText::new(text).color(colour));
+    ui.end_row();
+}
+
 /// A scale factor (1.0 = 100 %, never negative) edited in percent.
 fn scale_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
     attr_label(ui, label, LABEL_WIDTH);
@@ -3145,7 +3215,7 @@ mod tests {
                 let before = data.clone();
                 for _ in 0..3 {
                     ctx.run_ui(egui::RawInput::default(), |ui| {
-                        object_tab(ui, &mut data.kind, &mut KeyRows::default(), None);
+                        object_tab(ui, &mut data.kind, &mut KeyRows::default(), None, None);
                     })
                     .drop_without_applying_deltas();
                 }
@@ -3226,7 +3296,7 @@ mod tests {
             let mut keys = KeyRows::new(&data, &kind, 0.0);
             let mut shown = kind.clone();
             ctx.run_ui(egui::RawInput::default(), |ui| {
-                object_tab(ui, &mut shown, &mut keys, None)
+                object_tab(ui, &mut shown, &mut keys, None, None)
             })
             .drop_without_applying_deltas();
             let mut drawn = keys.drawn.clone();
@@ -3254,7 +3324,7 @@ mod tests {
         };
         for _ in 0..3 {
             ctx.run_ui(egui::RawInput::default(), |ui| {
-                assert_eq!(object_tab_at(ui, &mut data, keying, &mut false, None), None);
+                assert_eq!(object_tab_at(ui, &mut data, keying, &mut false, None, None), None);
             })
             .drop_without_applying_deltas();
         }

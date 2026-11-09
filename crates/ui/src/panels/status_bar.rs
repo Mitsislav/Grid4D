@@ -28,6 +28,11 @@ pub fn show(ui: &mut Ui, doc: &Document, editor: &EditorState) {
                 .color(p().warning)
                 .size(11.5),
             ),
+            None if editor.generators_waiting => ui.label(
+                RichText::new(tr("A slow generator updates when you release"))
+                    .color(p().text_strong)
+                    .size(11.5),
+            ),
             None => ui.label(RichText::new(hint).color(p().text_dim).size(11.5)),
         };
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

@@ -35,8 +35,8 @@ use grid4d_geom::{
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
 use grid4d_scene::{
-    AreaShape, Denoise, Environment, Lens, LinkMode, Linking, NoiseThreshold, Pass, PngPasses, RenderRegion,
-    ShutterPosition, Sky, SunPlacement,
+    AreaShape, Boolean, BooleanMode, Denoise, Environment, Lens, LinkMode, Linking, NoiseThreshold, Pass, PngPasses,
+    RenderRegion, ShutterPosition, Sky, SunPlacement,
 };
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
@@ -2379,6 +2379,18 @@ enum KindDto {
         #[serde(default, skip_serializing_if = "CapTypeDto::is_ngons")]
         cap_type: CapTypeDto,
     },
+    /// A Boolean generator (version 6, step 17.3); defaults omitted.
+    Boolean {
+        #[serde(default, skip_serializing_if = "BooleanModeDto::is_subtract")]
+        mode: BooleanModeDto,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        merge_faces: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        select_cut_edges: bool,
+        /// cm; 0.01 when absent.
+        #[serde(default = "default_weld", skip_serializing_if = "is_default_weld")]
+        weld: f32,
+    },
     /// A Loft generator (added in step 9.7); defaults omitted.
     Loft {
         subdivision_u: u32,
@@ -3804,6 +3816,61 @@ enum FalloffDto {
     InverseSquare,
 }
 
+/// What a Boolean keeps (version 6, step 17.3).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BooleanModeDto {
+    Union,
+    #[default]
+    Subtract,
+    Intersect,
+    Without,
+}
+
+impl BooleanModeDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_subtract(&self) -> bool {
+        *self == Self::Subtract
+    }
+}
+
+impl From<BooleanMode> for BooleanModeDto {
+    fn from(mode: BooleanMode) -> Self {
+        match mode {
+            BooleanMode::Union => Self::Union,
+            BooleanMode::Subtract => Self::Subtract,
+            BooleanMode::Intersect => Self::Intersect,
+            BooleanMode::Without => Self::Without,
+        }
+    }
+}
+
+impl From<BooleanModeDto> for BooleanMode {
+    fn from(mode: BooleanModeDto) -> Self {
+        match mode {
+            BooleanModeDto::Union => Self::Union,
+            BooleanModeDto::Subtract => Self::Subtract,
+            BooleanModeDto::Intersect => Self::Intersect,
+            BooleanModeDto::Without => Self::Without,
+        }
+    }
+}
+
+fn default_weld() -> f32 {
+    Boolean::default().weld
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_default_weld(weld: &f32) -> bool {
+    weld.to_bits() == default_weld().to_bits()
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum BoundaryDto {
@@ -4705,6 +4772,12 @@ impl KindDto {
             },
             ObjectKind::PlainEffector(effector) => Self::PlainEffector(EffectorDto::new(&effector)),
             ObjectKind::RandomEffector(effector) => Self::RandomEffector(EffectorDto::new(&effector)),
+            ObjectKind::Boolean(boolean) => Self::Boolean {
+                mode: boolean.mode.into(),
+                merge_faces: boolean.merge_faces,
+                select_cut_edges: boolean.select_cut_edges,
+                weld: boolean.weld,
+            },
             ObjectKind::Loft(loft) => Self::Loft {
                 subdivision_u: loft.subdivision_u,
                 subdivision_v: loft.subdivision_v,
@@ -5140,6 +5213,17 @@ impl KindDto {
                 seed,
                 reset_coordinates,
             }),
+            Self::Boolean {
+                mode,
+                merge_faces,
+                select_cut_edges,
+                weld,
+            } => ObjectKind::Boolean(Boolean {
+                mode: mode.into(),
+                merge_faces,
+                select_cut_edges,
+                weld: weld.clamp(0.0, Boolean::MAX_WELD),
+            }),
             Self::Loft {
                 subdivision_u,
                 subdivision_v,
@@ -5271,6 +5355,7 @@ impl KindDto {
     fn parameters(&self) -> Vec<f32> {
         match *self {
             Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } | Self::Loft { .. } => Vec::new(),
+            Self::Boolean { weld, .. } => vec![weld],
             Self::Cloner { ref layout, .. } => layout.parameters(),
             Self::PlainEffector(ref dto) | Self::RandomEffector(ref dto) => dto.parameters(),
             Self::Extrude { offset, movement, .. } => vec![offset, movement[0], movement[1], movement[2]],

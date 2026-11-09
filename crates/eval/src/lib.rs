@@ -37,7 +37,7 @@ pub use drawable::{Drawable, Shading, Surface, drawable, editable_mesh};
 pub use evaluated::{
     EvaluatedInstance, EvaluatedLight, EvaluatedNode, EvaluatedScene, MAX_LINKED_LIGHTS, PickShape, Purpose,
 };
-pub use generator::{generator_color, generator_mesh};
+pub use generator::{Built, GeneratorNote, generator_built, generator_color, generator_mesh};
 pub use key::{MeshKey, Ratio};
 pub use material_layer::{MaterialLayer, MaterialLayers};
 pub use overrides::Overrides;

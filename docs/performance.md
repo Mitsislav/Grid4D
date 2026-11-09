@@ -301,6 +301,27 @@ classifying every piece, near the cut or not — 17.3 lets triangles far
 from the other input pass through untouched. None of the Boolean's targets
 is met yet; they stand for 17.3.
 
+### Step 17.3: the Boolean generator
+
+The same cases, the generator's Boolean (Subtract, faces merged back,
+welded at 0.01 cm), on 2026-11-09:
+
+| Case | 17.2 | 17.3 | Target |
+|------|------|------|--------|
+| A box of 1 728 triangles minus two cylinders of 124 | 29 – 38 ms | 11 ms (918 faces) | ≤ 8 ms: not met |
+| Two spheres of 49 728 triangles each | 0.47 – 0.67 s | 0.18 s | ≤ 0.15 s: close |
+| A sphere of 998 000 triangles drilled | 10 – 11 s | 4.0 s | finishes |
+
+Per stage for the box (ms): preparing and pairing 1.2, cutting 1.4,
+joining points 0.7, stitching 4.7, classifying 1.5, building 1.1. What
+helped, in order: working only near the cut (faces with no cut pass
+through whole), sharing equal planes and one plane pair per input edge (the
+crossings of an edge are then the same point from both sides), noting
+known incidences and testing equality by sides (exact signs 8 068 → 526),
+box tests before exact surface tests, one winding number per group, a
+small hasher. A Boolean slower than 33 ms keeps its result while a pointer
+button is held (R9).
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

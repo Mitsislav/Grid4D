@@ -607,6 +607,7 @@ fn texts(
             | ObjectKind::Lathe(_)
             | ObjectKind::Sweep(_)
             | ObjectKind::Loft(_)
+            | ObjectKind::Boolean(_)
             | ObjectKind::Cloner { .. }
             | ObjectKind::PlainEffector(_)
             | ObjectKind::RandomEffector(_)

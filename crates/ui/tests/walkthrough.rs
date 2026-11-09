@@ -537,6 +537,63 @@ fn light_linking_picture() {
     save(&mut h, &dir, "light-linking");
 }
 
+/// The manual's picture of the Boolean: a block with two holes drilled by
+/// two cylinders (grouped as the second input), the Boolean selected:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored boolean_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn boolean_picture() {
+    use grid4d_scene::{Node, ObjectKind, ObjectKindTag};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::new("Boolean");
+    let boolean = doc
+        .scene
+        .insert(Node::new("Boolean", ObjectKindTag::Boolean.default_kind()));
+    let block = ObjectKind::Cube {
+        size: glam::Vec3::new(320.0, 120.0, 200.0),
+        segments: [1, 1, 1],
+    };
+    doc.scene.insert_child(boolean, Node::new("Block", block)).unwrap();
+    let cutters = doc
+        .scene
+        .insert_child(boolean, Node::new("Cutters", ObjectKind::Null))
+        .unwrap();
+    for (name, x) in [("Cylinder", -80.0), ("Cylinder.1", 80.0)] {
+        let mut cylinder = Node::new(
+            name,
+            ObjectKind::Cylinder {
+                radius: 40.0,
+                height: 300.0,
+                rotation_segments: 36,
+                height_segments: 1,
+            },
+        );
+        cylinder.data.transform.position = glam::Vec3::new(x, 0.0, 0.0);
+        doc.scene.insert_child(cutters, cylinder).unwrap();
+    }
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    h.state_mut()
+        .editor
+        .commands
+        .push(grid4d_ui::EditorCommand::FrameSelected);
+    h.run_steps(4);
+    // The Attribute Manager's Object tab: the Boolean's own settings.
+    let tab = h
+        .get_all_by_label("Object")
+        .map(|node| node.rect())
+        .filter(|rect| rect.top() > SIZE[1] * 0.5)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    click(&mut h, tab.center());
+    h.run_steps(2);
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "boolean");
+}
+
 /// The manual's picture of the render region: the demo scene with a region
 /// over part of the view, rendered there by the Render View:
 ///

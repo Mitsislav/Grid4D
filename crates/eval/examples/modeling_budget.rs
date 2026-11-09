@@ -19,10 +19,9 @@
 //!   200 000 points in the result);
 //! * **what Reduce starts from** — the topology and BVH of a
 //!   million-triangle scan;
-//! * **the Boolean** (step 17.2's spike, both methods of holding the points
-//!   a cut makes): a product shell (a box of about 1 700 triangles minus two
-//!   cylinders), two spheres of 50 000 triangles, and a sphere of a million
-//!   triangles with a cylinder cut through it.
+//! * **the Boolean** (Subtract): a product shell (a box of about 1 700
+//!   triangles minus two cylinders), two spheres of 50 000 triangles, and a
+//!   sphere of a million triangles with a cylinder cut through it.
 
 use std::{
     error::Error,
@@ -34,7 +33,7 @@ use glam::Vec3;
 use grid4d_eval::EvaluatedScene;
 use grid4d_geom::{
     BitSet, Bvh, PolyMesh, Smoothing, Topology, TriMesh, Triangulator,
-    boolean::{BooleanMode, Method, boolean, is_closed},
+    boolean::{BooleanMode, BooleanOptions, boolean, is_closed},
     ops::{OptimizeOptions, optimize},
     primitives,
 };
@@ -243,29 +242,31 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     let (triangles, time) = reduce_floor();
     println!("  a scan of {triangles:>8} triangles: topology and BVH: {}", ms(time));
-    println!("Boolean (Subtract), the spike's two methods");
+    println!("Boolean (Subtract)");
+    let options = BooleanOptions::default();
     for (name, a, b, runs) in boolean_cases()? {
         let triangles = |m: &PolyMesh| m.faces().map(|f| f.len() - 2).sum::<usize>();
         println!("  {name} ({} + {} triangles):", triangles(&a), triangles(&b));
-        for method in [Method::Exact, Method::Rounded] {
+        {
             let mut last = None;
-            let time = median(runs, || last = Some(boolean(&a, &b, BooleanMode::Subtract, method)));
+            let time = median(runs, || last = Some(boolean(&a, &b, BooleanMode::Subtract, options)));
             let Some(Ok(result)) = last else {
-                println!("    {method:?}: failed");
+                println!("    failed");
                 continue;
             };
             println!(
-                "    {method:<7?} {}  closed {:<5}  {} faces, {} pieces, {} pairs, {} exact signs",
+                "    {}  closed {:<5}  {} faces, {} pieces, {} whole faces, {} pairs, {} exact signs",
                 ms(time),
                 is_closed(&result.mesh),
                 result.mesh.face_count(),
                 result.stats.pieces,
+                result.stats.whole_faces,
                 result.stats.pairs,
                 result.stats.exact_calls
             );
             let t = result.stats.times.map(|d| d.as_secs_f64() * 1000.0);
             println!(
-                "            stages (ms): prepare {:.1}, cut {:.1}, join {:.1}, stitch {:.1}, classify {:.1}, build {:.1}",
+                "    stages (ms): prepare and pair {:.1}, cut {:.1}, join {:.1}, stitch {:.1}, classify {:.1}, build {:.1}",
                 t[0], t[1], t[2], t[3], t[4], t[5]
             );
         }
