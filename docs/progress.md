@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 17 — Modelling 2 (v1.3) |
-| Last step done | 17.1 — Phase 17's nine specs, the names reviewed, `.g4d` version 6 (version 5 frozen and upgraded as JSON), the modelling budget measured (2026-11-09) |
-| Next step | 17.2 — the boolean spike: both candidate methods on a corpus of hard cases, fuzzed; no interface |
-| Tests | 966 (and 17 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
+| Last step done | 17.2 — the boolean spike: exact arithmetic, one Boolean pipeline with two ways to hold made points, the corpus, property tests and a fuzz target; the plane-based method chosen (D39) (2026-11-09) |
+| Next step | 17.3 — the Boolean generator: fast enough near the cut, n-gons merged back, UVs, the generator, its interface and file data |
+| Tests | 979 (and 18 ignored, run by hand: three timings, the boolean spike's report, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2735,6 +2735,7 @@ risks R5 – R8 go with it.
 |------|----------------|-------|
 | — | Phase 17 planned in detail (`docs/IMPLEMENTATION_PLAN.md`): live Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce generators; soft selection, Slide, Plane Cut, the Polygon Pen, Extrude along Spline, Mirror, Array, bevel profiles; edge creases, hard edges and weighted normals; Wrap, Follow Spline, Displace, Project to Surface, Smooth and Explode deformers; `.g4d` v6; decisions D38 – D45, risk R9; a boolean spike (17.2) before any interface | 961 |
 | 17.1 | Nine specs (the format version 6, the Boolean, Symmetry / Instance / Join, the Spline Boolean, Reduce, soft selection, the modelling tools 2, creases and normals, the deformers 2); the names reviewed (R8: plain words kept, the reference's own names replaced — Join, Spline Boolean, Reduce, Crease, Hard Edges, Follow Spline, Displace, Project to Surface, Explode, Point Offsets); `.g4d` version 6 written (version 5's module moved to `v6.rs`; `v5.rs` and `v4.rs` now only list what the next version adds, applied by the shared `upgrade.rs`; versions 3 – 5 upgraded one at a time); `FILE_FORMAT.md` for version 6, golden `demo_v6.g4d` / `full_v6.g4d`, the version 5 fixtures frozen and checked to read exactly as before, the property tests relabel documents as version 5 too; the modelling budget measured (`grid4d-eval` example `modeling_budget`, `docs/performance.md`) and targets set for the Boolean, Symmetry and Reduce | 966 |
+| 17.2 | The boolean spike: `grid4d-geom::exact` (intervals rounded outwards as a filter, Shewchuk's expansions for exact signs) and `grid4d-geom::boolean` — one pipeline (box-touching triangle pairs, triangles cut by the other input's planes into convex pieces bounded by planes, equal points joined exactly, points on edges stitched in exact order, groups classified by the generalised winding number, pieces in the other's surface by the mode's rule, face origins) with two ways to hold the points a cut makes: implicit (three planes, plane-based) or rounded; a corpus of 14 hard cases, an open cutter, property tests (20 000 random pairs checked closed and by volume identities; garbage meshes never panic), a `boolean` cargo-fuzz target in CI and the weekly Fuzz workflow; both timed (`modeling_budget`). **D39: the plane-based method** — the only one passing everything (rounding: 4 of 14 cases and 185 of 1 000 random pairs wrong) and faster on large inputs; its speed (29 – 38 ms for the product shell, target 8) is 17.3's work | 979 |
 
 **17.1 — Specs, the format version 6, the modelling budget**
 
@@ -2772,6 +2773,58 @@ risks R5 – R8 go with it.
   36 ms), Symmetry done by hand with Optimize (21 ms for 200 000 points) and
   a million-triangle scan's topology and BVH (0.35 s). The specs' targets
   follow from them, with risk R9's fallback above 33 ms.
+
+**17.2 — The boolean spike**
+
+*Problems and solutions:*
+- **Two candidates, one pipeline.** Building a triangle arrangement and a
+  plane-based kernel separately would have compared two programs, not two
+  methods. Both run the same pipeline and differ only in how a point made by
+  a cut is held — as the meeting point of three input planes, or rounded to
+  `f64` when made — so the comparison measures exactly that. The
+  arrangement's own step (a constrained triangulation per triangle) needs
+  rounded points too, so its weakness is the rounded method's.
+- **Exact signs without a big-number library.** Grid4D's coordinates are
+  `f32`, exact in `f64`; Shewchuk's expansions (sums and products of
+  non-overlapping `f64`s, a product made exact by a fused multiply-add) give
+  every sign exactly, and intervals rounded outwards (`next_up` /
+  `next_down`) decide almost all of them first. One generic formula serves
+  both number types.
+- **Points 10⁻¹⁶ apart are real.** The first random failure: a sphere and a
+  hexagonal cylinder, both turned in `f32`, so each side quad became two
+  triangles a hair out of one plane. An edge line crossing such a pair meets
+  it at two distinct points 10⁻¹⁶ apart; stitching sorted the points it
+  inserted by their approximate position, and the two sides of the edge
+  disagreed on the order. Found by dumping the failing shapes and listing
+  the result's unbalanced edges with the pieces using them; points along an
+  edge are now ordered exactly by their coordinate along its main axis.
+- **A quick filter that was too quick.** The next failure was the same pair
+  of points seen from the other edge: the point lay 10⁻¹⁶ from the edge's
+  end and its approximate position rounded to just past it, so the
+  candidate filter dropped it before the exact test could say yes. Quick
+  filters now allow the tolerance at both ends.
+- **A sliver outvoted its group.** In a box whose bottom face B's corner
+  pokes through, the inside region's group held a sliver of 10⁻¹⁶ cm²
+  whose centre lay a hair outside B; the rule "the winding number farthest
+  from ½ wins" let its 0 beat the large pieces' 1 (both exactly ½ away).
+  The largest piece answers now, and smaller ones only when its answer is
+  unclear.
+- **The stitching grid's cells.** The first million-triangle run spent
+  15.7 of its 21 s stitching: the grid's cell was the involved triangles'
+  average size, and the drill's 300-unit sides made every cell hold
+  thousands of points. The median size brought it to 2.5 s.
+- **Rounded points fail where it matters.** Rounding left 4 of the 14
+  corpus cases and 185 of 1 000 random pairs open or wrong, and was slower
+  on large inputs: near-misses make more pieces, and classifying them
+  through tolerances took 104 of its 120 s on the million triangles.
+- **What is not done.** The spike visits every triangle of both inputs and
+  allocates per piece; the product shell takes 29 – 38 ms against a target
+  of 8. Working only near the cut, reusing buffers and merging pieces back
+  into n-gons are 17.3's first tasks.
+- **The fuzzer cannot run here.** libFuzzer needs nightly, which this
+  machine lacks; the target is checked to compile, and its two halves have
+  stable counterparts in `cargo test` (closed shapes stay closed; any
+  points and faces never panic, 5 000 cases run once).
 
 ## Phase 16 — Render quality (2026-11-07 – 2026-11-09)
 

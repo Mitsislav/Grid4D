@@ -1884,7 +1884,7 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 | D36 | Noise | Adaptive sampling from a two-buffer error estimate, then our own denoiser (D27): an edge-avoiding à-trous wavelet filter guided by albedo, normal, depth and variance | Phase 16 |
 | D37 | Render queue | Jobs (document, take, frames, output) kept in the app's storage by the binary, never in documents; run one at a time in the background like today's renders | Phase 16 |
 | D38 | The file format in 1.3 | `.g4d` v6 holds Phase 17's data (the new object kinds, edge creases and hard edges in the components, the new tool and deformer settings); migrated from v5 as JSON; additive until 1.3 ships, then frozen | Phase 17 |
-| D39 | Mesh booleans | A spike (17.2) chooses between a triangle arrangement with exact orientation predicates and a plane-based exact representation, on a fuzzed corpus of hard cases; classification by generalised winding number; coplanar pieces of one source polygon merged back into n-gons; each face's origin recorded | Phase 17 |
+| D39 | Mesh booleans | A spike (17.2) chooses between a triangle arrangement with exact orientation predicates and a plane-based exact representation, on a fuzzed corpus of hard cases; classification by generalised winding number; coplanar pieces of one source polygon merged back into n-gons; each face's origin recorded. **Outcome (17.2): plane-based** — points made by a cut stay the meeting points of three input planes, every sign exact (an interval filter, then expansions); triangles cut into convex pieces by the other input's planes, equal points joined exactly, points on edges stitched in exact order. It alone passed the corpus and 20 000 random pairs, and was faster on large inputs than rounding the points (which left 185 of 1 000 random results wrong) | Phase 17 |
 | D40 | Live modelling objects | Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce are generators in `grid4d-eval` like the Subdivision Surface: cached by their inputs' key, drawn and picked as one mesh, baked by Make Editable | Phase 17 |
 | D41 | Soft selection | Editor state (radius, falloff, surface or volume distance), never in the document; a weight per point used by component transforms and Tweak, kept in reused buffers | Phase 17 |
 | D42 | Creases | Per-edge crease weights stored by corner in the components like UV seams, carried by `Rebuilt::carry`; semi-sharp crease rules in the Subdivision Surface; no vertex creases in 1.3 | Phase 17 |
@@ -1892,7 +1892,7 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 | D44 | Pictures in evaluation | Deformers that read pictures (Displace) get the decoded pictures the editor hands to evaluation, keyed by texture version; a missing picture displaces nothing | Phase 17 |
 | D45 | Generators of curves | A generator may produce a spline (Spline Boolean); spline generators read the evaluated curve of a child generator as they read a spline object | Phase 17 |
 | R5 | Scope against capacity | The suites Grid4D is compared with have large teams. Ship one phase per minor release in the order above; a phase may be cut, never the rules (undo, tests, docs, the frame budget) | ongoing |
-| R6 | Robust mesh booleans | Coplanar and degenerate cases break naive booleans; Phase 17 starts with a spike on exact predicates and a fuzzed test corpus before any interface | Phase 17 |
+| R6 | Robust mesh booleans | Coplanar and degenerate cases break naive booleans; Phase 17 starts with a spike on exact predicates and a fuzzed test corpus before any interface. 17.2: the plane-based method passes the corpus, property tests and a fuzz target; its speed is 17.3's work (the product shell 29 – 38 ms against a target of 8 ms) | Phase 17 |
 | R7 | GPU compute portability | Shader behaviour differs between Vulkan, Metal and DX12; CI renders the reference scenes on every backend it has and compares with the CPU tracer | Phase 23 |
 | R8 | Feature names | Other products' feature names are often trademarks; every new feature gets a plain, descriptive name of our own (reviewed with R2 at each release) | ongoing |
 | R9 | Live generators under a drag | A Boolean or Reduce rebuilt on every frame of an input's drag can drop the viewport below its budget; measured from 17.1, and if one rebuild exceeds its share the drag shows the last result and rebuilds on release (said in the status bar) | Phase 17 |
@@ -1903,6 +1903,8 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 2026-11-09) and released as 1.2.0 (`.g4d` version 5 frozen). Phase 17
 (modelling 2, v1.3) started on 2026-11-09: 17.1 is done (nine specs in
 `docs/reference/`, the names reviewed, `.g4d` v6 written with version 5
-frozen and upgraded as JSON, the modelling budget measured). Next: the
-boolean spike (17.2) — both candidate methods on the corpus of hard cases,
-fuzzed — before any interface.
+frozen and upgraded as JSON, the modelling budget measured), and so is the
+boolean spike, 17.2 (`grid4d-geom::boolean` and `exact`: the plane-based
+method chosen, D39). Next: the Boolean generator (17.3) — speed first (work
+only near the cut, reuse buffers) to meet the budget, then n-gons merged
+back, UVs, the generator, its interface and file data.

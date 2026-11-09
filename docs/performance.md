@@ -281,6 +281,26 @@ rebuilt on release — applies to any rebuild over 33 ms):
 | Reduce | a million triangles: the collapse order / a change of Keep | ≤ 5 s once / ≤ 100 ms |
 | Every one | idle frames | no rebuild, no allocation (the steady-frame test) |
 
+### Step 17.2: the boolean spike
+
+The same example times the spike's Boolean (Subtract) with both ways of
+holding the points a cut makes (`docs/reference/generator-boolean.md` ▸
+*The spike*). Ranges over three runs on 2026-11-09; the machine was busier
+in the later runs (stages the last change did not touch slowed by a third):
+
+| Case | Exact (chosen) | Rounded |
+|------|----------------|---------|
+| A box of 1 728 triangles minus two cylinders of 124 | 29 – 38 ms, closed | 37 – 46 ms, **open** |
+| Two spheres of 49 728 triangles each | 0.47 – 0.67 s, closed | 1.3 – 1.7 s, **open** |
+| A sphere of 998 000 triangles drilled by a cylinder | 10 – 11 s, closed (21 s before the stitching grid took the median triangle's size) | 120 s, **open** |
+
+Per stage (exact, the product shell): preparing 2 – 3 ms, cutting 8 – 13,
+joining points 2 – 4, stitching 7 – 9, classifying 7 – 10, building 0.5.
+For the million triangles most of the time goes to stitching and
+classifying every piece, near the cut or not — 17.3 lets triangles far
+from the other input pass through untouched. None of the Boolean's targets
+is met yet; they stand for 17.3.
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

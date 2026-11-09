@@ -1,7 +1,8 @@
 name: Fuzz
 
-# A long run of the .g4d loader's fuzz target (fuzz/): weekly, or by hand
-# for as long as asked. CI runs it for two minutes on every push.
+# Long runs of the fuzz targets (fuzz/): the .g4d loader and the mesh
+# Boolean, weekly, or by hand for as long as asked. CI runs each for two
+# minutes on every push.
 
 on:
   schedule:
@@ -40,4 +41,29 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-artifacts
+          path: fuzz/artifacts
+
+  boolean:
+    name: fuzz the mesh Boolean
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Fuzz
+        env:
+          MINUTES: ${{ inputs.minutes || '60' }}
+        # As above: name the runner's own target.
+        run: |
+          mkdir -p fuzz/corpus/boolean
+          cargo fuzz run --target x86_64-unknown-linux-gnu boolean fuzz/corpus/boolean -- \
+            -max_total_time=$((MINUTES * 60)) -rss_limit_mb=2048 -timeout=10
+      - name: Keep what failed
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-boolean-artifacts
           path: fuzz/artifacts

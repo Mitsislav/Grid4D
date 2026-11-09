@@ -101,18 +101,70 @@ closed set of four.
 | Piece | Where |
 |-------|-------|
 | `ObjectKind::Boolean(Boolean)`, `ObjectKindTag::Boolean` in `GENERATORS`, label, icon, Attribute Manager page with the message row | `scene/node.rs`, `ui/icons.rs`, `ui/panels/attributes.rs` |
-| `boolean(a, b, mode, options) -> Result<Rebuilt-like result with face origins, BooleanError>` | `grid4d-geom::boolean` (pure; exact predicates, winding numbers, merging coplanar pieces) |
+| `boolean(a, b, mode, method) -> Result<BooleanResult { mesh, origins, stats }, BooleanError>` (17.2; options and merging back into n-gons in 17.3) | `grid4d-geom::boolean` (pure: `kernel.rs` planes, points and predicates; `mod.rs` the pipeline) on `grid4d-geom::exact` (intervals, expansions) |
 | Inputs, nesting, cache, the error kept for the Attribute Manager | `grid4d-eval::generator` (built deepest first; `generator_mesh` bakes it) |
 | The R9 fallback (last result while dragging) | `grid4d-eval` (the rebuild's time kept per generator) + the viewport's drag state; status-bar text through `i18n::tr` |
 | File | `.g4d` v6 kind `boolean` (17.3) |
 
-## Budget (measured 2026-11-09 before it exists; `modeling_budget` example)
+## Budget (`modeling_budget` example)
 
-| Case | Target |
-|------|--------|
-| A product shell: a bevelled box (≈ 2 000 triangles) minus two cylinders (≈ 1 000 each), a cutter dragged | ≤ 8 ms a rebuild: the drag stays at 60 fps (today a live Subdivision Surface over 1 152 faces costs 2.3 ms a frame) |
-| Two spheres of 50 000 triangles each | ≤ 150 ms a rebuild (the R9 fallback applies while dragging); today merely triangulating them and building each one's BVH and topology costs 36 ms |
-| A million triangles against a cutter | finishes (no time promised), no panic |
+| Case | Target | The spike (17.2, exact method) |
+|------|--------|--------------------------------|
+| A product shell: a bevelled box (≈ 2 000 triangles) minus two cylinders, a cutter dragged | ≤ 8 ms a rebuild: the drag stays at 60 fps (a live Subdivision Surface over 1 152 faces costs 2.3 ms a frame) | 29 – 38 ms (a box of 1 728 triangles minus two cylinders of 124): not met yet |
+| Two spheres of 50 000 triangles each | ≤ 150 ms a rebuild (the R9 fallback applies while dragging); triangulating them and building each one's BVH and topology alone costs 36 ms | 0.47 – 0.67 s: not met yet |
+| A million triangles against a cutter | finishes (no time promised), no panic | 10 – 11 s, closed |
+
+The spike's code was written to be right, not fast: every stage still
+allocates per piece, keys edges in hash maps and visits every triangle of
+both inputs, even those far from the other. Step 17.3 works only near the
+cut (untouched triangles pass straight through), groups pieces through the
+inputs' own topology, and keeps its buffers between rebuilds; the targets
+stand.
+
+## The spike (17.2): how the method was chosen
+
+Both candidates were built as **one pipeline** that differs only in how it
+holds the points a cut makes, so the comparison measures that alone:
+
+- **Exact (plane-based)**: a made point stays the meeting point of three
+  input planes; its side of any plane is decided exactly (an interval filter
+  first, exact expansion arithmetic when the interval cannot tell: 8 471
+  times for the product shell, 105 149 for the million triangles).
+- **Rounded**: a made point is rounded to `f64` when made and treated as an
+  input point from then on; tests on it are exact, but it no longer lies on
+  the planes that made it, so joining equal points and telling whether a
+  piece lies on the other surface need a tolerance (10⁻⁹ of the scene).
+
+| | Exact | Rounded |
+|-|-------|---------|
+| The corpus (14 hard cases: overlapping, coplanar faces, a shared edge, a shared point, face to face, identical, nearly touching, a hole flush with two faces, a cube turned by 10⁻⁶ rad, touching from within, spheres, a sphere and a cylinder, a plate and nine cylinders, non-manifold A) | all pass (closed, volumes exact to 10⁻⁵) | 4 fail (open results: the turned cube, both sphere cases, the plate) |
+| 1 000 random pairs (boxes, spheres, cylinders; half on a coarse grid) | 0 wrong | 185 wrong |
+| The same 1 000, time | 3.0 s | 1.4 s |
+| The three budget cases | closed; 29 – 38 ms, 0.47 – 0.67 s, 10 – 11 s | open; 37 – 46 ms, 1.3 – 1.7 s, 120 s |
+| 20 000 random pairs; 5 000 meshes of any points and faces | closed and right; no panic | — |
+
+**Outcome (D39): the exact, plane-based method.** It is the only one that
+passes everything, and on real sizes it is also the faster (the rounded
+method's near-misses make more pieces and send classification into long
+searches). The triangle arrangement with a constrained triangulation per
+triangle, D39's other candidate, was not built: its weak point is the same
+as the rounded method's (points made at intersections must be rounded to be
+triangulated), and the plane-based cut of convex pieces needs no
+triangulation at all.
+
+What the spike found on the way (each now a test):
+
+- Points a hair apart (10⁻¹⁶) are real: a line crossing the two
+  nearly-coplanar halves of a quad turned in `f32` meets them at two
+  points. Inserting points into an edge in order of their *approximate*
+  position put such a pair in opposite orders on the edge's two sides; the
+  order is now decided exactly, by the coordinate along the edge's main
+  axis.
+- The quick test that finds candidates for an edge must allow the
+  tolerance past both ends: a point 10⁻¹⁶ from an end rounded to just
+  beyond it.
+- A group's place is asked of its largest piece first: a sliver's centre
+  can lie a hair outside the solid it belongs to, and must never outvote it.
 
 ## Decisions (2026-11-09)
 
@@ -120,15 +172,22 @@ closed set of four.
 2. Inputs may be generators (nesting) — a chain of Booleans is how such
    models are built; the Subdivision Surface's "no nesting yet" rule is
    lifted for every generator in 17.3.
-3. The method is chosen by the spike (17.2) and recorded here and in D39.
+3. The method is chosen by the spike (17.2) and recorded here and in D39:
+   **exact, plane-based** (see *The spike* above).
+4. Edge planes run along the axis a triangle's normal leans on least, so
+   they are never parallel to it and need no square roots.
+5. Equal points are found near each other in a grid of 10⁻⁶ of the scene
+   and joined only when exactly equal; nothing is welded by distance in the
+   exact method (the Weld Tolerance parameter, 17.3, is a separate pass).
 
 ## Acceptance criteria
 
 - [ ] Each mode on two overlapping cubes gives the expected closed result
       (point count, volume within 1e-4, every edge between two faces).
-- [ ] The boolean corpus (17.2: coplanar faces, shared edges and points,
+- [x] The boolean corpus (17.2: coplanar faces, shared edges and points,
       touching, nearly touching, non-manifold, slightly open, a million
-      triangles) passes, and the fuzzer finds no panic.
+      triangles) passes, and the fuzzer finds no panic (property tests in
+      `cargo test`; the `boolean` cargo-fuzz target in CI and weekly).
 - [ ] Merge Coplanar Faces: a cube minus a smaller cube through one face
       gives n-gons on that face, quads where possible, no slivers.
 - [ ] UVs on the result equal the source's UVs at every source point kept.

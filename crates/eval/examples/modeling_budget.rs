@@ -18,7 +18,11 @@
 //!   mirrored, joined to itself and welded at the plane with Optimize (about
 //!   200 000 points in the result);
 //! * **what Reduce starts from** — the topology and BVH of a
-//!   million-triangle scan.
+//!   million-triangle scan;
+//! * **the Boolean** (step 17.2's spike, both methods of holding the points
+//!   a cut makes): a product shell (a box of about 1 700 triangles minus two
+//!   cylinders), two spheres of 50 000 triangles, and a sphere of a million
+//!   triangles with a cylinder cut through it.
 
 use std::{
     error::Error,
@@ -30,6 +34,7 @@ use glam::Vec3;
 use grid4d_eval::EvaluatedScene;
 use grid4d_geom::{
     BitSet, Bvh, PolyMesh, Smoothing, Topology, TriMesh, Triangulator,
+    boolean::{BooleanMode, Method, boolean, is_closed},
     ops::{OptimizeOptions, optimize},
     primitives,
 };
@@ -174,6 +179,49 @@ fn reduce_floor() -> (usize, Duration) {
     (triangles, time)
 }
 
+fn moved(mut mesh: PolyMesh, by: Vec3) -> PolyMesh {
+    for p in mesh.points_mut() {
+        *p += by;
+    }
+    mesh
+}
+
+fn joined(meshes: &[PolyMesh]) -> Result<PolyMesh, Box<dyn Error>> {
+    let mut out = PolyMesh::new();
+    for mesh in meshes {
+        let base = u32::try_from(out.point_count())?;
+        for &p in mesh.points() {
+            out.add_point(p).map_err(|e| e.to_string())?;
+        }
+        for face in mesh.faces() {
+            let face: Vec<u32> = face.iter().map(|&c| c + base).collect();
+            out.add_face(&face).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(out)
+}
+
+/// A Boolean case: its name, A, B and how many runs to time.
+type Case = (&'static str, PolyMesh, PolyMesh, usize);
+
+/// The Boolean's cases.
+fn boolean_cases() -> Result<Vec<Case>, Box<dyn Error>> {
+    let shell = primitives::cube(Vec3::new(200.0, 100.0, 150.0), [12, 12, 12]);
+    let cutters = joined(&[
+        moved(primitives::cylinder(20.0, 300.0, 32, 1), Vec3::new(-40.0, 0.0, 10.0)),
+        moved(primitives::cylinder(25.0, 300.0, 32, 1), Vec3::new(45.0, 0.0, -15.0)),
+    ])?;
+    let big = primitives::sphere(100.0, 224);
+    let small = moved(primitives::sphere(80.0, 224), Vec3::new(60.0, 20.0, 0.0));
+    let scan = primitives::sphere(100.0, 1000);
+    let drill = moved(primitives::cylinder(30.0, 300.0, 48, 1), Vec3::new(20.0, 0.0, 10.0));
+    Ok(vec![
+        ("product shell minus two cylinders", shell, cutters, 21),
+        ("two spheres of 50 000 triangles", big, small, 5),
+        ("a million triangles, drilled", scan, drill, 3),
+    ])
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     println!("Modelling budget (medians)");
     for segments in [48, 96] {
@@ -195,5 +243,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     let (triangles, time) = reduce_floor();
     println!("  a scan of {triangles:>8} triangles: topology and BVH: {}", ms(time));
+    println!("Boolean (Subtract), the spike's two methods");
+    for (name, a, b, runs) in boolean_cases()? {
+        let triangles = |m: &PolyMesh| m.faces().map(|f| f.len() - 2).sum::<usize>();
+        println!("  {name} ({} + {} triangles):", triangles(&a), triangles(&b));
+        for method in [Method::Exact, Method::Rounded] {
+            let mut last = None;
+            let time = median(runs, || last = Some(boolean(&a, &b, BooleanMode::Subtract, method)));
+            let Some(Ok(result)) = last else {
+                println!("    {method:?}: failed");
+                continue;
+            };
+            println!(
+                "    {method:<7?} {}  closed {:<5}  {} faces, {} pieces, {} pairs, {} exact signs",
+                ms(time),
+                is_closed(&result.mesh),
+                result.mesh.face_count(),
+                result.stats.pieces,
+                result.stats.pairs,
+                result.stats.exact_calls
+            );
+            let t = result.stats.times.map(|d| d.as_secs_f64() * 1000.0);
+            println!(
+                "            stages (ms): prepare {:.1}, cut {:.1}, join {:.1}, stitch {:.1}, classify {:.1}, build {:.1}",
+                t[0], t[1], t[2], t[3], t[4], t[5]
+            );
+        }
+    }
     Ok(())
 }

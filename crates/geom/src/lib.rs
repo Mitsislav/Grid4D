@@ -4,7 +4,8 @@
 //! for the GPU ([`Triangulator`] → [`TriMesh`]), vertex normals ([`Smoothing`]),
 //! adjacency ([`Topology`]), ray casting ([`Bvh`]) and component selections
 //! ([`ComponentSet`], [`selection::convert`]), modelling operations ([`ops`]) and
-//! Catmull-Clark subdivision ([`subdivision`]), and texture coordinates ([`uv`]).
+//! Catmull-Clark subdivision ([`subdivision`]), texture coordinates ([`uv`]) and
+//! mesh booleans with exact predicates ([`boolean`]).
 //!
 //! ## Architecture rule
 //!
@@ -20,11 +21,13 @@
 //! or more distinct points; it may be non-convex and slightly non-planar.
 
 mod bitset;
+pub mod boolean;
 mod bvh;
 pub mod cloner;
 pub mod deform;
 pub mod displace;
 pub mod effector;
+mod exact;
 pub mod loops;
 mod mesh;
 mod normals;

@@ -1935,6 +1935,7 @@ version = "1.2.0"
 dependencies = [
  "criterion",
  "glam 0.34.2",
+ "proptest",
 ]
 
 [[package]]
