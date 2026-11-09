@@ -14,7 +14,7 @@ solved them. Newest steps at the bottom of each phase.
 |-|-|
 | Current phase | 16 — Render quality (v1.2): complete; release 1.2.0 prepared |
 | Last step done | 16.11b — release 1.2.0 prepared: the workspace version, the changelog's `[1.2.0]` section, `.g4d` version 5 frozen, the README's and the itch.io page's features (2026-11-09) |
-| Next step | Phase 17 — modelling 2 (v1.3): its specs, and the R6 spike on robust booleans |
+| Next step | 17.1 — Phase 17's specs, `.g4d` v6 and the modelling budget (the phase is planned in `docs/IMPLEMENTATION_PLAN.md`) |
 | Tests | 961 (and 17 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
@@ -2728,6 +2728,12 @@ risks R5 – R8 go with it.
   itch.io uploads, so it is left for the user's go-ahead.
 
 ---
+
+## Phase 17 — Modelling 2 (planned 2026-11-09)
+
+| Step | What was built | Tests |
+|------|----------------|-------|
+| — | Phase 17 planned in detail (`docs/IMPLEMENTATION_PLAN.md`): live Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce generators; soft selection, Slide, Plane Cut, the Polygon Pen, Extrude along Spline, Mirror, Array, bevel profiles; edge creases, hard edges and weighted normals; Wrap, Follow Spline, Displace, Project to Surface, Smooth and Explode deformers; `.g4d` v6; decisions D38 – D45, risk R9; a boolean spike (17.2) before any interface | 961 |
 
 ## Phase 16 — Render quality (2026-11-07 – 2026-11-09)
 

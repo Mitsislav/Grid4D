@@ -1534,24 +1534,160 @@ rendering.
 
 ---
 
-## Phase 17 — Modelling 2 (v1.3) — outline
+## Phase 17 — Modelling 2 (v1.3)
 
 **Goal:** the modelling tools a hard-surface or product artist reaches for
-every day.
+every day — live booleans and symmetry, soft and precise component editing,
+creases under the Subdivision Surface, controllable normals — and the
+deformers that bend one shape onto another, all undoable, non-destructive
+where the object is live, and keeping component selections across every
+change.
 
-* **Live objects:** Boolean (union, subtract, intersect; robust predicates,
-  quads where possible), Symmetry (with welding at the plane), Instance,
-  Connect (join children into one mesh), Spline Mask (2D booleans of
-  splines), Polygon Reduction.
-* **Tools:** soft selection (proportional falloff for every transform),
-  slide (edges and points), knife variants (plane, loop, path), polygon pen,
-  extrude along a spline, mirror, array of selection, bevel improvements
-  (profiles, point mode), edge creases and weights for the Subdivision
-  Surface, normal editing (smoothing groups, weighted normals).
-* **More deformers:** wrap, spline, displacer (with Phase 15's textures),
-  shrink-wrap, smoothing, correction, explosion.
-* Risks: robust mesh booleans (R6) — budget a spike step first; every
-  operation keeps component selections through `Rebuilt::carry`.
+### Where things stand (2026-11-09, Grid4D 1.2)
+
+* **Polygon modelling** (Phase 5 / 7): Points, Edges and Polygons modes;
+  Extrude, Inset, Bevel (offset, subdivision with a rounded or hollow
+  profile, a limit, points cut off), Bridge, Weld, Loop / Path Cut, Line Cut,
+  Connect, Melt, Dissolve, Delete, Optimize; snapping; the gizmo and Tweak
+  on components. Every rebuilding operation returns a
+  `grid4d_geom::ops::Rebuilt` whose `carry` moves selections, hidden flags
+  and UV seams across.
+* **Generators** (`ObjectKindTag::GENERATORS`): Subdivision Surface
+  (Catmull-Clark on n-gons, no creases), Extrude, Lathe, Sweep, Loft, the
+  Cloner. Each is built in `grid4d-eval::generator`, cached by a key of its
+  inputs, drawn and picked as one mesh, baked by Make Editable; generators
+  read *splines* only from spline objects, never from another generator.
+* **Deformers**: Bend, Twist, Taper, Bulge, FFD (a stack while walking,
+  results cached per node); plugin deformers through `grid4d-plugin`.
+* **Normals**: per object — flat, smooth or by a Phong angle (the Phong
+  tag); no hard-edge flags, no weighted normals.
+* **Components** next to the mesh: selected and hidden sets, UV seams
+  (edges by corner, `ComponentState`); no per-edge weights.
+* **Materials** are per object (Material tags, layered); no per-polygon
+  material.
+* `.g4d` version 5 is frozen (Grid4D 1.2): Phase 17's data needs version 6.
+
+### Design
+
+* **The `.g4d` format v6** (D38): the new object kinds, edge creases and
+  hard edges in a polygon object's components, the new tool and deformer
+  parameters. A migration from v5 written as `v5::upgrade` (JSON → JSON,
+  like the earlier ones); `FILE_FORMAT.md` gains v6; v6 golden fixtures; v6
+  grows additively until 1.3 ships, then freezes. Grid4D 1.2 refuses v6
+  with its "newer version" message.
+* **Booleans** (D39, R6): a **Boolean** generator — union, subtract,
+  intersect, and *without the inside* (the first object with the second's
+  shape cut away, open) — of its first two children (each with its own
+  subtree merged, like the Subdivision Surface's cage). The method is
+  decided by a **spike** (17.2) before any interface: candidates are a
+  triangle mesh arrangement with exact orientation predicates (Shewchuk's
+  adaptive predicates, our own code or a permissively licensed crate if
+  `cargo deny` allows it) and a plane-based exact representation;
+  classification by a generalised winding number so slightly open inputs
+  still work. The result merges coplanar triangles of one source polygon
+  back into n-gons (**quads where possible**), welds what it cut, keeps UVs
+  by interpolation and records each face's origin (input and face), so
+  selections and later per-part materials can follow. Bad inputs never
+  panic: the generator shows the first input and says why in the
+  Attribute Manager.
+* **More live objects** (D40), each a generator cached by its inputs and
+  baked by Make Editable:
+  * **Symmetry** — its children mirrored across one of its planes, the
+    halves welded at the plane (a tolerance; points near it snap onto it);
+  * **Instance** — another object drawn again here (a link, like a
+    Cloner's Object), its own transform; renders and picking reuse the
+    source's mesh (no copy);
+  * **Join** — its children's meshes merged into one (optionally welded),
+    so one generator can take a group as a single input;
+  * **Spline Boolean** — 2D booleans (union, subtract, intersect, xor) of
+    child splines in its plane, producing a **spline** — the first
+    generator whose result is a curve: spline generators (Extrude, Lathe,
+    Sweep, Loft) learn to read the evaluated curve of a child generator
+    (D45);
+  * **Reduce** — fewer polygons by quadric-error edge collapses (Garland
+    and Heckbert's published method, our own code) to a percentage,
+    keeping borders and UV seams.
+* **Soft selection** (D41): editor state (radius, falloff curve, surface or
+  volume distance), giving every point a weight from the selection; the
+  gizmo's component moves, rotations and scales and Tweak use it, drawn as
+  a colour ramp on the points. Never stored in the document; the
+  allocation-free frame keeps its weights in reused buffers.
+* **Precise tools**, each through `modeling.rs` like Extrude (a viewport
+  drag and an Apply, one undo step, `Rebuilt::carry`):
+  * **Slide** — points and edge loops along their neighbouring edges
+    (clamped, optionally keeping the curvature);
+  * **Plane Cut** — the object or selection cut by a plane (through the
+    view, or the gizmo's plane), with the existing Loop / Path and Line Cut;
+  * **Polygon Pen** — new polygons drawn point by point on the object
+    (snapping to points and edges), and new rows dragged from an edge;
+  * **Extrude along Spline** — polygons extruded along a spline's path
+    (steps, twist, scale along it);
+  * **Mirror** — the selection (or object) mirrored across a plane,
+    welded where it meets itself;
+  * **Array** — the selection repeated with an offset, rotation and scale
+    per copy.
+  * **Bevel** gains a custom profile (a curve) and a mitre option.
+* **Creases and normals** (D42, D43):
+  * **edge creases** (0 – 100 %, per edge, stored like UV seams, by
+    corner, in the components) that the Subdivision Surface honours with
+    semi-sharp crease rules (DeRose, Kass and Truong's published rules);
+    crease values carried by `Rebuilt::carry`; shown as tinted edges;
+  * **hard edges** (flags in the components) that split smoothing wherever
+    the Phong angle would join; the Phong tag gains **Weighted normals**
+    (by face area and corner angle) for flat-faced hard-surface models;
+    glTF and OBJ export write the resulting normals.
+* **Deformers** (names to be reviewed under R8 in 17.1): **Wrap** (a
+  plane wrapped onto a cylinder or sphere), **Follow Spline** (an object
+  bent along a spline), **Displace** (along normals by a picture or a
+  noise — evaluation receives decoded pictures from the editor, D44),
+  **Project to Surface** (points pulled onto another object, by the
+  nearest point or along a direction, through its BVH), **Smooth**
+  (Laplacian, keeping volume), **Explode** (polygons flying apart by a
+  strength), and **Point Offsets** (edits on a deformed mesh kept as
+  offsets — may move to 1.4 under R5). All in the deformer stack, with
+  strength handles where they have one.
+* **Rules kept:** every operation keeps selections through
+  `Rebuilt::carry` (a property test per operation: random meshes and
+  selections, the carried selection names the same geometry); every new
+  object kind exhaustively matched; every new document field undoable
+  through `SceneEdit` and in the random-command test; specs in
+  `docs/reference/` written first, clean-room; the viewport's frame stays
+  allocation-free and within the budget with live booleans on screen.
+
+### Steps
+
+| Step | Size | Work |
+|------|------|------|
+| 17.1 | M | Specs (`generator-boolean.md`, `generator-symmetry-instance-join.md`, `generator-spline-boolean.md`, `generator-reduce.md`, `modeling-soft-selection.md`, `modeling-tools-2.md` (slide, plane cut, polygon pen, extrude along spline, mirror, array, bevel profile), `modeling-creases-normals.md`, `deformer-2.md`, `app-format-v6.md`); the names reviewed (R8); `.g4d` v6 with the migration from v5, `FILE_FORMAT.md` v6, v6 golden fixtures, fuzzing and property tests on v6; a modelling budget measured (Boolean, Symmetry and Reduce times to beat or keep) |
+| 17.2 | M | **The boolean spike** (R6): both candidate methods on a corpus of hard cases (coplanar faces, shared edges and points, nearly touching, non-manifold and slightly open inputs, a million triangles), fuzzed; closed inputs must give closed results; the faster method that passes everything is chosen and recorded as D39's outcome. No interface |
+| 17.3 | L | The **Boolean** generator (four modes, n-gons merged back, quads where possible, UVs, face origins, welding, errors shown); live updates within the budget while an input is dragged; Make Editable; reference renders and fuzzed property tests |
+| 17.4 | M | **Symmetry**, **Instance** and **Join** generators (welding at the plane, the link, merged children); Current State to Object and export bake them |
+| 17.5 | M | **Spline Boolean** (2D booleans of splines, a generator producing a curve) and spline generators reading a child generator's curve (D45); **Reduce** (quadric edge collapse to a percentage, borders and seams kept) |
+| 17.6 | M | **Soft selection** (radius, falloff, surface or volume) for every component transform and Tweak, with its colour ramp; **Slide** for points and edge loops |
+| 17.7 | M | **Plane Cut** and the **Polygon Pen**; **Extrude along Spline**, **Mirror** and **Array** of a selection; Bevel's custom profile and mitres |
+| 17.8 | M | **Edge creases** for the Subdivision Surface (semi-sharp rules), **hard edges** and **weighted normals** (the Phong tag); shown in the viewport, written by glTF / OBJ export |
+| 17.9 | L | **Deformers**: Wrap, Follow Spline, Displace (pictures handed to evaluation), Project to Surface, Smooth, Explode; Point Offsets if time allows (else 1.4, R5) |
+| 17.10 | S | The manual's modelling chapters for all of it with pictures, the walkthrough and an acceptance test, the modelling budget re-measured; release v1.3 (`.g4d` v6 frozen) |
+
+### Acceptance
+
+A user models a product shell: a box bevelled with a custom profile, two
+cylinders subtracted by a live **Boolean** (moving a cutter updates the
+result at interactive speed, and the result is closed); half of a handle is
+modelled and completed by **Symmetry** (welded, no seam), its profile
+extruded along a spline, its edges **creased** under a Subdivision Surface
+so the corners stay sharp while the faces stay smooth; a dent is pushed in
+with **soft selection**; an imported scan is **reduced** to 10 % keeping
+its outline and UVs; a label is **wrapped** around the bottle and a decal
+**projected** onto the shell; hard-surface panels get **weighted normals**.
+Every step undoes and redoes; selections survive each operation; the scene
+renders; saved as `.g4d` v6 and reopened identically; every 1.x file opens
+unchanged. The boolean corpus and the fuzzer pass in CI.
+
+**Not in Phase 17:** volume / SDF modelling, remeshing (voxel or quad),
+retopology tools, per-polygon materials and polygon selection tags (the
+face origins make them possible later), NURBS, vertex-level crease weights,
+custom per-corner normal editing, sculpting (Phase 19).
 
 ## Phase 18 — Fields and motion graphics 2 (v1.4) — outline
 
@@ -1734,19 +1870,24 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 | D35 | Render passes | A fixed list of passes chosen in Render Settings, written into one multi-layer OpenEXR by our own writer (no new crate); light groups add passes | Phase 16 |
 | D36 | Noise | Adaptive sampling from a two-buffer error estimate, then our own denoiser (D27): an edge-avoiding à-trous wavelet filter guided by albedo, normal, depth and variance | Phase 16 |
 | D37 | Render queue | Jobs (document, take, frames, output) kept in the app's storage by the binary, never in documents; run one at a time in the background like today's renders | Phase 16 |
+| D38 | The file format in 1.3 | `.g4d` v6 holds Phase 17's data (the new object kinds, edge creases and hard edges in the components, the new tool and deformer settings); migrated from v5 as JSON; additive until 1.3 ships, then frozen | Phase 17 |
+| D39 | Mesh booleans | A spike (17.2) chooses between a triangle arrangement with exact orientation predicates and a plane-based exact representation, on a fuzzed corpus of hard cases; classification by generalised winding number; coplanar pieces of one source polygon merged back into n-gons; each face's origin recorded | Phase 17 |
+| D40 | Live modelling objects | Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce are generators in `grid4d-eval` like the Subdivision Surface: cached by their inputs' key, drawn and picked as one mesh, baked by Make Editable | Phase 17 |
+| D41 | Soft selection | Editor state (radius, falloff, surface or volume distance), never in the document; a weight per point used by component transforms and Tweak, kept in reused buffers | Phase 17 |
+| D42 | Creases | Per-edge crease weights stored by corner in the components like UV seams, carried by `Rebuilt::carry`; semi-sharp crease rules in the Subdivision Surface; no vertex creases in 1.3 | Phase 17 |
+| D43 | Normals | Hard-edge flags in the components split smoothing; the Phong tag gains weighted normals (face area × corner angle); no per-corner normal editing in 1.3 | Phase 17 |
+| D44 | Pictures in evaluation | Deformers that read pictures (Displace) get the decoded pictures the editor hands to evaluation, keyed by texture version; a missing picture displaces nothing | Phase 17 |
+| D45 | Generators of curves | A generator may produce a spline (Spline Boolean); spline generators read the evaluated curve of a child generator as they read a spline object | Phase 17 |
 | R5 | Scope against capacity | The suites Grid4D is compared with have large teams. Ship one phase per minor release in the order above; a phase may be cut, never the rules (undo, tests, docs, the frame budget) | ongoing |
 | R6 | Robust mesh booleans | Coplanar and degenerate cases break naive booleans; Phase 17 starts with a spike on exact predicates and a fuzzed test corpus before any interface | Phase 17 |
 | R7 | GPU compute portability | Shader behaviour differs between Vulkan, Metal and DX12; CI renders the reference scenes on every backend it has and compares with the CPU tracer | Phase 23 |
 | R8 | Feature names | Other products' feature names are often trademarks; every new feature gets a plain, descriptive name of our own (reviewed with R2 at each release) | ongoing |
+| R9 | Live generators under a drag | A Boolean or Reduce rebuilt on every frame of an input's drag can drop the viewport below its budget; measured from 17.1, and if one rebuild exceeds its share the drag shows the last result and rebuilds on release (said in the status bar) | Phase 17 |
 
 ---
 
 **Next action:** Phase 16 (render quality, v1.2) is complete (2026-11-07 –
-2026-11-09): area lights and emissive surfaces with MIS, the Sky and
-Environment, light linking and groups, lens and shutter, render passes and
-multi-layer OpenEXR, adaptive sampling, the denoiser and the surface-area
-BVH, the render region and the Render Queue, the interactive Render View,
-subsurface scattering and displacement; its acceptance runs as
-`crates/ui/tests/acceptance_16.rs`, and release 1.2.0 is prepared (`.g4d`
-version 5 frozen). Next is Phase 17 (modelling 2, v1.3), starting like
-Phase 16 with its specs and the R6 spike on robust booleans.
+2026-11-09) and released as 1.2.0 (`.g4d` version 5 frozen). Phase 17
+(modelling 2, v1.3) is planned in detail above (2026-11-09); it starts with
+17.1: its specs in `docs/reference/`, `.g4d` v6, the modelling budget —
+then the boolean spike (17.2) before any interface.
