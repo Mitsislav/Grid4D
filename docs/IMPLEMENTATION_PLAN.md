@@ -1636,7 +1636,7 @@ change.
     the Phong angle would join; the Phong tag gains **Weighted normals**
     (by face area and corner angle) for flat-faced hard-surface models;
     glTF and OBJ export write the resulting normals.
-* **Deformers** (names to be reviewed under R8 in 17.1): **Wrap** (a
+* **Deformers** (names reviewed under R8 in 17.1, see below): **Wrap** (a
   plane wrapped onto a cylinder or sphere), **Follow Spline** (an object
   bent along a spline), **Displace** (along normals by a picture or a
   noise — evaluation receives decoded pictures from the editor, D44),
@@ -1646,6 +1646,19 @@ change.
   strength), and **Point Offsets** (edits on a deformed mesh kept as
   offsets — may move to 1.4 under R5). All in the deformer stack, with
   strength handles where they have one.
+* **Names (R8, reviewed in 17.1):** plain words are kept where they are
+  the general term (Boolean, Symmetry, Instance, Soft Selection, Slide,
+  Plane Cut, Polygon Pen, Extrude along Spline, Mirror, Array, Wrap,
+  Smooth); where the reference application's name is its own, Grid4D
+  uses another: **Join** (its Connect), **Spline Boolean** (its spline
+  mask), **Reduce** (its polygon reduction), **Crease** and **Hard Edges**
+  (its weights and Phong breaks), **Follow Spline**, **Displace**,
+  **Project to Surface**, **Explode**, **Point Offsets**. Shortcuts for
+  the new tools stay unbound until verified against the reference's list.
+* **Tool options are editor state** (17.1): soft selection and the
+  modelling tools' options are never saved in documents, so D38's "tool
+  settings" in v6 means only what objects and tags hold (the new kinds,
+  creases and hard edges, the Phong tag's weighting, deformer parameters).
 * **Rules kept:** every operation keeps selections through
   `Rebuilt::carry` (a property test per operation: random meshes and
   selections, the carried selection names the same geometry); every new
@@ -1888,6 +1901,8 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 
 **Next action:** Phase 16 (render quality, v1.2) is complete (2026-11-07 –
 2026-11-09) and released as 1.2.0 (`.g4d` version 5 frozen). Phase 17
-(modelling 2, v1.3) is planned in detail above (2026-11-09); it starts with
-17.1: its specs in `docs/reference/`, `.g4d` v6, the modelling budget —
-then the boolean spike (17.2) before any interface.
+(modelling 2, v1.3) started on 2026-11-09: 17.1 is done (nine specs in
+`docs/reference/`, the names reviewed, `.g4d` v6 written with version 5
+frozen and upgraded as JSON, the modelling budget measured). Next: the
+boolean spike (17.2) — both candidate methods on the corpus of hard cases,
+fuzzed — before any interface.

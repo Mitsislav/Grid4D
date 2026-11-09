@@ -5,6 +5,18 @@ Notable changes to Grid4D, newest first. Versions follow
 opens every file of the same major version; the plugin and script interfaces
 may grow in a minor version and change only in a major one.
 
+## [Unreleased]
+
+Grid4D 1.3 in development: modelling (planned: live booleans, symmetry,
+instances, joined and reduced meshes, spline booleans, soft selection, new
+modelling tools, edge creases, hard edges and weighted normals, new
+deformers).
+
+- **Files** — documents are saved in `.g4d` format version 6. It holds
+  nothing new yet; Grid4D 1.3's features will add to it until 1.3 is
+  released. Every earlier file opens unchanged; Grid4D 1.2 cannot open
+  version 6 files and says they come from a newer Grid4D.
+
 ## [1.2.0] - 2026-11-09
 
 Render quality: area lights, a daylight sky and HDR surroundings, light

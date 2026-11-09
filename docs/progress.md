@@ -12,10 +12,10 @@ solved them. Newest steps at the bottom of each phase.
 
 | | |
 |-|-|
-| Current phase | 16 — Render quality (v1.2): complete; release 1.2.0 prepared |
-| Last step done | 16.11b — release 1.2.0 prepared: the workspace version, the changelog's `[1.2.0]` section, `.g4d` version 5 frozen, the README's and the itch.io page's features (2026-11-09) |
-| Next step | 17.1 — Phase 17's specs, `.g4d` v6 and the modelling budget (the phase is planned in `docs/IMPLEMENTATION_PLAN.md`) |
-| Tests | 961 (and 17 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
+| Current phase | 17 — Modelling 2 (v1.3) |
+| Last step done | 17.1 — Phase 17's nine specs, the names reviewed, `.g4d` version 6 (version 5 frozen and upgraded as JSON), the modelling budget measured (2026-11-09) |
+| Next step | 17.2 — the boolean spike: both candidate methods on a corpus of hard cases, fuzzed; no interface |
+| Tests | 966 (and 17 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2729,11 +2729,49 @@ risks R5 – R8 go with it.
 
 ---
 
-## Phase 17 — Modelling 2 (planned 2026-11-09)
+## Phase 17 — Modelling 2 (2026-11-09 – )
 
 | Step | What was built | Tests |
 |------|----------------|-------|
 | — | Phase 17 planned in detail (`docs/IMPLEMENTATION_PLAN.md`): live Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce generators; soft selection, Slide, Plane Cut, the Polygon Pen, Extrude along Spline, Mirror, Array, bevel profiles; edge creases, hard edges and weighted normals; Wrap, Follow Spline, Displace, Project to Surface, Smooth and Explode deformers; `.g4d` v6; decisions D38 – D45, risk R9; a boolean spike (17.2) before any interface | 961 |
+| 17.1 | Nine specs (the format version 6, the Boolean, Symmetry / Instance / Join, the Spline Boolean, Reduce, soft selection, the modelling tools 2, creases and normals, the deformers 2); the names reviewed (R8: plain words kept, the reference's own names replaced — Join, Spline Boolean, Reduce, Crease, Hard Edges, Follow Spline, Displace, Project to Surface, Explode, Point Offsets); `.g4d` version 6 written (version 5's module moved to `v6.rs`; `v5.rs` and `v4.rs` now only list what the next version adds, applied by the shared `upgrade.rs`; versions 3 – 5 upgraded one at a time); `FILE_FORMAT.md` for version 6, golden `demo_v6.g4d` / `full_v6.g4d`, the version 5 fixtures frozen and checked to read exactly as before, the property tests relabel documents as version 5 too; the modelling budget measured (`grid4d-eval` example `modeling_budget`, `docs/performance.md`) and targets set for the Boolean, Symmetry and Reduce | 966 |
+
+**17.1 — Specs, the format version 6, the modelling budget**
+
+*Problems and solutions:*
+- **The same move a third time, with less copying.** Version 5's module
+  became `v6.rs`, as in 15.1 and 16.1. Version 4's upgrade module held both
+  its lists and the code that applies them; a second copy for version 5
+  would have been 300 lines kept in step by hand. The code moved to
+  `upgrade.rs` (its error now names the version it reads), and `v4.rs` and
+  `v5.rs` hold only their lists; `lib.rs` upgrades an old file one version
+  at a time, so version 3 goes through three small steps.
+- **A fixture written while another test read it.** Writing the new golden
+  files with `GRID4D_UPDATE_FIXTURES=1` ran the test that loads the demo
+  fixture in parallel with the one that writes it; it failed once on the
+  missing file and passed on the next run. Fixtures are written in a run of
+  their own before the full suite.
+- **Tool options are not document data.** D38 put "the new tool settings" in
+  version 6, but soft selection and the modelling tools' options are editor
+  state (as `ModelingSettings` is); the format spec lists only what objects
+  and tags hold, and the plan says so.
+- **Specs that cite only what was read.** The reference's pages were read for
+  its legacy Boolean (modes, single object, hidden edges, breaks and
+  selection at the cut, point merging), its newer Boolean's parameter list,
+  the Instance, the Connect object and the polygon-reduction generator;
+  the Symmetry page was not found where expected, and the other tools and
+  deformers follow no page — their specs say so and describe them by what
+  they do to points, with options of our own. The algorithms come from
+  public papers (Shewchuk's predicates, generalised winding numbers,
+  plane-based booleans, Martínez's polygon booleans, Garland and Heckbert's
+  quadrics, DeRose's semi-sharp creases, Taubin's smoothing).
+- **What to measure before the live objects exist.** A budget needs numbers
+  each of them can be held to: a live Subdivision Surface under a drag (the
+  cost a live Boolean is weighed against), what any boolean of two
+  50 000-triangle spheres must at least do (triangulate, BVH, topology:
+  36 ms), Symmetry done by hand with Optimize (21 ms for 200 000 points) and
+  a million-triangle scan's topology and BVH (0.35 s). The specs' targets
+  follow from them, with risk R9's fallback above 33 ms.
 
 ## Phase 16 — Render quality (2026-11-07 – 2026-11-09)
 

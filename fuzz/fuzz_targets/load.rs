@@ -1,7 +1,8 @@
 //! Any bytes given to the `.g4d` loader: it must return a document or an
 //! error — never panic, hang or allocate what a file merely claims. The seed
 //! corpus (the test fixtures) holds every format version, so the current
-//! version 5 reader and the upgrades of versions 3 and 4 to it are exercised.
+//! version 6 reader and the upgrades of versions 3, 4 and 5 to it are
+//! exercised.
 //!
 //! cargo +nightly fuzz run load fuzz/corpus/load crates/io/tests/fixtures
 

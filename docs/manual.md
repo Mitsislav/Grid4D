@@ -942,8 +942,8 @@ earlier version.
 
 **Files and Grid4D versions.** Each Grid4D opens every file an earlier one
 saved, unchanged, and saves in its own version of the format, which holds
-what it adds: Grid4D 1.1 saves version 4, the coming Grid4D 1.2 (in
-development) version 5. An older Grid4D cannot open a file saved by a newer
+what it adds: Grid4D 1.1 saves version 4, Grid4D 1.2 version 5, the coming
+Grid4D 1.3 (in development) version 6. An older Grid4D cannot open a file saved by a newer
 one: it says the file comes from a newer Grid4D. To hand a document to
 someone on an older version, keep a copy saved by that version.
 

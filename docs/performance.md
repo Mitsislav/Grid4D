@@ -252,6 +252,35 @@ twelfth on studio and a twentieth on interior; studio's error at the same 256 sa
 (light from glowing surfaces is sampled directly since 16.2). Dense comes
 within 4 % of 1.1's error in about half its time.
 
+## Modelling (Grid4D 1.3, step 17.1: before Phase 17)
+
+Phase 17 adds live modelling objects — a Boolean, Symmetry, Reduce — that
+rebuild while their inputs are dragged. Before any of them exists,
+`cargo run --release -p grid4d-eval --example modeling_budget` times what
+today's modelling costs, so each has a number to beat or keep. Measured on
+2026-11-09 on the reference machine (release build), medians, steady over
+three runs:
+
+| What | Time |
+|------|------|
+| A live Subdivision Surface (2 levels) while a cage point is dragged: evaluation per frame, cage of 1 152 faces | 2.2 – 2.4 ms |
+| … cage of 4 608 faces (74 000 quads shown) | 8.6 – 8.7 ms |
+| Two spheres of 50 000 triangles each: triangulated, BVH and topology built (a floor under any boolean of them) | 35.6 – 36.3 ms |
+| Symmetry by hand: a half of 100 000 points mirrored, joined and welded at the plane with Optimize (199 364 points) | 20.5 – 21.4 ms |
+| A scan of a million triangles: its topology and BVH (where a reduction starts) | 349 – 351 ms |
+
+The targets the phase's specs set from these (each re-measured when its
+step lands; risk R9's fallback — the last result shown during a drag,
+rebuilt on release — applies to any rebuild over 33 ms):
+
+| Live object | Case | Target |
+|-------------|------|--------|
+| Boolean | a bevelled box (≈ 2 000 triangles) minus two cylinders, a cutter dragged | ≤ 8 ms a rebuild (60 fps) |
+| Boolean | two spheres of 50 000 triangles | ≤ 150 ms a rebuild |
+| Symmetry | a half of 100 000 points | ≤ 10 ms a rebuild (half of doing it by hand) |
+| Reduce | a million triangles: the collapse order / a change of Keep | ≤ 5 s once / ≤ 100 ms |
+| Every one | idle frames | no rebuild, no allocation (the steady-frame test) |
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

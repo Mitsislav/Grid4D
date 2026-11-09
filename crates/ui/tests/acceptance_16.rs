@@ -358,7 +358,8 @@ fn phase_16_a_product_shot_lit_rendered_and_queued() {
     }
     assert!(has("= Bottle"), "the IDs named");
 
-    // 4. Saved as version 5, it opens the same.
+    // 4. Saved (as version 5 in 1.2; the current version since), it opens
+    // the same.
     let path = dir.join("product.g4d");
     e.doc.render.samples = 4;
     grid4d_io::save(&e.doc, &path).unwrap();

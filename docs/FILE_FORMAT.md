@@ -1,16 +1,19 @@
 # The `.g4d` file format
 
 The specification of Grid4D's document files, so that other programs can read
-and write them. This describes **format version 5**, which Grid4D 1.2
-writes (**frozen**). Version 4 (Grid4D 1.1, **frozen**) and version 3
-(Grid4D 1.0, **frozen**) are the same format without the later versions'
-additions — see [Version 5 and version 4](#version-5-and-version-4),
+and write them. This describes **format version 6**, which Grid4D 1.3
+(in development) writes. Version 5 (Grid4D 1.2, **frozen**), version 4
+(Grid4D 1.1, **frozen**) and version 3 (Grid4D 1.0, **frozen**) are the same
+format without the later versions' additions — see
+[Version 6 and version 5](#version-6-and-version-5),
+[Version 5 and version 4](#version-5-and-version-4),
 [Version 4 and version 3](#version-4-and-version-3) and
 [Versions](#versions).
 
-> Version 5 was completed with Grid4D 1.2 (2026-11-09) and is **frozen**:
-> it never changes; later data will come in a version 6. Version 4 was
-> completed with Grid4D 1.1 (2026-11-07) and never changes either.
+> Version 6 grows while Grid4D 1.3 is developed, only by optional fields and
+> new types (listed below as they arrive), and is frozen when 1.3 is
+> released. Version 5 was completed with Grid4D 1.2 (2026-11-09) and version
+> 4 with Grid4D 1.1 (2026-11-07); they never change.
 
 ## The container
 
@@ -322,6 +325,22 @@ memory). Indices out of range, a parent index not smaller than the object's
 own, mesh faces pointing past their points, and numbers that are not finite
 make the file invalid.
 
+## Version 6 and version 5
+
+Version 6 keeps everything about version 5 — the container, every field and
+its meaning — and only adds to it. What it adds (Grid4D 1.3, Phase 17), as
+each step arrives:
+
+| Addition | Since |
+|----------|-------|
+| nothing yet but the version number | step 17.1 |
+
+A version 5 file is read as a version 6 file with the version number
+changed, minus any field this table lists; a `type` or other value version 6
+adds to a closed set stays an error in a version 5 file, as it was for
+Grid4D 1.2. A version 6 file that uses none of the additions is a valid
+version 5 file once its `version` says `5`.
+
 ## Version 5 and version 4
 
 Version 5 keeps everything about version 4 — the container, every field and
@@ -374,11 +393,12 @@ its `version` says `3`.
 | 1, 2 | a single JSON file, `"format": "oc4d"` (from the project's former name OpenC4D; extension `.oc4d`) | yes, converted when opened |
 | 3 | the zip archive above, `"format": "grid4d"`; Grid4D 1.0 | yes, converted when opened |
 | 4 | the same archive with version 4's additions; Grid4D 1.1 (frozen) | yes, converted when opened |
-| 5 | the same archive with version 5's additions; Grid4D 1.2 (frozen) | yes; written |
+| 5 | the same archive with version 5's additions; Grid4D 1.2 (frozen) | yes, converted when opened |
+| 6 | the same archive with version 6's additions; Grid4D 1.3 (in development) | yes; written |
 
 A version grows during development only by optional fields and new types.
 **From Grid4D 1.0 a released version never changes:** new data means a new
 version number, written by newer Grid4Ds and converted from every older
 version when opened. A Grid4D refuses files with a version newer than it
 knows, with a message naming both versions (Grid4D 1.0 refuses version 4
-files this way, Grid4D 1.1 version 5 files).
+files this way, Grid4D 1.1 version 5 files, Grid4D 1.2 version 6 files).

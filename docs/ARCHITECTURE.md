@@ -91,10 +91,12 @@ a new variant). `cargo clippy -- -D warnings` must pass.
 shared with a shader has a size test.
 
 **Files.** A released `.g4d` version never changes: new data means a new
-version and a migration. The current version's module (`io/src/v5.rs`) reads
+version and a migration. The current version's module (`io/src/v6.rs`) reads
 and writes; an older archive version is upgraded to it as JSON first, one
-version at a time (`io/src/v3.rs` to version 4, `io/src/v4.rs` to version 5),
-so its meaning stays fixed while the current one grows. Loading never trusts sizes a file claims and rejects
+version at a time (`io/src/v3.rs` to version 4, `io/src/v4.rs` to version 5,
+`io/src/v5.rs` to version 6; each of the last two only lists what the next
+version adds, and `io/src/upgrade.rs` drops those fields and refuses those
+values), so its meaning stays fixed while the current one grows. Loading never trusts sizes a file claims and rejects
 numbers that are not finite. Files are read through `grid4d_io::read_file`
 (the memory reserved first, so a file too large is an error, not an abort)
 and written to a temporary file that replaces the old one only when complete.

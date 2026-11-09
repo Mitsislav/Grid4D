@@ -2,8 +2,8 @@
 //! the same — saved again, they give the same bytes. Every kind of object with
 //! random parameters, a random hierarchy, transforms, switches, tags,
 //! animation, materials, layers and plugin values (see `docs/FILE_FORMAT.md`);
-//! the same documents labelled version 4 (Grid4D 1.1) and, without what
-//! version 4 added, version 3 (Grid4D 1.0) read the same.
+//! the same documents labelled version 5 (Grid4D 1.2), version 4 (Grid4D 1.1)
+//! and, without what version 4 added, version 3 (Grid4D 1.0) read the same.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -315,9 +315,12 @@ proptest! {
         prop_assert_eq!(names(&loaded), names(&doc));
         let again = grid4d_io::to_bytes(&loaded).unwrap();
         prop_assert!(again == bytes, "saved again, the file changed");
-        // Written as version 4 (Grid4D 1.1) would have: the same document.
-        // Everything above is version 4's; Phase 16's additions get
-        // strategies of their own, left out of this check.
+        // Written as version 5 (Grid4D 1.2) or 4 (Grid4D 1.1) would have:
+        // the same document. Everything above is version 4's; Phase 16's and
+        // Phase 17's additions get strategies of their own, left out of this
+        // check.
+        let as_v5 = grid4d_io::from_bytes(&labelled(&bytes, 5)).unwrap();
+        prop_assert!(grid4d_io::to_bytes(&as_v5).unwrap() == bytes, "version 5 read differently");
         let as_v4 = grid4d_io::from_bytes(&labelled(&bytes, 4)).unwrap();
         prop_assert!(grid4d_io::to_bytes(&as_v4).unwrap() == bytes, "version 4 read differently");
     }
@@ -466,6 +469,9 @@ proptest! {
         let loaded = grid4d_io::from_bytes(&bytes).unwrap();
         prop_assert_eq!(&loaded.render, &doc.render);
         prop_assert!(grid4d_io::to_bytes(&loaded).unwrap() == bytes);
+        // Everything here is version 5's: labelled so, the same document.
+        let as_v5 = grid4d_io::from_bytes(&labelled(&bytes, 5)).unwrap();
+        prop_assert!(grid4d_io::to_bytes(&as_v5).unwrap() == bytes, "version 5 read differently");
         let as_v4 = grid4d_io::from_bytes(&labelled(&bytes, 4));
         if area.is_some() || sky.is_some() || environment.is_some() {
             // Grid4D 1.1 refused the Area light type and these kinds of

@@ -66,7 +66,6 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 6.1 | [`tag-basics.md`](tag-basics.md) — tags: Phong, Protection, Target | implemented 2026-10-20 |
 | 6.2 | [`animation-keys.md`](animation-keys.md) — tracks, curves, keys, evaluation | implemented 2026-10-20 |
 | 6.3 | [`animation-recording.md`](animation-recording.md) — Record (F9), Autokeying, key buttons, keys on the timeline | implemented 2026-10-20 |
-| later | `modeling-sds-weights.md` — point/edge weights (creases) | todo |
 | 6.4 | [`animation-fcurves.md`](animation-fcurves.md) — the F-Curve editor | implemented 2026-10-20 |
 | 6.5 | [`manager-coordinate.md`](manager-coordinate.md) — the Coordinate Manager | implemented 2026-10-20 |
 | 6.6 | [`manager-material.md`](manager-material.md) — materials, the Material Manager, the Material tag | implemented 2026-10-21 |
@@ -119,3 +118,12 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 16.7 | [`render-sampling.md`](render-sampling.md) — adaptive sampling, the à-trous denoiser, the SAH BVH, the render-time budget | draft 2026-11-07 |
 | 16.8 – 16.9 | [`render-queue.md`](render-queue.md) — the Render Queue, the render region, the interactive Render View | draft 2026-11-07 |
 | 16.10 | [`material-subsurface-displacement.md`](material-subsurface-displacement.md) — random-walk subsurface scattering, render-time displacement | draft 2026-11-07 |
+| 17.1 | [`app-format-v6.md`](app-format-v6.md) — `.g4d` version 6: what Phase 17 adds by step, reading version 5 (fields dropped, new values refused), the shared upgrade mechanism | implemented 2026-11-09 (the container; each later step adds its data) |
+| 17.2 – 17.3 | [`generator-boolean.md`](generator-boolean.md) — the live Boolean: union, subtract, intersect, without; exact predicates, winding numbers, n-gons merged back, face origins, the drag fallback | draft 2026-11-09 |
+| 17.4 | [`generator-symmetry-instance-join.md`](generator-symmetry-instance-join.md) — Symmetry (mirror plane, welding), Instance (a link drawn again, no copy), Join (children merged into one mesh) | draft 2026-11-09 |
+| 17.5 | [`generator-spline-boolean.md`](generator-spline-boolean.md) — 2D booleans of splines, a generator producing a curve, spline generators reading it | draft 2026-11-09 |
+| 17.5 | [`generator-reduce.md`](generator-reduce.md) — quadric edge collapse to a share, borders, seams and hard edges kept, the order computed once | draft 2026-11-09 |
+| 17.6 | [`modeling-soft-selection.md`](modeling-soft-selection.md) — radius, falloff, volume or surface distance, the colour ramp | draft 2026-11-09 |
+| 17.6 – 17.7 | [`modeling-tools-2.md`](modeling-tools-2.md) — Slide, Plane Cut, Polygon Pen, Extrude along Spline, Mirror, Array, Bevel's custom profile and mitres | draft 2026-11-09 |
+| 17.8 | [`modeling-creases-normals.md`](modeling-creases-normals.md) — edge creases (semi-sharp rules), hard edges, weighted normals (replaces the planned `modeling-sds-weights.md`) | draft 2026-11-09 |
+| 17.9 | [`deformer-2.md`](deformer-2.md) — Wrap, Follow Spline, Displace (pictures in evaluation), Project to Surface, Smooth, Explode, Point Offsets | draft 2026-11-09 |
