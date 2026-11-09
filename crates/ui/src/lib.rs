@@ -33,6 +33,7 @@ pub mod previews;
 #[cfg(test)]
 mod random_commands;
 pub mod recent;
+pub mod render_queue;
 pub mod rendering;
 pub mod scripts;
 pub mod shell;

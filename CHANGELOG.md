@@ -67,6 +67,11 @@ sampling and a denoiser, a render queue).
   view and the Render View renders only inside it; drag its edges to
   change it. Saved with the document; with Use for Final Render, final
   renders render only the region too.
+- **Render Queue** — Render ▸ Render Queue… renders saved documents one
+  after another in the background: whole documents, all their takes or
+  chosen ones, their own frames or output; Stop and Start go on from the
+  first missing frame; a document that cannot be read is an error and the
+  queue goes on. The list is kept between sessions.
 - **Faster renders** — the renderer's ray-casting hierarchy is built by the
   surface-area heuristic: the same pictures 20 – 40 % sooner.
 - **Merge** — an Environment's picture, lights' links and cameras' focus

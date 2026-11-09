@@ -506,6 +506,12 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 ui.close();
             }
             ui.separator();
+            let queue = Button::new(tr("Render Queue…")).selected(editor.show_render_queue);
+            if ui.add(queue).clicked() {
+                editor.show_render_queue = !editor.show_render_queue;
+                ui.close();
+            }
+            ui.separator();
             let settings = Button::new(tr("Edit Render Settings…"))
                 .shortcut_text("Ctrl+B")
                 .selected(editor.show_render_settings);
@@ -597,6 +603,11 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
             let viewer = Button::new(tr("Picture Viewer")).selected(editor.renders.viewer_open);
             if ui.add(viewer).clicked() {
                 editor.renders.viewer_open = !editor.renders.viewer_open;
+                ui.close();
+            }
+            let queue = Button::new(tr("Render Queue")).selected(editor.show_render_queue);
+            if ui.add(queue).clicked() {
+                editor.show_render_queue = !editor.show_render_queue;
                 ui.close();
             }
             ui.separator();

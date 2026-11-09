@@ -543,6 +543,45 @@ fn render_region_picture() {
     save(&mut h, &dir, "render-region");
 }
 
+/// The manual's picture of the Render Queue: three jobs (two takes of one
+/// shot finished and rendering, a file that could not be read):
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored render_queue_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn render_queue_picture() {
+    use grid4d_ui::render_queue::{JobFrames, JobStatus, JobTake, QueueJob};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = harness(Language::English, ColorTheme::Dark);
+    {
+        let editor = &mut h.state_mut().editor;
+        let shot = PathBuf::from("C:/Projects/Bottle/bottle.g4d");
+        let mut wide = QueueJob::new(shot.clone(), JobTake::Named("Wide".to_owned()));
+        (wide.status, wide.done, wide.total) = (JobStatus::Finished, 48, 48);
+        wide.message = "48 of 48 frames saved".to_owned();
+        let mut close = QueueJob::new(shot, JobTake::Named("Close".to_owned()));
+        close.frames = JobFrames::Manual {
+            from: 0,
+            to: 23,
+            step: 1,
+        };
+        close.output = Some("renders/close".to_owned());
+        let mut old = QueueJob::new(PathBuf::from("C:/Projects/Old/turntable.g4d"), JobTake::RenderTake);
+        (old.status, old.message) = (
+            JobStatus::Error,
+            "The system cannot find the file specified.".to_owned(),
+        );
+        editor.render_queue.jobs = vec![wide, close, old];
+        editor.show_render_queue = true;
+    }
+    h.run_steps(4);
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "render-queue");
+}
+
 /// The manual's picture of the Texture Manager: a few pictures (one embedded,
 /// one missing), in the Animate layout where the bottom pane is tall:
 ///

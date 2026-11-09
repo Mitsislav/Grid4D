@@ -2692,6 +2692,54 @@ picture, so it matches the view when the Render Settings' proportions do.
 
 ![The Render View inside a render region: the sphere and the cube rendered in the dashed frame, the cylinder and the box outside it as the view draws them](images/manual/render-region.png)
 
+### 20.5 The Render Queue
+
+The **Render Queue** renders saved documents one after another while you
+work on something else, or overnight. **Render ▸ Render Queue…** (or
+**Window ▸ Render Queue**) opens its window.
+
+![The Render Queue: one take of a shot finished, another ready with frames 0 – 23 and a file of its own, a document that could not be read](images/manual/render-queue.png)
+
+**Adding jobs**
+
+- **Add Current Document** adds the document as it is saved (save it first;
+  changes you have not saved are not rendered, and the job says so).
+- **Add All Takes** adds a job per take of the document, Main first.
+- **Add Files…** adds saved `.g4d` documents.
+
+Each job renders its document as Render to Picture Viewer would and saves
+every frame where its Render Settings say. Per job you can set:
+
+| Setting | Meaning |
+|---------|---------|
+| (check box) | only checked jobs are rendered |
+| Take | **Render Take** (the document's Render Settings ▸ Take), **Main**, or a take by name |
+| Frames | **From Document** (its Render Settings' range) or **Manual** (from, to, every n-th frame) |
+| Output | **Own File**: save to another file than the document says (a path relative to the document's folder, or a full one) |
+
+The camera is the take's camera, else the document's first camera object.
+
+**Rendering**
+
+**Start** renders the checked jobs from the top, one at a time, in the
+background; the editor stays usable. Each job shows how many frames it has
+saved; the window's title shows the whole queue's progress. The running
+job's picture is in the Picture Viewer's history (**Show**).
+
+**Stop** ends the job after the current pass: it is *Stopped* and keeps the
+frames it saved. **Start** again goes on **from the first frame that has no
+file yet**. **Reset** sets a job back to *Ready* (then it renders every frame
+again). A job whose document cannot be read, or that has nowhere to save,
+is an *Error* with the reason, and the queue goes on with the next one.
+
+While the queue renders, Render to Picture Viewer (Shift+R) waits: stop the
+queue first. The Render View (Ctrl+R) still works.
+
+**Up**, **Down**, **Duplicate** and **Remove** arrange the jobs. The list is
+kept when you close Grid4D and comes back the next time (a job that was
+rendering comes back *Stopped*); it is never saved in documents, and changes
+to it are not undo steps.
+
 ## 21. Plugins
 
 Plugins add to Grid4D things it does not have itself — kinds of objects,

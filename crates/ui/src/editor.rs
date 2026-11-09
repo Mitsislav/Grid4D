@@ -820,6 +820,10 @@ pub struct EditorState {
     /// Render ▸ Render Region: the next drag in the active view draws the
     /// render region.
     pub drawing_region: bool,
+    /// The Render Queue (kept by the app, never in documents).
+    pub render_queue: crate::render_queue::RenderQueue,
+    /// The Render Queue window is open.
+    pub show_render_queue: bool,
     /// The session's renders and the Picture Viewer (Shift+R).
     pub renders: crate::rendering::Renders,
     /// The rigid body simulation and its cache.
@@ -900,6 +904,8 @@ impl Default for EditorState {
             crash: crate::crash::CrashReports::default(),
             object_drag: None,
             drawing_region: false,
+            render_queue: Default::default(),
+            show_render_queue: Default::default(),
         }
     }
 }

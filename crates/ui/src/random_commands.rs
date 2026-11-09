@@ -143,7 +143,7 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
         _ => SelectMode::Remove,
     };
 
-    match rng.below(54) {
+    match rng.below(55) {
         0..=2 => EditorCommand::CreateObject(tag(rng)),
         3 => EditorCommand::CreateObject(ObjectKindTag::Cube),
         4 => EditorCommand::CreateChild(tag(rng)),
@@ -465,6 +465,13 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
                 EditorCommand::ClearRenderRegion
             }
         }
+        // The Render Menu's switches and the Render Queue with no jobs.
+        53 => [
+            EditorCommand::DrawRenderRegion,
+            EditorCommand::StartRenderQueue,
+            EditorCommand::StopRenderQueue,
+        ][rng.below(3)]
+        .clone(),
         47 => EditorCommand::Undo,
         48 => EditorCommand::Redo,
         // A click on the timeline: temporary values give way to the curves.

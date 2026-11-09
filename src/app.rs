@@ -47,6 +47,12 @@ impl Grid4DApp {
         if let Some(stored) = cc.storage.and_then(|s| s.get_string(recent::STORAGE_KEY)) {
             editor.file.recent = RecentFiles::from_storage(&stored);
         }
+        // The Render Queue as it was left (a job rendering comes back Stopped).
+        if let Some(jobs) = cc.storage.and_then(|s| {
+            eframe::get_value::<Vec<grid4d_ui::render_queue::QueueJob>>(s, grid4d_ui::render_queue::STORAGE_KEY)
+        }) {
+            editor.render_queue = grid4d_ui::render_queue::RenderQueue::restored(jobs);
+        }
         if let Some(stored) = cc
             .storage
             .and_then(|s| eframe::get_value::<Preferences>(s, preferences::STORAGE_KEY))
@@ -103,6 +109,11 @@ impl eframe::App for Grid4DApp {
         storage.set_string(recent::STORAGE_KEY, editor.file.recent.to_storage());
         eframe::set_value(storage, workspace::STORAGE_KEY, &self.shell.workspace);
         eframe::set_value(storage, preferences::STORAGE_KEY, &editor.preferences);
+        eframe::set_value(
+            storage,
+            grid4d_ui::render_queue::STORAGE_KEY,
+            &editor.render_queue.saved(),
+        );
     }
 
     /// A normal exit: the recovery copy is no longer needed.

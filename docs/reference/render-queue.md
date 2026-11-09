@@ -120,13 +120,24 @@ change.
 
 | Piece | Where |
 |-------|-------|
-| `RenderQueue`, `Job`, `JobStatus`; one worker at a time, shared with Shift+R renders | `grid4d-ui` (a new `render_queue.rs`, `rendering.rs`) |
+| `RenderQueue`, `QueueJob`, `JobStatus`, `JobTake`, `JobFrames`; a loader thread per job (read, take, pictures, simulation), then `Renders::start_frames` | `grid4d-ui` (`render_queue.rs`, `rendering.rs`, `textures::decode_all`) |
 | The window | `grid4d-ui` (`panels/render_queue.rs`) |
 | Saving the job list in the app's storage | the binary (`src/app.rs`), like recent files |
 | `RenderSettings::{region, region_final}` (`RenderRegion`) | `grid4d-scene` (`render.rs`) |
 | Rendering a pixel rectangle | `grid4d-raytrace` (`RenderOptions::region`; `Progressive` samples only inside; inside pixels are exactly those of a whole render) |
 | Region drawing and handles | `ui/panels/viewport/render_region.rs` (`EditorState::drawing_region`; `EditorCommand::{DrawRenderRegion, ClearRenderRegion}`) |
 | Interactive restarts, the kept picture, the scene rebuilt on the worker, camera-only restarts | `grid4d-ui` (`rendering.rs`: the view job keeps its `RenderScene`), `ViewKey` split into camera and scene parts |
+
+As built (16.8b), our choices: jobs are reordered with Up and Down
+buttons (no dragging) and files are added with Add Files… (not dropped on
+the window); Shift+R while the queue renders says so and renders nothing
+(it does not wait in line), and Start while a Picture Viewer render runs
+says so too; only a **Stopped** job skips frames whose file exists (a Ready
+one renders them all again, so two takes saving to the same file both
+render); the camera is the take's, else the document's first camera
+object, else the default view; a job's Take menu names the current
+document's takes when the job is that document. The job's renders are
+ordinary Picture Viewer renders, so the history shows them.
 
 Deliberate differences: no Team Render or network jobs, no per-job camera or
 render-settings override other than take, frames and output, no presets of
@@ -136,12 +147,12 @@ the blocky first pass.
 
 ## Acceptance criteria
 
-- [ ] Two jobs (two takes) run one after another unattended and save their
+- [x] Two jobs (two takes) run one after another unattended and save their
       frames; a stopped job continues from its first missing frame.
-- [ ] A broken file is an Error and the queue goes on.
-- [ ] The job list survives a restart of the app (statuses: Rendering comes
+- [x] A broken file is an Error and the queue goes on.
+- [x] The job list survives a restart of the app (statuses: Rendering comes
       back Stopped); documents never contain it.
-- [ ] The queue and Shift+R never render at once.
+- [x] The queue and Shift+R never render at once.
 - [x] The region renders only its pixels (Render View; final render with the
       switch); it is undoable and saved in v5.
 - [ ] The interactive Render View restarts on camera moves without

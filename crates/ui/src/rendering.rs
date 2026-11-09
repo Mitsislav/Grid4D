@@ -637,12 +637,27 @@ impl Renders {
         document: Option<&std::path::Path>,
         replay: Option<Replay>,
     ) -> u32 {
+        let frames: Vec<i32> = doc.render.clone().validated().frames(&doc.time).collect();
+        let numbered = frames.len() > 1;
+        self.start_frames(doc, pictures, (view, object), document, replay, (frames, numbered))
+    }
+
+    /// Like [`Self::start`], rendering only `frames` of the range (the
+    /// Render Queue continuing a job), the files `numbered` as the whole
+    /// range's are.
+    pub fn start_frames(
+        &mut self,
+        doc: &Document,
+        pictures: Pictures,
+        (view, object): (&OrbitCamera, Option<NodeId>),
+        document: Option<&std::path::Path>,
+        replay: Option<Replay>,
+        (frames, numbered): (Vec<i32>, bool),
+    ) -> u32 {
         self.stop();
         let settings = doc.render.clone().validated();
         let options = RenderOptions::from(&settings);
-        let frames: Vec<i32> = settings.frames(&doc.time).collect();
         let first = frames.first().copied().unwrap_or_else(|| doc.time.frame());
-        let numbered = frames.len() > 1;
         self.last_number += 1;
         let number = self.last_number;
         self.history.push(Picture {
@@ -692,6 +707,12 @@ impl Renders {
         self.job = job;
         self.trim();
         number
+    }
+
+    /// The number of the render running (not the Render View's), if one runs.
+    #[must_use]
+    pub fn running_number(&self) -> Option<u32> {
+        self.job.as_ref().map(|job| job.number)
     }
 
     /// Stops the running render, keeping what it rendered so far.

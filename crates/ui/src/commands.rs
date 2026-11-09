@@ -16,7 +16,7 @@ use grid4d_scene::{
     SceneEdit, SplineHandle, Transform,
 };
 
-use crate::i18n::key;
+use crate::i18n::{key, tr, trf};
 use crate::{
     EditMode, EditorState, Selection, ViewportPanel,
     file::{self, FileAction, UnsavedChoice},
@@ -128,6 +128,19 @@ pub enum EditorCommand {
     /// Render ▸ Render Region: the next drag in the active view draws the
     /// render region (again: no longer).
     DrawRenderRegion,
+    /// The Render Queue: adds the current document as saved (with
+    /// `all_takes`, one job per take, Main first); unsaved: asks to save.
+    QueueCurrentDocument {
+        all_takes: bool,
+    },
+    /// The Render Queue: asks for saved documents and adds a job for each.
+    QueueFiles,
+    /// The Render Queue: adds a job for each of these documents.
+    QueueDocuments(Vec<std::path::PathBuf>),
+    /// Renders the Render Queue's enabled jobs, one after another.
+    StartRenderQueue,
+    /// Stops the Render Queue (the job running keeps its saved frames).
+    StopRenderQueue,
     /// Render ▸ Clear Render Region (one undo step).
     ClearRenderRegion,
     /// Asks where, then saves the picture the Picture Viewer shows as PNG.
@@ -467,6 +480,8 @@ pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mu
     for frame in &finished {
         file::save_rendered_frame(editor, frame);
     }
+    // The Render Queue moves on once its render's frames are saved.
+    changed |= editor.render_queue.update(&mut editor.renders);
     if editor.commands.is_empty() {
         return changed;
     }
@@ -503,6 +518,37 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         }
         EditorCommand::MergeFile(path) => file::merge(&path, doc, editor, viewport),
         EditorCommand::Export => file::export(doc, editor),
+        EditorCommand::RenderToPictureViewer if editor.render_queue.is_running() => {
+            // The queue and Shift+R never render at once.
+            editor.file.alert = Some(file::Alert {
+                title: key("The Render Queue Is Rendering"),
+                message: tr("Stop the Render Queue first, or wait until it has finished.").to_owned(),
+            });
+        }
+        EditorCommand::QueueCurrentDocument { all_takes } => file::queue_current(doc, editor, all_takes),
+        EditorCommand::QueueFiles => {
+            let directory = editor
+                .file
+                .path()
+                .and_then(std::path::Path::parent)
+                .map(std::path::Path::to_path_buf);
+            let picked = editor.file.dialogs.pick_documents(directory.as_deref());
+            queue_documents(editor, picked);
+        }
+        EditorCommand::QueueDocuments(paths) => queue_documents(editor, paths),
+        EditorCommand::StartRenderQueue => {
+            // A Picture Viewer render runs to its end first: the queue waits.
+            if editor.renders.running_number().is_some() {
+                editor.file.alert = Some(file::Alert {
+                    title: key("A Render Is Running"),
+                    message: tr("The Render Queue starts once the Picture Viewer's render has finished or is stopped.")
+                        .to_owned(),
+                });
+            } else {
+                editor.render_queue.start();
+            }
+        }
+        EditorCommand::StopRenderQueue => editor.render_queue.stop(&mut editor.renders),
         EditorCommand::RenderToPictureViewer => {
             // Render Settings ▸ Take: another take renders from a copy
             // switched to it; a take's camera is the one renders look through.
@@ -675,7 +721,7 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             let message = if crate::scripts::valid_name(&editor.scripts.name) {
                 editor.scripts.save().err().map(|err| err.to_string())
             } else {
-                Some(crate::i18n::tr("Type a name for the script first (without \\ / : * ? \" < > |).").to_owned())
+                Some(tr("Type a name for the script first (without \\ / : * ? \" < > |).").to_owned())
             };
             if let Some(message) = message {
                 editor.file.alert = Some(file::Alert {
@@ -1604,7 +1650,7 @@ fn texture_command(command: EditorCommand, doc: &mut Document, editor: &mut Edit
             if found.is_empty() {
                 editor.file.alert = Some(file::Alert {
                     title: "Relink Folder",
-                    message: crate::i18n::trf("None of the missing pictures is in {0}.", &[&dir.display().to_string()]),
+                    message: trf("None of the missing pictures is in {0}.", &[&dir.display().to_string()]),
                 });
                 return;
             }
@@ -2359,7 +2405,7 @@ fn run_plugin(doc: &mut Document, editor: &mut EditorState, type_id: &str, optio
         Err(message) => {
             editor.file.alert = Some(file::Alert {
                 title: plugin.name(),
-                message: crate::i18n::tr(&message).to_owned(),
+                message: tr(&message).to_owned(),
             });
         }
     }
@@ -2833,6 +2879,34 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Disc
         | ObjectKindTag::Capsule
         | ObjectKindTag::Polygon => palette().icon_primitive,
+    }
+}
+
+/// Adds a Render Queue job for each saved document in `paths` (others are
+/// left out, and said so).
+fn queue_documents(editor: &mut EditorState, paths: Vec<std::path::PathBuf>) {
+    let (documents, others): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| crate::render_queue::is_document(p));
+    for path in documents {
+        editor.render_queue.jobs.push(crate::render_queue::QueueJob::new(
+            path,
+            crate::render_queue::JobTake::RenderTake,
+        ));
+    }
+    editor.show_render_queue = true;
+    if !others.is_empty() {
+        editor.file.alert = Some(file::Alert {
+            title: key("Not Added to the Render Queue"),
+            message: trf(
+                "Only saved Grid4D documents (.g4d) can be rendered from the queue:
+{0}",
+                &[
+                    &others.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(
+                        "
+",
+                    ),
+                ],
+            ),
+        });
     }
 }
 

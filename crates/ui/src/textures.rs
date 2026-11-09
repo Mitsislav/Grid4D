@@ -404,6 +404,32 @@ fn surround_ambient(image: &TextureImage, color_space: ColorSpace) -> Option<Amb
     }))
 }
 
+/// Every picture of `textures` read and decoded now, for a render away from
+/// the editor (the Render Queue): the path tracer's pictures, and the names
+/// of those that could not be read (they render as their channels' values).
+#[must_use]
+pub fn decode_all(textures: &Textures) -> (Pictures, Vec<String>) {
+    let mut pictures = Pictures::new();
+    let mut missing = Vec::new();
+    for (id, texture) in textures.iter() {
+        let bytes = match Input::of(&texture.source) {
+            Input::Bytes(bytes) => Ok(bytes),
+            Input::File(path) => grid4d_io::read_file(&path).map(Arc::<[u8]>::from),
+        };
+        let picture = bytes
+            .ok()
+            .and_then(|bytes| grid4d_io::decode_texture(&bytes, texture.color_space).ok())
+            .and_then(|image| render_picture(image.levels.first()?, texture.color_space));
+        match picture {
+            Some(picture) => {
+                pictures.insert(id, picture);
+            }
+            None => missing.push(texture.source.file_name()),
+        }
+    }
+    (pictures, missing)
+}
+
 /// A level of a decoded picture as the path tracer reads it, sharing its
 /// pixels.
 fn render_picture(level: &grid4d_io::Level, color_space: ColorSpace) -> Option<Arc<Picture>> {

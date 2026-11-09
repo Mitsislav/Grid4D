@@ -110,6 +110,7 @@ impl Shell {
 
         self.render_settings.show(&ctx, &mut self.doc, &mut self.editor);
         self.picture_viewer.show(&ctx, &mut self.editor);
+        crate::panels::render_queue::show(&ctx, &self.doc, &mut self.editor);
         about::show(&ctx, &mut self.editor);
         preferences_window::show(&ctx, &mut self.editor);
         recovery::show(&ctx, &mut self.editor);

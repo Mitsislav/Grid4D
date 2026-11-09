@@ -15,7 +15,7 @@ use grid4d_io::{ObjectEntry, Objects};
 
 use grid4d_scene::{Document, ImageFormat, MeshHandle, NodeData, NodeId, ObjectKind, PngPasses, SceneEdit, Tags};
 
-use crate::i18n::{tr, trf};
+use crate::i18n::{key, tr, trf};
 use crate::{
     EditorCommand, EditorState, History, ViewportPanel,
     recent::RecentFiles,
@@ -58,6 +58,10 @@ pub trait FileDialogs: std::fmt::Debug {
     /// A picture to link a texture to (Relink…), or `None` if cancelled.
     fn pick_texture(&mut self, directory: Option<&Path>) -> Option<PathBuf> {
         self.pick_open(directory)
+    }
+    /// Saved documents for the Render Queue (Add Files…); empty if cancelled.
+    fn pick_documents(&mut self, directory: Option<&Path>) -> Vec<PathBuf> {
+        self.pick_open(directory).into_iter().collect()
     }
     /// A folder to look for missing pictures in (Relink Folder…), or `None`
     /// if cancelled.
@@ -122,6 +126,14 @@ impl FileDialogs for NativeDialogs {
             .add_filter(tr("Pictures (PNG, OpenEXR)"), &["png", "exr"])
             .set_file_name(suggested)
             .save_file()
+    }
+
+    fn pick_documents(&mut self, directory: Option<&Path>) -> Vec<PathBuf> {
+        with_directory(rfd::FileDialog::new(), directory)
+            .set_title(tr("Add Documents to the Render Queue"))
+            .add_filter(tr("Grid4D Documents"), &["g4d", "oc4d"])
+            .pick_files()
+            .unwrap_or_default()
     }
 
     fn pick_textures(&mut self, directory: Option<&Path>) -> Vec<PathBuf> {
@@ -230,6 +242,37 @@ pub enum UnsavedChoice {
 pub struct Alert {
     pub title: &'static str,
     pub message: String,
+}
+
+/// Adds the current document to the Render Queue as saved (with
+/// `all_takes`, a job per take, Main first). A document never saved cannot
+/// be: the alert says so; unsaved changes are not rendered, and the job
+/// says so.
+pub fn queue_current(doc: &Document, editor: &mut EditorState, all_takes: bool) {
+    use crate::render_queue::{JobTake, QueueJob};
+    let Some(path) = editor.file.path().map(Path::to_path_buf) else {
+        editor.file.alert = Some(Alert {
+            title: key("Save the Document First"),
+            message: tr("The Render Queue renders saved documents: save this one, then add it.").to_owned(),
+        });
+        return;
+    };
+    let takes: Vec<JobTake> = if all_takes {
+        std::iter::once(JobTake::Main)
+            .chain(doc.takes.iter().map(|(_, take)| JobTake::Named(take.name.clone())))
+            .collect()
+    } else {
+        vec![JobTake::RenderTake]
+    };
+    let unsaved = editor.file.is_dirty(&editor.history);
+    for take in takes {
+        let mut job = QueueJob::new(path.clone(), take);
+        if unsaved {
+            job.message = tr("Unsaved changes are not rendered: the file as saved is").to_owned();
+        }
+        editor.render_queue.jobs.push(job);
+    }
+    editor.show_render_queue = true;
 }
 
 /// Session state of the document's file. Lives in [`EditorState::file`].

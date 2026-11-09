@@ -38,6 +38,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "A Protection tag guards this object's transform",
         "Μια ετικέτα Προστασίας φυλάει τον μετασχηματισμό αυτού του αντικειμένου",
     ),
+    ("A Render Is Running", "Τρέχει ένα render"),
     (
         "A click sets it from where the cursor is on the edge",
         "Ένα κλικ το ορίζει από το σημείο του δείκτη πάνω στην ακμή",
@@ -78,6 +79,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("A toothed wheel", "Ένας οδοντωτός τροχός"),
     ("Absolute", "Απόλυτη"),
     ("Adaptive", "Προσαρμοστική"),
+    ("Add All Takes", "Προσθήκη όλων των takes"),
     ("Add Arc", "Προσθήκη Τόξου"),
     (
         "Add Bend (Shift: under the selected object, fitted to it)",
@@ -99,8 +101,13 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Add Cone", "Προσθήκη Κώνου"),
     ("Add Cube", "Προσθήκη Κύβου"),
+    ("Add Current Document", "Προσθήκη τρέχοντος εγγράφου"),
     ("Add Cylinder", "Προσθήκη Κυλίνδρου"),
     ("Add Disc", "Προσθήκη Δίσκου"),
+    (
+        "Add Documents to the Render Queue",
+        "Προσθήκη εγγράφων στην ουρά render",
+    ),
     ("Add Environment", "Προσθήκη Περιβάλλοντος"),
     (
         "Add Extrude (Alt: around the selected spline)",
@@ -110,6 +117,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Add FFD (Shift: under the selected object, fitted to it)",
         "Προσθήκη FFD (Shift: κάτω από το επιλεγμένο αντικείμενο, προσαρμοσμένο σε αυτό)",
     ),
+    ("Add Files…", "Προσθήκη αρχείων…"),
     ("Add Flower", "Προσθήκη Λουλουδιού"),
     ("Add Helix", "Προσθήκη Έλικας"),
     ("Add Key", "Προσθήκη κλειδιού"),
@@ -262,6 +270,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Azimuth", "Αζιμούθιο"),
     ("B-Spline", "B-Spline"),
     ("Back", "Πίσω"),
+    (
+        "Back to Ready: Start renders every frame again",
+        "Πίσω σε Έτοιμο: το Έναρξη ξανακάνει render όλα τα frames",
+    ),
     ("Backface Culling", "Απόρριψη πίσω όψεων"),
     ("Background", "Φόντο"),
     ("Bake Simulation", "Ψήσιμο προσομοίωσης"),
@@ -537,6 +549,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Double-click: look through this camera",
         "Διπλό κλικ: θέαση μέσα από αυτή την κάμερα",
     ),
+    ("Down", "Κάτω"),
     (
         "Drag a line across the object; release cuts, Esc cancels",
         "Σύρετε μια γραμμή κατά μήκος του αντικειμένου· η αφήση κόβει, το Esc ακυρώνει",
@@ -560,6 +573,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Drop to add {0} as textures", "Αφήστε για προσθήκη ως υφές: {0}"),
     ("Drop to merge {0}", "Αφήστε για συγχώνευση: {0}"),
     ("Drop to open {0}", "Αφήστε για άνοιγμα: {0}"),
+    ("Duplicate", "Διπλότυπο"),
     ("Dynamic", "Δυναμικό"),
     ("Edge", "Ακμή"),
     ("Edge Mid Point", "Μέσο ακμής"),
@@ -627,6 +641,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("End Rotation", "Τελική περιστροφή"),
     ("End Scale", "Τελική κλίμακα"),
     ("Environment", "Περιβάλλον"),
+    ("Error", "Σφάλμα"),
     ("Evaluation", "Αξιολόγηση"),
     ("Every", "Κάθε"),
     (
@@ -685,6 +700,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Filter", "Φίλτρο"),
     ("Final Picture", "Τελική εικόνα"),
     ("Final and Render View", "Τελική και Render View"),
+    ("Finished", "Ολοκληρώθηκε"),
     ("Fit", "Προσαρμογή"),
     ("Fit to Object", "Προσαρμογή στο αντικείμενο"),
     ("Fit to Parent", "Προσαρμογή στον γονέα"),
@@ -727,6 +743,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Frames", "Καρέ"),
     ("Friction", "Τριβή"),
     ("From", "Από"),
+    ("From Document", "Από το έγγραφο"),
     ("From Object", "Από το αντικείμενο"),
     (
         "From the centre to the tips of the teeth",
@@ -779,6 +796,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Grid4D Cannot Start", "Το Grid4D δεν μπορεί να ξεκινήσει"),
     ("Grid4D Document", "Έγγραφο Grid4D"),
     ("Grid4D Document or Model", "Έγγραφο Grid4D ή μοντέλο"),
+    ("Grid4D Documents", "Έγγραφα Grid4D"),
     ("Grid4D Stopped Unexpectedly", "Το Grid4D σταμάτησε απροσδόκητα"),
     (
         "Grid4D could not start its graphics:\n\n{0}\n\nGrid4D needs a graphics card with Vulkan, Direct3D 12 or Metal support. Updating the graphics driver often helps.",
@@ -1116,6 +1134,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Εργαλείο Μετακίνησης / Κλιμάκωσης / Περιστροφής",
     ),
     ("Move Camera", "Μετακίνηση κάμερας"),
+    ("Move Down", "Μετακίνηση κάτω"),
     ("Move Edges", "Μετακίνηση ακμών"),
     ("Move Handle", "Μετακίνηση λαβής"),
     ("Move Keys", "Μετακίνηση κλειδιών"),
@@ -1123,6 +1142,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Move Polygons", "Μετακίνηση πολυγώνων"),
     ("Move Tangent", "Μετακίνηση εφαπτομένης"),
     ("Move UVs", "Μετακίνηση UV"),
+    ("Move Up", "Μετακίνηση πάνω"),
     ("Move to Top Level", "Μετακίνηση στο ανώτερο επίπεδο"),
     (
         "Move: drag an axis handle to move along it · Alt+drag to navigate",
@@ -1160,6 +1180,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "No file: renders are not saved.",
         "Χωρίς αρχείο: οι αποδόσεις δεν αποθηκεύονται.",
+    ),
+    (
+        "No jobs. Save the document and add it, or add saved documents with Add Files…",
+        "Καμία εργασία. Αποθηκεύστε το έγγραφο και προσθέστε το, ή προσθέστε αποθηκευμένα έγγραφα με το Προσθήκη αρχείων…",
     ),
     ("No key selected", "Κανένα επιλεγμένο κλειδί"),
     (
@@ -1200,6 +1224,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Normal Strength", "Ισχύς καθέτων"),
     ("Normal Texture", "Υφή καθέτων (normal map)"),
     ("Normal and Bump", "Κάθετα και ανάγλυφο"),
+    ("Not Added to the Render Queue", "Δεν προστέθηκαν στην ουρά render"),
     (
         "Not saved: Save is off in the Render Settings.",
         "Δεν αποθηκεύτηκε: η Αποθήκευση είναι ανενεργή στις Ρυθμίσεις απόδοσης.",
@@ -1241,6 +1266,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("One File per Pass", "Ένα αρχείο ανά πέρασμα"),
     (
+        "One job per take of the current document, Main first",
+        "Μία εργασία για κάθε take του τρέχοντος εγγράφου, πρώτο το Main",
+    ),
+    (
         "Only Grid4D documents (.g4d), models (.gltf, .glb, .obj) and pictures can be dropped",
         "Μπορούν να αφεθούν μόνο έγγραφα Grid4D (.g4d), μοντέλα (.gltf, .glb, .obj) και εικόνες",
     ),
@@ -1252,6 +1281,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Only points inside the box move",
         "Κινούνται μόνο τα σημεία μέσα στο κουτί",
+    ),
+    (
+        "Only saved Grid4D documents (.g4d) can be rendered from the queue:\n{0}",
+        "Από την ουρά γίνεται render μόνο σε αποθηκευμένα έγγραφα Grid4D (.g4d):\n{0}",
     ),
     ("Opacity", "Αδιαφάνεια"),
     ("Opacity Texture", "Υφή αδιαφάνειας"),
@@ -1282,6 +1315,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Outer Radius", "Εξωτερική ακτίνα"),
     ("Output", "Έξοδος"),
     ("Overrides", "Παρακάμψεις"),
+    ("Own File", "Δικό του αρχείο"),
     ("PNG (8 bit)", "PNG (8 bit)"),
     ("PNG Passes", "Περάσματα σε PNG"),
     ("Pack Islands", "Τακτοποίηση νησιών"),
@@ -1426,6 +1460,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Read only: make the object editable (C) to change its UVs",
         "Μόνο για ανάγνωση: κάντε το αντικείμενο επεξεργάσιμο (C) για να αλλάξετε τα UV του",
     ),
+    ("Reading the document…", "Διάβασμα του εγγράφου…"),
+    ("Ready", "Έτοιμο"),
     ("Record", "Καταγραφή"),
     ("Record Active Objects", "Καταγραφή ενεργών αντικειμένων"),
     (
@@ -1474,6 +1510,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Relink Texture", "Επανασύνδεση υφής"),
     ("Relink Textures", "Επανασύνδεση υφών"),
     ("Relink…", "Επανασύνδεση…"),
+    ("Remove", "Αφαίρεση"),
     ("Remove Selected Objects", "Αφαίρεση επιλεγμένων αντικειμένων"),
     ("Remove Unused", "Αφαίρεση αχρησιμοποίητων"),
     ("Remove Unused Textures", "Αφαίρεση αχρησιμοποίητων υφών"),
@@ -1502,6 +1539,9 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Rename Take", "Μετονομασία λήψης"),
     ("Rename Texture", "Μετονομασία υφής"),
     ("Render", "Απόδοση"),
+    ("Render Queue", "Ουρά render"),
+    ("Render Queue · {0} of {1} frames", "Ουρά render · {0} από {1} frames"),
+    ("Render Queue…", "Ουρά render…"),
     ("Render Region", "Περιοχή render"),
     ("Render Settings", "Ρυθμίσεις απόδοσης"),
     ("Render Take", "Λήψη απόδοσης"),
@@ -1519,6 +1559,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Render the active view (Shift+R)",
         "Απόδοση της ενεργής προβολής (Shift+R)",
+    ),
+    (
+        "Render the enabled jobs from the top, one after another",
+        "Render των ενεργών εργασιών από την κορυφή, τη μία μετά την άλλη",
     ),
     ("Render to Picture Viewer", "Απόδοση στην Προβολή Εικόνων"),
     (
@@ -1546,13 +1590,19 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Απόδοση › Απόδοση στην Προβολή Εικόνων (Shift+R)",
     ),
     ("Render: shown in renders", "Απόδοση: εμφανίζεται στις αποδόσεις"),
+    ("Rendering", "Σε render"),
     ("Rendering · {0}", "Απόδοση · {0}"),
+    (
+        "Rendering · {0} of {1} frames saved",
+        "Σε render · αποθηκεύτηκαν {0} από {1} frames",
+    ),
     ("Renders are not saved.", "Οι αποδόσεις δεν αποθηκεύονται."),
     (
         "Renders over the camera's shutter: moving things smear (the camera's Shutter sets how long)",
         "Απόδοση σε όλη τη διάρκεια του κλείστρου της κάμερας: ό,τι κινείται θολώνει (το Κλείστρο της κάμερας ορίζει πόσο)",
     ),
     ("Reparent", "Αλλαγή γονέα"),
+    ("Reset", "Επαναφορά"),
     ("Reset Coordinates", "Επαναφορά συντεταγμένων"),
     ("Reset Lattice", "Επαναφορά πλέγματος"),
     ("Reset Layout", "Επαναφορά διάταξης"),
@@ -1642,9 +1692,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Save Render As", "Αποθήκευση απόδοσης ως"),
     ("Save Selection as Object…", "Αποθήκευση επιλογής ως αντικείμενο…"),
     ("Save changes to “{0}”?", "Αποθήκευση αλλαγών στο «{0}»;"),
+    ("Save the Document First", "Αποθηκεύστε πρώτα το έγγραφο"),
     (
         "Save the shown picture as PNG",
         "Αποθήκευση της εικόνας που φαίνεται ως PNG",
+    ),
+    (
+        "Save to another file than the document's Render Settings say",
+        "Αποθήκευση σε άλλο αρχείο από αυτό των Render Settings του εγγράφου",
     ),
     ("Saved to {0}", "Αποθηκεύτηκε στο {0}"),
     (
@@ -1768,12 +1823,17 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Shifts the wave along; key it to make the wave travel",
         "Μετατοπίζει το κύμα· βάλτε της κλειδιά για να ταξιδεύει",
     ),
+    ("Show", "Εμφάνιση"),
     ("Show Report", "Εμφάνιση αναφοράς"),
     ("Show Stretch", "Εμφάνιση παραμόρφωσης"),
     ("Show Texture", "Εμφάνιση υφής"),
     (
         "Show the picture's file in the file browser",
         "Εμφανίζει το αρχείο της εικόνας στην εξερεύνηση αρχείων",
+    ),
+    (
+        "Show the render in the Picture Viewer",
+        "Εμφάνιση του render στο Picture Viewer",
     ),
     (
         "Show the view under the pointer alone / back among the others",
@@ -1856,6 +1916,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Square 1080 × 1080", "Τετράγωνο 1080 × 1080"),
     ("Standard", "Τυπική"),
     ("Star", "Αστέρι"),
+    ("Start", "Έναρξη"),
     ("Start Angle", "Αρχική γωνία"),
     ("Start Cap", "Αρχικό καπάκι"),
     ("Start Growth", "Αρχική ανάπτυξη"),
@@ -1866,9 +1927,18 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Steps per Frame", "Βήματα ανά καρέ"),
     ("Stop", "Διακοπή"),
     ("Stop (F7)", "Διακοπή (F7)"),
+    (
+        "Stop after the current pass; Start goes on from the first missing frame",
+        "Διακοπή μετά το τρέχον πέρασμα· το Έναρξη συνεχίζει από το πρώτο frame που λείπει",
+    ),
     ("Stop at Non-Quads", "Στάση σε μη τετράπλευρα"),
     ("Stop at Poles", "Στάση σε πόλους"),
     ("Stop at Selections", "Στάση σε επιλογές"),
+    (
+        "Stop the Render Queue first, or wait until it has finished.",
+        "Σταματήστε πρώτα την ουρά render, ή περιμένετε να τελειώσει.",
+    ),
+    ("Stopped", "Διακόπηκε"),
     ("Stopped: not saved.", "Διακόπηκε: δεν αποθηκεύτηκε."),
     ("Strength", "Ισχύς"),
     ("Subdivide", "Υποδιαίρεση"),
@@ -1913,6 +1983,15 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Texture Size", "Μέγεθος υφής"),
     ("Texture Strength", "Ισχύς υφής"),
     ("Textures", "Υφές"),
+    ("The Render Queue Is Rendering", "Η ουρά render κάνει render"),
+    (
+        "The Render Queue renders saved documents: save this one, then add it.",
+        "Η ουρά render αποδίδει αποθηκευμένα έγγραφα: αποθηκεύστε αυτό και μετά προσθέστε το.",
+    ),
+    (
+        "The Render Queue starts once the Picture Viewer's render has finished or is stopped.",
+        "Η ουρά render ξεκινά όταν το render του Picture Viewer τελειώσει ή σταματήσει.",
+    ),
     ("The Render View is not saved.", "Η Προβολή απόδοσης δεν αποθηκεύεται."),
     (
         "The Sky or Environment seen directly",
@@ -1931,6 +2010,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "The distance from one crest to the next",
         "Η απόσταση από τη μία κορυφή στην επόμενη",
+    ),
+    (
+        "The document as saved: unsaved changes are not rendered",
+        "Το έγγραφο όπως αποθηκεύτηκε: οι μη αποθηκευμένες αλλαγές δεν αποδίδονται",
+    ),
+    (
+        "The document has no take named {0}",
+        "Το έγγραφο δεν έχει take με όνομα {0}",
     ),
     ("The file contains no objects.", "Το αρχείο δεν περιέχει αντικείμενα."),
     (
@@ -1951,6 +2038,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "The light of each light group apart, and of lights in none",
         "Το φως κάθε ομάδας φωτός χωριστά, και των φώτων χωρίς ομάδα",
     ),
+    ("The loader stopped unexpectedly", "Η φόρτωση σταμάτησε απροσδόκητα"),
     (
         "The most a pixel gets: noisy pixels get up to this many",
         "Τα περισσότερα που παίρνει ένα pixel: τα θορυβώδη παίρνουν έως τόσα",
@@ -2112,10 +2200,15 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Uniform Scale", "Ομοιόμορφη κλίμακα"),
     ("Units", "Μονάδες"),
     ("Unlimited", "Απεριόριστο"),
+    (
+        "Unsaved changes are not rendered: the file as saved is",
+        "Οι μη αποθηκευμένες αλλαγές δεν αποδίδονται: αποδίδεται το αρχείο όπως αποθηκεύτηκε",
+    ),
     ("Untitled", "Χωρίς τίτλο"),
     ("Unused Points", "Αχρησιμοποίητα σημεία"),
     ("Unwrap", "Ξεδίπλωμα"),
     ("Unwrap UVs", "Ξεδίπλωμα UV"),
+    ("Up", "Πάνω"),
     ("Up Vector", "Διάνυσμα πάνω"),
     ("Use Camera", "Χρήση κάμερας"),
     ("Use Inner", "Χρήση εσωτερικής"),
@@ -2248,8 +2341,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("glTF Binary (.glb)", "glTF δυαδικό (.glb)"),
     ("less than a minute ago", "πριν από λιγότερο από ένα λεπτό"),
     ("min", "λεπτά"),
+    ("missing pictures: {0}", "λείπουν εικόνες: {0}"),
     ("n-Side", "ν-πλευρο"),
     ("no limit (180°)", "χωρίς όριο (180°)"),
+    ("renders/shot", "renders/shot"),
     ("slowest: {0} {1} ms", "πιο αργό: {0} {1} ms"),
     ("steps", "βήματα"),
     ("to", "έως"),
@@ -2266,6 +2361,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("{0} ms · {1} fps · worst {2} ms", "{0} ms · {1} fps · χειρότερο {2} ms"),
     ("{0} objects · {1} selected", "{0} αντικείμενα · {1} επιλεγμένα"),
     ("{0} of {1}", "{0} του {1}"),
+    ("{0} of {1} frames saved", "αποθηκεύτηκαν {0} από {1} frames"),
     ("{0} overrides", "{0} παρακάμψεις"),
     (
         "{0} · drag onto an object to assign it",

@@ -44,6 +44,7 @@ pub use layers::LayersPanel;
 pub use materials::MaterialsPanel;
 pub use outliner::OutlinerPanel;
 pub use picture_viewer::PictureViewerPanel;
+pub mod render_queue;
 pub use render_settings::RenderSettingsPanel;
 pub use takes::TakesPanel;
 pub use texture_manager::TextureManagerPanel;
