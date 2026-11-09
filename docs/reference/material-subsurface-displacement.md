@@ -44,7 +44,7 @@ picture rather than modelling.
 | Mid Level | 0 … 1 | 0.5 | the picture value that stays in place (below it moves inwards) |
 | Subdivision | 0 … 8 | 3 | each level splits every triangle in four before moving (level 3: 64 per triangle) |
 
-Render Settings ▸ Sampling gains **Displacement Budget** (1 … 100 million
+Render Settings ▸ Sampling gains **Triangle Budget** (1 … 100 million
 triangles, default 20 million): an object whose subdivision would exceed its
 share is subdivided less, with a note in the render's information line.
 

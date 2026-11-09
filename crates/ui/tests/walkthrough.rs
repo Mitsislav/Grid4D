@@ -279,7 +279,7 @@ fn pass(dir: &Path, language: Language, theme: ColorTheme) {
     }
 
     // The windows and dialogs.
-    let windows: [(&str, Open); 8] = [
+    let windows: [(&str, Open); 9] = [
         ("about", |e| e.show_about = true),
         ("licences", |e| {
             e.show_about = true;
@@ -290,6 +290,14 @@ fn pass(dir: &Path, language: Language, theme: ColorTheme) {
         ("optimize", |e| e.show_optimize = true),
         ("script-manager", |e| e.scripts.show = true),
         ("picture-viewer", |e| e.renders.viewer_open = true),
+        ("render-queue", |e| {
+            use grid4d_ui::render_queue::{JobStatus, JobTake, QueueJob};
+            let mut done = QueueJob::new(PathBuf::from("bottle.g4d"), JobTake::Named("Wide".to_owned()));
+            (done.status, done.done, done.total) = (JobStatus::Finished, 24, 24);
+            let ready = QueueJob::new(PathBuf::from("bottle.g4d"), JobTake::Main);
+            e.render_queue.jobs = vec![done, ready];
+            e.show_render_queue = true;
+        }),
         ("crash-report", |e| {
             e.crash.new_report = Some(PathBuf::from("crash-2026-11-01T13-41-07-4242.txt"))
         }),
@@ -306,9 +314,29 @@ fn pass(dir: &Path, language: Language, theme: ColorTheme) {
         editor.show_optimize = false;
         editor.scripts.show = false;
         editor.renders.viewer_open = false;
+        editor.show_render_queue = false;
         editor.crash.new_report = None;
         h.run_steps(2);
     }
+
+    // The Render Settings' pages (the Sampling page with Adaptive and the
+    // denoiser on, as new documents have them).
+    h.state_mut().doc.render = grid4d_scene::RenderSettings::for_new_documents();
+    h.state_mut().editor.show_render_settings = true;
+    h.run_steps(3);
+    for (k, page) in ["Sampling", "Passes"].into_iter().enumerate() {
+        let label = grid4d_ui::i18n::tr(page).to_owned();
+        let at = h.get_by_label(&label).rect().center();
+        click(&mut h, at);
+        h.run_steps(3);
+        save(
+            &mut h,
+            dir,
+            &format!("{tag}-07-render-settings-{k}-{}", page.to_lowercase()),
+        );
+    }
+    h.state_mut().editor.show_render_settings = false;
+    h.run_steps(2);
 }
 
 #[test]

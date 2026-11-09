@@ -2217,7 +2217,7 @@ detailed model a low one. Points shared by polygons move together, so the
 surface stays closed; where a picture differs across a UV seam a small crack
 may open there. The viewport keeps showing the picture as bump, and Current
 State to Object does not bake it. Render Settings ▸ Sampling ▸
-**Displacement Budget** (20 million triangles by default) keeps a render
+**Triangle Budget** (20 million triangles by default) keeps a render
 within memory: objects that would make more are split less.
 
 ![A brick pavement displaced by its height picture, lit low from the side: the bricks stand out, cast shadows and break the far edge](images/manual/render-displacement.png)
@@ -2483,6 +2483,21 @@ where the viewport only approximates them. **Render Settings** say how the
 document is rendered; the **Picture Viewer** renders it and shows the result;
 the **Render View** renders the view you work in, in place.
 
+**What goes into a render**, and where it is set:
+
+| To get | Use | See |
+|--------|-----|-----|
+| Soft light from a shape (a softbox, a window, a lamp) | an **Area** light | [§4.1](#41-lights) |
+| Daylight, or light from a panorama picture | the **Sky** or **Environment** object | [§4.2](#42-sky-and-environment) |
+| A light that lights only some objects; light groups | the light's **Linking** and **Light Group** | [§4.1](#41-lights) |
+| A blurred background or foreground; moving things smeared | the camera's **Lens** (depth of field, shutter) and **Motion Blur** | [§3.1](#31-looking-through-a-camera), [§20.1](#201-render-settings) |
+| Wax, skin, marble; real relief from a height picture | the material's **Subsurface**; **Displace in Renders** | [§19](#19-materials-and-textures) |
+| A clean picture sooner | **Adaptive** sampling and the **Denoise**r | [§20.1](#201-render-settings) |
+| Pieces of the picture for compositing | the **Passes** page | [§20.1](#201-render-settings) |
+| A look at part of the picture | the **Render Region** | [§20.4](#204-the-render-region) |
+| The final look while you work | the **Render View** (interactive) | [§20.3](#203-the-render-view) |
+| Several shots or takes rendered unattended | the **Render Queue** | [§20.5](#205-the-render-queue) |
+
 **Materials in renders.** Renders read every channel of a material
 ([§19](#19-materials-and-textures)), through its Material tags and their projections:
 
@@ -2547,6 +2562,8 @@ how many frames and the first file's name.
 ![The Save page set up for an animation: OpenEXR files named shot.0000.exr, shot.0002.exr, … next to the document](images/manual/render-settings-animation.png)
 
 **Sampling**
+
+![The Sampling page as a new document has it: Adaptive from 16 up to 128 samples, the final picture denoised](images/manual/render-settings-sampling.png)
 
 | Setting | Meaning |
 |---------|---------|

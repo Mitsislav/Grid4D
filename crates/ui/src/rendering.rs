@@ -426,6 +426,12 @@ fn drain(
                     materials,
                 } => {
                     picture.frames_done += 1;
+                    // The finished frame as saved (denoised, when it is):
+                    // the passes before it showed it sharpening.
+                    if image.guides.is_some() {
+                        (picture.rgba, picture.rgb) = (image.to_rgba8(), image.to_rgb8());
+                        picture.version += 1;
+                    }
                     // The frame's passes for the viewer (a new texture only
                     // when they show something new), with adaptive sampling
                     // the samples each pixel got.
@@ -1600,6 +1606,8 @@ pub(crate) mod tests {
         // Denoised: the picture before kept as a pass; adaptive: counts per
         // pixel, the empty background stopped at the minimum.
         assert!(image.passes.iter().any(|l| l.name == "Noisy"));
+        // The viewer shows the picture as saved: denoised.
+        assert_eq!(renders.shown_picture().unwrap().rgb, image.to_rgb8());
         assert_eq!(image.sample_counts.iter().min(), Some(&16));
         let picture = renders.shown_picture().unwrap();
         let (average, share) = picture.sampling.unwrap();

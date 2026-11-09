@@ -229,7 +229,7 @@ pub struct Texturing<'a> {
     /// Camera objects, where they are this frame.
     pub cameras: &'a [(NodeId, RenderCamera)],
     /// The most triangles displacement may make (Render Settings'
-    /// Displacement Budget); objects beyond are split less.
+    /// Triangle Budget); objects beyond are split less.
     pub displacement_budget: usize,
 }
 
@@ -534,7 +534,7 @@ impl RenderScene {
     }
 
     /// How many objects displacement split less than their materials ask:
-    /// the Displacement Budget ran out.
+    /// the Triangle Budget ran out.
     #[must_use]
     pub fn split_less(&self) -> usize {
         self.split_less

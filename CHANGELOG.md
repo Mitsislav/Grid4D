@@ -71,7 +71,7 @@ sampling and a denoiser, a render queue).
 - **Displacement** — a material's Bump picture can move the surface in
   renders (Displace in Renders, Mid Level, Subdivision): bricks, rocks and
   carving cast shadows and show in silhouette. Render Settings ▸ Sampling
-  ▸ Displacement Budget keeps renders within memory. OBJ `disp` reads and
+  ▸ Triangle Budget keeps renders within memory. OBJ `disp` reads and
   writes it.
 - **Interactive Render View** — the Render View (Ctrl+R) keeps rendering
   while you work: orbiting re-renders at once from the scene already

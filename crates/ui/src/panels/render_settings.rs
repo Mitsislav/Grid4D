@@ -499,7 +499,7 @@ fn sampling_page(ui: &mut Ui, s: &mut RenderSettings) {
                     .accesskit_node_builder(field.id, |node| node.set_label(tr("Denoise Strength")));
                 ui.end_row();
             }
-            attr_label(ui, "Displacement Budget", LABEL_WIDTH);
+            attr_label(ui, "Triangle Budget", LABEL_WIDTH);
             let field = ui
                 .add_sized(
                     [FIELD_WIDTH, 19.0],
@@ -511,7 +511,7 @@ fn sampling_page(ui: &mut Ui, s: &mut RenderSettings) {
                     "The most triangles displacement may make, in millions: objects beyond are split less",
                 ));
             ui.ctx()
-                .accesskit_node_builder(field.id, |node| node.set_label(tr("Displacement Budget")));
+                .accesskit_node_builder(field.id, |node| node.set_label(tr("Triangle Budget")));
             ui.end_row();
             attr_label(ui, "Bounces", LABEL_WIDTH);
             ui.add_sized(

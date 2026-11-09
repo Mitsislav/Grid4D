@@ -233,6 +233,25 @@ give 1.12 in 55 % of the time 256 take for 1.08 (not quite: the step's
 acceptance is met on three scenes of four). Gathering the guides and
 denoising cost about 25 ms at 320 × 180.
 
+### Release 1.2 (16.11): the budget against 1.1
+
+Measured on 2026-11-09, same machine (a little slower that hour: the
+256-sample renders took 5 – 20 % longer than at 16.7b). The errors are
+exactly 16.7b's: steps 16.8 – 16.10 changed no picture that does not use
+them.
+
+| Scene | 1.1 (16.1): 256 samples | 1.2: 256 samples | 1.2: the quickest setting at or below 1.1's error |
+|-------|-------------------------|------------------|---------------------------------------------------|
+| demo | 0.23 s / 0.54 | 0.21 s / 0.53 | Adaptive 0.01: 0.14 s / 0.42 |
+| studio | 3.2 s / 7.16 | 3.4 s / 3.32 | 16 + denoiser: 0.27 s / 4.32 |
+| interior | 7.4 s / 4.86 | 4.4 s / 4.86 | 16 + denoiser: 0.34 s / 3.96 |
+| dense | 2.2 s / 1.08 | 2.1 s / 1.08 | 128 + denoiser: 1.2 s / 1.12 (just above) |
+
+1.1's 256-sample cleanliness now takes 60 % of 1.1's time on demo, a
+twelfth on studio and a twentieth on interior; studio's error at the same 256 samples halved
+(light from glowing surfaces is sampled directly since 16.2). Dense comes
+within 4 % of 1.1's error in about half its time.
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds
