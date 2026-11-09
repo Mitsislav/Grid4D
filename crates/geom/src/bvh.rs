@@ -15,8 +15,27 @@ pub struct RayHit {
 
 /// Triangles per leaf, at most.
 const LEAF_SIZE: usize = 4;
-/// Median splits halve every node, so a `u32`-indexed mesh never gets deeper than 33.
-const MAX_DEPTH: usize = 64;
+/// Room on the traversal stack: a path visits at most its depth + 1 nodes
+/// at once (the nearer child first, the other waiting).
+const MAX_DEPTH: usize = 96;
+/// Past this depth the surface-area build splits at the median, which
+/// halves every node: never deeper than this + 33 for a `u32`-indexed mesh.
+const SAH_DEPTH: usize = 56;
+/// Candidate split planes per axis of the surface-area build, + 1.
+const BINS: usize = 16;
+
+/// How [`Bvh::build_with`] splits each node.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BvhSplit {
+    /// At the median of the triangles along the longest axis: the fastest
+    /// to build (picking builds on first use).
+    #[default]
+    Median,
+    /// Where the surface-area heuristic says rays will visit the fewest
+    /// boxes (binned, 16 planes per axis): slower to build, faster rays
+    /// (the final renderer).
+    SurfaceArea,
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 struct Node {
@@ -73,6 +92,14 @@ impl Bvh {
     /// moments, finds what it meets ([`raycast_by`](Self::raycast_by)).
     #[must_use]
     pub fn build_swept(mesh: &PolyMesh, moments: &[&[Vec3]]) -> Self {
+        Self::build_with(mesh, moments, BvhSplit::Median)
+    }
+
+    /// [`build_swept`](Self::build_swept), splitting nodes by `split`.
+    /// Rays find the same nearest hit whichever way it was built (ties go to
+    /// the lower polygon index).
+    #[must_use]
+    pub fn build_with(mesh: &PolyMesh, moments: &[&[Vec3]], split: BvhSplit) -> Self {
         let (mut triangles, mut faces) = (Vec::new(), Vec::new());
         Triangulator::new().triangulate_points(mesh, &mut triangles, &mut faces);
         let points = mesh.points();
@@ -102,8 +129,8 @@ impl Bvh {
             nodes.reserve(2 * items.len() / LEAF_SIZE + 1);
             nodes.push(Node::default());
         }
-        let mut pending = vec![(0usize, 0usize, items.len())];
-        while let Some((node, start, end)) = pending.pop() {
+        let mut pending = vec![(0usize, 0usize, items.len(), 0usize)];
+        while let Some((node, start, end, depth)) = pending.pop() {
             if nodes.is_empty() {
                 break;
             }
@@ -133,14 +160,20 @@ impl Bvh {
                 nodes[node].count = u32_index(span.len());
                 continue;
             }
-            let half = span.len() / 2;
-            span.select_nth_unstable_by(half, |a, b| a.centroid()[axis].total_cmp(&b.centroid()[axis]));
+            let sah = (split == BvhSplit::SurfaceArea && depth < SAH_DEPTH)
+                .then(|| surface_area_split(span, cmin, cmax))
+                .flatten();
+            let half = sah.unwrap_or_else(|| {
+                let half = span.len() / 2;
+                span.select_nth_unstable_by(half, |a, b| a.centroid()[axis].total_cmp(&b.centroid()[axis]));
+                half
+            });
             let left = nodes.len();
             nodes.push(Node::default());
             nodes.push(Node::default());
             nodes[node].first = u32_index(left);
-            pending.push((left, start, start + half));
-            pending.push((left + 1, start + half, end));
+            pending.push((left, start, start + half, depth + 1));
+            pending.push((left + 1, start + half, end, depth + 1));
         }
         Self {
             nodes,
@@ -192,15 +225,24 @@ impl Bvh {
         }
         let inv = dir.recip();
         let mut best: Option<RayHit> = None;
-        let mut stack = [0u32; MAX_DEPTH];
-        let mut len = 1; // the root
+        let root = self.nodes[0];
+        let entry = box_entry(root.min, root.max, origin, inv, f32::INFINITY)?;
+        // Nodes waiting, with where the ray enters their box: the nearer
+        // child is visited first, so hits found early cut the rest short.
+        let mut stack = [(0u32, 0.0f32); MAX_DEPTH];
+        stack[0] = (0, entry);
+        let mut len = 1;
         while len > 0 {
             len -= 1;
-            let node = self.nodes[us(stack[len])];
-            let limit = best.map_or(f32::INFINITY, |hit| hit.t);
-            if !hits_box(node.min, node.max, origin, inv, limit) {
+            let (index, entry) = stack[len];
+            // A little past the best hit: where the ray enters a box is
+            // rounded too, and a triangle on the box's face may be nearer
+            // by an ulp.
+            let limit = best.map_or(f32::INFINITY, |hit| hit.t * (1.0 + 1e-5) + 1e-12);
+            if entry > limit {
                 continue;
             }
+            let node = self.nodes[us(index)];
             if node.count > 0 {
                 let range = us(node.first)..us(node.first) + us(node.count);
                 for (triangle, &face) in self.triangles[range.clone()].iter().zip(&self.faces[range]) {
@@ -208,24 +250,125 @@ impl Bvh {
                         continue;
                     }
                     let [a, b, c] = triangle.map(&point);
+                    // Equal distances go to the lower polygon, whatever the
+                    // order the boxes were visited in.
                     if let Some(t) = ray_triangle(origin, dir, a, b, c)
-                        && best.is_none_or(|hit| t < hit.t)
+                        && best.is_none_or(|hit| t < hit.t || (t == hit.t && face < hit.face))
                     {
                         best = Some(RayHit { t, face });
                     }
                 }
             } else if len + 2 <= MAX_DEPTH {
-                stack[len] = node.first;
-                stack[len + 1] = node.first + 1;
-                len += 2;
+                let (a, b) = (node.first, node.first + 1);
+                let (na, nb) = (self.nodes[us(a)], self.nodes[us(b)]);
+                let ea = box_entry(na.min, na.max, origin, inv, limit);
+                let eb = box_entry(nb.min, nb.max, origin, inv, limit);
+                let mut push = |node: u32, entry: f32| {
+                    stack[len] = (node, entry);
+                    len += 1;
+                };
+                match (ea, eb) {
+                    (Some(ea), Some(eb)) if ea <= eb => {
+                        push(b, eb);
+                        push(a, ea);
+                    }
+                    (Some(ea), Some(eb)) => {
+                        push(a, ea);
+                        push(b, eb);
+                    }
+                    (Some(ea), None) => push(a, ea),
+                    (None, Some(eb)) => push(b, eb),
+                    (None, None) => {}
+                }
             }
         }
         best
     }
 }
 
-/// Slab test: does the ray cross the box (boundary included) before `limit`?
-fn hits_box(min: Vec3, max: Vec3, origin: Vec3, inv_dir: Vec3, limit: f32) -> bool {
+/// Where a binned surface-area split divides `span` (whose centroids lie in
+/// `cmin`…`cmax`): sorts it into the two sides and returns the left side's
+/// length, or `None` when no plane separates the triangles.
+fn surface_area_split(span: &mut [Item], cmin: Vec3, cmax: Vec3) -> Option<usize> {
+    #[derive(Clone, Copy)]
+    struct Bin {
+        min: Vec3,
+        max: Vec3,
+        count: u32,
+    }
+    const EMPTY: Bin = Bin {
+        min: Vec3::INFINITY,
+        max: Vec3::NEG_INFINITY,
+        count: 0,
+    };
+    fn area(min: Vec3, max: Vec3) -> f32 {
+        let d = (max - min).max(Vec3::ZERO);
+        d.x * d.y + d.y * d.z + d.z * d.x
+    }
+    let extent = cmax - cmin;
+    let bin_of = |axis: usize, centroid: Vec3| -> usize {
+        let scale = BINS as f32 / extent[axis];
+        // Non-negative (centroids lie in the bounds) and capped.
+        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a bin index")]
+        let bin = ((centroid[axis] - cmin[axis]) * scale) as usize;
+        bin.min(BINS - 1)
+    };
+    // (cost, axis, last bin on the left)
+    let mut best: Option<(f32, usize, usize)> = None;
+    for axis in 0..3 {
+        // Flat (or not a number): no plane along this axis.
+        if extent[axis].is_nan() || extent[axis] <= 0.0 {
+            continue;
+        }
+        let mut bins = [EMPTY; BINS];
+        for item in span.iter() {
+            let bin = &mut bins[bin_of(axis, item.centroid())];
+            bin.min = bin.min.min(item.min);
+            bin.max = bin.max.max(item.max);
+            bin.count += 1;
+        }
+        // Left of plane i: bins 0..=i; right: the rest.
+        let mut right = [(0.0f32, 0u32); BINS];
+        let mut acc = EMPTY;
+        for i in (1..BINS).rev() {
+            acc.min = acc.min.min(bins[i].min);
+            acc.max = acc.max.max(bins[i].max);
+            acc.count += bins[i].count;
+            right[i - 1] = (area(acc.min, acc.max), acc.count);
+        }
+        let mut acc = EMPTY;
+        for (i, bin) in bins.iter().enumerate().take(BINS - 1) {
+            acc.min = acc.min.min(bin.min);
+            acc.max = acc.max.max(bin.max);
+            acc.count += bin.count;
+            let (right_area, right_count) = right[i];
+            if acc.count == 0 || right_count == 0 {
+                continue;
+            }
+            let cost = area(acc.min, acc.max) * f32::from(u16::try_from(acc.count).unwrap_or(u16::MAX))
+                + right_area * f32::from(u16::try_from(right_count).unwrap_or(u16::MAX));
+            if best.is_none_or(|(c, _, _)| cost < c) {
+                best = Some((cost, axis, i));
+            }
+        }
+    }
+    let (_, axis, plane) = best?;
+    // Partition: bins up to `plane` to the front.
+    let (mut i, mut j) = (0, span.len());
+    while i < j {
+        if bin_of(axis, span[i].centroid()) <= plane {
+            i += 1;
+        } else {
+            j -= 1;
+            span.swap(i, j);
+        }
+    }
+    (i > 0 && i < span.len()).then_some(i)
+}
+
+/// Slab test: where the ray enters the box (boundary included; 0 from
+/// inside), if it does before `limit`.
+fn box_entry(min: Vec3, max: Vec3, origin: Vec3, inv_dir: Vec3, limit: f32) -> Option<f32> {
     let t0 = (min - origin) * inv_dir;
     let t1 = (max - origin) * inv_dir;
     // NaN (0 · ∞): parallel to that slab and starting on its boundary, i.e. inside it.
@@ -236,7 +379,9 @@ fn hits_box(min: Vec3, max: Vec3, origin: Vec3, inv_dir: Vec3, limit: f32) -> bo
     let far = Vec3::select(on_face, Vec3::INFINITY, t0.max(t1))
         .min_element()
         .min(limit);
-    near <= far
+    // A ray through a corner or along a face of the box may find its near
+    // and far ends an ulp apart the wrong way round: still a hit.
+    (near <= far + far.abs() * 1e-5 + 1e-12).then_some(near)
 }
 
 /// How far outside a triangle (in barycentric units) still counts as inside, so a
@@ -328,6 +473,75 @@ mod tests {
                 "{name}: only {hits} of 500 rays hit — test rays miss the mesh"
             );
         }
+    }
+
+    #[test]
+    fn both_builds_find_the_same_hits() {
+        let meshes = [
+            ("sphere", primitives::sphere(1.0, 48)),
+            ("torus", shapes::torus(24, 12)),
+            ("cylinder", shapes::cylinder(9)),
+            ("star", shapes::star()),
+            ("l", shapes::l_shape()),
+        ];
+        let mut rng = Lcg(11);
+        for (name, mesh) in meshes {
+            let median = Bvh::build(&mesh);
+            let sah = Bvh::build_with(&mesh, &[], BvhSplit::SurfaceArea);
+            assert_eq!(sah.triangle_count(), median.triangle_count());
+            for _ in 0..500 {
+                let origin = rng.vec3() * 4.0;
+                let dir = rng.vec3() * 0.8 - origin;
+                let expected = median.raycast(mesh.points(), origin, dir);
+                assert_eq!(sah.raycast(mesh.points(), origin, dir), expected, "{name}");
+                assert_eq!(expected.map(|h| h.t), brute_force(&mesh, origin, dir), "{name}");
+            }
+            // Rays through the shared corners and edges of the polygons:
+            // ties go to the lower polygon in both.
+            for p in mesh.points() {
+                let origin = *p * 3.0 + Vec3::new(0.01, 0.02, 0.03);
+                let dir = *p - origin;
+                assert_eq!(
+                    sah.raycast(mesh.points(), origin, dir),
+                    median.raycast(mesh.points(), origin, dir),
+                    "{name}: through {p}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_surface_area_build_holds_every_triangle_once() {
+        // Uneven sizes: a large plane under many small spheres' worth.
+        let mut mesh = primitives::plane(500.0, 500.0, 1, 1);
+        let sphere = primitives::sphere(1.0, 64);
+        let offset = u32_index(mesh.point_count());
+        for &p in sphere.points() {
+            mesh.add_point(p + Vec3::new(30.0, 2.0, -40.0)).unwrap();
+        }
+        for face in sphere.faces() {
+            let corners: Vec<u32> = face.iter().map(|&c| c + offset).collect();
+            mesh.add_face(&corners).unwrap();
+        }
+        let bvh = Bvh::build_with(&mesh, &[], BvhSplit::SurfaceArea);
+        let expected: usize = mesh.faces().map(|f| f.len() - 2).sum();
+        assert_eq!(bvh.triangle_count(), expected);
+        let mut seen = vec![0u32; expected];
+        let mut stack = vec![(0usize, 1usize)];
+        while let Some((node, depth)) = stack.pop() {
+            assert!(depth < MAX_DEPTH);
+            let n = bvh.nodes[node];
+            if n.count > 0 {
+                assert!(us(n.count) <= LEAF_SIZE);
+                for count in &mut seen[us(n.first)..us(n.first + n.count)] {
+                    *count += 1;
+                }
+            } else {
+                stack.push((us(n.first), depth + 1));
+                stack.push((us(n.first) + 1, depth + 1));
+            }
+        }
+        assert!(seen.iter().all(|&count| count == 1));
     }
 
     #[test]

@@ -74,6 +74,17 @@ const ADDED: &[Added] = &[
         place: Place::Render,
         fields: &["passes", "png_passes"],
     },
+    // Step 16.7: adaptive sampling.
+    Added {
+        place: Place::Render,
+        fields: &[
+            "adaptive",
+            "min_samples",
+            "noise_threshold",
+            "denoise",
+            "denoise_strength",
+        ],
+    },
     Added {
         place: Place::Kind("camera"),
         fields: &["lens"],

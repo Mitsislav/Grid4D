@@ -133,6 +133,12 @@ fn full_document() -> (Document, SimulationCache) {
     .into_iter()
     .collect();
     doc.render.png_passes = grid4d_scene::PngPasses::OneFilePerPass;
+    // Step 16.7: adaptive sampling.
+    doc.render.adaptive = true;
+    doc.render.min_samples = 8;
+    doc.render.noise_threshold = grid4d_scene::NoiseThreshold::from_thousandths(25);
+    doc.render.denoise = grid4d_scene::Denoise::Final;
+    doc.render.denoise_strength = 80;
     let sphere = doc.scene.iter().find(|(_, n)| n.data.name == "Sphere").unwrap().0;
     doc.scene.insert(Node::new(
         "Lens Camera",

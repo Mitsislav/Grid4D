@@ -77,6 +77,7 @@ pub fn render_preview(material: &Material, pictures: &Pictures) -> Image {
         auto_light: false,
         clamp_indirect: true,
         emissive_lights: true,
+        adaptive: None,
     };
     let render = |doc: &Document| {
         let mut evaluated = EvaluatedScene::for_render();

@@ -24,12 +24,12 @@ smearing edges or textures, and trace every ray faster.
 
 | Name | Type / range | Default | Effect |
 |------|--------------|---------|--------|
-| Adaptive | on / off | off (new documents: on) | off: every pixel gets Samples, as in 1.1 |
+| Adaptive | on / off | off (new documents: on, with Samples 128) | off: every pixel gets Samples, as in 1.1 |
 | Samples | 1 … 4096 | 16 | without Adaptive: samples per pixel; with it, the **maximum** |
 | Minimum Samples | 1 … 4096 | 16 | with Adaptive: every pixel gets these first (kept ≤ Samples) |
-| Noise Threshold | 0.001 … 0.5 | 0.01 | with Adaptive: a pixel stops once its estimated error, relative to its brightness, is below this; smaller is cleaner and slower |
-| Denoise | Off, Final Picture, Final and Render View | Off (new documents: Final Picture) | runs the denoiser on the finished picture (and on the Render View's passes once each pixel has 4 samples) |
-| Denoise Strength | 0 … 100 % | 100 % | blends the denoised picture with the noisy one |
+| Noise Threshold | 0.001 … 0.5 (kept in thousandths) | 0.01 | with Adaptive: a pixel stops once its estimated error, relative to the square root of its brightness, is below this; smaller is cleaner and slower |
+| Denoise | Off, Final Picture, Final and Render View | Off (new documents: Final Picture) | runs the denoiser on the finished picture (and on the Render View's pictures once each pixel has 4 samples) |
+| Denoise Strength | 0 … 100 % (whole percent) | 100 % | blends the denoised picture with the noisy one |
 
 Old documents keep Adaptive and Denoise off, so they render as before; new
 documents start with both on (our choice; the template's settings).
@@ -39,35 +39,57 @@ documents start with both on (our choice; the template's settings).
 ### Adaptive sampling
 
 - Samples are added in passes (as today's progressive render). Each pixel
-  keeps two sums of alternate samples; their difference, scaled by the
-  pixel's brightness (with a floor for dark pixels, and spread over a 3 × 3
-  neighbourhood so isolated pixels are not stopped by luck), is its error
-  estimate.
-- After Minimum Samples, a pass adds samples only to pixels whose error is
-  above the threshold; the render ends when none is, or at Samples.
+  keeps, beside the sum of all its samples, the sum of its odd-numbered
+  ones. Its error estimate is the difference between the two averages
+  (colour channels added up) divided by 0.0001 + the square root of its
+  brightness (R + G + B) — roughly how visible noise is — or the difference
+  in coverage, whichever is larger.
+- Decisions are taken at Minimum Samples (rounded up to even), then each
+  time half as many again have been added (at least 4; always even, so the
+  halves are equal). The estimate is itself noisy, so it is averaged over
+  the pixel's 3 × 3 neighbourhood (a stopped pixel keeps its last one), and
+  a pixel stops when that average is below the threshold for it and its
+  eight neighbours (so pixels are not stopped by luck). A stopped pixel is
+  never sampled again; the render ends when every pixel stopped, or at
+  Samples.
 - Deterministic: the passes and which pixels continue depend only on the
   scene, the settings and the seed, never on threads (rows still run in
   parallel; decisions are taken between passes).
 - The Picture Viewer's information line shows the average samples per pixel
-  and how many pixels reached the maximum; a **Samples** pass (a heat map of
-  samples per pixel) can be shown there.
-- Progress: the bar estimates from the pixels still active.
+  and how many pixels reached the maximum; a **Samples per Pixel** entry
+  (a heat map, dark blue to yellow) can be shown in its Pass menu; it is
+  never saved.
+- Progress counts pixel samples; a pixel that stops counts its remaining
+  samples as done, so the bar jumps ahead as areas come clean.
 
 ### The denoiser
 
 - Runs after the last pass (and per frame of an animation, before saving):
   five rounds of an **à-trous** filter (a 5 × 5 B3-spline kernel with holes
-  doubling each round) on the lighting, each neighbour weighted by how alike
-  it is in albedo, normal and depth and by the pixel's variance (noisy
-  pixels lean on their neighbours more). Lighting is filtered **divided by
-  albedo** and multiplied back, so textures stay sharp.
+  doubling each round: 1, 2, 4, 8, 16 pixels) on the lighting, each
+  neighbour weighted by how alike it is in normal (cosine to the power 64),
+  depth (relative to how fast the depth changes across the pixel), albedo
+  and brightness (within 4 standard deviations of the pixel's remaining
+  noise; the noise is filtered along, so later rounds trust cleaner
+  values). Lighting is filtered **divided by albedo** (colours below 0.02
+  are not divided) and multiplied back, so textures stay sharp; the noise
+  is measured in the same units.
+- The guides — albedo, normal and depth averaged over the samples that met
+  a surface — are gathered during the render beside the picture (not
+  returned as passes unless asked for), and each pixel's noise comes from
+  the two halves of its samples, as for adaptive sampling.
+- Pixels that met nothing (the background, a Sky or Environment seen
+  directly) are left as they are and never mixed with surfaces.
 - Alpha is not filtered; data passes (depth, normal, IDs) are never
-  denoised; light-group and lighting passes are denoised each the same way
-  when Denoise is on, so they still add up (to within the filter's
-  rounding).
-- The beauty without denoising can still be saved: the EXR gets a
-  `Noisy.R G B` layer when Denoise is on (our choice, for compositors who
+  denoised; light-group and lighting passes are filtered with the
+  picture's own weights, so they still add up (to within rounding).
+- The picture before denoising is kept as a pass named **Noisy**: in the
+  EXR as `Noisy.R G B`, with PNG passes as `<name>_Noisy.png`, in the
+  Picture Viewer as *Before Denoising* (our choice, for compositors who
   prefer their own).
+- Glossy reflections and what is seen through glass are guided by the
+  mirror's or glass's own surface, so detail in them is softened (a known
+  limit of first-hit guides).
 - Pure Rust, in `grid4d-raytrace`, no new dependency; parallel by rows.
 - Open Image Denoise remains an optional later build (D27).
 
@@ -76,8 +98,10 @@ documents start with both on (our choice; the template's settings).
 - `grid4d_geom::Bvh` gains a **binned SAH** builder (16 bins per axis,
   leaves of up to 4 triangles); the path tracer uses it, the viewport's
   picking keeps the current median build unless the SAH build is not
-  slower to build for it (measured, 16.7). Ray results are identical in
-  what they hit (same nearest hit; ties broken the same way).
+  slower to build for it (measured, 16.7: about twice as slow for a million
+  triangles, so picking keeps the median build). Ray results are identical
+  in what they hit (same nearest hit; ties go to the lower polygon index).
+  Traversal visits the nearer child box first.
 
 ## Grid4D mapping
 
@@ -85,8 +109,8 @@ documents start with both on (our choice; the template's settings).
 |-------|-------|
 | `RenderSettings::{adaptive, min_samples, threshold, denoise, denoise_strength}` | `grid4d-scene` (`render.rs`) |
 | Two half sums per pixel, active pixel list, passes | `grid4d-raytrace` (`trace.rs`: `Progressive`) |
-| The à-trous filter guided by albedo / normal / depth / variance | `grid4d-raytrace` (a new `denoise.rs`) |
-| Binned SAH build | `grid4d-geom` (`bvh.rs`) |
+| The à-trous filter guided by albedo / normal / depth / variance | `grid4d-raytrace` (`denoise.rs`: `denoise(&mut Image, strength)`, `Guides`; `Progressive::with_denoising` gathers them, `Image::guides`) |
+| Binned SAH build | `grid4d-geom` (`bvh.rs`: `BvhSplit`, `Bvh::build_with`) |
 | The Sampling page; the samples heat map | `grid4d-ui` |
 
 Deliberate differences: no separate anti-aliasing filter settings, no
@@ -103,14 +127,18 @@ faster).
 
 ## Acceptance criteria
 
-- [ ] Adaptive off renders exactly as 1.1; on, a flat-lit plane stops near
-      Minimum Samples while a soft shadow's edge gets more.
-- [ ] Renders with Adaptive are repeatable and identical with 1 thread or
+- [x] Adaptive off renders exactly as 1.1; on, a flat-lit plane stops near
+      Minimum Samples while edges get more.
+- [x] Renders with Adaptive are repeatable and identical with 1 thread or
       many.
 - [ ] On each reference scene, Adaptive + Denoise reaches 1.1's 256-sample
-      error (RMSE against the 4096-sample reference) in less time.
-- [ ] The denoiser keeps a checker texture's edges (albedo guidance) and a
-      cube's edges (normal guidance) within a set error of the reference.
-- [ ] The SAH BVH finds the same nearest hits as the median build on random
+      error (RMSE against the 4096-sample reference) in less time — on
+      three of the four (interior, studio denoised; demo with adaptive
+      sampling); dense comes within 4 % of it in 55 % of the time
+      (`docs/performance.md`).
+- [x] The denoiser keeps a checker texture's edges (albedo guidance) and a
+      cube's edges (normal and depth guidance) within a set error of the
+      reference.
+- [x] The SAH BVH finds the same nearest hits as the median build on random
       rays over the test shapes, and the demo render is faster.
-- [ ] Settings are undoable, saved in v5, stripped from a v4 file.
+- [x] Settings are undoable, saved in v5, stripped from a v4 file.

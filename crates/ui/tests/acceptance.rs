@@ -265,6 +265,7 @@ fn phase_15_from_a_textured_model_to_a_render_and_back() {
         auto_light: true,
         clamp_indirect: true,
         emissive_lights: true,
+        adaptive: None,
     };
     let image = grid4d_raytrace::render(&RenderScene::textured(&evaluated, &texturing), &camera, &options);
     let covered = image.pixels.iter().filter(|p| p[3] > 0.5).count();

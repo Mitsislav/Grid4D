@@ -2515,12 +2515,25 @@ how many frames and the first file's name.
 
 | Setting | Meaning |
 |---------|---------|
-| Samples | samples per pixel (16 by default, up to 4096): more give smoother edges and less noise in soft shadows and reflections, and take longer |
+| Samples | samples per pixel (up to 4096): more give smoother edges and less noise in soft shadows and reflections, and take longer. With **Adaptive** on, the most any pixel gets |
+| Adaptive | on (for new documents): samples go where the picture is still noisy. Every pixel gets Minimum Samples; after that, pixels whose noise is below the Noise Threshold stop, and only the rest get more, up to Samples. Plain walls and the empty background finish early; soft shadows, glossy reflections and edges get the samples. Off: every pixel gets Samples |
+| Minimum Samples | with Adaptive: what every pixel gets before any stops (16 by default) |
+| Noise Threshold | with Adaptive: how much noise a pixel may keep (0.010 by default). Smaller is cleaner and slower; 0.02 – 0.05 for quick previews |
+| Denoise | **Off**; **Final Picture** (for new documents): each finished render (every frame of an animation) is cleaned of the noise that is left, keeping edges, textures and the shapes of shadows; **Final and Render View**: the Render View too, once each pixel has 4 samples. The picture before denoising is kept as a pass, *Before Denoising* in the Picture Viewer's Pass menu, saved with the other passes |
+| Denoise Strength | how much of the cleaned picture is used, 0 – 100 % (100 % by default); lower keeps some of the original grain |
 | Bounces | how often light bounces between surfaces (2 by default; 0: direct light only) |
 | Clamp Indirect | on (the default): light that arrives after a bounce is capped, which keeps bright specks out of the picture at the cost of slightly darker reflections of very bright things; off: exact, but noisier |
 | Emissive Surfaces Light the Scene | on (the default): surfaces whose material has **Emission** light the scene like lights — a glowing panel, a neon tube, a screen; off: they still glow, but light other surfaces only when a bounce happens to meet them, which is much noisier |
 | Motion Blur | off (the default); on: each frame is rendered over the camera's shutter time, so what moves — objects, deforming or simulated surfaces, clones, the camera itself — smears ([§3.1](#31-looking-through-a-camera)) |
 | Segments | with Motion Blur: how many moments of the shutter time are worked out (2 – 8, default 3). Movement between them is straight, so a spinning wheel wants more; each one costs about one more scene preparation, not more samples |
+
+With the denoiser, few samples go a long way: 16 – 64 samples denoised are
+often as clean as hundreds without. It cannot invent detail the samples
+did not find, though: very noisy renders come out smooth but blotchy, and
+reflections in mirrors and what is seen through glass are softened. Raise
+Samples (or lower the Noise Threshold) when that shows.
+
+![The same scene at 64 samples: as rendered (left), denoised (middle) and a 4096-sample reference (right)](images/manual/render-denoise.png)
 
 Glowing surfaces are real light sources in renders: a large panel with
 Emission gives soft light and soft shadows, and the brighter or larger it is,
@@ -2623,6 +2636,13 @@ the frames ("frame 4 (3 of 3 done)") and the files saved.
 with its size, samples and render time. Click one to show it again. The history
 lasts until you close Grid4D; when the pictures take more than 512 MB together,
 the oldest go.
+
+**Adaptive sampling**: the line at the bottom also says how many samples a
+pixel got on average and how many got all of them, and the Pass menu gets
+**Samples per Pixel**, a map of where the samples went: dark blue few,
+red and yellow many.
+
+![A render with Adaptive on (left) and its Samples per Pixel map (right): the sky and the shadows finished at the minimum, the floor lit by the sky and the shiny objects got the most](images/manual/render-adaptive.png)
 
 **Zoom**: **Fit** shows the whole picture (the default), **100 %** one picture
 pixel per screen pixel, **−** and **+** halve and double. The **mouse wheel**

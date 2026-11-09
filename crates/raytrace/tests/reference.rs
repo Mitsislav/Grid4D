@@ -66,6 +66,7 @@ fn demo() -> Image {
         auto_light: true,
         clamp_indirect: true,
         emissive_lights: true,
+        adaptive: None,
     };
     render(&RenderScene::new(&evaluated), &camera, &options)
 }
@@ -228,6 +229,7 @@ fn textured() -> Image {
         auto_light: false,
         clamp_indirect: true,
         emissive_lights: true,
+        adaptive: None,
     };
     let texturing = Texturing {
         materials: doc.scene.materials(),
@@ -243,6 +245,12 @@ fn textured() -> Image {
 /// (a soft rectangle above, a disc from the side, a visible sphere, a
 /// visible tube) and a glowing panel, with light bouncing between them.
 fn areas() -> Image {
+    let (scene, camera, options) = areas_view(96, 54, 32);
+    render(&scene, &camera, &options)
+}
+
+/// The area-light scene, its camera and options at `width` × `height`.
+fn areas_view(width: u32, height: u32, samples: u32) -> (RenderScene, RenderCamera, RenderOptions) {
     let mut doc = Document::new("areas");
     let mut grey = Material::new("Grey");
     (grey.color, grey.roughness) = ([0.6, 0.6, 0.6], 0.7);
@@ -336,24 +344,25 @@ fn areas() -> Image {
     eval.update(&doc.scene);
     let camera = RenderCamera::framing(Vec3::new(-200.0, 0.0, -200.0), Vec3::new(240.0, 120.0, 120.0), 0.75);
     let options = RenderOptions {
-        width: 96,
-        height: 54,
-        samples: 32,
+        width,
+        height,
+        samples,
         bounces: 2,
         seed: 0,
         auto_light: false,
         clamp_indirect: true,
         emissive_lights: true,
+        adaptive: None,
     };
     let pictures = Pictures::new();
     let texturing = Texturing {
         materials: doc.scene.materials(),
         pictures: &pictures,
         camera,
-        aspect: 96.0 / 54.0,
+        aspect: f32::from(u16::try_from(width).unwrap()) / f32::from(u16::try_from(height).unwrap()),
         cameras: &[],
     };
-    render(&RenderScene::textured(&eval, &texturing), &camera, &options)
+    (RenderScene::textured(&eval, &texturing), camera, options)
 }
 
 /// A grey floor and three shapes; `material(name, colour, roughness,
@@ -448,6 +457,7 @@ fn still_life_view(
         auto_light: true,
         clamp_indirect: true,
         emissive_lights: true,
+        adaptive: None,
     };
     let texturing = Texturing {
         materials: doc.scene.materials(),
@@ -630,6 +640,7 @@ fn depth_of_field_at(width: u32, height: u32, samples: u32) -> Image {
         auto_light: true,
         clamp_indirect: true,
         emissive_lights: true,
+        adaptive: None,
     };
     render(&RenderScene::new(&eval), &camera, &options)
 }
@@ -708,6 +719,7 @@ fn spinning_wheel_at(width: u32, height: u32, samples: u32) -> Image {
         auto_light: true,
         clamp_indirect: true,
         emissive_lights: true,
+        adaptive: None,
     };
     render(&scene, &camera, &options)
 }
@@ -851,6 +863,95 @@ fn passes_for_the_manual() {
         u32::try_from(width).unwrap(),
         u32::try_from(height).unwrap(),
     );
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().unwrap().write_image_data(&out).unwrap();
+    println!("{}", path.display());
+}
+
+/// The manual's picture of adaptive sampling (`render-adaptive.png`, before
+/// it is reduced to 256 colours): the daylight still life with adaptive
+/// sampling, and where its samples went.
+///
+/// `GRID4D_MANUAL_PICTURES=<folder> cargo test --release -p grid4d-raytrace --test reference -- --ignored adaptive`
+#[test]
+#[ignore = "renders a picture for the manual"]
+fn adaptive_sampling_for_the_manual() {
+    use grid4d_raytrace::{Adaptive, PassLayer};
+    let dir = std::env::var_os("GRID4D_MANUAL_PICTURES").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let (w, h) = (360u32, 203u32);
+    let (doc, pictures) = daylight_scene();
+    let (scene, camera, options) = still_life_view(&doc, &pictures, w, h, 512);
+    let options = RenderOptions {
+        adaptive: Some(Adaptive {
+            min_samples: 16,
+            threshold: 0.03,
+        }),
+        ..options
+    };
+    let image = render(&scene, &camera, &options);
+    let left = image.to_rgb8();
+    let right = PassLayer::samples(&image.sample_counts).to_rgb8();
+    let row = usize::try_from(w * 3).unwrap();
+    let gap = 4usize;
+    let width = row * 2 + gap * 3;
+    let mut both = Vec::new();
+    for (a, b) in left.chunks(row).zip(right.chunks(row)) {
+        both.extend_from_slice(a);
+        both.extend(std::iter::repeat_n(255u8, gap * 3));
+        both.extend_from_slice(b);
+    }
+    let path = dir.join("render-adaptive.png");
+    let mut encoder = png::Encoder::new(
+        BufWriter::new(File::create(&path).unwrap()),
+        u32::try_from(width / 3).unwrap(),
+        h,
+    );
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().unwrap().write_image_data(&both).unwrap();
+    println!("{}", path.display());
+}
+
+/// The manual's picture of the denoiser (`render-denoise.png`, before it is
+/// reduced to 256 colours): the area-light scene at 64 samples, denoised,
+/// and at 2048.
+///
+/// `GRID4D_MANUAL_PICTURES=<folder> cargo test --release -p grid4d-raytrace --test reference -- --ignored denoiser`
+#[test]
+#[ignore = "renders a picture for the manual"]
+fn denoiser_for_the_manual() {
+    use grid4d_raytrace::{Progressive, RenderControl, denoise};
+    let dir = std::env::var_os("GRID4D_MANUAL_PICTURES").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    let (w, h) = (320u32, 180u32);
+    let (scene, camera, options) = areas_view(w, h, 64);
+    let mut progressive = Progressive::new(&options).with_denoising();
+    progressive.add_samples(&scene, &camera, &options, u32::MAX, &RenderControl::default());
+    let noisy = progressive.image();
+    let mut clean = noisy.clone();
+    assert!(denoise(&mut clean, 1.0));
+    let reference = render(
+        &scene,
+        &camera,
+        &RenderOptions {
+            samples: 2048,
+            ..options
+        },
+    );
+    let tiles = [noisy.to_rgb8(), clean.to_rgb8(), reference.to_rgb8()];
+    let row = usize::try_from(w * 3).unwrap();
+    let gap = [255u8; 12];
+    let mut out = Vec::new();
+    for y in 0..usize::try_from(h).unwrap() {
+        for (i, tile) in tiles.iter().enumerate() {
+            if i > 0 {
+                out.extend_from_slice(&gap);
+            }
+            out.extend_from_slice(&tile[y * row..(y + 1) * row]);
+        }
+    }
+    let path = dir.join("render-denoise.png");
+    let mut encoder = png::Encoder::new(BufWriter::new(File::create(&path).unwrap()), w * 3 + 8, h);
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.write_header().unwrap().write_image_data(&out).unwrap();

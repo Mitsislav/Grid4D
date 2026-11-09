@@ -41,7 +41,7 @@ pub mod uv;
 mod shapes;
 
 pub use bitset::BitSet;
-pub use bvh::{Bvh, RayHit};
+pub use bvh::{Bvh, BvhSplit, RayHit};
 pub use mesh::{MeshError, PolyMesh};
 pub use normals::Smoothing;
 pub use selection::{Component, ComponentSet};

@@ -30,8 +30,20 @@ const MAX_SAMPLES: u32 = 4096;
 /// that take thousands of samples to average out.
 const BOUNCE_CAP: f32 = 2.0;
 
+/// Adaptive sampling: where the picture is clean, pixels stop early.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Adaptive {
+    /// Samples every pixel gets before any stops (at most
+    /// [`RenderOptions::samples`]).
+    pub min_samples: u32,
+    /// A pixel stops once its estimated noise — the difference between the
+    /// average of all its samples and of every other one, relative to the
+    /// square root of its brightness — is below this, around it too.
+    pub threshold: f32,
+}
+
 /// How a picture is rendered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderOptions {
     /// Picture size in pixels (1…16384 each).
     pub width: u32,
@@ -51,6 +63,9 @@ pub struct RenderOptions {
     /// importance sampling); off: they light others only when a bounce
     /// happens to meet them, as in Grid4D 1.1.
     pub emissive_lights: bool,
+    /// Samples where the picture is still noisy only, up to `samples`;
+    /// `None`: every pixel gets `samples`.
+    pub adaptive: Option<Adaptive>,
 }
 
 impl Default for RenderOptions {
@@ -64,6 +79,7 @@ impl Default for RenderOptions {
             auto_light: true,
             clamp_indirect: true,
             emissive_lights: true,
+            adaptive: None,
         }
     }
 }
@@ -80,6 +96,10 @@ impl From<&RenderSettings> for RenderOptions {
             auto_light: settings.auto_light,
             clamp_indirect: settings.clamp_indirect,
             emissive_lights: settings.emissive_lights,
+            adaptive: settings.adaptive.then(|| Adaptive {
+                min_samples: settings.min_samples,
+                threshold: settings.noise_threshold.get(),
+            }),
         }
     }
 }
@@ -111,7 +131,9 @@ impl RenderControl {
         self.cancelled.load(Ordering::Relaxed)
     }
 
-    /// Work done so far, in rows × samples (a whole render: height × samples).
+    /// Work done so far, in pixels × samples (a whole render: width ×
+    /// height × samples; with adaptive sampling a pixel that stops counts
+    /// its remaining samples as done).
     #[must_use]
     pub fn progress(&self) -> u64 {
         self.progress.load(Ordering::Relaxed)
@@ -119,21 +141,64 @@ impl RenderControl {
 }
 
 /// A render built up in passes, for showing it while it sharpens: each pass
-/// adds samples to every pixel. Samples are added in the same order as one
-/// [`render`] adds them, so the finished picture is exactly the same.
+/// adds samples to every pixel (with adaptive sampling, to every pixel still
+/// noisy). Samples are added in the same order as one [`render`] adds them,
+/// and adaptive decisions are taken at fixed sample counts, so the finished
+/// picture is exactly the same however the passes are cut.
 #[derive(Clone, Debug)]
 pub struct Progressive {
     width: u32,
     height: u32,
     /// Per pixel: the sum of its samples' colours, and how many met a surface.
     sums: Vec<[f32; 4]>,
+    /// Samples given to every pixel still sampled.
     samples: u32,
     /// The render passes asked for: where their sums sit in `extra`, a
-    /// pixel's `layout.stride` floats after another; and the light groups'
-    /// names.
+    /// pixel's `layout.stride` floats after another (one float per row
+    /// without passes); and the light groups' names.
     layout: Option<Layout>,
     extra: Vec<f32>,
     groups: Vec<String>,
+    /// Adaptive sampling's state per pixel (one per row without it or the
+    /// denoiser's guides).
+    adaptive: Option<Adaptive>,
+    states: Vec<PixelState>,
+    /// Pixels still sampled.
+    active: usize,
+    /// The passes the caller asked for (the layout may hold the
+    /// denoiser's guides besides).
+    requested: grid4d_scene::Passes,
+    /// The denoiser's guides are gathered.
+    guided: bool,
+}
+
+/// A pixel's adaptive sampling.
+#[derive(Clone, Copy, Debug, Default)]
+struct PixelState {
+    /// The sum of its odd-numbered samples (colour and coverage): half the
+    /// samples, whose average is compared with the whole's.
+    half: [f32; 4],
+    /// Samples it got.
+    count: u32,
+    /// Still sampled.
+    active: bool,
+    /// Its noise when last measured.
+    error: f32,
+}
+
+/// How a pixel stopped: its samples so far, the colour and coverage
+/// averaged over all of them and over the odd-numbered half.
+fn noise(sum: &[f32; 4], state: &PixelState) -> f32 {
+    if state.count < 2 {
+        return f32::INFINITY;
+    }
+    let n = to_f32(state.count);
+    let odd = to_f32(state.count / 2);
+    let all = Vec3::new(sum[0], sum[1], sum[2]) / n;
+    let half = Vec3::new(state.half[0], state.half[1], state.half[2]) / odd;
+    let colour = (all - half).abs().element_sum() / (1e-4 + all.element_sum().max(0.0).sqrt());
+    let coverage = (sum[3] / n - state.half[3] / odd).abs();
+    colour.max(coverage)
 }
 
 impl Progressive {
@@ -143,15 +208,66 @@ impl Progressive {
         let width = options.width.clamp(1, MAX_SIZE);
         let height = options.height.clamp(1, MAX_SIZE);
         let count = usize::try_from(u64::from(width) * u64::from(height)).unwrap_or(0);
+        let rows = usize::try_from(height).unwrap_or(0);
+        let adaptive = options.adaptive;
         Self {
             width,
             height,
             sums: vec![[0.0; 4]; count],
             samples: 0,
             layout: None,
-            extra: Vec::new(),
+            extra: vec![0.0; rows],
             groups: Vec::new(),
+            adaptive,
+            states: if adaptive.is_some() {
+                vec![
+                    PixelState {
+                        active: true,
+                        ..PixelState::default()
+                    };
+                    count
+                ]
+            } else {
+                vec![PixelState::default(); rows]
+            },
+            active: count,
+            requested: grid4d_scene::Passes::NONE,
+            guided: false,
         }
+    }
+
+    /// Whether each pixel keeps its own state (adaptive sampling, or the
+    /// denoiser's estimate of its noise).
+    fn per_pixel(&self) -> bool {
+        self.adaptive.is_some() || self.guided
+    }
+
+    /// Gathers, beside the picture, what [`denoise`](crate::denoise) needs:
+    /// the surface colour, normal and depth (not returned as passes unless
+    /// asked for) and each pixel's noise.
+    #[must_use]
+    pub fn with_denoising(mut self) -> Self {
+        use grid4d_scene::Pass;
+        let mut wanted = self.requested;
+        for pass in [Pass::Albedo, Pass::Normal, Pass::Depth] {
+            wanted.set(pass, true);
+        }
+        self.layout = Layout::new(wanted, self.groups.len());
+        if let Some(layout) = &self.layout {
+            let row = (usize::try_from(self.width).unwrap_or(1) * layout.stride).max(1);
+            self.extra = vec![0.0; row * usize::try_from(self.height).unwrap_or(0)];
+        }
+        if self.adaptive.is_none() {
+            self.states = vec![
+                PixelState {
+                    active: true,
+                    ..PixelState::default()
+                };
+                self.sums.len()
+            ];
+        }
+        self.guided = true;
+        self
     }
 
     /// No samples yet, at the size of `options`, gathering `passes` of
@@ -161,22 +277,44 @@ impl Progressive {
         let mut progressive = Self::new(options);
         progressive.layout = Layout::new(passes, scene.light_groups().len());
         if let Some(layout) = &progressive.layout {
-            progressive.extra = vec![0.0; progressive.sums.len() * layout.stride];
+            let row = (usize::try_from(progressive.width).unwrap_or(1) * layout.stride).max(1);
+            progressive.extra = vec![0.0; row * usize::try_from(progressive.height).unwrap_or(0)];
         }
         progressive.groups = scene.light_groups().to_vec();
+        progressive.requested = passes;
         progressive
     }
 
-    /// Samples per pixel so far.
+    /// Samples per pixel so far (with adaptive sampling: of the pixels
+    /// still sampled).
     #[must_use]
     pub fn samples(&self) -> u32 {
         self.samples
     }
 
-    /// Whether every sample of `options` is in.
+    /// Whether every sample of `options` is in (with adaptive sampling: or
+    /// every pixel stopped).
     #[must_use]
     pub fn is_complete(&self, options: &RenderOptions) -> bool {
-        self.samples >= options.samples.clamp(1, MAX_SAMPLES)
+        self.samples >= options.samples.clamp(1, MAX_SAMPLES) || self.active == 0
+    }
+
+    /// The next sample count at which adaptive sampling decides which
+    /// pixels go on: the minimum, then every half as many again (at least 4
+    /// more); always even, so the two halves compared are equal. Without
+    /// adaptive sampling: `total`.
+    fn next_decision(&self, total: u32) -> u32 {
+        let Some(adaptive) = self.adaptive else {
+            return total;
+        };
+        let even = |n: u32| n.saturating_add(n % 2);
+        let min = even(adaptive.min_samples.clamp(2, MAX_SAMPLES));
+        let next = if self.samples < min {
+            min
+        } else {
+            even(self.samples + (self.samples / 2).max(4))
+        };
+        next.min(total)
     }
 
     /// Adds up to `count` samples per pixel (never more than `options` asks
@@ -191,11 +329,7 @@ impl Progressive {
         control: &RenderControl,
     ) -> bool {
         let total = options.samples.clamp(1, MAX_SAMPLES);
-        let first = self.samples.min(total);
-        let last = first.saturating_add(count).min(total);
-        if first == last {
-            return !control.is_cancelled();
-        }
+        let goal = self.samples.saturating_add(count).min(total);
         let automatic = [automatic_light(camera)];
         // Auto Light only for a scene with no light at all: a Sky or an
         // Environment lights it too.
@@ -204,6 +338,9 @@ impl Progressive {
         } else {
             scene.lights()
         };
+        // The job reads the layout while the sums are written (a few
+        // numbers: cloned once per call).
+        let layout = self.layout.clone();
         let job = Job {
             scene,
             lights,
@@ -215,54 +352,118 @@ impl Progressive {
             clamp: options.clamp_indirect,
             table: scene.light_table(options.emissive_lights),
             moving: scene.is_moving() || camera.end.is_some(),
-            layout: self.layout.as_ref(),
+            layout: layout.as_ref(),
         };
+        while self.samples < goal && self.active > 0 {
+            let decision = self.next_decision(total);
+            let stop = decision.min(goal);
+            if !self.add_range(&job, self.samples..stop, control) {
+                return false;
+            }
+            self.samples = stop;
+            if self.adaptive.is_some() && stop == decision {
+                self.decide(total, control);
+            }
+        }
+        !control.is_cancelled()
+    }
+
+    /// Adds samples `range` to every pixel still sampled.
+    fn add_range(&mut self, job: &Job<'_>, range: std::ops::Range<u32>, control: &RenderControl) -> bool {
         let row_length = usize::try_from(self.width).unwrap_or(1);
-        let pass = u64::from(last - first);
-        match &self.layout {
-            None => {
-                self.sums
-                    .par_chunks_mut(row_length)
-                    .zip(0..self.height)
-                    .for_each(|(row, y)| {
-                        if control.is_cancelled() {
-                            return;
-                        }
-                        for (sum, x) in row.iter_mut().zip(0..self.width) {
-                            job.add_samples(x, y, first..last, sum, &mut []);
-                        }
-                        control.progress.fetch_add(pass, Ordering::Relaxed);
-                    });
-            }
-            Some(layout) => {
-                let stride = layout.stride;
-                // The passes' sums row by row beside the picture's (a
-                // layout of no floats still needs a chunk per row).
-                let extra_row = (row_length * stride).max(1);
-                if self.extra.is_empty() {
-                    self.extra = vec![0.0; extra_row * usize::try_from(self.height).unwrap_or(0)];
+        let stride = self.layout.as_ref().map_or(0, |layout| layout.stride);
+        let extra_row = (row_length * stride).max(1);
+        let adaptive = self.per_pixel();
+        let state_row = if adaptive { row_length } else { 1 };
+        let pass = u64::from(range.end - range.start);
+        self.sums
+            .par_chunks_mut(row_length)
+            .zip(self.extra.par_chunks_mut(extra_row))
+            .zip(self.states.par_chunks_mut(state_row))
+            .zip(0..self.height)
+            .for_each(|(((row, extra), states), y)| {
+                if control.is_cancelled() {
+                    return;
                 }
-                self.sums
-                    .par_chunks_mut(row_length)
-                    .zip(self.extra.par_chunks_mut(extra_row))
-                    .zip(0..self.height)
-                    .for_each(|((row, extra), y)| {
-                        if control.is_cancelled() {
-                            return;
+                let mut sampled = 0u64;
+                for (i, (sum, x)) in row.iter_mut().zip(0..self.width).enumerate() {
+                    let state = if adaptive { states.get_mut(i) } else { None };
+                    if state.as_ref().is_some_and(|s| !s.active) {
+                        continue;
+                    }
+                    let slots = extra.get_mut(i * stride..(i + 1) * stride).unwrap_or(&mut []);
+                    match state {
+                        Some(state) => {
+                            job.add_samples(x, y, range.clone(), sum, slots, Some(&mut state.half));
+                            state.count = range.end;
                         }
-                        for (i, (sum, x)) in row.iter_mut().zip(0..self.width).enumerate() {
-                            let slots = extra.get_mut(i * stride..(i + 1) * stride).unwrap_or(&mut []);
-                            job.add_samples(x, y, first..last, sum, slots);
-                        }
-                        control.progress.fetch_add(pass, Ordering::Relaxed);
-                    });
+                        None => job.add_samples(x, y, range.clone(), sum, slots, None),
+                    }
+                    sampled += 1;
+                }
+                control.progress.fetch_add(sampled * pass, Ordering::Relaxed);
+            });
+        !control.is_cancelled()
+    }
+
+    /// Stops the pixels whose noise, and their neighbours' (3 × 3), is
+    /// below the threshold; counts their remaining samples as done.
+    fn decide(&mut self, total: u32, control: &RenderControl) {
+        let Some(adaptive) = self.adaptive else {
+            return;
+        };
+        let (w, h) = (
+            usize::try_from(self.width).unwrap_or(1),
+            usize::try_from(self.height).unwrap_or(1),
+        );
+        // Each pixel's own estimate is noisy itself: it is averaged over
+        // its 3 × 3 neighbourhood (a stopped pixel keeps its last one), and
+        // a pixel stops only when that average is below the threshold all
+        // around it, so pixels are not stopped by luck.
+        self.states
+            .par_iter_mut()
+            .zip(&self.sums)
+            .filter(|(state, _)| state.active)
+            .for_each(|(state, sum)| state.error = noise(sum, state));
+        let around = |values: &dyn Fn(usize) -> f32, x: usize, y: usize, reduce: fn(f32, f32) -> f32| {
+            let mut out: Option<f32> = None;
+            let mut count = 0.0f32;
+            for ny in y.saturating_sub(1)..(y + 2).min(h) {
+                for nx in x.saturating_sub(1)..(x + 2).min(w) {
+                    let v = values(ny * w + nx);
+                    out = Some(out.map_or(v, |o| reduce(o, v)));
+                    count += 1.0;
+                }
             }
-        }
-        if control.is_cancelled() {
-            return false;
-        }
-        self.samples = last;
-        true
+            (out.unwrap_or(0.0), count)
+        };
+        let states = &self.states;
+        let error = |i: usize| states.get(i).map_or(0.0, |s| s.error);
+        let smoothed: Vec<f32> = (0..w * h)
+            .into_par_iter()
+            .map(|i| {
+                let (sum, count) = around(&error, i % w, i / w, |a, b| a + b);
+                sum / count
+            })
+            .collect();
+        let smooth = |i: usize| smoothed.get(i).copied().unwrap_or(0.0);
+        let stopped = AtomicU64::new(0);
+        let remaining = u64::from(total.saturating_sub(self.samples));
+        self.states.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+            for (x, state) in row.iter_mut().enumerate() {
+                if !state.active {
+                    continue;
+                }
+                let (worst, _) = around(&smooth, x, y, f32::max);
+                if worst < adaptive.threshold {
+                    state.active = false;
+                    stopped.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        });
+        let stopped = stopped.into_inner();
+        control.progress.fetch_add(stopped * remaining, Ordering::Relaxed);
+        self.active -= usize::try_from(stopped).unwrap_or(self.active).min(self.active);
     }
 
     /// The picture so far: each pixel the average of its samples, colour
@@ -273,16 +474,70 @@ impl Progressive {
         if self.samples == 0 {
             return image;
         }
-        let n = to_f32(self.samples);
-        for (pixel, &[r, g, b, covered]) in image.pixels.iter_mut().zip(&self.sums) {
+        let adaptive = self.per_pixel();
+        let count = |i: usize| -> u32 {
+            if adaptive {
+                self.states.get(i).map_or(self.samples, |s| s.count)
+            } else {
+                self.samples
+            }
+        };
+        for (i, (pixel, &[r, g, b, covered])) in image.pixels.iter_mut().zip(&self.sums).enumerate() {
+            let n = to_f32(count(i).max(1));
             let colour = Vec3::new(r, g, b) / n;
             *pixel = [colour.x, colour.y, colour.z, covered / n];
         }
+        if self.adaptive.is_some() {
+            image.sample_counts = self.states.iter().map(|s| s.count).collect();
+        }
         if let Some(layout) = &self.layout {
             let extra: &[f32] = if layout.stride == 0 { &[] } else { &self.extra };
-            image.passes = layout.layers(&self.sums, extra, self.samples, &self.groups);
+            image.passes = layout.layers(&self.sums, extra, &count, &self.groups);
+        }
+        if self.guided {
+            image.guides = Some(self.guides(&mut image.passes));
         }
         image
+    }
+
+    /// The denoiser's guides, taken out of `passes` (or copied, where the
+    /// caller asked for them too), and each pixel's noise.
+    fn guides(&self, passes: &mut Vec<crate::PassLayer>) -> crate::Guides {
+        use grid4d_scene::Pass;
+        let mut take = |pass: Pass| -> Vec<f32> {
+            let Some(index) = passes.iter().position(|l| l.name == pass.name()) else {
+                return Vec::new();
+            };
+            if self.requested.contains(pass) {
+                passes[index].values.clone()
+            } else {
+                passes.remove(index).values
+            }
+        };
+        let (albedo, normal, depth) = (take(Pass::Albedo), take(Pass::Normal), take(Pass::Depth));
+        // The variance of the average's brightness: the squared difference
+        // between the average of all samples and of the odd ones.
+        let weights = Vec3::new(0.2126, 0.7152, 0.0722);
+        let variance = self
+            .sums
+            .iter()
+            .zip(&self.states)
+            .map(|(sum, state)| {
+                if state.count < 2 {
+                    return 0.0;
+                }
+                let all = Vec3::new(sum[0], sum[1], sum[2]) / to_f32(state.count);
+                let odd = Vec3::new(state.half[0], state.half[1], state.half[2]) / to_f32(state.count / 2);
+                let d = (all - odd).dot(weights);
+                d * d
+            })
+            .collect();
+        crate::Guides {
+            albedo,
+            normal,
+            depth,
+            variance,
+        }
     }
 }
 
@@ -359,7 +614,17 @@ const fn sampled_part(lobe: Option<Lobe>) -> Part {
 impl Job<'_> {
     /// Adds samples `samples` of pixel (`x`, `y`) to `sum`: their colours, and
     /// one per sample that met a surface.
-    fn add_samples(&self, x: u32, y: u32, samples: std::ops::Range<u32>, sum: &mut [f32; 4], slots: &mut [f32]) {
+    /// With `half`, the odd-numbered samples are added to it too (adaptive
+    /// sampling's estimate of the noise).
+    fn add_samples(
+        &self,
+        x: u32,
+        y: u32,
+        samples: std::ops::Range<u32>,
+        sum: &mut [f32; 4],
+        slots: &mut [f32],
+        mut half: Option<&mut [f32; 4]>,
+    ) {
         let (w, h) = (to_f32(self.width), to_f32(self.height));
         let aspect = w / h;
         for sample in samples {
@@ -379,6 +644,14 @@ impl Job<'_> {
                 sum[1] += radiance.y;
                 sum[2] += radiance.z;
                 sum[3] += 1.0;
+                if sample % 2 == 1
+                    && let Some(half) = half.as_deref_mut()
+                {
+                    half[0] += radiance.x;
+                    half[1] += radiance.y;
+                    half[2] += radiance.z;
+                    half[3] += 1.0;
+                }
             }
             if let (Some(layout), Some(split)) = (self.layout, split) {
                 layout.add(slots, &split);
@@ -953,6 +1226,7 @@ mod tests {
             auto_light: true,
             clamp_indirect: true,
             emissive_lights: true,
+            adaptive: None,
         }
     }
 
@@ -1400,6 +1674,7 @@ mod tests {
                 auto_light: false,
                 clamp_indirect: false,
                 emissive_lights: false,
+                adaptive: None,
             }
         );
         let defaults = RenderOptions::from(&RenderSettings::default());
@@ -1457,11 +1732,75 @@ mod tests {
         assert!(progressive.is_complete(&options));
         assert_eq!(progressive.samples(), 7, "never more than asked for");
         assert_eq!(progressive.image(), whole, "exactly the same picture");
-        assert_eq!(control.progress(), 20 * 7, "rows × samples");
+        assert_eq!(control.progress(), 20 * 20 * 7, "pixels × samples");
 
         let mut first = Progressive::new(&options);
         first.add_samples(&scene, &camera, &options, 1, &control);
         assert_ne!(first.image(), whole, "one sample is noisier");
+    }
+
+    /// Adaptive sampling from 8 samples, up to 128.
+    fn adaptive(size: u32) -> RenderOptions {
+        RenderOptions {
+            adaptive: Some(Adaptive {
+                min_samples: 8,
+                threshold: 0.01,
+            }),
+            ..options(size, 128, 0)
+        }
+    }
+
+    #[test]
+    fn adaptive_sampling_spends_samples_on_edges_only() {
+        let doc = floor_scene(LightShadow::None);
+        let scene = scene_of(&doc);
+        // 64 pixels over 600 cm: edges run through pixels, not between them.
+        let image = render(&scene, &top_camera(), &adaptive(64));
+        let count = |x: f32, z: f32| {
+            let px = ((x / 300.0 + 1.0) * 32.0).floor() as usize;
+            let py = ((z / 300.0 + 1.0) * 32.0).floor() as usize;
+            image.sample_counts[py * 64 + px]
+        };
+        // The evenly lit floor and the empty background stop at the minimum.
+        assert_eq!(count(150.0, 0.0), 8);
+        assert_eq!(count(290.0, 290.0), 8);
+        // The cube's edge over the floor and the floor's over the background
+        // get more.
+        assert!(count(-50.0, 0.0) > 8, "{}", count(-50.0, 0.0));
+        assert!(count(200.0, 100.0) > 8, "{}", count(200.0, 100.0));
+        let total: u32 = image.sample_counts.iter().sum();
+        assert!(total < 64 * 64 * 48, "far fewer samples than 128 each: {total}");
+        // Without adaptive sampling nothing is counted per pixel.
+        assert!(
+            render(&scene, &top_camera(), &options(8, 4, 0))
+                .sample_counts
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn adaptive_renders_are_the_same_however_they_are_cut_and_shared() {
+        let doc = floor_scene(LightShadow::Raytraced);
+        let scene = scene_of(&doc);
+        let options = RenderOptions {
+            bounces: 1,
+            ..adaptive(24)
+        };
+        let whole = render(&scene, &top_camera(), &options);
+        let control = RenderControl::default();
+        let mut progressive = Progressive::new(&options);
+        for count in [1, 3, 5, 7, 1000] {
+            assert!(progressive.add_samples(&scene, &top_camera(), &options, count, &control));
+        }
+        assert!(progressive.is_complete(&options));
+        assert_eq!(progressive.image(), whole);
+        assert_eq!(control.progress(), 24 * 24 * 128, "stopped pixels count as done");
+        let single = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap()
+            .install(|| render(&scene, &top_camera(), &options));
+        assert_eq!(single, whole, "one thread or many");
     }
 
     #[test]
@@ -2225,6 +2564,180 @@ mod tests {
         // Alpha is the coverage.
         assert_eq!(layer(&image, "Alpha").values[i], 1.0);
         assert_eq!(layer(&image, "Alpha").values[outside], 0.0);
+    }
+
+    /// Root mean square difference of two pictures' 8-bit sRGB values, over
+    /// the pixels `only` keeps.
+    fn rmse(a: &Image, b: &Image, only: impl Fn(usize) -> bool) -> f64 {
+        let (a, b) = (a.to_rgb8(), b.to_rgb8());
+        let (mut sum, mut n) = (0.0, 0.0);
+        for (i, (pa, pb)) in a.chunks(3).zip(b.chunks(3)).enumerate() {
+            if only(i) {
+                for (x, y) in pa.iter().zip(pb) {
+                    let d = f64::from(*x) - f64::from(*y);
+                    sum += d * d;
+                    n += 1.0;
+                }
+            }
+        }
+        (sum / f64::max(n, 1.0)).sqrt()
+    }
+
+    /// `doc` from above at `size` pixels: at 4 samples with the denoiser's
+    /// guides, that picture denoised, and a 256-sample reference.
+    fn denoised(doc: &Document, pictures: &Pictures, size: u32) -> (Image, Image, Image) {
+        let scene = textured_scene(doc, pictures, top_camera(), &[]);
+        let options = options(size, 4, 2);
+        let mut progressive = Progressive::new(&options).with_denoising();
+        progressive.add_samples(&scene, &top_camera(), &options, u32::MAX, &RenderControl::default());
+        let noisy = progressive.image();
+        let mut clean = noisy.clone();
+        assert!(crate::denoise(&mut clean, 1.0));
+        let reference = render(
+            &scene,
+            &top_camera(),
+            &RenderOptions {
+                samples: 256,
+                seed: 1,
+                ..options
+            },
+        );
+        (noisy, clean, reference)
+    }
+
+    /// `doc` without its Sun, under a Sky without one: soft light from
+    /// everywhere, noisy where the cube hides part of it.
+    fn overcast(mut doc: Document) -> Document {
+        let sun = doc.scene.iter().find(|(_, n)| n.data.name == "Sun").unwrap().0;
+        doc.scene.remove(sun);
+        let sky = grid4d_scene::Sky {
+            sun: false,
+            ..grid4d_scene::Sky::default()
+        };
+        doc.scene.insert(Node::new("Sky", ObjectKind::Sky(sky)));
+        doc
+    }
+
+    /// Pixels where the picture changes sharply to the right or below.
+    fn edges(image: &Image) -> impl Fn(usize) -> bool {
+        let bytes = image.to_rgb8();
+        let w = usize::try_from(image.width).unwrap();
+        let luma = |i: usize| {
+            bytes
+                .get(i * 3..i * 3 + 3)
+                .map_or(0, |p| i32::from(p[0]) + i32::from(p[1]) + i32::from(p[2]))
+        };
+        let sharp: Vec<bool> = (0..bytes.len() / 3)
+            .map(|i| (luma(i) - luma(i + 1)).abs() > 60 || (luma(i) - luma(i + w)).abs() > 60)
+            .collect();
+        move |i| sharp.get(i).copied().unwrap_or(false)
+    }
+
+    #[test]
+    fn the_denoiser_cleans_a_checker_and_keeps_its_edges() {
+        // The floor and cube under an overcast sky, a checker of 4 × 4
+        // squares as the floor's colour (8 pixels each).
+        let mut doc = overcast(floor_scene(LightShadow::None));
+        let texture = texture(&mut doc);
+        let material = doc.scene.materials_mut().insert(mapped(Channel::BaseColor, texture));
+        let floor = doc.scene.iter().find(|(_, n)| n.data.name == "Floor").unwrap().0;
+        doc.scene.get_mut(floor).unwrap().data.tags = vec![tag(material)];
+        let texels: Vec<u8> = (0..64 * 64)
+            .flat_map(|i| {
+                let (x, y) = (i % 64 / 16, i / 64 / 16);
+                if (x + y) % 2 == 0 {
+                    [230, 230, 230, 255]
+                } else {
+                    [40, 40, 40, 255]
+                }
+            })
+            .collect();
+        let mut pictures = Pictures::new();
+        pictures.insert(
+            texture,
+            Arc::new(Picture::new(64, 64, Texels::Srgb8(Arc::from(texels))).unwrap()),
+        );
+        let (noisy, clean, reference) = denoised(&doc, &pictures, 48);
+        // Away from the squares' edges the light's noise is gone; at the
+        // edges, what is left is the 4 samples' coarse anti-aliasing, which
+        // the denoiser must not make worse (it divides by the surface
+        // colour, so it never blurs the squares into each other).
+        let edge = edges(&reference);
+        let flat = |i: usize| !edge(i);
+        let (before, after) = (rmse(&noisy, &reference, flat), rmse(&clean, &reference, flat));
+        assert!(after < before * 0.6, "denoised {after:.2} against noisy {before:.2}");
+        let (before, after) = (rmse(&noisy, &reference, &edge), rmse(&clean, &reference, &edge));
+        assert!(
+            after < before,
+            "at the checker's edges: denoised {after:.2} against noisy {before:.2}"
+        );
+    }
+
+    #[test]
+    fn the_denoiser_keeps_a_cubes_edges_and_leaves_the_background() {
+        let doc = overcast(floor_scene(LightShadow::None));
+        let (noisy, clean, reference) = denoised(&doc, &Pictures::new(), 48);
+        let (before, after) = (rmse(&noisy, &reference, |_| true), rmse(&clean, &reference, |_| true));
+        assert!(after < before * 0.6, "denoised {after:.2} against noisy {before:.2}");
+        let edge = edges(&reference);
+        let (before, after) = (rmse(&noisy, &reference, &edge), rmse(&clean, &reference, &edge));
+        assert!(
+            after < before * 1.1,
+            "at the cube's edges: denoised {after:.2} against noisy {before:.2}"
+        );
+        // Pixels that met nothing (the Sky around the floor) are as they were.
+        let guides = clean.guides.as_ref().unwrap();
+        for (i, &depth) in guides.depth.iter().enumerate() {
+            if depth == f32::MAX {
+                assert_eq!(clean.pixels[i], noisy.pixels[i]);
+            }
+        }
+        // Strength 0 keeps the noisy picture; the noisy one is kept as a pass.
+        let mut none = noisy.clone();
+        assert!(crate::denoise(&mut none, 0.0));
+        assert_eq!(none.pixels, noisy.pixels);
+        assert_eq!(layer(&clean, "Noisy").values[..3], noisy.pixels[0][..3]);
+        // Without guides there is nothing to do.
+        let mut plain = render(&scene_of(&doc), &top_camera(), &options(8, 2, 1));
+        assert!(!crate::denoise(&mut plain, 1.0));
+    }
+
+    #[test]
+    fn denoised_passes_still_add_up_to_the_picture() {
+        let doc = every_path();
+        let options = options(32, 8, 3);
+        let scene = textured_scene(&doc, &Pictures::new(), top_camera(), &[]);
+        let all: grid4d_scene::Passes = grid4d_scene::Pass::ALL.into_iter().collect();
+        let mut progressive = Progressive::with_passes(&options, all, &scene).with_denoising();
+        progressive.add_samples(&scene, &top_camera(), &options, u32::MAX, &RenderControl::default());
+        let mut image = progressive.image();
+        // Asked for: the guides stay passes too.
+        for name in ["Albedo", "Normal", "Depth"] {
+            layer(&image, name);
+        }
+        assert!(crate::denoise(&mut image, 0.8));
+        let lighting = [
+            "Emission",
+            "Background",
+            "DiffuseDirect",
+            "DiffuseIndirect",
+            "SpecularDirect",
+            "SpecularIndirect",
+            "Transmission",
+        ];
+        let groups = ["Group.Default", "Group.Key", "Group.Daylight"];
+        for names in [&lighting[..], &groups[..]] {
+            let layers: Vec<_> = names.iter().map(|n| layer(&image, n)).collect();
+            for (i, pixel) in image.pixels.iter().enumerate() {
+                for (c, &beauty) in pixel.iter().take(3).enumerate() {
+                    let sum: f32 = layers.iter().map(|l| l.values[i * 3 + c]).sum();
+                    assert!(
+                        (sum - beauty).abs() <= 1e-3 * beauty.abs().max(1.0),
+                        "{names:?} pixel {i}: {sum} vs {beauty}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

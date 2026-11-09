@@ -1749,5 +1749,7 @@ done (2026-11-08); step 16.3 — the Sky and Environment objects
 ([`render-environment.md`](reference/render-environment.md)) — is done
 (2026-11-08); step 16.4 — light linking and the light-group name — is done
 (2026-11-08); step 16.5 — lens and shutter — is done (2026-11-08); step
-16.6 — render passes and multi-layer OpenEXR — is done (2026-11-09); next is
-16.7, adaptive sampling and the denoiser.
+16.6 — render passes and multi-layer OpenEXR — is done (2026-11-09); step
+16.7 — adaptive sampling, the surface-area BVH (16.7a) and the denoiser
+(16.7b) — is done (2026-11-09); next is 16.8, the render queue and region
+render.

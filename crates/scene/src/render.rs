@@ -148,6 +148,108 @@ pub struct RenderSettings {
     pub passes: Passes,
     /// With PNG: the picture only, or a file per pass beside it.
     pub png_passes: PngPasses,
+    /// Samples go where the picture is still noisy: every pixel gets
+    /// [`Self::min_samples`], then only pixels whose noise is above
+    /// [`Self::noise_threshold`] get more, up to [`Self::samples`]. Off:
+    /// every pixel gets `samples`, as in Grid4D 1.1 (see
+    /// `docs/reference/render-sampling.md`).
+    pub adaptive: bool,
+    /// With [`Self::adaptive`]: the samples every pixel gets first
+    /// (1…[`Self::MAX_SAMPLES`]; at most `samples` when rendered).
+    pub min_samples: u32,
+    /// With [`Self::adaptive`]: a pixel stops once its estimated noise is
+    /// below this.
+    pub noise_threshold: NoiseThreshold,
+    /// Which pictures the denoiser cleans.
+    pub denoise: Denoise,
+    /// How much of the denoised picture is used, in percent (0…100; the
+    /// rest is the noisy one).
+    pub denoise_strength: u32,
+}
+
+/// Which pictures the denoiser cleans (see
+/// `docs/reference/render-sampling.md`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Denoise {
+    /// None, as in Grid4D 1.1.
+    #[default]
+    Off,
+    /// Finished renders (each frame of an animation).
+    Final,
+    /// Finished renders and the Render View while it sharpens.
+    FinalAndView,
+}
+
+impl Denoise {
+    pub const ALL: [Self; 3] = [Self::Off, Self::Final, Self::FinalAndView];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Final => "Final Picture",
+            Self::FinalAndView => "Final and Render View",
+        }
+    }
+}
+
+/// How much noise adaptive sampling leaves in a pixel, relative to the
+/// square root of its brightness: kept in thousandths
+/// ([`Self::MIN`]…[`Self::MAX`]), so settings stay comparable and hashable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NoiseThreshold(u32);
+
+impl NoiseThreshold {
+    /// 0.001.
+    pub const MIN: u32 = 1;
+    /// 0.5.
+    pub const MAX: u32 = 500;
+
+    /// The threshold of `thousandths` / 1000, kept in range.
+    #[must_use]
+    pub const fn from_thousandths(thousandths: u32) -> Self {
+        Self(if thousandths < Self::MIN {
+            Self::MIN
+        } else if thousandths > Self::MAX {
+            Self::MAX
+        } else {
+            thousandths
+        })
+    }
+
+    /// The threshold nearest `value`, kept in range (not finite: the default).
+    #[must_use]
+    pub fn from_f32(value: f32) -> Self {
+        if !value.is_finite() {
+            return Self::default();
+        }
+        let thousandths = (value * 1000.0).round().clamp(0.0, 1_000_000.0);
+        // In range after the clamp: exact as a whole number.
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "clamped whole number"
+        )]
+        let thousandths = thousandths as u32;
+        Self::from_thousandths(thousandths)
+    }
+
+    #[must_use]
+    pub const fn thousandths(self) -> u32 {
+        self.0
+    }
+
+    #[must_use]
+    pub fn get(self) -> f32 {
+        f32::from(u16::try_from(self.0).unwrap_or(u16::MAX)) / 1000.0
+    }
+}
+
+impl Default for NoiseThreshold {
+    /// 0.01.
+    fn default() -> Self {
+        Self(10)
+    }
 }
 
 /// A render pass: a piece of the picture for compositing.
@@ -345,6 +447,11 @@ impl Default for RenderSettings {
             segments: 3,
             passes: Passes::NONE,
             png_passes: PngPasses::BeautyOnly,
+            adaptive: false,
+            min_samples: 16,
+            noise_threshold: NoiseThreshold::default(),
+            denoise: Denoise::Off,
+            denoise_strength: 100,
         }
     }
 }
@@ -357,6 +464,19 @@ impl RenderSettings {
     pub const MIN_SEGMENTS: u32 = 2;
     pub const MAX_SEGMENTS: u32 = 8;
 
+    /// The settings a new document starts with: the defaults (what a file
+    /// without these settings means) with Adaptive on and the final
+    /// picture denoised.
+    #[must_use]
+    pub fn for_new_documents() -> Self {
+        Self {
+            adaptive: true,
+            samples: 128,
+            denoise: Denoise::Final,
+            ..Self::default()
+        }
+    }
+
     /// The settings with every value in its range.
     #[must_use]
     pub fn validated(mut self) -> Self {
@@ -366,6 +486,9 @@ impl RenderSettings {
         self.samples = self.samples.clamp(1, Self::MAX_SAMPLES);
         self.bounces = self.bounces.min(Self::MAX_BOUNCES);
         self.segments = self.segments.clamp(Self::MIN_SEGMENTS, Self::MAX_SEGMENTS);
+        self.min_samples = self.min_samples.clamp(1, Self::MAX_SAMPLES);
+        self.noise_threshold = NoiseThreshold::from_thousandths(self.noise_threshold.thousandths());
+        self.denoise_strength = self.denoise_strength.min(100);
         if let FrameRange::Manual { from, to } = &mut self.frames {
             *to = (*to).max(*from);
         }

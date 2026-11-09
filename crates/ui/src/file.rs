@@ -375,7 +375,11 @@ pub(crate) fn answer(
 
 fn perform(action: FileAction, doc: &mut Document, editor: &mut EditorState, viewport: &mut ViewportPanel) {
     match action {
-        FileAction::New => replace(doc, editor, viewport, Document::new("Untitled 1"), None),
+        FileAction::New => {
+            let mut new = Document::new("Untitled 1");
+            new.render = grid4d_scene::RenderSettings::for_new_documents();
+            replace(doc, editor, viewport, new, None);
+        }
         FileAction::Open => {
             let directory = editor.file.directory().map(Path::to_path_buf);
             if let Some(path) = editor.file.dialogs.pick_open(directory.as_deref()) {

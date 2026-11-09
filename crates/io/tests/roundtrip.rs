@@ -335,6 +335,8 @@ proptest! {
         linked in prop::option::of((any::<bool>(), "[A-Za-z]{0,8}")),
         blur in prop::option::of(2u32..9),
         passes in (0u32..1 << 15, any::<bool>()),
+        adaptive in prop::option::of((1u32..4097, 1u32..501)),
+        denoise in (0usize..3, 0u32..101),
         lens in prop::option::of((any::<bool>(), 1.0f32..5000.0, 0.5f32..64.0, 0u32..17, -6.0f32..6.0, 0.0f32..2.0, 0usize..3, any::<bool>())),
     ) {
         let mut doc = document(objects, Vec::new(), Vec::new());
@@ -376,6 +378,13 @@ proptest! {
         if passes.1 {
             doc.render.png_passes = grid4d_scene::PngPasses::OneFilePerPass;
         }
+        // Step 16.7: adaptive sampling.
+        if let Some((min_samples, threshold)) = adaptive {
+            doc.render.adaptive = true;
+            doc.render.min_samples = min_samples;
+            doc.render.noise_threshold = grid4d_scene::NoiseThreshold::from_thousandths(threshold);
+        }
+        (doc.render.denoise, doc.render.denoise_strength) = (grid4d_scene::Denoise::ALL[denoise.0], denoise.1);
         if let Some((dof, focus_distance, f_stop, blades, blade_rotation, shutter, position, focused)) = lens {
             let focus_object = doc.scene.iter().map(|(id, _)| id).next().filter(|_| focused);
             doc.scene.insert(Node::new(
@@ -449,6 +458,9 @@ proptest! {
             (expected.clamp_indirect, expected.emissive_lights) = (true, true);
             (expected.motion_blur, expected.segments) = (false, 3);
             (expected.passes, expected.png_passes) = (grid4d_scene::Passes::NONE, grid4d_scene::PngPasses::BeautyOnly);
+            (expected.adaptive, expected.min_samples, expected.noise_threshold) =
+                (false, 16, grid4d_scene::NoiseThreshold::default());
+            (expected.denoise, expected.denoise_strength) = (grid4d_scene::Denoise::Off, 100);
             let as_v4 = as_v4.unwrap();
             prop_assert_eq!(&as_v4.render, &expected);
             // Lights light everything, in no group; cameras are pinholes.

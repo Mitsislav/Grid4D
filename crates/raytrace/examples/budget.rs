@@ -8,8 +8,8 @@
 //! ```
 //!
 //! Scenes: `demo`, `studio`, `interior`, `dense` (all when none is named).
-//! With `--pictures`, each scene's reference and 16-sample pictures are saved
-//! there as PNG, to look at.
+//! With `--pictures`, each scene's reference, 16- and 64-sample pictures and
+//! the 64-sample one denoised are saved there as PNG, to look at.
 //!
 //! For each scene: the time to evaluate it and build its triangles and BVH; a 1280 × 720 render at 16
 //! samples (the size of the phase's acceptance shot); and at 320 × 180 the
@@ -27,7 +27,10 @@ use std::{
 
 use glam::{Vec3, camera::rh};
 use grid4d_eval::EvaluatedScene;
-use grid4d_raytrace::{CameraProjection, Image, Pictures, RenderCamera, RenderOptions, RenderScene, Texturing, render};
+use grid4d_raytrace::{
+    Adaptive, CameraProjection, Image, Pictures, Progressive, RenderCamera, RenderControl, RenderOptions, RenderScene,
+    Texturing, denoise, render,
+};
 use grid4d_scene::{
     Document, Falloff, LightDetails, LightShadow, LightType, Material, MaterialTag, Node, ObjectKind, Tag, Transform,
 };
@@ -343,6 +346,7 @@ fn options(scene: &Scene, width: u32, height: u32, samples: u32, seed: u32) -> R
         auto_light: true,
         clamp_indirect: true,
         emissive_lights: true,
+        adaptive: None,
     }
 }
 
@@ -404,8 +408,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::fs::create_dir_all(folder)?;
     }
     let scenes = [demo, studio, interior, dense];
-    println!("| Scene | Triangles | Build | 1280 × 720, 16 samples | 16 samples | 64 | 256 | 4096 (reference) |");
-    println!("|-------|-----------|-------|------------------------|------------|----|-----|------------------|");
+    println!(
+        "| Scene | Triangles | Build | 1280 × 720, 16 samples | 16 samples | 64 | 256 | Adaptive 0.02 | Adaptive 0.01 | 16 + denoiser | 64 + denoiser | 128 + denoiser | Adaptive 0.02 + denoiser | 4096 (reference) |"
+    );
+    println!(
+        "|-------|-----------|-------|------------------------|------------|----|-----|---------------|---------------|---------------|---------------|----------------|--------------------------|------------------|"
+    );
     for make in scenes {
         let scene = make();
         if !names.is_empty() && !names.iter().any(|n| n == scene.name) {
@@ -421,17 +429,60 @@ fn main() -> Result<(), Box<dyn Error>> {
                 render(&wide, &scene.camera, &options(&scene, 320, 180, samples, 0))
             });
             cells.push(format!("{} / {:.2}", ms(time), rmse(&image, &reference)));
-            if samples == 16
+            if samples != 256
                 && let Some(folder) = &pictures
             {
-                save(&image, &folder.join(format!("{}-16.png", scene.name)))?;
+                save(&image, &folder.join(format!("{}-{samples}.png", scene.name)))?;
+            }
+        }
+        // Adaptive sampling from 16 samples, up to 1024: time, error and
+        // the samples a pixel got on average.
+        for threshold in [0.02, 0.01] {
+            let adaptive = RenderOptions {
+                adaptive: Some(Adaptive {
+                    min_samples: 16,
+                    threshold,
+                }),
+                ..options(&scene, 320, 180, 1024, 0)
+            };
+            let (time, image) = timed(2, || render(&wide, &scene.camera, &adaptive));
+            let average = image.sample_counts.iter().map(|&n| f64::from(n)).sum::<f64>()
+                / image.sample_counts.len().max(1) as f64;
+            cells.push(format!(
+                "{} / {:.2} ({average:.0} spp)",
+                ms(time),
+                rmse(&image, &reference)
+            ));
+        }
+        // The same, denoised (the time includes the denoiser).
+        let adaptive = Some(Adaptive {
+            min_samples: 16,
+            threshold: 0.02,
+        });
+        for (samples, adaptive) in [(16, None), (64, None), (128, None), (1024, adaptive)] {
+            let options = RenderOptions {
+                adaptive,
+                ..options(&scene, 320, 180, samples, 0)
+            };
+            let (time, image) = timed(2, || {
+                let mut progressive = Progressive::new(&options).with_denoising();
+                progressive.add_samples(&wide, &scene.camera, &options, u32::MAX, &RenderControl::default());
+                let mut image = progressive.image();
+                denoise(&mut image, 1.0);
+                image
+            });
+            cells.push(format!("{} / {:.2}", ms(time), rmse(&image, &reference)));
+            if samples == 64
+                && let Some(folder) = &pictures
+            {
+                save(&image, &folder.join(format!("{}-64-denoised.png", scene.name)))?;
             }
         }
         if let Some(folder) = &pictures {
             save(&reference, &folder.join(format!("{}-4096.png", scene.name)))?;
         }
         println!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             scene.name,
             wide.triangle_count(),
             ms(built),
@@ -439,6 +490,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             cells[0],
             cells[1],
             cells[2],
+            cells[3],
+            cells[4],
+            cells[5],
+            cells[6],
+            cells[7],
+            cells[8],
             ms(reference_time),
         );
     }

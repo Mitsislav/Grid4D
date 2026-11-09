@@ -9,6 +9,11 @@ pub struct Image {
     pub pixels: Vec<[f32; 4]>,
     /// The render passes asked for, beside the picture.
     pub passes: Vec<crate::PassLayer>,
+    /// With adaptive sampling: the samples each pixel got (empty: every
+    /// pixel got the same).
+    pub sample_counts: Vec<u32>,
+    /// What [`denoise`](crate::denoise) needs, when the render gathered it.
+    pub guides: Option<crate::Guides>,
 }
 
 impl Image {
@@ -21,6 +26,8 @@ impl Image {
             height,
             pixels: vec![[0.0; 4]; count],
             passes: Vec::new(),
+            sample_counts: Vec::new(),
+            guides: None,
         }
     }
 

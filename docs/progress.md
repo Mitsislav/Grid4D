@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 16 — Render quality (v1.2): in progress |
-| Last step done | 16.6 — render passes: Alpha, Depth, Normal, Position, Albedo, seven lighting passes that add up to the picture, Object and Material IDs, light-group passes; multi-layer OpenEXR, PNG per pass, the Picture Viewer's Pass menu (2026-11-09) |
-| Next step | 16.7 — adaptive sampling and the denoiser |
-| Tests | 932 (and 11 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens and passes render pictures), all passing; clippy and rustfmt clean |
+| Last step done | 16.7 — adaptive sampling (16.7a: pixels stop once clean; the surface-area BVH for renders) and the denoiser (16.7b: an à-trous filter guided by albedo, normal, depth and noise) (2026-11-09) |
+| Next step | 16.8 — the render queue and region render |
+| Tests | 940 (and 13 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling and denoiser render pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2738,6 +2738,8 @@ risks R5 – R8 go with it.
 | 16.3 | The Sky and Environment objects (`ObjectKind::{Sky, Environment}`, `SunPlacement`; Elevation, Azimuth, Turbidity, Intensity, Rotation animate): the Preetham daylight model and the sun's colour from Rayleigh and haze transmittance (`grid4d-eval::sky`, pure; 1.0 = 100 000 lux), the topmost visible one chosen by evaluation; in the tracer the surround met by rays and sampled as a light — the sun as a disc, the rest by importance over an equirectangular table (`environment.rs`) — with MIS, Auto Light off, and the last bounce followed one ray further for lights sampled directly; in the viewport a background pass (`sky.wgsl`) behind perspective views and spherical-harmonic ambient light in Gouraud shading (a Sky's made when it changes, a picture's on the texture loader's thread), the sun as an Infinite light with the view's shadow; View ▸ Filter ▸ Sky; `.g4d` v5 kinds `sky` / `environment` (refused in a version 4 file); the Attribute Manager's rows and the "Not used" note; Create ▸ Sky / Environment, icons, Greek; two reference pictures (daylight, a panorama-lit still life); the manual's §4.2 | 908 |
 | 16.5 | Lens and shutter: `Lens` on cameras (depth of field, focus distance or object, F-Stop, blades and their turn, shutter length and position; focus, F-Stop and blade turn animate) and Render Settings ▸ Motion Blur with Segments; in the tracer a thin lens (`ThinLens`: a real-sized aperture, round or bladed) and motion blur — the scene evaluated at moments of the shutter (`RenderScene::moving`: corners and normals per moment, blended at each sample's time; `Bvh::build_swept` / `raycast_by`), a moving camera, simulations blended between cached frames (`Replay::overrides_at`); time and aperture drawn only when used, so other renders are unchanged; the camera's focus plane in the viewport; `.g4d` v5 `lens`, `motion_blur`, `segments` (stripped from a version 4 file); the Attribute Manager's Lens rows, the Sampling page's rows; Greek; two reference pictures; the manual's §3.1 and §20.1 | 923 |
 | 16.6 | Render passes: `RenderSettings::passes` (a set of `Pass`) and `png_passes`; in the tracer each bounce names its lobe and each contribution goes to Emission, Background, Diffuse / Specular Direct / Indirect or Transmission and to its light group, data passes (depth, normal, position, albedo) from the first hit, Object / Material IDs by a running majority vote (`passes.rs`: a `Layout` of only the chosen passes' floats per pixel; `Progressive::with_passes`, `Image::passes`); renders without passes unchanged bit for bit; multi-channel OpenEXR (`save_exr_layers`: half and float channels, the IDs' names as string attributes; the single-layer writer goes through it unchanged); PNG One File per Pass; the Render Settings' Passes page, the Picture Viewer's Pass menu; `.g4d` v5 `passes`, `png_passes` (stripped from a version 4 file); Greek; the manual's §20.1 and §20.2 with a picture of seven passes (an ignored test renders it) | 932 |
+| 16.7a | Adaptive sampling: `RenderSettings::{adaptive, min_samples, noise_threshold}` (`NoiseThreshold` in thousandths, so settings stay hashable), `RenderOptions::adaptive`; `Progressive` keeps per pixel the odd samples' sum, its count and whether it goes on, decides at Minimum Samples and every half as many again (even counts), a pixel stopping when its noise and its neighbours' are below the threshold; progress in pixel samples; `Image::sample_counts`; renders without it unchanged; the Picture Viewer's average and Samples per Pixel map; new documents Adaptive with 128 samples; `grid4d_geom::BvhSplit` and `Bvh::build_with` (binned surface-area build, nearer child first, ties to the lower polygon, box tests with an ulp of slack) used by the renderer: 23 – 43 % faster; `.g4d` v5 `adaptive`, `min_samples`, `noise_threshold`; Greek; the budget re-measured | 940 |
+| 16.7b | The denoiser: `RenderSettings::{denoise: Denoise (Off, Final Picture, Final and Render View), denoise_strength}`; `grid4d_raytrace::denoise(&mut Image, strength)` (`denoise.rs`): five à-trous rounds (B3 kernel, holes 1 – 16), weights from normals, depth against its gradient, albedo and brightness within 4 σ of the noise (filtered along), light divided by albedo and multiplied back, background pixels untouched, lighting and group passes filtered with the picture's weights, the picture before kept as a `Noisy` pass; `Progressive::with_denoising` gathers albedo / normal / depth and each pixel's noise (`Image::guides`); renders denoise each finished frame, the Render View from 4 samples when asked; new documents Final Picture; `.g4d` v5 `denoise`, `denoise_strength`; Greek; the manual's §20.1 with a picture; the budget with the denoiser | 940 |
 | 16.4 | Light linking and the light-group name: `Linking { mode: Exclude / Include, objects }` and `group` on lights (`group` on the Sky and Environment too); evaluation gives each linked light a bit (the first 64) and every object and clone a mask of the linked lights that skip it (`link_lights`, allocation-free); renders skip those lights and let their shadow rays through such objects (`RenderScene::lit_by`); the viewport carries the mask in `InstanceRaw::normal`'s free `w`s (24 bits each), each light its bit (`LightRaw` 112 bytes) and the shadow pass the key light's; `.g4d` v5 `linking` (object indices) and `group` (stripped from a version 4 file); Merge keeps links and, newly, an Environment's picture; the Attribute Manager's Linking, Objects and Light Group rows; Greek; the manual's §4.1 with a picture | 912 |
 | 16.2b | Area lights: `LightType::Area` and `AreaShape` (Rectangle, Disc, Sphere, Tube) with Size X / Y (animatable as `Size . X / Y`), Visible in Render and Two-Sided in `LightDetails`; `.g4d` v5 `light_type: "area"` and an `area` object (a version 4 file with them is refused / stripped); the Attribute Manager's rows; glTF export as a wide spot or a point; in the tracer one power table for area lights and emitting triangles (`lights.rs`: `AreaLight`, `LightTable`), a Sphere sampled over the cone it fills and a Tube over its facing half, visible lights seen by camera rays and bounces with MIS, others sampled only; brightness matched to an Omni light with Inverse Square falloff at 500 cm; in the viewport the shapes as lines and an approximate light from the shape's nearest point (`LightRaw` 96 bytes); a third reference picture; Greek; the manual's §4.1 with a render | 887 |
 
@@ -2916,6 +2918,74 @@ risks R5 – R8 go with it.
 - **The Greek table's long entries, again.** New entries landed after a
   multi-line one; the table is now re-sorted by a script that reads both
   forms.
+
+**16.7b — The denoiser**
+
+*Problems and solutions:*
+- **A test scene with no noise to remove.** The first checker floor was lit
+  by the Sky's sun, which shadow rays sample cleanly; what differed from
+  the reference was the 4 samples' coarse anti-aliasing at the squares'
+  edges, which no denoiser should touch. The tests now use an overcast sky
+  (no sun) with the cube hiding part of it, and judge edges and the rest
+  apart.
+- **Dark squares stayed noisy.** The noise was measured on the picture's
+  brightness but the filter compares light divided by the surface colour,
+  which on a dark square is ~50 times larger: every neighbour looked too
+  different and got no weight. The noise is now divided by the surface
+  colour too (squared).
+- **Passes must still add up.** The weights come from the picture alone and
+  are applied to every lighting and group pass, each divided and multiplied
+  by the same colour: a linear filter, so the passes' sum is the filtered
+  picture (a test checks it to 1e-3).
+- **Worse than no denoiser, on the demo.** The budget showed the clean
+  demo scene with more error after denoising. A map of the differences
+  pointed at the small folded plane: seen from both sides within a pixel,
+  its averaged normal was short, so even the pixel itself got almost no
+  weight (its cosine to the 64th power) and came out black. Normals are now
+  compared by direction only, and a pixel always counts for itself. Edge
+  pixels are also divided by their coverage, so a half-covered pixel
+  filters like its neighbours and keeps its soft edge.
+- **The background is not noise.** A Sky or a panorama seen directly would
+  have been blurred five times over; pixels that met nothing are left as
+  they are and never mixed with surfaces.
+
+**16.7a — Adaptive sampling and the surface-area BVH**
+
+*Problems and solutions:*
+- **Split in two again.** 16.7 (adaptive sampling, the denoiser, a faster
+  hierarchy) is built as 16.7a (sampling and the hierarchy) and 16.7b (the
+  denoiser).
+- **The same picture however it is cut.** The Picture Viewer asks for 1,
+  1, 2, 4 … samples at a time, a plain render for all at once. Which pixels
+  go on is decided only at fixed sample counts (Minimum Samples, then half
+  as many again each time), never at the caller's, and a pixel's samples
+  keep their numbers, so its random numbers are the same as in a render
+  without adaptive sampling. A test cuts a render five ways and runs it on
+  one thread: identical.
+- **A float in hashable settings.** Render settings are compared and
+  hashed (a Render View is dropped when they change); the threshold is kept
+  as whole thousandths (`NoiseThreshold`), which is also all the field
+  shows.
+- **Old documents must not change.** A file without the new fields reads
+  as Adaptive off; only File ▸ New and the start-up document get
+  `RenderSettings::for_new_documents` (Adaptive on, 128 samples).
+- **Stopped by luck.** A pixel's own estimate (the difference of two
+  half averages) is noisy too: with each pixel judged on its own and its
+  neighbours', the map of samples was salt and pepper. The estimate is now
+  averaged over 3 × 3 pixels before the neighbourhood test, and the map
+  shows areas.
+- **Edges on pixel borders.** The first test looked for extra samples on a
+  cube's edge that fell exactly between two pixels, so neither was noisy;
+  the test view is now 64 pixels wide.
+- **Two builds, two answers.** Rays through a polygon's corner found the
+  same face at distances one ulp apart depending on the build, because a
+  box whose entry was rounded past the best hit was skipped, or its slab
+  test came out an ulp the wrong way round. Box tests now allow a relative
+  1e-5 of slack, ties go to the lower polygon, and a test casts rays
+  through every corner of the test shapes in both builds.
+- **Measured, not guessed.** The surface-area build makes renders 23 – 43 %
+  faster but takes twice as long for a million triangles; picking, which
+  builds on first use, keeps the median build.
 
 **16.6 — Render passes**
 

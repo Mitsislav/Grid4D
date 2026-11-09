@@ -90,10 +90,27 @@ pub struct PassLayer {
 }
 
 impl PassLayer {
+    /// A map of the samples each pixel got (adaptive sampling): a layer
+    /// `Samples` with one channel `N`, shown from dark blue (fewest) through
+    /// red to yellow (most).
+    #[must_use]
+    pub fn samples(counts: &[u32]) -> Self {
+        Self {
+            name: "Samples".to_owned(),
+            channels: vec!["N"],
+            float: true,
+            values: counts
+                .iter()
+                .map(|&n| f32::from(u16::try_from(n).unwrap_or(u16::MAX)))
+                .collect(),
+        }
+    }
+
     /// 8-bit RGB to look at, three bytes per pixel: colours sRGB-encoded
     /// over black; Alpha as grey; Depth from near (white) to far (black)
     /// over the range found; Normal × 0.5 + 0.5; Position over its range per
-    /// axis; IDs as distinct colours (0 black).
+    /// axis; IDs as distinct colours (0 black);
+    /// samples as a heat map.
     #[must_use]
     pub fn to_rgb8(&self) -> Vec<u8> {
         use crate::image::{linear_to_srgb, to_byte};
@@ -128,6 +145,23 @@ impl PassLayer {
                     .collect()
             }
             ["ID"] => pixels.flat_map(|p| id_colour(p[0])).collect(),
+            ["N"] => {
+                // From the fewest samples any pixel got to the most.
+                let (fewest, most) = range(0);
+                pixels
+                    .flat_map(|p| {
+                        let t = if most > fewest {
+                            ((p[0] - fewest) / (most - fewest)).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        let r = (t * 2.0).min(1.0);
+                        let g = (t * 2.0 - 1.0).clamp(0.0, 1.0);
+                        let b = 0.35 * (1.0 - t * 2.0).max(0.0) + 0.1;
+                        [r, g, b].map(to_byte)
+                    })
+                    .collect()
+            }
             ["X", "Y", "Z"] if self.name == "Normal" => pixels
                 .flat_map(|p| [0, 1, 2].map(|c| to_byte(p[c] * 0.5 + 0.5)))
                 .collect(),
@@ -247,10 +281,16 @@ impl Layout {
     }
 
     /// The passes as pictures from `sums` (the picture's own: colour and
-    /// coverage) and `extra` (this layout's per pixel), after `samples`
-    /// samples; `groups` names the light groups.
-    pub(crate) fn layers(&self, sums: &[[f32; 4]], extra: &[f32], samples: u32, groups: &[String]) -> Vec<PassLayer> {
-        let n = f32::from(u16::try_from(samples.max(1)).unwrap_or(u16::MAX));
+    /// coverage) and `extra` (this layout's per pixel), each pixel after
+    /// `samples(pixel)` samples; `groups` names the light groups.
+    pub(crate) fn layers(
+        &self,
+        sums: &[[f32; 4]],
+        extra: &[f32],
+        samples: &dyn Fn(usize) -> u32,
+        groups: &[String],
+    ) -> Vec<PassLayer> {
+        let n = |i: usize| f32::from(u16::try_from(samples(i).max(1)).unwrap_or(u16::MAX));
         let pixels = sums.len();
         let pixel = |i: usize| extra.get(i * self.stride..(i + 1) * self.stride).unwrap_or(&[]);
         let mut layers = Vec::new();
@@ -261,6 +301,7 @@ impl Layout {
             values: (0..pixels)
                 .flat_map(|i| {
                     let p = pixel(i);
+                    let n = n(i);
                     [0, 1, 2].map(|c| p.get(at + c).copied().unwrap_or(0.0) / n)
                 })
                 .collect(),
@@ -286,7 +327,7 @@ impl Layout {
                     name: pass.name().to_owned(),
                     channels: vec!["A"],
                     float: false,
-                    values: sums.iter().map(|s| s[3] / n).collect(),
+                    values: sums.iter().enumerate().map(|(i, s)| s[3] / n(i)).collect(),
                 }),
                 Pass::Depth => {
                     if let Some(at) = self.depth {

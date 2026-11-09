@@ -71,7 +71,8 @@ impl Grid4DApp {
             editor.file.alert = Some(alert);
         }
 
-        let doc = Document::with_demo_scene();
+        let mut doc = Document::with_demo_scene();
+        doc.render = grid4d_scene::RenderSettings::for_new_documents();
         // Start with the first object active so the gizmo and Attribute Manager have content.
         if let Some(&first) = doc.scene.roots().first() {
             editor.selection.set_single(first);

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use glam::{Affine2, Mat3, Mat4, Vec2, Vec3, Vec4};
 use grid4d_eval::{Drawable, EvaluatedLight, EvaluatedScene, MaterialLayers, MeshKey};
-use grid4d_geom::{Bvh, PolyMesh, TriMesh, Triangulator, uv};
+use grid4d_geom::{Bvh, BvhSplit, PolyMesh, TriMesh, Triangulator, uv};
 use grid4d_scene::{Aabb, Falloff, LightShadow, LightType, MaterialId, Materials, NodeId, Projection};
 
 use crate::environment::EnvironmentLight;
@@ -407,7 +407,7 @@ impl RenderScene {
             [first, first + 1, first + 2]
         });
         let triangles = PolyMesh::from_faces(b.points, faces).unwrap_or_default();
-        let bvh = Bvh::build(&triangles);
+        let bvh = Bvh::build_with(&triangles, &[], BvhSplit::SurfaceArea);
         Self {
             triangles,
             bvh,
@@ -493,7 +493,7 @@ impl RenderScene {
         };
         let mut scene = moments.swap_remove(base);
         let refs: Vec<&[Vec3]> = points.iter().map(Vec::as_slice).collect();
-        scene.bvh = Bvh::build_swept(&scene.triangles, &refs);
+        scene.bvh = Bvh::build_with(&scene.triangles, &refs, BvhSplit::SurfaceArea);
         for moment in &points {
             for &p in moment {
                 scene.bounds = Some(scene.bounds.map_or((p, p), |(min, max)| (min.min(p), max.max(p))));

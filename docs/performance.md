@@ -174,6 +174,65 @@ times are those of 16.3 within measuring noise (studio: 0.31 s / 11.4,
 1.22 s / 6.20, 5.0 s / 3.32 at 16, 64 and 256 samples; demo 18 / 69 /
 261 ms). Passes are gathered only when chosen.
 
+### Step 16.7a (adaptive sampling, the surface-area BVH)
+
+Measured on 2026-11-09, same machine, the same day for both builds of the
+hierarchy (the machine was faster than at 16.6). The pictures are the same
+(same errors); a render takes 23 – 43 % less time with the surface-area
+build, which takes about twice as long to build for a million triangles
+(the viewport's picking keeps the median build, made on first use):
+
+| Scene | Build | 1280 × 720, 16 samples | 16 samples | 64 | 256 | 4096 |
+|-------|-------|------------------------|------------|----|-----|------|
+| demo, median | < 1 ms | 270 ms | 18 ms / 1.87 | 68 ms / 0.96 | 276 ms / 0.53 | 4.4 s |
+| demo, SAH | 1 ms | 213 ms | 14 ms / 1.87 | 53 ms / 0.96 | 212 ms / 0.53 | 3.4 s |
+| studio, median | 3 ms | 5.2 s | 0.32 s / 11.4 | 1.35 s / 6.20 | 5.5 s / 3.32 | 86 s |
+| studio, SAH | 4 ms | 3.1 s | 0.19 s / 11.4 | 0.79 s / 6.20 | 3.1 s / 3.32 | 52 s |
+| interior, SAH | 1 ms | 3.7 s | 0.22 s / 17.8 | 0.91 s / 9.36 | 3.8 s / 4.86 | 60 s |
+| dense, median | 430 ms | 2.5 s | 0.15 s / 4.08 | 0.64 s / 2.05 | 2.5 s / 1.08 | 41 s |
+| dense, SAH | 787 ms | 1.6 s | 0.10 s / 4.08 | 0.41 s / 2.05 | 1.6 s / 1.08 | 26 s |
+
+Adaptive sampling from 16 samples up to 1024 (time / error, and the
+samples a pixel got on average):
+
+| Scene | Threshold 0.02 | Threshold 0.01 |
+|-------|----------------|----------------|
+| demo | 81 ms / 0.69 (34) | 135 ms / 0.42 (57) |
+| studio | 8.7 s / 2.08 (669) | 11.8 s / 1.87 (927) |
+| interior | 15.2 s / 2.66 (1020) | 15.1 s / 2.66 (1024) |
+| dense | 1.8 s / 1.23 (131) | 3.9 s / 0.80 (340) |
+
+Where much of the picture is clean and cheap to trace, adaptive sampling
+pays: **demo** beats the 256-sample error (0.42 against 0.53) in 60 % of the
+time. Where the whole picture is noisy (studio's and interior's indirect
+light) nearly every pixel goes on to the maximum and it costs what uniform
+sampling costs (no overhead measured). In **dense** the pixels that go on
+are the expensive ones (the million-triangle object; the empty background
+stops first), so a sample costs more on average and it is about even with
+uniform sampling for the same error. The noisy scenes are the denoiser's
+(16.7b).
+
+### Step 16.7b (the denoiser)
+
+Measured on 2026-11-09, same machine (time / error against the 4096-sample
+reference; the time includes gathering the guides and denoising):
+
+| Scene | 256 samples (1.1's mark) | 16 + denoiser | 64 + denoiser | 128 + denoiser | Adaptive 0.02 + denoiser |
+|-------|--------------------------|---------------|---------------|----------------|--------------------------|
+| demo | 210 ms / 0.53 | 35 ms / 1.52 | 78 ms / 0.80 | 137 ms / 0.62 | 100 ms / 0.67 |
+| studio | 3.2 s / 3.32 | 0.26 s / 4.32 | 0.87 s / 2.84 | — | 8.9 s / 1.52 |
+| interior | 3.6 s / 4.86 | 0.29 s / 3.96 | 1.0 s / 2.54 | — | 15.3 s / 1.51 |
+| dense | 1.58 s / 1.08 | 0.15 s / 2.21 | 0.46 s / 1.36 | 0.87 s / 1.12 | 1.8 s / 0.81 |
+
+The noisy scenes are where it pays: **interior** at 16 samples denoised is
+cleaner than 1.1's 256 in a twelfth of the time, **studio** at 64 in a
+quarter. **Demo** (little noise to remove; its error is mostly anti-aliasing
+at the edges, which the denoiser leaves) reaches 1.1's mark with adaptive
+sampling alone (0.42 in 135 ms). **Dense** comes close: 128 samples denoised
+give 1.12 in 55 % of the time 256 take for 1.08 (not quite: the step's
+acceptance is met on three scenes of four). Gathering the guides and
+denoising cost about 25 ms at 320 × 180.
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

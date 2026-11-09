@@ -262,7 +262,10 @@ passes, an array of `alpha`, `depth`, `normal`, `position`, `albedo`,
 `emission`, `background`, `diffuse_direct`, `diffuse_indirect`,
 `specular_direct`, `specular_indirect`, `transmission`, `object_id`,
 `material_id`, `light_groups`; none when absent) and `png_passes`
-(`beauty_only`, the default, or `one_file_per_pass`).
+(`beauty_only`, the default, or `one_file_per_pass`); `adaptive` (false when
+absent), `min_samples` (16) and `noise_threshold` (a number, 0.01; kept to
+thousandths, 0.001 – 0.5); `denoise` (`off`, the default, `final`,
+`final_and_view`) and `denoise_strength` (percent, 100 when absent).
 
 ### Takes
 
@@ -324,6 +327,7 @@ Phase 16; each step adds its row):
 | the `light` kind's `linking` (`mode`, `objects`) and `group`; `group` on `sky` and `environment` | step 16.4 |
 | the `camera` kind's `lens`; the render settings' `motion_blur` (false when absent) and `segments` (3 when absent); the track parameters `focus_distance`, `f_stop`, `blade_rotation` | step 16.5 |
 | the render settings' `passes` (none when absent) and `png_passes` (`beauty_only` when absent) | step 16.6 |
+| the render settings' `adaptive` (false when absent), `min_samples` (16), `noise_threshold` (0.01), `denoise` (`off`) and `denoise_strength` (100) | step 16.7 |
 
 A version 4 file is therefore read as a version 5 file with the version
 number changed, minus any field this table lists (version 4 readers ignore

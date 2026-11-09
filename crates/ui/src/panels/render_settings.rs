@@ -410,8 +410,76 @@ fn sampling_page(ui: &mut Ui, s: &mut RenderSettings) {
                 [FIELD_WIDTH, 19.0],
                 DragValue::new(&mut s.samples).range(1..=RenderSettings::MAX_SAMPLES),
             )
-            .on_hover_text(tr("Per pixel: smoother edges and less noise, but slower"));
+            .on_hover_text(if s.adaptive {
+                tr("The most a pixel gets: noisy pixels get up to this many")
+            } else {
+                tr("Per pixel: smoother edges and less noise, but slower")
+            });
             ui.end_row();
+            check(
+                ui,
+                key("Adaptive"),
+                &mut s.adaptive,
+                key("Spends samples where the picture is still noisy: clean areas stop early"),
+            );
+            if s.adaptive {
+                attr_label(ui, "Minimum Samples", LABEL_WIDTH);
+                let field = ui
+                    .add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut s.min_samples).range(1..=RenderSettings::MAX_SAMPLES),
+                    )
+                    .on_hover_text(tr("Every pixel gets these before any stops"));
+                ui.ctx()
+                    .accesskit_node_builder(field.id, |node| node.set_label(tr("Minimum Samples")));
+                ui.end_row();
+                attr_label(ui, "Noise Threshold", LABEL_WIDTH);
+                let mut threshold = s.noise_threshold.get();
+                let field = ui
+                    .add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut threshold)
+                            .range(0.001..=0.5)
+                            .speed(0.001)
+                            .fixed_decimals(3),
+                    )
+                    .on_hover_text(tr(
+                        "A pixel stops once its noise is below this: smaller is cleaner and slower",
+                    ));
+                ui.ctx()
+                    .accesskit_node_builder(field.id, |node| node.set_label(tr("Noise Threshold")));
+                if field.changed() {
+                    s.noise_threshold = grid4d_scene::NoiseThreshold::from_f32(threshold);
+                }
+                ui.end_row();
+            }
+            attr_label(ui, "Denoise", LABEL_WIDTH);
+            let combo = ComboBox::from_id_salt("grid4d.render.denoise")
+                .selected_text(tr(s.denoise.label()))
+                .show_ui(ui, |ui| {
+                    for option in grid4d_scene::Denoise::ALL {
+                        ui.selectable_value(&mut s.denoise, option, tr(option.label()));
+                    }
+                });
+            let id = combo.response.id;
+            combo.response.on_hover_text(tr(
+                "Removes the noise left in finished renders, keeping edges and textures",
+            ));
+            ui.ctx()
+                .accesskit_node_builder(id, |node| node.set_label(tr("Denoise")));
+            ui.end_row();
+            if s.denoise != grid4d_scene::Denoise::Off {
+                attr_label(ui, "Denoise Strength", LABEL_WIDTH);
+                let field = ui
+                    .add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut s.denoise_strength).range(0..=100).suffix(" %"),
+                    )
+                    .on_hover_text(tr("How much of the denoised picture is used over the noisy one"));
+                ui.ctx()
+                    .accesskit_node_builder(field.id, |node| node.set_label(tr("Denoise Strength")));
+                ui.end_row();
+            }
             attr_label(ui, "Bounces", LABEL_WIDTH);
             ui.add_sized(
                 [FIELD_WIDTH, 19.0],

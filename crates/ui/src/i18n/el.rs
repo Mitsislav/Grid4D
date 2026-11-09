@@ -60,6 +60,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Ένας αριθμός ανά αντικείμενο (το αρχείο τα ονομάζει)",
     ),
     (
+        "A pixel stops once its noise is below this: smaller is cleaner and slower",
+        "Ένα pixel σταματά μόλις ο θόρυβός του πέσει κάτω από αυτό: μικρότερο είναι πιο καθαρό και πιο αργό",
+    ),
+    (
         "A recovery copy of your unsaved work could not be written. Save your work to keep it safe.",
         "Δεν ήταν δυνατό να γραφτεί αντίγραφο ανάκτησης της μη αποθηκευμένης δουλειάς σας. Αποθηκεύστε τη δουλειά σας για να είναι ασφαλής.",
     ),
@@ -268,6 +272,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Base Color Texture", "Υφή χρώματος βάσης"),
     ("Basic", "Βασικά"),
     ("Basic Properties", "Βασικές ιδιότητες"),
+    ("Before Denoising", "Πριν την αποθορυβοποίηση"),
     ("Bend", "Κάμψη"),
     ("Bends its parent's subtree", "Κάμπτει το υποδέντρο του γονέα του"),
     ("Bevel", "Λοξοτόμηση"),
@@ -502,6 +507,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Delete Take", "Διαγραφή λήψης"),
     ("Delete Texture", "Διαγραφή υφής"),
     ("Delete Track", "Διαγραφή καναλιού"),
+    ("Denoise", "Αποθορυβοποίηση"),
+    ("Denoise Strength", "Ένταση αποθορυβοποίησης"),
     ("Density", "Πυκνότητα"),
     ("Depth", "Βάθος"),
     ("Depth of Field", "Βάθος πεδίου"),
@@ -617,6 +624,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Environment", "Περιβάλλον"),
     ("Evaluation", "Αξιολόγηση"),
     ("Every", "Κάθε"),
+    (
+        "Every pixel gets these before any stops",
+        "Κάθε pixel παίρνει τόσα πριν σταματήσει οποιοδήποτε",
+    ),
     ("Exclude", "Εξαίρεση"),
     ("Expand All", "Ανάπτυξη όλων"),
     ("Export", "Εξαγωγή"),
@@ -667,6 +678,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("File", "Αρχείο"),
     ("Fillet", "Στρογγύλεμα"),
     ("Filter", "Φίλτρο"),
+    ("Final Picture", "Τελική εικόνα"),
+    ("Final and Render View", "Τελική και Render View"),
     ("Fit", "Προσαρμογή"),
     ("Fit to Object", "Προσαρμογή στο αντικείμενο"),
     ("Fit to Parent", "Προσαρμογή στον γονέα"),
@@ -816,6 +829,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Πόσα βήματα πίσω μπορεί να πάει η Αναίρεση· η μείωση πετάει αμέσως τα παλαιότερα",
     ),
     ("How many teeth go round the wheel", "Πόσα δόντια έχει ο τροχός"),
+    (
+        "How much of the denoised picture is used over the noisy one",
+        "Πόση από την καθαρισμένη εικόνα χρησιμοποιείται πάνω από τη θορυβώδη",
+    ),
     (
         "How often light bounces between surfaces (0: direct light only)",
         "Πόσες φορές αναπηδά το φως ανάμεσα στις επιφάνειες (0: μόνο άμεσο φως)",
@@ -1072,6 +1089,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Το μεσαίο σύρσιμο στην προβολή το αλλάζει επίσης",
     ),
     ("Millimetres", "Χιλιοστά"),
+    ("Minimum Samples", "Ελάχιστα δείγματα"),
     ("Minimum Time", "Ελάχιστος χρόνος"),
     ("Missing Plugin", "Plugin που λείπει"),
     ("Missing textures: {0}", "Υφές που λείπουν: {0}"),
@@ -1159,6 +1177,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "No textures yet. Add… chooses pictures; you can also drop picture files on the window.",
         "Δεν υπάρχουν ακόμη υφές. Η Προσθήκη… επιλέγει εικόνες· μπορείτε και να αφήσετε αρχεία εικόνων στο παράθυρο.",
     ),
+    ("Noise Threshold", "Όριο θορύβου"),
     ("None", "Κανένα"),
     (
         "None of the dropped files is a Grid4D document (.{0}), a model (.gltf, .glb, .obj) or a picture:",
@@ -1460,6 +1479,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Αφαιρεί τις υφές που δεν χρησιμοποιεί κανένα υλικό",
     ),
     ("Remove this texture", "Αφαιρεί αυτή την υφή"),
+    (
+        "Removes the noise left in finished renders, keeping edges and textures",
+        "Αφαιρεί τον θόρυβο που μένει στα τελικά render, κρατώντας ακμές και υφές",
+    ),
     ("Rename", "Μετονομασία"),
     (
         "Rename (a name in the Object Manager)",
@@ -1597,6 +1620,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("SSAO", "SSAO"),
     ("Samples", "Δείγματα"),
+    ("Samples per Pixel", "Δείγματα ανά pixel"),
     ("Sampling", "Δειγματοληψία"),
     ("Save", "Αποθήκευση"),
     ("Save As", "Αποθήκευση ως"),
@@ -1799,6 +1823,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Specular Direct", "Γυαλιστερό άμεσο"),
     ("Specular Indirect", "Γυαλιστερό έμμεσο"),
     ("Specular Texture", "Υφή κατοπτρισμού"),
+    (
+        "Spends samples where the picture is still noisy: clean areas stop early",
+        "Ξοδεύει δείγματα όπου η εικόνα έχει ακόμα θόρυβο: οι καθαρές περιοχές σταματούν νωρίς",
+    ),
     ("Sphere", "Σφαίρα"),
     ("Spherical", "Σφαιρική"),
     ("Spin . X", "Περιστροφή . X"),
@@ -1908,6 +1936,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "The light of each light group apart, and of lights in none",
         "Το φως κάθε ομάδας φωτός χωριστά, και των φώτων χωρίς ομάδα",
+    ),
+    (
+        "The most a pixel gets: noisy pixels get up to this many",
+        "Τα περισσότερα που παίρνει ένα pixel: τα θορυβώδη παίρνουν έως τόσα",
     ),
     (
         "The object and its children without a Material tag of their own show this material; later Material tags lie over earlier ones. Drag a material onto an object to assign it (Shift: as a new layer)",
@@ -2223,5 +2255,9 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "{0} · drag onto an object to assign it",
         "{0} · σύρετε σε αντικείμενο για ανάθεση",
+    ),
+    (
+        "{0} · {1} samples per pixel on average, {2} % got all",
+        "{0} · κατά μέσο όρο {1} δείγματα ανά pixel, {2} % τα πήραν όλα",
     ),
 ];

@@ -35,7 +35,8 @@ use grid4d_geom::{
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
 use grid4d_scene::{
-    AreaShape, Environment, Lens, LinkMode, Linking, Pass, PngPasses, ShutterPosition, Sky, SunPlacement,
+    AreaShape, Denoise, Environment, Lens, LinkMode, Linking, NoiseThreshold, Pass, PngPasses, ShutterPosition, Sky,
+    SunPlacement,
 };
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
@@ -840,6 +841,65 @@ struct RenderDto {
     /// Added in version 5 (step 16.6): `beauty_only` when absent.
     #[serde(default, skip_serializing_if = "PngPassesDto::is_beauty_only")]
     png_passes: PngPassesDto,
+    /// Added in version 5 (step 16.7): adaptive sampling, off when absent.
+    #[serde(default, skip_serializing_if = "is_false")]
+    adaptive: bool,
+    /// Added in version 5 (step 16.7): 16 when absent.
+    #[serde(default = "sixteen", skip_serializing_if = "is_sixteen")]
+    min_samples: u32,
+    /// Added in version 5 (step 16.7): 0.01 when absent.
+    #[serde(default = "one_hundredth", skip_serializing_if = "is_one_hundredth")]
+    noise_threshold: f32,
+    /// Added in version 5 (step 16.7): `off` when absent.
+    #[serde(default, skip_serializing_if = "DenoiseDto::is_off")]
+    denoise: DenoiseDto,
+    /// Added in version 5 (step 16.7): 100 (percent) when absent.
+    #[serde(default = "hundred", skip_serializing_if = "is_hundred")]
+    denoise_strength: u32,
+}
+
+/// Which pictures are denoised (version 5, step 16.7).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum DenoiseDto {
+    #[default]
+    Off,
+    Final,
+    FinalAndView,
+}
+
+impl DenoiseDto {
+    #[expect(clippy::trivially_copy_pass_by_ref, reason = "serde's signature")]
+    fn is_off(&self) -> bool {
+        *self == Self::Off
+    }
+}
+
+const fn hundred() -> u32 {
+    100
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde's signature")]
+const fn is_hundred(value: &u32) -> bool {
+    *value == 100
+}
+
+const fn sixteen() -> u32 {
+    16
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde's signature")]
+const fn is_sixteen(value: &u32) -> bool {
+    *value == 16
+}
+
+const fn one_hundredth() -> f32 {
+    0.01
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde's signature")]
+fn is_one_hundredth(value: &f32) -> bool {
+    NoiseThreshold::from_f32(*value) == NoiseThreshold::default()
 }
 
 /// A render pass (version 5, step 16.6).
@@ -1009,6 +1069,11 @@ impl RenderDto {
             segments,
             passes,
             png_passes,
+            adaptive,
+            min_samples,
+            noise_threshold,
+            denoise,
+            denoise_strength,
         } = *settings;
         Some(Self {
             width,
@@ -1044,6 +1109,15 @@ impl RenderDto {
                 PngPasses::BeautyOnly => PngPassesDto::BeautyOnly,
                 PngPasses::OneFilePerPass => PngPassesDto::OneFilePerPass,
             },
+            adaptive,
+            min_samples,
+            noise_threshold: noise_threshold.get(),
+            denoise: match denoise {
+                Denoise::Off => DenoiseDto::Off,
+                Denoise::Final => DenoiseDto::Final,
+                Denoise::FinalAndView => DenoiseDto::FinalAndView,
+            },
+            denoise_strength,
         })
     }
 
@@ -1082,6 +1156,15 @@ impl RenderDto {
                 PngPassesDto::BeautyOnly => PngPasses::BeautyOnly,
                 PngPassesDto::OneFilePerPass => PngPasses::OneFilePerPass,
             },
+            adaptive: self.adaptive,
+            min_samples: self.min_samples,
+            noise_threshold: NoiseThreshold::from_f32(self.noise_threshold),
+            denoise: match self.denoise {
+                DenoiseDto::Off => Denoise::Off,
+                DenoiseDto::Final => Denoise::Final,
+                DenoiseDto::FinalAndView => Denoise::FinalAndView,
+            },
+            denoise_strength: self.denoise_strength,
         }
         .validated()
     }
@@ -6845,6 +6928,11 @@ mod tests {
                 .into_iter()
                 .collect(),
             png_passes: PngPasses::OneFilePerPass,
+            adaptive: true,
+            min_samples: 8,
+            noise_threshold: NoiseThreshold::from_thousandths(25),
+            denoise: Denoise::FinalAndView,
+            denoise_strength: 70,
         };
         assert_eq!(round_trip(&doc).render, doc.render);
         doc.render.frames = FrameRange::All;

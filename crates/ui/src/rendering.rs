@@ -26,7 +26,7 @@ use grid4d_raytrace::{
 };
 use grid4d_render::OrbitCamera;
 use grid4d_scene::{
-    Document, ImageFormat, Lens, NodeId, ObjectKind, ObjectKindTag, Pass, Passes, RenderSettings, Scene,
+    Denoise, Document, ImageFormat, Lens, NodeId, ObjectKind, ObjectKindTag, Pass, Passes, RenderSettings, Scene,
 };
 use grid4d_sim::Replay;
 
@@ -133,6 +133,9 @@ pub struct Picture {
     pub passes: Vec<grid4d_raytrace::PassLayer>,
     /// The pass shown instead of the picture (an index into `passes`).
     pub pass: Option<usize>,
+    /// With adaptive sampling: the samples a pixel got on average, and the
+    /// share of pixels (0…1) that got every sample.
+    pub sampling: Option<(f32, f32)>,
 }
 
 impl Picture {
@@ -178,6 +181,7 @@ enum Update {
         rgb: Vec<u8>,
         samples: u32,
         frame: i32,
+        sampling: Option<(f32, f32)>,
     },
     /// Every sample of `frame` is in.
     Frame {
@@ -307,6 +311,7 @@ impl Job {
             replay,
             segments,
             passes,
+            denoising,
         } = look;
         let control = Arc::new(RenderControl::default());
         let (sender, updates) = mpsc::channel();
@@ -321,20 +326,30 @@ impl Job {
                     frames: &frames,
                     eye,
                 };
-                work(&input, &options, (segments, passes), replay, &worker_control, &sender);
+                work(
+                    &input,
+                    &options,
+                    (segments, passes, denoising),
+                    replay,
+                    &worker_control,
+                    &sender,
+                );
             });
         if let Err(err) = spawned {
             log::error!("could not start the render thread: {err}");
             return None;
         }
-        let rows = options.height.clamp(1, RenderSettings::MAX_SIZE);
+        // Progress counts pixels × samples (adaptive sampling credits a
+        // pixel's remaining samples when it stops).
+        let rows = u64::from(options.height.clamp(1, RenderSettings::MAX_SIZE))
+            * u64::from(options.width.clamp(1, RenderSettings::MAX_SIZE));
         let samples = options.samples.clamp(1, RenderSettings::MAX_SAMPLES);
         Some(Self {
             number,
             control,
             updates,
             started: Instant::now(),
-            total: u64::from(rows) * u64::from(samples) * count,
+            total: rows * u64::from(samples) * count,
         })
     }
 
@@ -360,8 +375,10 @@ impl Job {
                     rgb,
                     samples,
                     frame,
+                    sampling,
                 } => {
                     (picture.rgba, picture.rgb, picture.samples, picture.frame) = (rgba, rgb, samples, frame);
+                    picture.sampling = sampling;
                     picture.version += 1;
                     changed = true;
                 }
@@ -373,9 +390,15 @@ impl Job {
                 } => {
                     picture.frames_done += 1;
                     // The frame's passes for the viewer (a new texture only
-                    // when they show something new).
-                    if picture.passes != image.passes {
-                        picture.passes.clone_from(&image.passes);
+                    // when they show something new), with adaptive sampling
+                    // the samples each pixel got.
+                    let mut passes = image.passes.clone();
+                    if !image.sample_counts.is_empty() {
+                        passes.push(grid4d_raytrace::PassLayer::samples(&image.sample_counts));
+                        picture.sampling = sampling_of(&image, picture.total_samples);
+                    }
+                    if picture.passes != passes {
+                        picture.passes = passes;
                         if picture.pass.is_some_and(|i| i >= picture.passes.len()) {
                             picture.pass = None;
                         }
@@ -561,6 +584,7 @@ impl Renders {
                 segments: settings.motion_blur.then_some(settings.segments),
                 // The Render View shows the picture only.
                 passes: Passes::NONE,
+                denoising: Denoising::view(&settings),
             },
         );
         let picture = Picture {
@@ -587,6 +611,7 @@ impl Renders {
             version: 0,
             passes: Vec::new(),
             pass: None,
+            sampling: None,
         };
         self.view = Some(ViewRender { key, picture, job });
     }
@@ -639,6 +664,7 @@ impl Renders {
             version: 0,
             passes: Vec::new(),
             pass: None,
+            sampling: None,
         });
         self.shown = None;
 
@@ -655,6 +681,7 @@ impl Renders {
                 replay,
                 segments: settings.motion_blur.then_some(settings.segments),
                 passes: settings.passes,
+                denoising: Denoising::render(&settings),
             },
         );
         if job.is_none() {
@@ -821,6 +848,40 @@ struct Look {
     segments: Option<u32>,
     /// The render passes gathered beside the picture.
     passes: Passes,
+    denoising: Denoising,
+}
+
+/// Which of a render's pictures are denoised, and how strongly (0…1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Denoising {
+    Off,
+    /// The finished picture.
+    Final(f32),
+    /// Every picture from 4 samples on (the Render View).
+    Live(f32),
+}
+
+impl Denoising {
+    /// A finished render's, by `settings`.
+    fn render(settings: &RenderSettings) -> Self {
+        match settings.denoise {
+            Denoise::Off => Self::Off,
+            Denoise::Final | Denoise::FinalAndView => Self::Final(strength(settings)),
+        }
+    }
+
+    /// The Render View's, by `settings`.
+    fn view(settings: &RenderSettings) -> Self {
+        match settings.denoise {
+            Denoise::Off | Denoise::Final => Self::Off,
+            Denoise::FinalAndView => Self::Live(strength(settings)),
+        }
+    }
+}
+
+/// The settings' Denoise Strength as a fraction.
+fn strength(settings: &RenderSettings) -> f32 {
+    f32::from(u16::try_from(settings.denoise_strength.min(100)).unwrap_or(100)) / 100.0
 }
 
 /// What a render worker renders: the scene, its texture pictures, its frames
@@ -867,7 +928,7 @@ fn aspect(options: &RenderOptions) -> f32 {
 fn work(
     input: &Input<'_>,
     options: &RenderOptions,
-    (segments, passes): (Option<u32>, Passes),
+    (segments, passes, denoising): (Option<u32>, Passes, Denoising),
     mut replay: Option<Replay>,
     control: &RenderControl,
     sender: &Sender<Update>,
@@ -922,6 +983,9 @@ fn work(
             ..placements[base]
         };
         let mut progressive = Progressive::with_passes(options, passes, &render_scene);
+        if denoising != Denoising::Off {
+            progressive = progressive.with_denoising();
+        }
         while !progressive.is_complete(options) {
             // 1, 1, 2, 4, … samples: a first picture at once, then fewer updates.
             let pass = progressive.samples().clamp(1, MAX_PASS);
@@ -929,18 +993,27 @@ fn work(
                 let _ = sender.send(Update::Done { stopped: true });
                 return;
             }
-            let image = progressive.image();
+            let mut image = progressive.image();
+            if let Denoising::Live(strength) = denoising
+                && progressive.samples() >= 4
+            {
+                grid4d_raytrace::denoise(&mut image, strength);
+            }
             let update = Update::Pass {
                 rgba: image.to_rgba8(),
                 rgb: image.to_rgb8(),
                 samples: progressive.samples(),
                 frame,
+                sampling: sampling_of(&image, options.samples),
             };
             if sender.send(update).is_err() {
                 return;
             }
         }
-        let image = progressive.image();
+        let mut image = progressive.image();
+        if let Denoising::Final(strength) | Denoising::Live(strength) = denoising {
+            grid4d_raytrace::denoise(&mut image, strength);
+        }
         // What the ID passes' numbers name.
         let objects = if passes.contains(Pass::ObjectId) {
             render_scene
@@ -976,6 +1049,23 @@ fn work(
         }
     }
     let _ = sender.send(Update::Done { stopped: false });
+}
+
+/// With adaptive sampling: the samples `image`'s pixels got on average, and
+/// the share that got all `total`.
+fn sampling_of(image: &Image, total: u32) -> Option<(f32, f32)> {
+    if image.sample_counts.is_empty() {
+        return None;
+    }
+    let sum: u64 = image.sample_counts.iter().map(|&n| u64::from(n)).sum();
+    let full = image.sample_counts.iter().filter(|&&n| n >= total).count();
+    // Shown to one decimal: f32 is plenty.
+    #[expect(clippy::cast_precision_loss, reason = "shown rounded")]
+    let (average, share) = (
+        sum as f32 / image.sample_counts.len() as f32,
+        full as f32 / image.sample_counts.len() as f32,
+    );
+    Some((average, share))
 }
 
 #[cfg(test)]
@@ -1045,6 +1135,31 @@ pub(crate) mod tests {
             &RenderOptions::from(&doc.render),
         );
         assert_eq!(picture.rgba, whole.to_rgba8());
+    }
+
+    #[test]
+    fn new_documents_render_adaptively_and_denoised() {
+        let mut doc = Document::with_demo_scene();
+        doc.render = RenderSettings::for_new_documents();
+        small(&mut doc, 32);
+        let mut renders = Renders::default();
+        renders.start(&doc, Pictures::new(), &OrbitCamera::default(), None, None, None);
+        let finished = wait(&mut renders);
+        let image = &finished[0].image;
+        // Denoised: the picture before kept as a pass; adaptive: counts per
+        // pixel, the empty background stopped at the minimum.
+        assert!(image.passes.iter().any(|l| l.name == "Noisy"));
+        assert_eq!(image.sample_counts.iter().min(), Some(&16));
+        let picture = renders.shown_picture().unwrap();
+        let (average, share) = picture.sampling.unwrap();
+        assert!((16.0..=32.0).contains(&average) && (0.0..=1.0).contains(&share));
+        // The viewer can show where the samples went and the picture before.
+        let names: Vec<_> = picture.passes.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["Noisy", "Samples"]);
+        // The Render View denoises only when asked.
+        assert_eq!(Denoising::view(&doc.render), Denoising::Off);
+        doc.render.denoise = Denoise::FinalAndView;
+        assert_eq!(Denoising::view(&doc.render), Denoising::Live(1.0));
     }
 
     #[test]
@@ -1236,6 +1351,7 @@ pub(crate) mod tests {
                 version: 1,
                 passes: Vec::new(),
                 pass: None,
+                sampling: None,
             });
         }
         renders.shown = Some(1);

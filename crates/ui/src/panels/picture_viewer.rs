@@ -279,6 +279,12 @@ impl PictureViewerPanel {
 /// A pass's name as the menu shows it: the pass's own label, a light
 /// group's as "Light Group: name".
 fn pass_label(name: &str) -> String {
+    if name == "Samples" {
+        return tr("Samples per Pixel").to_owned();
+    }
+    if name == "Noisy" {
+        return tr("Before Denoising").to_owned();
+    }
     if let Some(group) = name.strip_prefix("Group.") {
         let group = if group == "Default" { tr("Default") } else { group };
         return trf("Light Group: {0}", &[&group]);
@@ -362,6 +368,14 @@ fn status_line(ui: &mut Ui, renders: &Renders) {
             &seconds(picture.elapsed),
         ],
     );
+    // Adaptive sampling: how many samples the pixels took.
+    let summary = match picture.sampling {
+        Some((average, share)) => trf(
+            "{0} · {1} samples per pixel on average, {2} % got all",
+            &[&summary, &format!("{average:.1}"), &format!("{:.0}", share * 100.0)],
+        ),
+        None => summary,
+    };
     match renders.progress().filter(|&(number, _)| number == picture.number) {
         Some((_, fraction)) => {
             ui.add(

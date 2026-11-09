@@ -52,6 +52,19 @@ sampling and a denoiser, a render queue).
   the IDs' names listed in the file); with PNG each can be a file of its
   own. The Picture Viewer shows any pass of a render. Renders without
   passes come out exactly as before.
+- **Adaptive sampling** — Render Settings ▸ Sampling ▸ Adaptive spends
+  samples where the picture is still noisy: every pixel gets Minimum
+  Samples, then pixels whose noise is below the Noise Threshold stop and
+  the rest get more, up to Samples. On for new documents (with up to 128
+  samples); documents from earlier versions keep it off. The Picture
+  Viewer shows the samples per pixel on average and as a map.
+- **Denoiser** — Render Settings ▸ Sampling ▸ Denoise cleans finished
+  renders of the noise that is left (and, if asked, the Render View),
+  guided by each pixel's surface colour, direction and distance so edges,
+  textures and shadows stay; Denoise Strength blends it with the original.
+  On for new documents; the picture before denoising is kept as a pass.
+- **Faster renders** — the renderer's ray-casting hierarchy is built by the
+  surface-area heuristic: the same pictures 20 – 40 % sooner.
 - **Merge** — an Environment's picture, lights' links and cameras' focus
   objects survive merging.
 - **Renders** — lights that are sampled directly (glowing surfaces, area
