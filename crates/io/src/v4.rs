@@ -85,6 +85,11 @@ const ADDED: &[Added] = &[
             "denoise_strength",
         ],
     },
+    // Step 16.8: the render region.
+    Added {
+        place: Place::Render,
+        fields: &["region", "region_final"],
+    },
     Added {
         place: Place::Kind("camera"),
         fields: &["lens"],

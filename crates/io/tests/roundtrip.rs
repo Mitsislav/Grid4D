@@ -337,6 +337,7 @@ proptest! {
         passes in (0u32..1 << 15, any::<bool>()),
         adaptive in prop::option::of((1u32..4097, 1u32..501)),
         denoise in (0usize..3, 0u32..101),
+        region in prop::option::of((0u16..5000, 0u16..5000, 5001u16..10001, 5001u16..10001, any::<bool>())),
         lens in prop::option::of((any::<bool>(), 1.0f32..5000.0, 0.5f32..64.0, 0u32..17, -6.0f32..6.0, 0.0f32..2.0, 0usize..3, any::<bool>())),
     ) {
         let mut doc = document(objects, Vec::new(), Vec::new());
@@ -385,6 +386,11 @@ proptest! {
             doc.render.noise_threshold = grid4d_scene::NoiseThreshold::from_thousandths(threshold);
         }
         (doc.render.denoise, doc.render.denoise_strength) = (grid4d_scene::Denoise::ALL[denoise.0], denoise.1);
+        // Step 16.8: the render region.
+        if let Some((left, top, right, bottom, last)) = region {
+            doc.render.region = grid4d_scene::RenderRegion::new(left, top, right, bottom);
+            doc.render.region_final = last;
+        }
         if let Some((dof, focus_distance, f_stop, blades, blade_rotation, shutter, position, focused)) = lens {
             let focus_object = doc.scene.iter().map(|(id, _)| id).next().filter(|_| focused);
             doc.scene.insert(Node::new(
@@ -461,6 +467,7 @@ proptest! {
             (expected.adaptive, expected.min_samples, expected.noise_threshold) =
                 (false, 16, grid4d_scene::NoiseThreshold::default());
             (expected.denoise, expected.denoise_strength) = (grid4d_scene::Denoise::Off, 100);
+            (expected.region, expected.region_final) = (None, false);
             let as_v4 = as_v4.unwrap();
             prop_assert_eq!(&as_v4.render, &expected);
             // Lights light everything, in no group; cameras are pinholes.

@@ -509,6 +509,40 @@ fn light_linking_picture() {
     save(&mut h, &dir, "light-linking");
 }
 
+/// The manual's picture of the render region: the demo scene with a region
+/// over part of the view, rendered there by the Render View:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored render_region_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn render_region_picture() {
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::with_demo_scene();
+    doc.render.region = grid4d_scene::RenderRegion::new(2600, 3000, 6400, 7400);
+    doc.render.samples = 32;
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    h.run_steps(4);
+    h.state_mut().editor.commands.push(grid4d_ui::EditorCommand::RenderView);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        h.run_steps(1);
+        let done = h
+            .state()
+            .editor
+            .renders
+            .view_render()
+            .is_some_and(|view| view.progress().is_none() && view.picture.has_pixels());
+        if done || std::time::Instant::now() > deadline {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "render-region");
+}
+
 /// The manual's picture of the Texture Manager: a few pictures (one embedded,
 /// one missing), in the Animate layout where the bottom pane is tall:
 ///

@@ -66,6 +66,38 @@ pub struct RenderOptions {
     /// Samples where the picture is still noisy only, up to `samples`;
     /// `None`: every pixel gets `samples`.
     pub adaptive: Option<Adaptive>,
+    /// Only the pixels from (`x0`, `y0`) up to, not including, (`x1`, `y1`)
+    /// are rendered; the rest stay transparent. `None`: all.
+    pub region: Option<[u32; 4]>,
+}
+
+impl RenderOptions {
+    /// The picture's size, as rendered (kept in range).
+    #[must_use]
+    pub fn size(&self) -> (u32, u32) {
+        (self.width.clamp(1, MAX_SIZE), self.height.clamp(1, MAX_SIZE))
+    }
+
+    /// The pixels rendered: the region inside the picture, else all of
+    /// them (first column and row, one past the last).
+    #[must_use]
+    pub fn rendered(&self) -> [u32; 4] {
+        let (w, h) = self.size();
+        match self.region {
+            Some([x0, y0, x1, y1]) => {
+                let (x0, y0) = (x0.min(w - 1), y0.min(h - 1));
+                [x0, y0, x1.clamp(x0 + 1, w), y1.clamp(y0 + 1, h)]
+            }
+            None => [0, 0, w, h],
+        }
+    }
+
+    /// How many pixels are rendered (a render's work is this × samples).
+    #[must_use]
+    pub fn pixel_count(&self) -> u64 {
+        let [x0, y0, x1, y1] = self.rendered();
+        u64::from(x1 - x0) * u64::from(y1 - y0)
+    }
 }
 
 impl Default for RenderOptions {
@@ -80,6 +112,7 @@ impl Default for RenderOptions {
             clamp_indirect: true,
             emissive_lights: true,
             adaptive: None,
+            region: None,
         }
     }
 }
@@ -100,6 +133,11 @@ impl From<&RenderSettings> for RenderOptions {
                 min_samples: settings.min_samples,
                 threshold: settings.noise_threshold.get(),
             }),
+            // Final renders: only with Use for Final Render.
+            region: settings
+                .region
+                .filter(|_| settings.region_final)
+                .map(|region| region.pixels(settings.width, settings.height)),
         }
     }
 }
@@ -170,6 +208,8 @@ pub struct Progressive {
     requested: grid4d_scene::Passes,
     /// The denoiser's guides are gathered.
     guided: bool,
+    /// The pixels rendered (see [`RenderOptions::rendered`]).
+    region: [u32; 4],
 }
 
 /// A pixel's adaptive sampling.
@@ -210,6 +250,15 @@ impl Progressive {
         let count = usize::try_from(u64::from(width) * u64::from(height)).unwrap_or(0);
         let rows = usize::try_from(height).unwrap_or(0);
         let adaptive = options.adaptive;
+        let region = options.rendered();
+        let [x0, y0, x1, y1] = region;
+        let inside = |i: usize| {
+            let (x, y) = (
+                u32::try_from(i % usize::try_from(width).unwrap_or(1)).unwrap_or(0),
+                u32::try_from(i / usize::try_from(width).unwrap_or(1)).unwrap_or(0),
+            );
+            (x0..x1).contains(&x) && (y0..y1).contains(&y)
+        };
         Self {
             width,
             height,
@@ -220,19 +269,19 @@ impl Progressive {
             groups: Vec::new(),
             adaptive,
             states: if adaptive.is_some() {
-                vec![
-                    PixelState {
-                        active: true,
+                (0..count)
+                    .map(|i| PixelState {
+                        active: inside(i),
                         ..PixelState::default()
-                    };
-                    count
-                ]
+                    })
+                    .collect()
             } else {
                 vec![PixelState::default(); rows]
             },
-            active: count,
+            active: usize::try_from(options.pixel_count()).unwrap_or(count),
             requested: grid4d_scene::Passes::NONE,
             guided: false,
+            region,
         }
     }
 
@@ -258,13 +307,15 @@ impl Progressive {
             self.extra = vec![0.0; row * usize::try_from(self.height).unwrap_or(0)];
         }
         if self.adaptive.is_none() {
-            self.states = vec![
-                PixelState {
-                    active: true,
+            let width = usize::try_from(self.width).unwrap_or(1);
+            let [x0, y0, x1, y1] = self.region;
+            self.states = (0..self.sums.len())
+                .map(|i| PixelState {
+                    active: u32::try_from(i % width).is_ok_and(|x| (x0..x1).contains(&x))
+                        && u32::try_from(i / width).is_ok_and(|y| (y0..y1).contains(&y)),
                     ..PixelState::default()
-                };
-                self.sums.len()
-            ];
+                })
+                .collect();
         }
         self.guided = true;
         self
@@ -376,17 +427,21 @@ impl Progressive {
         let adaptive = self.per_pixel();
         let state_row = if adaptive { row_length } else { 1 };
         let pass = u64::from(range.end - range.start);
+        let [x0, y0, x1, y1] = self.region;
         self.sums
             .par_chunks_mut(row_length)
             .zip(self.extra.par_chunks_mut(extra_row))
             .zip(self.states.par_chunks_mut(state_row))
             .zip(0..self.height)
             .for_each(|(((row, extra), states), y)| {
-                if control.is_cancelled() {
+                if control.is_cancelled() || !(y0..y1).contains(&y) {
                     return;
                 }
                 let mut sampled = 0u64;
                 for (i, (sum, x)) in row.iter_mut().zip(0..self.width).enumerate() {
+                    if !(x0..x1).contains(&x) {
+                        continue;
+                    }
                     let state = if adaptive { states.get_mut(i) } else { None };
                     if state.as_ref().is_some_and(|s| !s.active) {
                         continue;
@@ -1227,6 +1282,7 @@ mod tests {
             clamp_indirect: true,
             emissive_lights: true,
             adaptive: None,
+            region: None,
         }
     }
 
@@ -1675,6 +1731,7 @@ mod tests {
                 clamp_indirect: false,
                 emissive_lights: false,
                 adaptive: None,
+                region: None,
             }
         );
         let defaults = RenderOptions::from(&RenderSettings::default());
@@ -1801,6 +1858,51 @@ mod tests {
             .unwrap()
             .install(|| render(&scene, &top_camera(), &options));
         assert_eq!(single, whole, "one thread or many");
+    }
+
+    #[test]
+    fn a_region_renders_its_pixels_as_the_whole_picture_does() {
+        let doc = floor_scene(LightShadow::Raytraced);
+        let scene = scene_of(&doc);
+        for adaptive in [None, adaptive(32).adaptive] {
+            let whole_options = RenderOptions {
+                adaptive,
+                ..options(32, 16, 1)
+            };
+            let whole = render(&scene, &top_camera(), &whole_options);
+            let options = RenderOptions {
+                region: Some([5, 8, 20, 30]),
+                ..whole_options
+            };
+            assert_eq!(options.pixel_count(), 15 * 22);
+            let control = RenderControl::default();
+            let mut progressive = Progressive::new(&options);
+            progressive.add_samples(&scene, &top_camera(), &options, u32::MAX, &control);
+            let part = progressive.image();
+            for y in 0..32 {
+                for x in 0..32 {
+                    let i = y * 32 + x;
+                    // Adaptive decisions look at neighbours, which differ at
+                    // the region's edge: there only the samples are the same.
+                    if (5..20).contains(&x) && (8..30).contains(&y) {
+                        if adaptive.is_none() {
+                            assert_eq!(part.pixels[i], whole.pixels[i], "({x}, {y}) inside");
+                        } else {
+                            assert!(part.sample_counts[i] >= 8, "({x}, {y}) inside");
+                        }
+                    } else {
+                        assert_eq!(part.pixels[i], [0.0; 4], "({x}, {y}) outside");
+                    }
+                }
+            }
+            assert_eq!(control.progress(), 15 * 22 * 16, "only the region's work");
+        }
+        // A region past the picture is cut to it.
+        let options = RenderOptions {
+            region: Some([30, 30, 99, 99]),
+            ..options(32, 1, 0)
+        };
+        assert_eq!(options.rendered(), [30, 30, 32, 32]);
     }
 
     #[test]

@@ -10,6 +10,7 @@ mod join_tools;
 mod mesh_tools;
 mod overlay;
 mod pen_tool;
+mod render_region;
 mod select_tools;
 mod snapping;
 mod spline_tools;
@@ -261,6 +262,8 @@ pub struct ViewportPanel {
     pen: pen_tool::PenState,
     /// A deformer's strength handle being dragged.
     deformer_drag: Option<deformer_tools::DeformerDrag>,
+    /// The render region being drawn or reshaped.
+    region_drag: Option<render_region::RegionDrag>,
     /// View ▸ Frame Time: how long frames and their parts take.
     times: frame_time::FrameTimes,
 }
@@ -328,6 +331,7 @@ impl ViewportPanel {
             point_stroke: None,
             pen: pen_tool::PenState::default(),
             deformer_drag: None,
+            region_drag: None,
             times: frame_time::FrameTimes::default(),
         }
     }
@@ -684,8 +688,11 @@ impl ViewportPanel {
         let keying = crate::keys::Keying::of(doc, editor);
         let mut gizmo_geo = GizmoGeometry::new(&doc.scene, editor, &self.camera, rect, keying.frame);
         self.snap_hit = None;
-        // A deformer's handle comes before the gizmo: it may sit on an arrow.
-        let handle_owns_pointer = !navigating && self.deformer_handle_drag(ui, &response, rect, doc, editor);
+        // The render region's frame, then a deformer's handle come before
+        // the gizmo: they may sit on an arrow.
+        let handle_owns_pointer = !navigating
+            && (self.render_region_drag(ui, &response, rect, doc, editor)
+                || self.deformer_handle_drag(ui, &response, rect, doc, editor));
         let gizmo_owns_pointer = if navigating || handle_owns_pointer {
             handle_owns_pointer
         } else {
@@ -821,7 +828,7 @@ impl ViewportPanel {
                 egui::Color32::WHITE,
             );
             if interactive {
-                self.paint_render_view(ui, painter, rect, editor);
+                self.paint_render_view(ui, painter, rect, editor, doc.render.region);
             }
         } else {
             painter.text(
@@ -843,6 +850,7 @@ impl ViewportPanel {
         if interactive {
             self.paint_pen(painter, rect, doc, editor);
             self.paint_deformer_handle(painter, rect, doc, editor);
+            self.paint_render_region(painter, rect, doc);
         }
         overlay::view_label(painter, rect, &label);
         if editor.animation.autokey {
@@ -967,7 +975,14 @@ impl ViewportPanel {
     /// Viewport header with C4D's menu set and the navigation drag-icons.
     /// The Render View over the active view: its picture (over black, without
     /// the grid), and a line saying how far it is.
-    fn paint_render_view(&mut self, ui: &Ui, painter: &egui::Painter, rect: Rect, editor: &EditorState) {
+    fn paint_render_view(
+        &mut self,
+        ui: &Ui,
+        painter: &egui::Painter,
+        rect: Rect,
+        editor: &EditorState,
+        doc_region: Option<grid4d_scene::RenderRegion>,
+    ) {
         let Some(view) = editor.renders.view_render() else {
             self.render_view = None;
             return;
@@ -1002,12 +1017,19 @@ impl ViewportPanel {
                 }
             }
             if let Some(cached) = &self.render_view {
-                painter.image(
-                    cached.texture.id(),
-                    rect,
-                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
+                // With a render region only its part was rendered: the rest
+                // of the view stays the editor's drawing.
+                let (shown, uv) = match doc_region {
+                    Some(region) => {
+                        let [l, t, r, b] = region.fractions();
+                        (
+                            render_region::screen_rect(rect, region),
+                            Rect::from_min_max(pos2(l, t), pos2(r, b)),
+                        )
+                    }
+                    None => (rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))),
+                };
+                painter.image(cached.texture.id(), shown, uv, egui::Color32::WHITE);
             }
         }
         let seconds = picture.elapsed.as_secs_f32();
@@ -3328,6 +3350,65 @@ mod tests {
         h.editor.selection.set_single(extrude);
         h.viewport.frame_selection(&h.doc.scene, &h.editor.selection);
         assert!(h.viewport.camera().target.x > 2000.0);
+    }
+
+    #[test]
+    fn a_render_region_is_drawn_and_reshaped_one_undo_step_each() {
+        let mut h = Harness::new();
+        h.frame(vec![]);
+        let rect = h.viewport.view_rect;
+        let at = |x: f32, y: f32| pos2(rect.left() + x * rect.width(), rect.top() + y * rect.height());
+        let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 0.01);
+        let (steps, cube) = (h.editor.history.undo_len(), h.doc.scene.roots()[0]);
+        let place = h.position(cube);
+        h.editor.commands.push(EditorCommand::DrawRenderRegion);
+        h.frame(vec![]);
+        assert!(h.editor.drawing_region);
+        // Drawn over the selected cube: the gizmo does not take the drag.
+        h.drag(at(0.6, 0.8), at(0.2, 0.3));
+        let region = h.doc.render.region.expect("a region");
+        assert!(
+            near(region.fractions(), [0.2, 0.3, 0.6, 0.8]),
+            "{:?}",
+            region.fractions()
+        );
+        assert!(!h.editor.drawing_region, "one region per Render Region");
+        assert_eq!(h.position(cube), place);
+        assert_eq!(h.editor.history.undo_len(), steps + 1);
+        assert_eq!(h.editor.history.undo_label(), Some("Render Region"));
+        // Its right edge dragged further right.
+        h.drag(at(0.6, 0.5), at(0.9, 0.5));
+        let region = h.doc.render.region.unwrap();
+        assert!(
+            near(region.fractions(), [0.2, 0.3, 0.9, 0.8]),
+            "{:?}",
+            region.fractions()
+        );
+        assert_eq!(h.editor.history.undo_len(), steps + 2);
+        // Undo goes back one drag at a time; Clear is a step of its own.
+        h.editor.commands.push(EditorCommand::Undo);
+        h.frame(vec![]);
+        assert!(near(h.doc.render.region.unwrap().fractions(), [0.2, 0.3, 0.6, 0.8]));
+        h.editor.commands.push(EditorCommand::ClearRenderRegion);
+        h.frame(vec![]);
+        assert_eq!(h.doc.render.region, None);
+        h.editor.commands.push(EditorCommand::Undo);
+        h.frame(vec![]);
+        assert!(h.doc.render.region.is_some());
+        // Esc during a drag puts it back.
+        h.frame(vec![Event::PointerMoved(at(0.2, 0.55))]);
+        h.frame(vec![Harness::button(at(0.2, 0.55), true)]);
+        h.frame(vec![Event::PointerMoved(at(0.05, 0.55))]);
+        h.frame(vec![Event::PointerMoved(at(0.02, 0.55))]);
+        h.frame(vec![Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }]);
+        h.frame(vec![Harness::button(at(0.02, 0.55), false)]);
+        assert!(near(h.doc.render.region.unwrap().fractions(), [0.2, 0.3, 0.6, 0.8]));
     }
 
     #[test]

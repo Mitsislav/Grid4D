@@ -347,6 +347,7 @@ fn options(scene: &Scene, width: u32, height: u32, samples: u32, seed: u32) -> R
         clamp_indirect: true,
         emissive_lights: true,
         adaptive: None,
+        region: None,
     }
 }
 

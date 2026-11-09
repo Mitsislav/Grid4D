@@ -63,6 +63,10 @@ sampling and a denoiser, a render queue).
   guided by each pixel's surface colour, direction and distance so edges,
   textures and shadows stay; Denoise Strength blends it with the original.
   On for new documents; the picture before denoising is kept as a pass.
+- **Render region** — Render ▸ Render Region: drag a rectangle in the
+  view and the Render View renders only inside it; drag its edges to
+  change it. Saved with the document; with Use for Final Render, final
+  renders render only the region too.
 - **Faster renders** — the renderer's ray-casting hierarchy is built by the
   surface-area heuristic: the same pictures 20 – 40 % sooner.
 - **Merge** — an Environment's picture, lights' links and cameras' focus

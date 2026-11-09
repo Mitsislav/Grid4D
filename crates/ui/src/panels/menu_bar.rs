@@ -489,6 +489,23 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 EditorCommand::RenderToPictureViewer,
             );
             ui.separator();
+            let region = Button::new(tr("Render Region")).selected(editor.drawing_region);
+            if ui
+                .add(region)
+                .on_hover_text(tr("Drag a rectangle in the active view: only it is rendered"))
+                .clicked()
+            {
+                editor.commands.push(EditorCommand::DrawRenderRegion);
+                ui.close();
+            }
+            if ui
+                .add_enabled(doc.render.region.is_some(), Button::new(tr("Clear Render Region")))
+                .clicked()
+            {
+                editor.commands.push(EditorCommand::ClearRenderRegion);
+                ui.close();
+            }
+            ui.separator();
             let settings = Button::new(tr("Edit Render Settings…"))
                 .shortcut_text("Ctrl+B")
                 .selected(editor.show_render_settings);

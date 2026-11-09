@@ -143,7 +143,7 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
         _ => SelectMode::Remove,
     };
 
-    match rng.below(53) {
+    match rng.below(54) {
         0..=2 => EditorCommand::CreateObject(tag(rng)),
         3 => EditorCommand::CreateObject(ObjectKindTag::Cube),
         4 => EditorCommand::CreateChild(tag(rng)),
@@ -446,6 +446,23 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
                 _ => {
                     EditorCommand::AddTextureFiles(vec![std::path::PathBuf::from(format!("maps/{}.png", rng.below(5)))])
                 }
+            }
+        }
+        // The render region: drawn in the view (written live, one step), or
+        // cleared from the Render menu.
+        52 => {
+            if rng.below(2) == 0 {
+                let before = doc.render.clone();
+                let corner = |rng: &mut Rng| [rng.range(0.0, 1.0), rng.range(0.0, 1.0)];
+                let (a, b) = (corner(rng), corner(rng));
+                doc.render.region = grid4d_scene::RenderRegion::from_fractions(a, b);
+                doc.render.region_final = rng.below(2) == 0;
+                EditorCommand::CommitLive {
+                    inverse: SceneEdit::SetRender(before),
+                    label: "Render Region",
+                }
+            } else {
+                EditorCommand::ClearRenderRegion
             }
         }
         47 => EditorCommand::Undo,

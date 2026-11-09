@@ -260,6 +260,25 @@ fn output_page(ui: &mut Ui, s: &mut RenderSettings, time: &TimeState, ratio: (u3
             attr_label(ui, "Aspect", LABEL_WIDTH);
             ui.label(RichText::new(aspect_text(s.width, s.height)).color(p().text_dim));
             ui.end_row();
+            // The render region, drawn in the view (Render ▸ Render Region).
+            attr_label(ui, "Render Region", LABEL_WIDTH);
+            let text = s.region.map_or_else(
+                || tr("None (Render › Render Region draws one)").to_owned(),
+                |region| {
+                    let [x0, y0, x1, y1] = region.pixels(s.width, s.height);
+                    trf("{0} × {1} px", &[&(x1 - x0), &(y1 - y0)])
+                },
+            );
+            ui.label(RichText::new(text).color(p().text_dim));
+            ui.end_row();
+            if s.region.is_some() {
+                check(
+                    ui,
+                    key("Use for Final Render"),
+                    &mut s.region_final,
+                    key("Render to Picture Viewer renders only the region too (the rest transparent)"),
+                );
+            }
         });
 
     section_heading(ui, "Frames");

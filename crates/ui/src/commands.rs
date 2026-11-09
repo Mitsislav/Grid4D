@@ -125,6 +125,11 @@ pub enum EditorCommand {
     RenderView,
     /// Stops the running render, keeping what it rendered.
     StopRender,
+    /// Render ▸ Render Region: the next drag in the active view draws the
+    /// render region (again: no longer).
+    DrawRenderRegion,
+    /// Render ▸ Clear Render Region (one undo step).
+    ClearRenderRegion,
     /// Asks where, then saves the picture the Picture Viewer shows as PNG.
     SaveRenderAs,
     /// Adds `tag` (a kind's default, or a preset such as Collider Body) to
@@ -529,6 +534,23 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
         EditorCommand::BakeSimulation => editor.simulation.bake(doc),
         EditorCommand::ClearSimulation => editor.simulation.clear(),
         EditorCommand::StopRender => editor.renders.stop(),
+        EditorCommand::DrawRenderRegion => editor.drawing_region = !editor.drawing_region,
+        EditorCommand::ClearRenderRegion => {
+            if doc.render.region.is_some() {
+                let settings = grid4d_scene::RenderSettings {
+                    region: None,
+                    ..doc.render.clone()
+                };
+                commit(
+                    doc,
+                    editor,
+                    "Clear Render Region",
+                    vec![SceneEdit::SetRender(settings)],
+                    |_, _| {},
+                );
+            }
+            editor.drawing_region = false;
+        }
         EditorCommand::SaveRenderAs => file::save_render_as(doc, editor),
         EditorCommand::SplineCommand(op) => spline_command(doc, editor, op),
         EditorCommand::PenPoint { position, tangent } => pen_point(doc, editor, position, tangent),

@@ -817,6 +817,9 @@ pub struct EditorState {
     pub scripts: crate::scripts::Scripts,
     /// The Render Settings window is open (Ctrl+B).
     pub show_render_settings: bool,
+    /// Render ▸ Render Region: the next drag in the active view draws the
+    /// render region.
+    pub drawing_region: bool,
     /// The session's renders and the Picture Viewer (Shift+R).
     pub renders: crate::rendering::Renders,
     /// The rigid body simulation and its cache.
@@ -896,6 +899,7 @@ impl Default for EditorState {
             autosave: crate::autosave::Autosave::default(),
             crash: crate::crash::CrashReports::default(),
             object_drag: None,
+            drawing_region: false,
         }
     }
 }

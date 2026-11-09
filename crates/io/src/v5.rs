@@ -35,8 +35,8 @@ use grid4d_geom::{
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
 use grid4d_scene::{
-    AreaShape, Denoise, Environment, Lens, LinkMode, Linking, NoiseThreshold, Pass, PngPasses, ShutterPosition, Sky,
-    SunPlacement,
+    AreaShape, Denoise, Environment, Lens, LinkMode, Linking, NoiseThreshold, Pass, PngPasses, RenderRegion,
+    ShutterPosition, Sky, SunPlacement,
 };
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
@@ -856,6 +856,13 @@ struct RenderDto {
     /// Added in version 5 (step 16.7): 100 (percent) when absent.
     #[serde(default = "hundred", skip_serializing_if = "is_hundred")]
     denoise_strength: u32,
+    /// Added in version 5 (step 16.8): the render region as [left, top,
+    /// right, bottom] fractions of the picture; none when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    region: Option<[f32; 4]>,
+    /// Added in version 5 (step 16.8): off when absent.
+    #[serde(default, skip_serializing_if = "is_false")]
+    region_final: bool,
 }
 
 /// Which pictures are denoised (version 5, step 16.7).
@@ -1074,6 +1081,8 @@ impl RenderDto {
             noise_threshold,
             denoise,
             denoise_strength,
+            region,
+            region_final,
         } = *settings;
         Some(Self {
             width,
@@ -1118,6 +1127,8 @@ impl RenderDto {
                 Denoise::FinalAndView => DenoiseDto::FinalAndView,
             },
             denoise_strength,
+            region: region.map(RenderRegion::fractions),
+            region_final,
         })
     }
 
@@ -1165,6 +1176,10 @@ impl RenderDto {
                 DenoiseDto::FinalAndView => Denoise::FinalAndView,
             },
             denoise_strength: self.denoise_strength,
+            region: self
+                .region
+                .and_then(|[left, top, right, bottom]| RenderRegion::from_fractions([left, top], [right, bottom])),
+            region_final: self.region_final,
         }
         .validated()
     }
@@ -6933,6 +6948,8 @@ mod tests {
             noise_threshold: NoiseThreshold::from_thousandths(25),
             denoise: Denoise::FinalAndView,
             denoise_strength: 70,
+            region: RenderRegion::new(2500, 1000, 7500, 9000),
+            region_final: true,
         };
         assert_eq!(round_trip(&doc).render, doc.render);
         doc.render.frames = FrameRange::All;

@@ -341,15 +341,14 @@ impl Job {
         }
         // Progress counts pixels × samples (adaptive sampling credits a
         // pixel's remaining samples when it stops).
-        let rows = u64::from(options.height.clamp(1, RenderSettings::MAX_SIZE))
-            * u64::from(options.width.clamp(1, RenderSettings::MAX_SIZE));
+        let pixels = options.pixel_count();
         let samples = options.samples.clamp(1, RenderSettings::MAX_SAMPLES);
         Some(Self {
             number,
             control,
             updates,
             started: Instant::now(),
-            total: rows * u64::from(samples) * count,
+            total: pixels * u64::from(samples) * count,
         })
     }
 
@@ -565,9 +564,11 @@ impl Renders {
     ) {
         self.view = None;
         let settings = doc.render.clone().validated();
+        // The Render View renders the render region whenever there is one.
         let options = RenderOptions {
             width: key.size[0],
             height: key.size[1],
+            region: settings.region.map(|region| region.pixels(key.size[0], key.size[1])),
             ..RenderOptions::from(&settings)
         };
         let job = Job::spawn(
@@ -1057,14 +1058,15 @@ fn sampling_of(image: &Image, total: u32) -> Option<(f32, f32)> {
     if image.sample_counts.is_empty() {
         return None;
     }
-    let sum: u64 = image.sample_counts.iter().map(|&n| u64::from(n)).sum();
-    let full = image.sample_counts.iter().filter(|&&n| n >= total).count();
+    // Pixels outside a render region got none.
+    let rendered = image.sample_counts.iter().filter(|&&n| n > 0);
+    let (pixels, sum) = rendered
+        .clone()
+        .fold((0u64, 0u64), |(p, s), &n| (p + 1, s + u64::from(n)));
+    let full = rendered.filter(|&&n| n >= total).count();
     // Shown to one decimal: f32 is plenty.
     #[expect(clippy::cast_precision_loss, reason = "shown rounded")]
-    let (average, share) = (
-        sum as f32 / image.sample_counts.len() as f32,
-        full as f32 / image.sample_counts.len() as f32,
-    );
+    let (average, share) = (sum as f32 / pixels.max(1) as f32, full as f32 / pixels.max(1) as f32);
     Some((average, share))
 }
 
@@ -1135,6 +1137,26 @@ pub(crate) mod tests {
             &RenderOptions::from(&doc.render),
         );
         assert_eq!(picture.rgba, whole.to_rgba8());
+    }
+
+    #[test]
+    fn final_renders_use_the_region_only_when_asked() {
+        let mut doc = Document::with_demo_scene();
+        small(&mut doc, 2);
+        doc.render.region = grid4d_scene::RenderRegion::new(0, 0, 5000, 10_000);
+        let render = |doc: &Document| {
+            let mut renders = Renders::default();
+            renders.start(doc, Pictures::new(), &OrbitCamera::default(), None, None, None);
+            wait(&mut renders).remove(0).image
+        };
+        // Off: the whole picture (the scene's right half too).
+        let whole = render(&doc);
+        let right = |image: &Image| image.pixels.chunks(24).flat_map(|row| &row[12..]).any(|p| p[3] > 0.0);
+        assert!(right(&whole), "the demo scene reaches the right half");
+        doc.render.region_final = true;
+        let part = render(&doc);
+        assert!(!right(&part), "only the left half rendered");
+        assert!(part.pixels.iter().any(|p| p[3] > 0.0));
     }
 
     #[test]

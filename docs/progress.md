@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 16 — Render quality (v1.2): in progress |
-| Last step done | 16.7 — adaptive sampling (16.7a: pixels stop once clean; the surface-area BVH for renders) and the denoiser (16.7b: an à-trous filter guided by albedo, normal, depth and noise) (2026-11-09) |
-| Next step | 16.8 — the render queue and region render |
-| Tests | 940 (and 13 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling and denoiser render pictures), all passing; clippy and rustfmt clean |
+| Last step done | 16.8a — the render region: drawn and reshaped in the active view, one undo step each; the Render View renders only inside it, final renders with Use for Final Render (2026-11-09) |
+| Next step | 16.8b — the Render Queue |
+| Tests | 944 (and 14 ignored, run by hand: three timings, the walkthrough, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser and render region pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2740,6 +2740,7 @@ risks R5 – R8 go with it.
 | 16.6 | Render passes: `RenderSettings::passes` (a set of `Pass`) and `png_passes`; in the tracer each bounce names its lobe and each contribution goes to Emission, Background, Diffuse / Specular Direct / Indirect or Transmission and to its light group, data passes (depth, normal, position, albedo) from the first hit, Object / Material IDs by a running majority vote (`passes.rs`: a `Layout` of only the chosen passes' floats per pixel; `Progressive::with_passes`, `Image::passes`); renders without passes unchanged bit for bit; multi-channel OpenEXR (`save_exr_layers`: half and float channels, the IDs' names as string attributes; the single-layer writer goes through it unchanged); PNG One File per Pass; the Render Settings' Passes page, the Picture Viewer's Pass menu; `.g4d` v5 `passes`, `png_passes` (stripped from a version 4 file); Greek; the manual's §20.1 and §20.2 with a picture of seven passes (an ignored test renders it) | 932 |
 | 16.7a | Adaptive sampling: `RenderSettings::{adaptive, min_samples, noise_threshold}` (`NoiseThreshold` in thousandths, so settings stay hashable), `RenderOptions::adaptive`; `Progressive` keeps per pixel the odd samples' sum, its count and whether it goes on, decides at Minimum Samples and every half as many again (even counts), a pixel stopping when its noise and its neighbours' are below the threshold; progress in pixel samples; `Image::sample_counts`; renders without it unchanged; the Picture Viewer's average and Samples per Pixel map; new documents Adaptive with 128 samples; `grid4d_geom::BvhSplit` and `Bvh::build_with` (binned surface-area build, nearer child first, ties to the lower polygon, box tests with an ulp of slack) used by the renderer: 23 – 43 % faster; `.g4d` v5 `adaptive`, `min_samples`, `noise_threshold`; Greek; the budget re-measured | 940 |
 | 16.7b | The denoiser: `RenderSettings::{denoise: Denoise (Off, Final Picture, Final and Render View), denoise_strength}`; `grid4d_raytrace::denoise(&mut Image, strength)` (`denoise.rs`): five à-trous rounds (B3 kernel, holes 1 – 16), weights from normals, depth against its gradient, albedo and brightness within 4 σ of the noise (filtered along), light divided by albedo and multiplied back, background pixels untouched, lighting and group passes filtered with the picture's weights, the picture before kept as a `Noisy` pass; `Progressive::with_denoising` gathers albedo / normal / depth and each pixel's noise (`Image::guides`); renders denoise each finished frame, the Render View from 4 samples when asked; new documents Final Picture; `.g4d` v5 `denoise`, `denoise_strength`; Greek; the manual's §20.1 with a picture; the budget with the denoiser | 940 |
+| 16.8a | The render region: `RenderSettings::{region: Option<RenderRegion>, region_final}` (`RenderRegion` in ten-thousandths of the picture, `pixels(width, height)`); `RenderOptions::region` and `rendered` / `pixel_count`: `Progressive` samples only inside (inside pixels exactly those of a whole render; adaptive states inactive outside), progress counts only the region; Render ▸ Render Region / Clear Render Region (`EditorCommand::{DrawRenderRegion, ClearRenderRegion}`, `EditorState::drawing_region`); `viewport/render_region.rs`: drawn by a drag, edges and corners reshaped (cursor shows which), Esc restores, one `CommitLive` per drag, a dashed frame; the Render View draws only its region over the view; the Output page's Render Region row and Use for Final Render; `.g4d` v5 `region`, `region_final`; Greek; the manual's §20.4 with a picture (walkthrough) | 944 |
 | 16.4 | Light linking and the light-group name: `Linking { mode: Exclude / Include, objects }` and `group` on lights (`group` on the Sky and Environment too); evaluation gives each linked light a bit (the first 64) and every object and clone a mask of the linked lights that skip it (`link_lights`, allocation-free); renders skip those lights and let their shadow rays through such objects (`RenderScene::lit_by`); the viewport carries the mask in `InstanceRaw::normal`'s free `w`s (24 bits each), each light its bit (`LightRaw` 112 bytes) and the shadow pass the key light's; `.g4d` v5 `linking` (object indices) and `group` (stripped from a version 4 file); Merge keeps links and, newly, an Environment's picture; the Attribute Manager's Linking, Objects and Light Group rows; Greek; the manual's §4.1 with a picture | 912 |
 | 16.2b | Area lights: `LightType::Area` and `AreaShape` (Rectangle, Disc, Sphere, Tube) with Size X / Y (animatable as `Size . X / Y`), Visible in Render and Two-Sided in `LightDetails`; `.g4d` v5 `light_type: "area"` and an `area` object (a version 4 file with them is refused / stripped); the Attribute Manager's rows; glTF export as a wide spot or a point; in the tracer one power table for area lights and emitting triangles (`lights.rs`: `AreaLight`, `LightTable`), a Sphere sampled over the cone it fills and a Tube over its facing half, visible lights seen by camera rays and bounces with MIS, others sampled only; brightness matched to an Omni light with Inverse Square falloff at 500 cm; in the viewport the shapes as lines and an approximate light from the shape's nearest point (`LightRaw` 96 bytes); a third reference picture; Greek; the manual's §4.1 with a render | 887 |
 
@@ -2918,6 +2919,27 @@ risks R5 – R8 go with it.
 - **The Greek table's long entries, again.** New entries landed after a
   multi-line one; the table is now re-sorted by a script that reads both
   forms.
+
+**16.8a — The render region**
+
+*Problems and solutions:*
+- **Split again.** 16.8 (the Render Queue and the render region) is built
+  as 16.8a (the region) and 16.8b (the queue): they share nothing but the
+  renders.
+- **Hashable fractions.** Render settings are compared and hashed, so the
+  region is kept in ten-thousandths of the picture (0.4 pixel at 4K), not
+  as floats; a region that rounds to no area is none.
+- **The same pixels as a whole render.** Inside the region every pixel is
+  sampled exactly as in a render of the whole picture (its random numbers
+  depend only on the pixel and the sample); a test checks it pixel for
+  pixel. With adaptive sampling only the samples match at the region's
+  edge, where a pixel's neighbours outside count as clean.
+- **Before the gizmo.** A region drawn over the selected object would have
+  moved it; the region's drag is tried first, like a deformer's handle.
+- **No shortcut yet.** The plan named Alt+R; the reference names no key for
+  the region, so none is bound (the spec says so).
+- **"▸" in a label.** The built-in font has no "▸"; the Output page's hint
+  uses "›" like the rest of the interface.
 
 **16.7b — The denoiser**
 

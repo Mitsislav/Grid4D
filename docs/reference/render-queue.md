@@ -78,9 +78,13 @@ change.
 | Use for Final Render | on / off | off | Shift+R and the queue render only the region too (the rest of the picture transparent) |
 
 - **Drawing**: Render ▸ Render Region, then drag a rectangle in the active
-  view; its edges and corners can then be dragged; *Clear Render Region*
-  removes it. Shown as a dashed frame in the active view (over the render
-  camera's picture area when the view looks through a camera).
+  view; its edges and corners can then be dragged (within 6 points; the
+  cursor shows which); Esc during a drag puts it back; *Clear Render
+  Region* removes it. Shown as a dashed frame in the active view. The
+  region is kept in ten-thousandths of the view's width and height; a final
+  render takes the same fractions of its picture (our choice: the view
+  shows no picture area of its own yet, so the two match when the
+  proportions do).
 - Saved with the document (`document.render`), undoable (one step per
   drag), part of takes like other render settings.
 - The Render View renders only the region (the rest of the view stays the
@@ -119,9 +123,9 @@ change.
 | `RenderQueue`, `Job`, `JobStatus`; one worker at a time, shared with Shift+R renders | `grid4d-ui` (a new `render_queue.rs`, `rendering.rs`) |
 | The window | `grid4d-ui` (`panels/render_queue.rs`) |
 | Saving the job list in the app's storage | the binary (`src/app.rs`), like recent files |
-| `RenderSettings::{region, region_final}` | `grid4d-scene` (`render.rs`) |
-| Rendering a pixel rectangle | `grid4d-raytrace` (`Progressive` over a region) |
-| Region drawing and handles | `ui/panels/viewport/` (a `render_region.rs`) |
+| `RenderSettings::{region, region_final}` (`RenderRegion`) | `grid4d-scene` (`render.rs`) |
+| Rendering a pixel rectangle | `grid4d-raytrace` (`RenderOptions::region`; `Progressive` samples only inside; inside pixels are exactly those of a whole render) |
+| Region drawing and handles | `ui/panels/viewport/render_region.rs` (`EditorState::drawing_region`; `EditorCommand::{DrawRenderRegion, ClearRenderRegion}`) |
 | Interactive restarts, the kept picture, the scene rebuilt on the worker, camera-only restarts | `grid4d-ui` (`rendering.rs`: the view job keeps its `RenderScene`), `ViewKey` split into camera and scene parts |
 
 Deliberate differences: no Team Render or network jobs, no per-job camera or
@@ -138,7 +142,7 @@ the blocky first pass.
 - [ ] The job list survives a restart of the app (statuses: Rendering comes
       back Stopped); documents never contain it.
 - [ ] The queue and Shift+R never render at once.
-- [ ] The region renders only its pixels (Render View; final render with the
+- [x] The region renders only its pixels (Render View; final render with the
       switch); it is undoable and saved in v5.
 - [ ] The interactive Render View restarts on camera moves without
       rebuilding the scene, rebuilds on edits on the worker, never shows a

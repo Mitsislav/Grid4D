@@ -67,6 +67,7 @@ fn demo() -> Image {
         clamp_indirect: true,
         emissive_lights: true,
         adaptive: None,
+        region: None,
     };
     render(&RenderScene::new(&evaluated), &camera, &options)
 }
@@ -230,6 +231,7 @@ fn textured() -> Image {
         clamp_indirect: true,
         emissive_lights: true,
         adaptive: None,
+        region: None,
     };
     let texturing = Texturing {
         materials: doc.scene.materials(),
@@ -353,6 +355,7 @@ fn areas_view(width: u32, height: u32, samples: u32) -> (RenderScene, RenderCame
         clamp_indirect: true,
         emissive_lights: true,
         adaptive: None,
+        region: None,
     };
     let pictures = Pictures::new();
     let texturing = Texturing {
@@ -458,6 +461,7 @@ fn still_life_view(
         clamp_indirect: true,
         emissive_lights: true,
         adaptive: None,
+        region: None,
     };
     let texturing = Texturing {
         materials: doc.scene.materials(),
@@ -641,6 +645,7 @@ fn depth_of_field_at(width: u32, height: u32, samples: u32) -> Image {
         clamp_indirect: true,
         emissive_lights: true,
         adaptive: None,
+        region: None,
     };
     render(&RenderScene::new(&eval), &camera, &options)
 }
@@ -720,6 +725,7 @@ fn spinning_wheel_at(width: u32, height: u32, samples: u32) -> Image {
         clamp_indirect: true,
         emissive_lights: true,
         adaptive: None,
+        region: None,
     };
     render(&scene, &camera, &options)
 }

@@ -139,6 +139,9 @@ fn full_document() -> (Document, SimulationCache) {
     doc.render.noise_threshold = grid4d_scene::NoiseThreshold::from_thousandths(25);
     doc.render.denoise = grid4d_scene::Denoise::Final;
     doc.render.denoise_strength = 80;
+    // Step 16.8: a render region, used for final renders too.
+    doc.render.region = grid4d_scene::RenderRegion::new(1000, 2000, 6000, 8000);
+    doc.render.region_final = true;
     let sphere = doc.scene.iter().find(|(_, n)| n.data.name == "Sphere").unwrap().0;
     doc.scene.insert(Node::new(
         "Lens Camera",

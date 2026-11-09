@@ -165,6 +165,90 @@ pub struct RenderSettings {
     /// How much of the denoised picture is used, in percent (0…100; the
     /// rest is the noisy one).
     pub denoise_strength: u32,
+    /// Only this part of the picture is rendered: by the Render View
+    /// always, by final renders with [`Self::region_final`] (see
+    /// `docs/reference/render-queue.md`).
+    pub region: Option<RenderRegion>,
+    /// Final renders (Shift+R, the Render Queue) render only the region too.
+    pub region_final: bool,
+}
+
+/// A rectangle of the picture, in ten-thousandths of its width and height
+/// from the top left (0…[`Self::WHOLE`]), so settings stay comparable and
+/// hashable. Never empty.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RenderRegion {
+    left: u16,
+    top: u16,
+    right: u16,
+    bottom: u16,
+}
+
+impl RenderRegion {
+    /// The whole width or height.
+    pub const WHOLE: u16 = 10_000;
+
+    /// The rectangle between two corners given as fractions of the picture
+    /// (0…1, in any order), kept inside it; `None` when it has no area.
+    #[must_use]
+    pub fn from_fractions(a: [f32; 2], b: [f32; 2]) -> Option<Self> {
+        let part = |v: f32| -> Option<u16> {
+            v.is_finite().then(|| {
+                let scaled = (v.clamp(0.0, 1.0) * f32::from(Self::WHOLE)).round();
+                // Within 0…10000 after the clamp.
+                #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped")]
+                let whole = scaled as u16;
+                whole
+            })
+        };
+        let (ax, ay, bx, by) = (part(a[0])?, part(a[1])?, part(b[0])?, part(b[1])?);
+        Self::new(ax.min(bx), ay.min(by), ax.max(bx), ay.max(by))
+    }
+
+    /// The rectangle from `left`, `top` to `right`, `bottom` in
+    /// ten-thousandths; `None` when it has no area or leaves the picture.
+    #[must_use]
+    pub fn new(left: u16, top: u16, right: u16, bottom: u16) -> Option<Self> {
+        (left < right && top < bottom && right <= Self::WHOLE && bottom <= Self::WHOLE).then_some(Self {
+            left,
+            top,
+            right,
+            bottom,
+        })
+    }
+
+    /// Left, top, right, bottom as fractions of the picture (0…1).
+    #[must_use]
+    pub fn fractions(self) -> [f32; 4] {
+        [self.left, self.top, self.right, self.bottom].map(|v| f32::from(v) / f32::from(Self::WHOLE))
+    }
+
+    /// Left, top, right, bottom in ten-thousandths.
+    #[must_use]
+    pub const fn parts(self) -> [u16; 4] {
+        [self.left, self.top, self.right, self.bottom]
+    }
+
+    /// The pixels it covers in a `width` × `height` picture: the first
+    /// column and row, and one past the last (at least one pixel).
+    #[must_use]
+    pub fn pixels(self, width: u32, height: u32) -> [u32; 4] {
+        let at = |part: u16, size: u32, up: bool| -> u32 {
+            let whole = u64::from(part) * u64::from(size);
+            let (q, r) = (whole / u64::from(Self::WHOLE), whole % u64::from(Self::WHOLE));
+            u32::try_from(if up && r > 0 { q + 1 } else { q }).unwrap_or(size)
+        };
+        let (x0, y0) = (at(self.left, width, false), at(self.top, height, false));
+        let (x1, y1) = (at(self.right, width, true), at(self.bottom, height, true));
+        let x0 = x0.min(width.saturating_sub(1));
+        let y0 = y0.min(height.saturating_sub(1));
+        [
+            x0,
+            y0,
+            x1.clamp(x0 + 1, width.max(x0 + 1)),
+            y1.clamp(y0 + 1, height.max(y0 + 1)),
+        ]
+    }
 }
 
 /// Which pictures the denoiser cleans (see
@@ -452,6 +536,8 @@ impl Default for RenderSettings {
             noise_threshold: NoiseThreshold::default(),
             denoise: Denoise::Off,
             denoise_strength: 100,
+            region: None,
+            region_final: false,
         }
     }
 }
@@ -571,6 +657,24 @@ impl RenderSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_region_is_kept_inside_the_picture_and_covers_its_pixels() {
+        let region = RenderRegion::from_fractions([0.75, 0.5], [0.25, 0.1]).unwrap();
+        assert_eq!(region.parts(), [2500, 1000, 7500, 5000]);
+        assert_eq!(region.pixels(100, 50), [25, 5, 75, 25]);
+        // Partly covered pixels are in; at least one pixel.
+        assert_eq!(region.pixels(3, 3), [0, 0, 3, 2]);
+        let thin = RenderRegion::new(5000, 5000, 5001, 5001).unwrap();
+        assert_eq!(thin.pixels(10, 10), [5, 5, 6, 6]);
+        assert!(
+            RenderRegion::from_fractions([0.3, 0.2], [0.3, 0.9]).is_none(),
+            "no area"
+        );
+        assert!(RenderRegion::from_fractions([f32::NAN, 0.0], [1.0, 1.0]).is_none());
+        let outside = RenderRegion::from_fractions([-1.0, -1.0], [2.0, 2.0]).unwrap();
+        assert_eq!(outside.pixels(8, 4), [0, 0, 8, 4]);
+    }
 
     #[test]
     fn validation_clamps_every_value() {

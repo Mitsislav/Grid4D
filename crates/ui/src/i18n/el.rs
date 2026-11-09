@@ -375,6 +375,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Clear", "Καθαρισμός"),
     ("Clear Override", "Καθαρισμός παράκαμψης"),
     ("Clear Recent", "Καθαρισμός πρόσφατων"),
+    ("Clear Render Region", "Καθαρισμός περιοχής render"),
     ("Clear Seams", "Καθαρισμός ραφών"),
     ("Clear Simulation Cache", "Καθαρισμός αποθηκευμένης προσομοίωσης"),
     ("Clearcoat", "Βερνίκι"),
@@ -539,6 +540,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Drag a line across the object; release cuts, Esc cancels",
         "Σύρετε μια γραμμή κατά μήκος του αντικειμένου· η αφήση κόβει, το Esc ακυρώνει",
+    ),
+    (
+        "Drag a rectangle in the active view: only it is rendered",
+        "Σύρετε ένα ορθογώνιο στην ενεργή όψη: μόνο αυτό γίνεται render",
     ),
     ("Drag to orbit", "Σύρετε για περιστροφή"),
     ("Drag to pan", "Σύρετε για μετατόπιση"),
@@ -1180,6 +1185,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Noise Threshold", "Όριο θορύβου"),
     ("None", "Κανένα"),
     (
+        "None (Render › Render Region draws one)",
+        "Καμία (το Render › Περιοχή render σχεδιάζει μία)",
+    ),
+    (
         "None of the dropped files is a Grid4D document (.{0}), a model (.gltf, .glb, .obj) or a picture:",
         "Κανένα από τα αρχεία που αφέθηκαν δεν είναι έγγραφο Grid4D (.{0}), μοντέλο (.gltf, .glb, .obj) ή εικόνα:",
     ),
@@ -1493,6 +1502,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Rename Take", "Μετονομασία λήψης"),
     ("Rename Texture", "Μετονομασία υφής"),
     ("Render", "Απόδοση"),
+    ("Render Region", "Περιοχή render"),
     ("Render Settings", "Ρυθμίσεις απόδοσης"),
     ("Render Take", "Λήψη απόδοσης"),
     ("Render View", "Προβολή απόδοσης"),
@@ -1518,6 +1528,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Render to Picture Viewer renders every frame of the range; the Render View the current one.",
         "Η Απόδοση στην Προβολή Εικόνων αποδίδει κάθε καρέ του εύρους· η Προβολή απόδοσης το τρέχον.",
+    ),
+    (
+        "Render to Picture Viewer renders only the region too (the rest transparent)",
+        "Το Render to Picture Viewer αποδίδει κι αυτό μόνο την περιοχή (τα υπόλοιπα διάφανα)",
     ),
     (
         "Render {0} · {1} × {2}{3} · {4} of {5} samples · {6}",
@@ -2105,6 +2119,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Up Vector", "Διάνυσμα πάνω"),
     ("Use Camera", "Χρήση κάμερας"),
     ("Use Inner", "Χρήση εσωτερικής"),
+    ("Use for Final Render", "Και στο τελικό render"),
     ("User Data", "Δεδομένα χρήστη"),
     (
         "U…  L Loop · B Ring · W Connected · Y Grow · K Shrink · I Invert · Z Melt · O Optimize · Esc cancels",
@@ -2260,4 +2275,5 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "{0} · {1} samples per pixel on average, {2} % got all",
         "{0} · κατά μέσο όρο {1} δείγματα ανά pixel, {2} % τα πήραν όλα",
     ),
+    ("{0} × {1} px", "{0} × {1} px"),
 ];

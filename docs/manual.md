@@ -2488,6 +2488,7 @@ left: **Output**, **Save**, **Sampling**, **Passes** or **Options**.
 | Aspect | the proportions, e.g. 16:9 |
 | Frame Range | **Current Frame** (the frame at the time slider), **All Frames** (the document's range, Project Settings ▸ Minimum to Maximum Time) or **Manual** (From to To). Typing a From or To frame switches to Manual |
 | Frame Step | renders every n-th frame of the range |
+| Render Region | the region drawn in the view, in pixels ([§20.4](#204-the-render-region)); **Use for Final Render**: Render to Picture Viewer renders only the region too |
 | Frames | how many pictures the range gives |
 
 **Render to Picture Viewer** renders every frame of the range at the Frame
@@ -2667,6 +2668,29 @@ the frame, resize the view or switch views — a render that runs then stops.
 overlays stay on top, so you can carry on working. **Ctrl+R** again renders
 afresh. The Render View is never saved and does not appear in the Picture
 Viewer's history; use **Shift+R** for a picture to keep.
+
+### 20.4 The render region
+
+To look at one part of the picture without waiting for the rest, render
+only a region of it.
+
+1. **Render ▸ Render Region**, then drag a rectangle in the active view.
+   A dashed orange frame shows the region.
+2. **Ctrl+R**: the Render View renders only inside the frame; the rest of
+   the view stays as you work in it.
+
+Drag the frame's edges or corners to change it (the pointer shows the
+direction); **Esc** during a drag puts it back. Each drawing or reshaping
+is one undo step. **Render ▸ Clear Render Region** removes it.
+
+The region is saved with the document (with each take's render settings).
+Final renders ignore it unless **Use for Final Render** is on (Render
+Settings ▸ Output, under *Render Region*): then Shift+R renders only the
+region too, the rest of the picture transparent. The region is a part of
+the view's width and height; a final render takes the same part of its
+picture, so it matches the view when the Render Settings' proportions do.
+
+![The Render View inside a render region: the sphere and the cube rendered in the dashed frame, the cylinder and the box outside it as the view draws them](images/manual/render-region.png)
 
 ## 21. Plugins
 

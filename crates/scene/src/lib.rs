@@ -59,7 +59,8 @@ pub use node::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, Node, NodeData, NodeId, 
 pub use param::{ObjectParam, ParamUnit};
 pub use plugin::{PluginObject, PluginValue};
 pub use render::{
-    Denoise, FrameNaming, FrameRange, ImageFormat, NoiseThreshold, Pass, Passes, PngPasses, RenderSettings,
+    Denoise, FrameNaming, FrameRange, ImageFormat, NoiseThreshold, Pass, Passes, PngPasses, RenderRegion,
+    RenderSettings,
 };
 pub use scene::{Detached, Scene, SceneError, WalkItem};
 pub use sky::{Environment, Sky, SunPlacement};
