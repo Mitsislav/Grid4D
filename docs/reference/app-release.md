@@ -33,7 +33,8 @@ large for memory — Grid4D says so in words and loses no work it could keep.
 - The version numbers follow the plan's releases: 0.13.0 for the work of
   Phase 13, 1.0.0-rc.1 for the first release candidate (the packages of
   14.6), 1.0.0 for the first stable release, 1.1.0 for Phase 15 (materials,
-  UVs and textures; `.g4d` version 4).
+  UVs and textures; `.g4d` version 4), 1.2.0 for Phase 16 (render quality;
+  `.g4d` version 5).
 
 ## Behaviour (14.3)
 

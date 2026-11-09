@@ -40,14 +40,18 @@ hand.
 > **Animate** — keyframes on positions and on object parameters, Autokeying, an
 > F-curve editor, and rigid-body dynamics on objects and on clones.
 >
-> **Materials and UVs** (new in 1.1) — pictures on every channel of a material
+> **Materials and UVs** — pictures on every channel of a material
 > (colour, roughness, metallic, normal and bump, emission, cut-outs, glass,
 > clear coat), layered Material tags with projections, and a UV Editor with
 > unwrapping, relaxing and packing.
 >
-> **Render** — textures in the viewport, shadows and ambient occlusion, up to
-> four views, and a built-in path tracer: an interactive Render View, a
-> Picture Viewer, still images and animations to PNG or OpenEXR.
+> **Render** (new in 1.2) — a built-in path tracer with area lights, a
+> daylight sky and HDR surroundings, light linking, depth of field and motion
+> blur, subsurface scattering and displacement; adaptive sampling and a
+> denoiser for clean pictures sooner; a Render View that keeps rendering while
+> you work, a render region, a Render Queue, and render passes in one
+> multi-layer OpenEXR. In the viewport: textures, the sky, shadows and ambient
+> occlusion, up to four views.
 >
 > **Work your way** — dockable layouts, Layers and Takes, Dark / Darker / Light
 > themes, English or Greek, glTF 2.0 and OBJ import and export with materials and

@@ -1,18 +1,16 @@
 # The `.g4d` file format
 
 The specification of Grid4D's document files, so that other programs can read
-and write them. This describes **format version 5**, which Grid4D 1.2 (in
-development) writes. Version 4 (Grid4D 1.1, **frozen**) and version 3
+and write them. This describes **format version 5**, which Grid4D 1.2
+writes (**frozen**). Version 4 (Grid4D 1.1, **frozen**) and version 3
 (Grid4D 1.0, **frozen**) are the same format without the later versions'
 additions — see [Version 5 and version 4](#version-5-and-version-4),
 [Version 4 and version 3](#version-4-and-version-3) and
 [Versions](#versions).
 
-> Version 5 is **open**: during Grid4D 1.2's development it grows only by
-> optional fields (left out while they have their default) and new types,
-> each listed in [Version 5 and version 4](#version-5-and-version-4). It is
-> frozen when 1.2 is released. Version 4 was completed with Grid4D 1.1
-> (2026-11-07) and never changes.
+> Version 5 was completed with Grid4D 1.2 (2026-11-09) and is **frozen**:
+> it never changes; later data will come in a version 6. Version 4 was
+> completed with Grid4D 1.1 (2026-11-07) and never changes either.
 
 ## The container
 
@@ -327,8 +325,7 @@ make the file invalid.
 ## Version 5 and version 4
 
 Version 5 keeps everything about version 4 — the container, every field and
-its meaning — and only adds to it. What it adds (Grid4D 1.2 development,
-Phase 16; each step adds its row):
+its meaning — and only adds to it. What it adds (Grid4D 1.2, Phase 16):
 
 | Addition | Since |
 |----------|-------|
@@ -377,7 +374,7 @@ its `version` says `3`.
 | 1, 2 | a single JSON file, `"format": "oc4d"` (from the project's former name OpenC4D; extension `.oc4d`) | yes, converted when opened |
 | 3 | the zip archive above, `"format": "grid4d"`; Grid4D 1.0 | yes, converted when opened |
 | 4 | the same archive with version 4's additions; Grid4D 1.1 (frozen) | yes, converted when opened |
-| 5 | the same archive with version 5's additions; Grid4D 1.2 (open until it is released) | yes; written |
+| 5 | the same archive with version 5's additions; Grid4D 1.2 (frozen) | yes; written |
 
 A version grows during development only by optional fields and new types.
 **From Grid4D 1.0 a released version never changes:** new data means a new

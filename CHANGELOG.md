@@ -5,11 +5,14 @@ Notable changes to Grid4D, newest first. Versions follow
 opens every file of the same major version; the plugin and script interfaces
 may grow in a minor version and change only in a major one.
 
-## [Unreleased]
+## [1.2.0] - 2026-11-09
 
-Grid4D 1.2 in development: render quality (planned: area lights, a sky and
-HDR surroundings, depth of field and motion blur, render passes, adaptive
-sampling and a denoiser, a render queue).
+Render quality: area lights, a daylight sky and HDR surroundings, light
+linking, depth of field and motion blur, render passes in multi-layer
+OpenEXR, adaptive sampling and a denoiser, a render region, a Render Queue,
+an interactive Render View, subsurface scattering and displacement. Every
+1.0 and 1.1 document opens and renders as before; new documents start with
+adaptive sampling and the denoiser on.
 
 - **Glowing surfaces light the scene** — in renders, surfaces whose
   material has Emission are now real light sources, sampled like lights:

@@ -40,6 +40,7 @@ does not understand.
 | 16.8 | the **render region** | `document.render` |
 | 16.10 | the **Subsurface** and **Displacement** channels, a render subdivision level | `document.materials`; `document.render` / object kinds |
 
+- **Frozen since 1.2 (2026-11-09).** What follows held during Phase 16.
 - **Additive until 1.2 ships.** During Phase 16 version 5 grows only by
   optional fields left out while they have their default, and by new types
   and values. A document that uses none of Phase 16's features writes exactly

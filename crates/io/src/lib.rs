@@ -10,7 +10,7 @@
 //! format version has its own module; older versions are migrated on load.
 //! This crate never depends on `wgpu`, `egui` or `grid4d-ui`.
 //!
-//! ## Format, version 5 (current)
+//! ## Format, version 5 (current, frozen with Grid4D 1.2)
 //!
 //! A zip archive (deflate) with fixed timestamps, so the same document always
 //! gives the same bytes:

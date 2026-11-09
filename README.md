@@ -45,9 +45,12 @@ Direct3D 12 or Metal (any from the last decade).
   glass, clear coat), layered Material tags with projections, a Texture
   Manager, and a UV Editor with unwrapping, relaxing and packing.
 - **Rendering** — a viewport with textures, shading modes, shadows, ambient
-  occlusion, up to four views and scene cameras; a built-in path tracer with
-  an interactive Render View, a Picture Viewer, and stills and animations to
-  PNG or OpenEXR.
+  occlusion, a daylight sky, up to four views and scene cameras; a built-in
+  path tracer with area lights, a sky and HDR surroundings, light linking,
+  depth of field and motion blur, subsurface scattering and displacement,
+  adaptive sampling and a denoiser; an interactive Render View, a render
+  region, a Picture Viewer, a Render Queue, and stills and animations to PNG
+  or OpenEXR with render passes.
 - **Workspace** — dockable layouts, Layers, Takes, Preferences, Dark /
   Darker / Light themes, English and Greek.
 - **Files** — the documented `.g4d` format; glTF 2.0 and OBJ import and
@@ -66,7 +69,7 @@ Direct3D 12 or Metal (any from the last decade).
 - [The `.g4d` file format](docs/FILE_FORMAT.md), so other programs can read
   and write it.
 - [Changelog](CHANGELOG.md) and the [plan](docs/IMPLEMENTATION_PLAN.md),
-  including what comes after 1.1.
+  including what comes after 1.2.
 - [Architecture](docs/ARCHITECTURE.md) — how the code is organised, for
   contributors; [performance](docs/performance.md) — what is measured.
 

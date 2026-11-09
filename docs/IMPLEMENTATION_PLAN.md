@@ -1391,7 +1391,7 @@ nodes), displacement (Phase 16), UDIMs, video textures.
 
 ---
 
-## Phase 16 — Render quality (v1.2)
+## Phase 16 — Render quality (v1.2) ✅
 
 **Goal:** stills and animations that can be shown to a client: real light
 (area lights, a sky, an HDRI), real lenses (depth of field, motion blur),
@@ -1741,19 +1741,12 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 
 ---
 
-**Next action:** Phase 16 (render quality, v1.2) is under way: step 16.1
-(its specs in `docs/reference/`, `.g4d` v5 open, the render-time budget in
-`docs/performance.md`) is done (2026-11-07); step 16.2 — light transport
-with MIS, emissive surfaces as lights (16.2a) and area lights (16.2b) — is
-done (2026-11-08); step 16.3 — the Sky and Environment objects
-([`render-environment.md`](reference/render-environment.md)) — is done
-(2026-11-08); step 16.4 — light linking and the light-group name — is done
-(2026-11-08); step 16.5 — lens and shutter — is done (2026-11-08); step
-16.6 — render passes and multi-layer OpenEXR — is done (2026-11-09); step
-16.7 — adaptive sampling, the surface-area BVH (16.7a) and the denoiser
-(16.7b) — is done (2026-11-09); step 16.8 — the render region (16.8a) and
-the Render Queue (16.8b) — is done (2026-11-09); step 16.9 — the
-interactive Render View — is done (2026-11-09); step 16.10 — subsurface
-scattering (16.10a) and displacement (16.10b) — is done (2026-11-09); step 16.11a — the acceptance test, the
-walkthrough, the manual's overview and the budget — is done (2026-11-09);
-next is 16.11b, the release of v1.2.
+**Next action:** Phase 16 (render quality, v1.2) is complete (2026-11-07 –
+2026-11-09): area lights and emissive surfaces with MIS, the Sky and
+Environment, light linking and groups, lens and shutter, render passes and
+multi-layer OpenEXR, adaptive sampling, the denoiser and the surface-area
+BVH, the render region and the Render Queue, the interactive Render View,
+subsurface scattering and displacement; its acceptance runs as
+`crates/ui/tests/acceptance_16.rs`, and release 1.2.0 is prepared (`.g4d`
+version 5 frozen). Next is Phase 17 (modelling 2, v1.3), starting like
+Phase 16 with its specs and the R6 spike on robust booleans.
