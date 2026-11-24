@@ -130,6 +130,17 @@ pub enum ObjectKind {
     /// Boolean generator: its first two children (each with its own
     /// children) combined as solids (`docs/reference/generator-boolean.md`).
     Boolean(crate::Boolean),
+    /// Symmetry generator: its children and their mirror image across one of
+    /// its planes, welded at the plane.
+    Symmetry(grid4d_geom::symmetry::Symmetry),
+    /// Shows another object (and its subtree) again at its own placement,
+    /// without a copy (`docs/reference/generator-symmetry-instance-join.md`).
+    Instance {
+        /// The object shown; none or a deleted one shows nothing.
+        reference: Option<NodeId>,
+    },
+    /// Join generator: its children merged into one mesh.
+    Join(crate::Join),
     /// Repeats its children along a line, a circle or a grid
     /// (`docs/reference/mograph-cloner.md`). The clones are instances made by
     /// evaluation, not nodes.
@@ -204,6 +215,9 @@ pub enum ObjectKindTag {
     Sweep,
     Loft,
     Boolean,
+    Symmetry,
+    Instance,
+    Join,
     Cloner,
     PlainEffector,
     RandomEffector,
@@ -227,7 +241,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 40] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -248,6 +262,9 @@ impl ObjectKindTag {
         Self::Sweep,
         Self::Loft,
         Self::Boolean,
+        Self::Symmetry,
+        Self::Instance,
+        Self::Join,
         Self::Cloner,
         Self::PlainEffector,
         Self::RandomEffector,
@@ -281,13 +298,16 @@ impl ObjectKindTag {
 
     /// Generators: objects that build their geometry from their children (the
     /// Cloner repeats them).
-    pub const GENERATORS: [Self; 7] = [
+    pub const GENERATORS: [Self; 10] = [
         Self::SubdivisionSurface,
         Self::Extrude,
         Self::Lathe,
         Self::Sweep,
         Self::Loft,
         Self::Boolean,
+        Self::Symmetry,
+        Self::Join,
+        Self::Instance,
         Self::Cloner,
     ];
 
@@ -333,6 +353,9 @@ impl ObjectKindTag {
             Self::Sweep => "Sweep",
             Self::Loft => "Loft",
             Self::Boolean => "Boolean",
+            Self::Symmetry => "Symmetry",
+            Self::Instance => "Instance",
+            Self::Join => "Join",
             Self::Cloner => "Cloner",
             Self::PlainEffector => "Plain",
             Self::RandomEffector => "Random",
@@ -437,6 +460,11 @@ impl ObjectKindTag {
             Self::Loft => ObjectKind::Loft(grid4d_geom::surface::Loft::default()),
             // docs/reference/generator-boolean.md: Subtract, merged, welded.
             Self::Boolean => ObjectKind::Boolean(crate::Boolean::default()),
+            // Left and right, welded and held within 0.01 cm.
+            Self::Symmetry => ObjectKind::Symmetry(grid4d_geom::symmetry::Symmetry::default()),
+            Self::Instance => ObjectKind::Instance { reference: None },
+            // Welded within 0.1 cm.
+            Self::Join => ObjectKind::Join(crate::Join::default()),
             // docs/reference/mograph-cloner.md: three clones in a row, 250 cm apart.
             Self::Cloner => ObjectKind::cloner(grid4d_geom::cloner::Cloner::default()),
             // docs/reference/mograph-effectors.md: the clones lifted 100 cm / moved up to 50 cm.
@@ -586,6 +614,9 @@ impl ObjectKind {
             Self::Sweep(_) => ObjectKindTag::Sweep,
             Self::Loft(_) => ObjectKindTag::Loft,
             Self::Boolean(_) => ObjectKindTag::Boolean,
+            Self::Symmetry(_) => ObjectKindTag::Symmetry,
+            Self::Instance { .. } => ObjectKindTag::Instance,
+            Self::Join(_) => ObjectKindTag::Join,
             Self::Cloner { .. } => ObjectKindTag::Cloner,
             Self::PlainEffector(_) => ObjectKindTag::PlainEffector,
             Self::RandomEffector(_) => ObjectKindTag::RandomEffector,
@@ -620,10 +651,12 @@ impl ObjectKind {
     #[must_use]
     pub const fn generator_inputs(&self) -> usize {
         match self {
-            Self::Loft(_) | Self::Cloner { .. } => usize::MAX,
+            Self::Loft(_) | Self::Cloner { .. } | Self::Symmetry(_) | Self::Join(_) => usize::MAX,
             Self::Sweep(_) | Self::Boolean(_) => 2,
             Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) => 1,
+            // An Instance shows a linked object, not its children.
             Self::Null
+            | Self::Instance { .. }
             | Self::Cube { .. }
             | Self::Sphere { .. }
             | Self::Cylinder { .. }
@@ -756,6 +789,8 @@ impl ObjectKind {
                 | Self::Sweep(_)
                 | Self::Loft(_)
                 | Self::Boolean(_)
+                | Self::Symmetry(_)
+                | Self::Join(_)
                 | Self::Cloner { .. }
         )
     }
@@ -778,6 +813,9 @@ impl ObjectKind {
             | Self::Sweep(_)
             | Self::Loft(_)
             | Self::Boolean(_)
+            | Self::Symmetry(_)
+            | Self::Instance { .. }
+            | Self::Join(_)
             | Self::Cloner { .. }
             // A plugin's mesh: evaluation knows its extent.
             | Self::Plugin(_)

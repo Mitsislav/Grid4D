@@ -122,6 +122,48 @@ fn boolean_floor() -> (usize, Duration) {
 
 /// A half of about 100 000 points mirrored across x = 0, joined and
 /// welded at the plane.
+/// The Symmetry generator's work on the same half (step 17.4).
+fn symmetry_generator() -> (usize, Duration) {
+    let whole = primitives::sphere(100.0, 448);
+    let half = whole.with_faces_where(|f| whole.face_center(f).x >= 0.0);
+    let settings = grid4d_geom::symmetry::Symmetry::default();
+    let mut points = 0;
+    let time = median(11, || {
+        let mirrored = grid4d_geom::symmetry::mirror(&half, &settings);
+        points = mirrored.point_count();
+        black_box(mirrored);
+    });
+    (points, time)
+}
+
+/// A thousand Instances of a sphere of about 10 000 triangles: evaluating the
+/// scene after one of them moves (step 17.4).
+fn thousand_instances() -> Result<Duration, Box<dyn Error>> {
+    let mut doc = Document::new("instances");
+    let ball = doc.scene.insert(Node::new(
+        "Ball",
+        ObjectKind::polygon(MeshHandle::new(primitives::sphere(50.0, 72))),
+    ));
+    let mut last = None;
+    for k in 0..1000u16 {
+        let mut instance = Node::new("Instance", ObjectKind::Instance { reference: Some(ball) });
+        instance.data.transform.position = Vec3::new(f32::from(k % 40) * 150.0, 0.0, f32::from(k / 40) * 150.0);
+        last = Some(doc.scene.insert(instance));
+    }
+    let last = last.ok_or("no instance")?;
+    let mut evaluated = EvaluatedScene::new();
+    evaluated.update(&doc.scene);
+    if evaluated.instances().len() != 1000 {
+        return Err("every Instance shows its copy".into());
+    }
+    Ok(median(31, || {
+        if let Some(node) = doc.scene.get_mut(last) {
+            node.data.transform.position.y += 1.0;
+        }
+        black_box(evaluated.update(&doc.scene));
+    }))
+}
+
 fn symmetry_by_hand() -> Result<(usize, Duration), Box<dyn Error>> {
     // A sphere's half with x ≥ 0: the faces whose centre lies on that side.
     let whole = primitives::sphere(100.0, 448);
@@ -242,6 +284,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     let (triangles, time) = reduce_floor();
     println!("  a scan of {triangles:>8} triangles: topology and BVH: {}", ms(time));
+    let (points, time) = symmetry_generator();
+    println!(
+        "  the Symmetry generator on that half ({points:>7} points): {}",
+        ms(time)
+    );
+    println!(
+        "  a thousand Instances of a 10 000-triangle ball, one moved: {} a frame",
+        ms(thousand_instances()?)
+    );
     println!("Boolean (Subtract)");
     let options = BooleanOptions::default();
     for (name, a, b, runs) in boolean_cases()? {

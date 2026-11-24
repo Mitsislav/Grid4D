@@ -66,10 +66,11 @@ pub struct EvaluatedNode {
 
 /// One shape of a clone a Cloner makes, as viewers see it this frame: a
 /// child (or a part of a child group, or a clone of a Cloner inside it) where
-/// the layout puts it. Selected, picked and filtered as its Cloner.
+/// the layout puts it — or one shape an Instance shows again. Selected,
+/// picked and filtered as its owner.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EvaluatedInstance {
-    /// The Cloner.
+    /// The Cloner (or Instance).
     pub owner: NodeId,
     /// The clone's number in its Cloner (the parts of a cloned group share it).
     pub index: u32,
@@ -231,6 +232,10 @@ pub struct EvaluatedScene {
     /// turned objects whose subtree is being visited.
     aim_index: HashMap<NodeId, usize>,
     aim_stack: Vec<(u32, Mat4)>,
+    /// Scratch space for Instances: node index by id, and the Instances
+    /// being expanded (to refuse cycles).
+    instance_index: HashMap<NodeId, usize>,
+    instance_stack: Vec<NodeId>,
     /// Objects placed by a simulation, and scratch space for applying them.
     overrides: crate::Overrides,
     override_stack: Vec<(u32, Mat4)>,
@@ -608,6 +613,7 @@ impl EvaluatedScene {
                 match options {
                     Options::Subdivision(_) => pending_cages.extend(scene.children(id).first()),
                     Options::Boolean(_) => pending_cages.extend(scene.children(id).iter().take(2)),
+                    Options::Symmetry(_) | Options::Join(_) => pending_cages.extend(scene.children(id)),
                     Options::Extrude { .. } | Options::Lathe(_) | Options::Sweep(_) | Options::Loft(_) => {}
                 }
             }
@@ -712,6 +718,14 @@ impl EvaluatedScene {
         );
         // Simulated clones where the simulation put them.
         crate::overrides::apply_clones(&self.overrides, &mut self.instances, &mut self.nodes);
+        // What Instances show again, the clones included.
+        build_object_instances(
+            scene,
+            &self.nodes,
+            &mut self.instance_index,
+            &mut self.instance_stack,
+            &mut self.instances,
+        );
         // The lights where animation and Target tags put them.
         self.lights.clear();
         for node in &self.nodes {
@@ -1271,6 +1285,136 @@ fn build_plugin(object: &grid4d_scene::PluginObject) -> Option<MeshHandle> {
         })
 }
 
+/// How deep a chain of Instances (an Instance of an Instance of …) is followed.
+const MAX_INSTANCE_DEPTH: usize = 16;
+
+/// Adds to `instances` the shapes every Instance in `nodes` shows: its
+/// reference and the reference's subtree as evaluated, placed by the
+/// Instance (the Instance's matrix in place of the reference's), with the
+/// clones of Cloners in it and, through Instances in it, what they show.
+/// An Instance's own Material tags cover its copies. Cycles (an Instance of
+/// itself or of an object above it, a chain that comes back) show nothing.
+/// Allocation-free once the scratch space has grown, and free when there is
+/// no Instance.
+fn build_object_instances(
+    scene: &Scene,
+    nodes: &[EvaluatedNode],
+    index: &mut HashMap<NodeId, usize>,
+    stack: &mut Vec<NodeId>,
+    instances: &mut Vec<EvaluatedInstance>,
+) {
+    if !nodes.iter().any(|n| n.kind == ObjectKindTag::Instance) {
+        return;
+    }
+    index.clear();
+    index.extend(nodes.iter().enumerate().map(|(i, n)| (n.id, i)));
+    let clones = instances.len();
+    let materials = scene.materials();
+    for top in 0..nodes.len() {
+        if nodes[top].kind != ObjectKindTag::Instance {
+            continue;
+        }
+        let owner = nodes[top].id;
+        let own = scene.get(owner).and_then(|node| {
+            let material = node.data.tags.material_in(|m| materials.contains(m))?;
+            Some((nodes[top].materials, materials.get(material)?))
+        });
+        let start = instances.len();
+        stack.clear();
+        expand_instance(
+            scene,
+            nodes,
+            index,
+            top,
+            Mat4::IDENTITY,
+            owner,
+            clones,
+            stack,
+            instances,
+        );
+        if let Some((layers, material)) = own {
+            for copy in &mut instances[start..] {
+                copy.materials = layers;
+                if let Some(drawable) = copy.drawable.as_mut().filter(|d| !d.marker) {
+                    drawable.color = material.color;
+                    drawable.surface = Surface::of(material);
+                }
+            }
+        }
+    }
+}
+
+/// The shapes Instance `nodes[at]` shows, placed by `into` × its own
+/// placement, added to `instances` as `owner`'s (see
+/// [`build_object_instances`]).
+#[expect(clippy::too_many_arguments, reason = "the expansion's scratch space, passed apart")]
+fn expand_instance(
+    scene: &Scene,
+    nodes: &[EvaluatedNode],
+    index: &HashMap<NodeId, usize>,
+    at: usize,
+    into: Mat4,
+    owner: NodeId,
+    clones: usize,
+    stack: &mut Vec<NodeId>,
+    instances: &mut Vec<EvaluatedInstance>,
+) {
+    let id = nodes[at].id;
+    if stack.len() >= MAX_INSTANCE_DEPTH || stack.contains(&id) {
+        return;
+    }
+    let Some(&ObjectKind::Instance {
+        reference: Some(reference),
+    }) = scene.get(id).map(|n| &n.data.kind)
+    else {
+        return;
+    };
+    // An Instance of itself or of an object above it would contain itself.
+    let mut above = Some(id);
+    while let Some(current) = above {
+        if current == reference {
+            return;
+        }
+        above = scene.get(current).and_then(grid4d_scene::Node::parent);
+    }
+    let Some(&r) = index.get(&reference) else { return };
+    let placement = into * nodes[at].world * nodes[r].world.inverse();
+    stack.push(id);
+    let depth = nodes[r].depth;
+    let mut m = r;
+    while m < nodes.len() && (m == r || nodes[m].depth > depth) {
+        let node = &nodes[m];
+        if node.kind == ObjectKindTag::Instance {
+            expand_instance(scene, nodes, index, m, placement, owner, clones, stack, instances);
+        } else if node.drawable.is_some() || node.pick != PickShape::None {
+            instances.push(EvaluatedInstance {
+                owner,
+                index: 0,
+                source: node.id,
+                kind: node.kind,
+                world: placement * node.world,
+                bounds: node.bounds,
+                drawable: node.drawable,
+                pick: node.pick,
+                materials: node.materials,
+                unlit: node.unlit,
+            });
+        }
+        if node.kind == ObjectKindTag::Cloner {
+            for c in 0..clones {
+                if instances[c].owner == node.id {
+                    let mut copy = instances[c];
+                    copy.owner = owner;
+                    copy.world = placement * copy.world;
+                    instances.push(copy);
+                }
+            }
+        }
+        m += 1;
+    }
+    stack.pop();
+}
+
 /// A generator's result and what it was built from.
 #[derive(Debug)]
 struct Generated {
@@ -1457,6 +1601,9 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Sweep(_)
         | ObjectKind::Loft(_)
         | ObjectKind::Boolean(_)
+        | ObjectKind::Symmetry(_)
+        | ObjectKind::Instance { .. }
+        | ObjectKind::Join(_)
         | ObjectKind::Bend(_)
         | ObjectKind::Twist(_)
         | ObjectKind::Taper(_)
@@ -2720,7 +2867,14 @@ mod tests {
                 K::Cube | K::Sphere | K::Cylinder | K::Plane | K::Cone | K::Torus | K::Disc | K::Capsule => {
                     assert_good_uvs(tag.label(), &crate::editable_mesh(&kind).unwrap());
                 }
-                K::SubdivisionSurface | K::Extrude | K::Lathe | K::Sweep | K::Loft | K::Boolean => {
+                K::SubdivisionSurface
+                | K::Extrude
+                | K::Lathe
+                | K::Sweep
+                | K::Loft
+                | K::Boolean
+                | K::Symmetry
+                | K::Join => {
                     let mut doc = Document::new("uvs");
                     let id = doc.scene.insert(Node::new(tag.label(), kind));
                     let children = match tag {
@@ -2729,6 +2883,8 @@ mod tests {
                         K::Lathe => vec![at(K::Rectangle, Vec3::new(300.0, 0.0, 0.0))],
                         K::Sweep => vec![at(K::Circle, Vec3::ZERO), at(K::Helix, Vec3::ZERO)],
                         K::Boolean => vec![at(K::Cube, Vec3::ZERO), at(K::Sphere, Vec3::new(80.0, 60.0, 40.0))],
+                        K::Symmetry => vec![at(K::Cube, Vec3::new(150.0, 0.0, 0.0))],
+                        K::Join => vec![at(K::Cube, Vec3::ZERO), at(K::Sphere, Vec3::new(300.0, 0.0, 0.0))],
                         _ => vec![at(K::Circle, Vec3::ZERO), at(K::Circle, Vec3::new(0.0, 0.0, 300.0))],
                     };
                     for child in children {
@@ -2739,8 +2895,10 @@ mod tests {
                 }
                 // No surface of their own: groups, cameras, lights, curves,
                 // deformers and effectors; a polygon object keeps the UVs it
-                // has; a Cloner's clones are its children's meshes.
+                // has; a Cloner's clones are its children's meshes, an
+                // Instance's its reference's.
                 K::Null
+                | K::Instance
                 | K::Camera
                 | K::Light
                 | K::Sky
@@ -3680,5 +3838,173 @@ mod tests {
         let fast = result_of(&eval, boolean).id();
         eval.update(&doc.scene);
         assert_ne!(result_of(&eval, boolean).id(), fast);
+    }
+
+    #[test]
+    fn a_symmetry_shows_its_children_and_their_mirror_welded() {
+        let mut doc = Document::new("symmetry");
+        let symmetry = doc
+            .scene
+            .insert(Node::new("Symmetry", ObjectKindTag::Symmetry.default_kind()));
+        // The half of a box with x ≥ 0, open at the plane.
+        let cube = grid4d_geom::primitives::cube(Vec3::splat(200.0), [2, 1, 1]);
+        let half = cube.with_faces_where(|f| cube.face_center(f).x > 0.0);
+        let half = doc
+            .scene
+            .insert_child(symmetry, Node::new("Half", ObjectKind::polygon(MeshHandle::new(half))))
+            .unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let whole = result_of(&eval, symmetry);
+        assert_eq!(whole.mesh().face_count(), 2 * half_faces(&half_of(&doc, half)));
+        assert!(grid4d_geom::boolean::is_closed(whole.mesh()), "welded at the plane");
+        let shown = node(&eval, half);
+        assert_eq!(
+            (shown.drawable, shown.pick),
+            (None, PickShape::None),
+            "the half is not drawn"
+        );
+        assert!(eval.polygon(half).is_some(), "and edited in component modes");
+        assert!((grid4d_geom::boolean::volume(whole.mesh()) - 200.0f64.powi(3)).abs() < 1.0);
+    }
+
+    fn half_of(doc: &Document, id: NodeId) -> grid4d_geom::PolyMesh {
+        let ObjectKind::Polygon { mesh, .. } = &doc.scene.get(id).unwrap().data.kind else {
+            panic!("a polygon object")
+        };
+        mesh.mesh().clone()
+    }
+
+    fn half_faces(mesh: &grid4d_geom::PolyMesh) -> usize {
+        mesh.face_count()
+    }
+
+    #[test]
+    fn a_join_merges_its_children_into_one_welded_mesh() {
+        let mut doc = Document::new("join");
+        let join = doc.scene.insert(Node::new("Join", ObjectKindTag::Join.default_kind()));
+        let a = doc
+            .scene
+            .insert_child(join, Node::new("A", ObjectKindTag::Cube.default_kind()))
+            .unwrap();
+        // A second cube touching the first face to face.
+        let mut touching = Node::new("B", ObjectKindTag::Cube.default_kind());
+        touching.data.transform.position.x = 200.0;
+        let b = doc.scene.insert_child(join, touching).unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let joined = result_of(&eval, join);
+        assert_eq!(joined.mesh().face_count(), 12);
+        assert_eq!(joined.mesh().point_count(), 12, "the four shared points welded");
+        for child in [a, b] {
+            assert_eq!(node(&eval, child).drawable, None, "the children are not drawn");
+        }
+        // Not welded: sixteen points.
+        if let ObjectKind::Join(settings) = &mut doc.scene.get_mut(join).unwrap().data.kind {
+            settings.weld = false;
+        }
+        eval.update(&doc.scene);
+        assert_eq!(result_of(&eval, join).mesh().point_count(), 16);
+        // A Subdivision Surface over the Join smooths the whole.
+        let sds = doc.scene.insert(Node::new(
+            "Subdivision Surface",
+            ObjectKindTag::SubdivisionSurface.default_kind(),
+        ));
+        doc.scene.reparent(join, Some(sds), false).unwrap();
+        eval.update(&doc.scene);
+        assert!(result_of(&eval, sds).mesh().face_count() > 12 * 4);
+    }
+
+    #[test]
+    fn an_instance_shows_its_reference_again_without_a_copy() {
+        let mut doc = Document::new("instance");
+        let group = doc.scene.insert(Node::new("Group", ObjectKind::Null));
+        let sphere = doc
+            .scene
+            .insert_child(group, Node::new("Sphere", ObjectKindTag::Sphere.default_kind()))
+            .unwrap();
+        let mut moved = Node::new("Cube", ObjectKindTag::Cube.default_kind());
+        moved.data.transform.position.y = 300.0;
+        doc.scene.insert_child(group, moved).unwrap();
+        let mut instance = Node::new("Instance", ObjectKind::Instance { reference: Some(group) });
+        instance.data.transform.position.x = 500.0;
+        let instance = doc.scene.insert(instance);
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let copies: Vec<&EvaluatedInstance> = eval.instances().iter().filter(|c| c.owner == instance).collect();
+        assert_eq!(copies.len(), 2, "the sphere and the cube");
+        let of_sphere = copies.iter().find(|c| c.source == sphere).unwrap();
+        assert_eq!(of_sphere.world.w_axis.truncate(), Vec3::new(500.0, 0.0, 0.0));
+        assert_eq!(of_sphere.drawable, node(&eval, sphere).drawable, "the same mesh key");
+        assert!(
+            node(&eval, sphere).drawable.is_some(),
+            "the reference itself still shows"
+        );
+
+        // An Instance of an Instance follows the chain.
+        let mut second = Node::new(
+            "Instance.1",
+            ObjectKind::Instance {
+                reference: Some(instance),
+            },
+        );
+        second.data.transform.position.z = 400.0;
+        let second = doc.scene.insert(second);
+        eval.update(&doc.scene);
+        let chained: Vec<_> = eval.instances().iter().filter(|c| c.owner == second).collect();
+        assert_eq!(chained.len(), 2);
+        // Its placement replaces the first Instance's, which replaced the group's.
+        assert!(
+            chained
+                .iter()
+                .any(|c| c.world.w_axis.truncate() == Vec3::new(0.0, 0.0, 400.0))
+        );
+
+        // Cycles show nothing: an Instance of its own parent, two of each other.
+        let looped = doc
+            .scene
+            .insert_child(
+                group,
+                Node::new("Looped", ObjectKind::Instance { reference: Some(group) }),
+            )
+            .unwrap();
+        if let ObjectKind::Instance { reference } = &mut doc.scene.get_mut(instance).unwrap().data.kind {
+            *reference = Some(second);
+        }
+        eval.update(&doc.scene);
+        for id in [looped, instance, second] {
+            assert!(eval.instances().iter().all(|c| c.owner != id), "{id:?} shows nothing");
+        }
+        // A deleted reference shows nothing either.
+        if let ObjectKind::Instance { reference } = &mut doc.scene.get_mut(instance).unwrap().data.kind {
+            *reference = Some(sphere);
+        }
+        doc.scene.detach(sphere).unwrap();
+        eval.update(&doc.scene);
+        assert!(eval.instances().iter().all(|c| c.owner != instance));
+    }
+
+    #[test]
+    fn an_instance_with_its_own_material_covers_its_copies() {
+        let mut doc = Document::new("instance");
+        let mut material = grid4d_scene::Material::new("Red");
+        material.color = [1.0, 0.0, 0.0];
+        let red = doc.scene.materials_mut().insert(material);
+        let sphere = doc
+            .scene
+            .insert(Node::new("Sphere", ObjectKindTag::Sphere.default_kind()));
+        let mut instance = Node::new(
+            "Instance",
+            ObjectKind::Instance {
+                reference: Some(sphere),
+            },
+        );
+        instance.data.tags = vec![Tag::Material(grid4d_scene::MaterialTag::new(Some(red)))];
+        let instance = doc.scene.insert(instance);
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let copy = eval.instances().iter().find(|c| c.owner == instance).unwrap();
+        assert_eq!(copy.drawable.unwrap().color, [1.0, 0.0, 0.0]);
+        assert_ne!(node(&eval, sphere).drawable.unwrap().color, [1.0, 0.0, 0.0]);
     }
 }

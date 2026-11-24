@@ -1907,5 +1907,8 @@ frozen and upgraded as JSON, the modelling budget measured), and so is the
 boolean spike, 17.2 (`grid4d-geom::boolean` and `exact`: the plane-based
 method chosen, D39), and the Boolean generator, 17.3 (work only near the
 cut, n-gons merged back, UVs, cut edges, weld; the generator with nesting,
-its page, Make Editable, `.g4d` v6 `boolean`, the drag fallback of R9).
-Next: Symmetry, Instance and Join (17.4).
+its page, Make Editable, `.g4d` v6 `boolean`, the drag fallback of R9), and
+Symmetry, Instance and Join, 17.4 (mirroring welded at the plane in 5 ms
+for a 100 000-point half; Instances as clones of the reference's shapes, no
+copy; a Join counted as one input by other generators). Next: the Spline
+Boolean and Reduce (17.5).

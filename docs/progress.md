@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 17 — Modelling 2 (v1.3) |
-| Last step done | 17.3 — the Boolean generator: the geometry fast near the cut with faces merged back and UVs, the object with nested inputs, its page, Make Editable, `.g4d` v6 `boolean`, the drag fallback (2026-11-09) |
-| Next step | 17.4 — Symmetry, Instance and Join |
-| Tests | 990 (and 18 ignored, run by hand: three timings, the walkthrough, the Boolean's picture, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
+| Last step done | 17.4 — Symmetry, Instance and Join: mirroring welded at a plane, Instances without copies, children merged into one mesh; pages, file data, Make Editable (2026-11-24) |
+| Next step | 17.5 — the Spline Boolean and Reduce |
+| Tests | 999 (and 19 ignored, run by hand: three timings, the walkthrough, the Boolean's and the Symmetry's pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2737,6 +2737,7 @@ risks R5 – R8 go with it.
 | 17.1 | Nine specs (the format version 6, the Boolean, Symmetry / Instance / Join, the Spline Boolean, Reduce, soft selection, the modelling tools 2, creases and normals, the deformers 2); the names reviewed (R8: plain words kept, the reference's own names replaced — Join, Spline Boolean, Reduce, Crease, Hard Edges, Follow Spline, Displace, Project to Surface, Explode, Point Offsets); `.g4d` version 6 written (version 5's module moved to `v6.rs`; `v5.rs` and `v4.rs` now only list what the next version adds, applied by the shared `upgrade.rs`; versions 3 – 5 upgraded one at a time); `FILE_FORMAT.md` for version 6, golden `demo_v6.g4d` / `full_v6.g4d`, the version 5 fixtures frozen and checked to read exactly as before, the property tests relabel documents as version 5 too; the modelling budget measured (`grid4d-eval` example `modeling_budget`, `docs/performance.md`) and targets set for the Boolean, Symmetry and Reduce | 966 |
 | 17.2 | The boolean spike: `grid4d-geom::exact` (intervals rounded outwards as a filter, Shewchuk's expansions for exact signs) and `grid4d-geom::boolean` — one pipeline (box-touching triangle pairs, triangles cut by the other input's planes into convex pieces bounded by planes, equal points joined exactly, points on edges stitched in exact order, groups classified by the generalised winding number, pieces in the other's surface by the mode's rule, face origins) with two ways to hold the points a cut makes: implicit (three planes, plane-based) or rounded; a corpus of 14 hard cases, an open cutter, property tests (20 000 random pairs checked closed and by volume identities; garbage meshes never panic), a `boolean` cargo-fuzz target in CI and the weekly Fuzz workflow; both timed (`modeling_budget`). **D39: the plane-based method** — the only one passing everything (rounding: 4 of 14 cases and 185 of 1 000 random pairs wrong) and faster on large inputs; its speed (29 – 38 ms for the product shell, target 8) is 17.3's work | 979 |
 | 17.3 | The Boolean generator. Geometry: only triangles near the other input are cut (faces with no cut pass through whole, getting the cut's points on their edges by lookup), equal support planes shared, one edge plane and partner plane per input edge (an edge's crossings are then one point from both sides), known incidences, equality tested by sides, a small hasher; kept pieces merged back into polygons per face, UVs interpolated (turned faces' pictures mirrored back), cut edges listed, a weld that splits pinched faces so closed stays closed; the spike's rounded method removed; the shell 38 → 11 ms, 50k spheres 0.67 → 0.18 s, a million triangles 11 → 4 s. The object: `ObjectKind::Boolean` (Mode, Merge Faces, Select Cut Edges, Weld), its operands each a subtree, another generator as an input (nested Booleans), both hidden, a note when an input is missing; the drag fallback (R9: a rebuild over 33 ms keeps the last result while a pointer is held, the status bar says so); Make Editable selects the cut edges; `.g4d` v6 `boolean` (refused in v5), golden fixtures, property tests; renders see it; icon, page, tooltip, Greek; the manual's §12.5 with a picture | 990 |
+| 17.4 | Symmetry, Instance and Join. `grid4d_geom::symmetry` (`Symmetry`, `MirrorPlane`, `mirror`: the half and its image wound the other way, welded and held at the plane, faces in the plane not doubled, the mirror's U turned round, the half's point numbers kept; 5.1 ms for a 100 000-point half); `ObjectKind::{Symmetry, Join}` take all their children (`gather_solids`, hidden as cages), the Join merged and welded; a Subdivision Surface's cage may now be a Join, Symmetry or Boolean; `ObjectKind::Instance { reference }` shows its reference's subtree as clones owned by the Instance (its Cloners' clones and nested Instances too, chains up to 16, cycles show nothing, its own material over them; 0.17 ms to evaluate a thousand), created linked to the selection; Make Editable, Current State and export bake all three; `.g4d` v6 `symmetry`, `instance` (by index), `join`, refused in v5; icons, pages, tooltips, Greek; the manual's §12.6 with a picture | 999 |
 
 **17.1 — Specs, the format version 6, the modelling budget**
 
@@ -2873,6 +2874,35 @@ risks R5 – R8 go with it.
   60 fps.
 - **Builds broke twice from locked files** (the linker's 1181, then
   unreadable metadata); a clean build fixed them.
+
+**17.4 — Symmetry, Instance and Join**
+
+*Problems and solutions:*
+- **The half's points must keep their numbers.** A selection made on the
+  half has to name the same points after Make Editable. The first version
+  dropped every point no face used, which renumbered a half cut out of a
+  larger mesh; now all the half's points stay as they are and only unused
+  mirror points are left out.
+- **The mirror showed its pictures backwards.** The test every generator
+  passes (no face with a mirrored picture) caught it: the mirror half now
+  reads its UVs with U turned round, as the Boolean's turned faces do.
+- **12.8 ms against a target of 10.** Building a vector per face and a list
+  of lists for the mesh cost more than the mirroring; points and faces are
+  now written straight into the mesh with one reused buffer: 5.1 ms.
+- **A Subdivision Surface over a Join showed nothing.** The cage walk left
+  out every generator inside it. A cage may now be a generator of solids (a
+  Join, Symmetry or Boolean), taken through its own inputs like a Boolean's.
+- **Where an Instance of an Instance stands.** The test expected the first
+  Instance's offset to add up; by the spec's rule an Instance's placement
+  *replaces* its reference's, so the chained copy stands at the second
+  Instance alone. The test was wrong, not the code.
+- **An Instance draws without copies.** Its shapes go into the list the
+  Cloner's clones are in, owned by the Instance, so the viewport, picking,
+  the renderer, Current State and export already knew what to do; the
+  expansion runs only when the scene has an Instance and reuses its scratch
+  space.
+- **A file held open.** rustfmt once could not write a source file another
+  program had open; running it again wrote it.
 
 ## Phase 16 — Render quality (2026-11-07 – 2026-11-09)
 

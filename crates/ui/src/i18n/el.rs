@@ -132,6 +132,14 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Add Files…", "Προσθήκη αρχείων…"),
     ("Add Flower", "Προσθήκη Λουλουδιού"),
     ("Add Helix", "Προσθήκη Έλικας"),
+    (
+        "Add Instance: shows the selected object again, without a copy",
+        "Προσθήκη στιγμιότυπου: δείχνει ξανά το επιλεγμένο αντικείμενο, χωρίς αντίγραφο",
+    ),
+    (
+        "Add Join: its children as one mesh (Alt: around the selected objects)",
+        "Προσθήκη ένωσης: τα παιδιά της ως ένα πλέγμα (Alt: γύρω από τα επιλεγμένα αντικείμενα)",
+    ),
     ("Add Key", "Προσθήκη κλειδιού"),
     (
         "Add Lathe (Alt: around the selected spline)",
@@ -171,6 +179,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Add Sweep: profile first, path second (Alt: around the selected spline)",
         "Προσθήκη Σάρωσης: πρώτα το προφίλ, μετά η διαδρομή (Alt: γύρω από την επιλεγμένη καμπύλη)",
+    ),
+    (
+        "Add Symmetry: its children and their mirror image (Alt: around the selected object)",
+        "Προσθήκη συμμετρίας: τα παιδιά της και το είδωλό τους (Alt: γύρω από το επιλεγμένο αντικείμενο)",
     ),
     ("Add Tag", "Προσθήκη ετικέτας"),
     (
@@ -727,6 +739,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Fit to Object", "Προσαρμογή στο αντικείμενο"),
     ("Fit to Parent", "Προσαρμογή στον γονέα"),
     ("Flat", "Επίπεδη"),
+    ("Flip", "Αντιστροφή"),
     ("Flip U", "Αναστροφή U"),
     ("Flip V", "Αναστροφή V"),
     ("Flower", "Λουλούδι"),
@@ -852,6 +865,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Hide Unselected", "Απόκρυψη μη επιλεγμένων"),
     ("Hierarchical", "Ιεραρχική"),
     ("History", "Ιστορικό"),
+    ("Hold Points on Plane", "Συγκράτηση σημείων στο επίπεδο"),
     ("Hole Radius", "Ακτίνα τρύπας"),
     ("Horizontal Spacing", "Οριζόντια απόσταση"),
     (
@@ -904,6 +918,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Inset: drag left/right to inset the selected polygons (all when none is) · click selects · Esc cancels",
         "Ένθεση: σύρετε αριστερά/δεξιά για ένθεση των επιλεγμένων πολυγώνων (όλων αν δεν υπάρχει επιλογή) · κλικ επιλέγει · Esc ακυρώνει",
     ),
+    ("Instance", "Στιγμιότυπο"),
     ("Intensity", "Ένταση"),
     ("Interactive Render View", "Διαδραστικό Render View"),
     ("Interface", "Περιβάλλον"),
@@ -935,6 +950,12 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Μένει σε αυτόν τον υπολογιστή· επισυνάψτε την σε μια αναφορά σφάλματος, αν αναφέρετε το πρόβλημα.",
     ),
     ("Iterate", "Επανάληψη"),
+    (
+        "Its children and their mirror image",
+        "Τα παιδιά της και το είδωλό τους",
+    ),
+    ("Its children as one mesh", "Τα παιδιά της ως ένα πλέγμα"),
+    ("Join", "Ένωση πλεγμάτων"),
     ("Keep Y-Axis Length", "Διατήρηση μήκους άξονα Y"),
     (
         "Keep a recovery copy of unsaved work, offered after a crash",
@@ -1140,6 +1161,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Millimetres", "Χιλιοστά"),
     ("Minimum Samples", "Ελάχιστα δείγματα"),
     ("Minimum Time", "Ελάχιστος χρόνος"),
+    ("Mirror Plane", "Επίπεδο κατοπτρισμού"),
     ("Missing Plugin", "Plugin που λείπει"),
     ("Missing textures: {0}", "Υφές που λείπουν: {0}"),
     ("Missing: {0}", "Λείπει: {0}"),
@@ -1523,6 +1545,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Επανάληψη (Ctrl+Y) — τίποτα για επανάληψη",
     ),
     ("Redo {0}", "Επανάληψη: {0}"),
+    ("Reference Object", "Αντικείμενο αναφοράς"),
     ("Reflection", "Ανάκλαση"),
     (
         "Relative to the document's folder: renders are saved once the document is saved.",
@@ -1878,6 +1901,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Shows how long frames take, and the slowest part",
         "Δείχνει πόσο διαρκούν τα καρέ και το πιο αργό τμήμα",
     ),
+    (
+        "Shows its reference object again, without a copy",
+        "Δείχνει ξανά το αντικείμενο αναφοράς του, χωρίς αντίγραφο",
+    ),
     ("Shrink Selection", "Συρρίκνωση επιλογής"),
     ("Shutter", "Κλείστρο"),
     ("Shutter Position", "Θέση κλείστρου"),
@@ -2001,6 +2028,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Switch the selected generator (or the one above the selection) off / on",
         "Απενεργοποίηση / ενεργοποίηση του επιλεγμένου generator (ή αυτού πάνω από την επιλογή)",
     ),
+    ("Symmetry", "Συμμετρία"),
     ("Tag Properties", "Ιδιότητες ετικέτας"),
     ("Tags", "Ετικέτες"),
     ("Take", "Λήψη"),
@@ -2312,6 +2340,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Wavefront OBJ (.obj + .mtl)", "Wavefront OBJ (.obj + .mtl)"),
     ("Wavelength", "Μήκος κύματος"),
     ("Weld", "Συγκόλληση"),
+    ("Weld Points", "Συγκόλληση σημείων"),
     (
         "Weld: click a selected point to weld onto it, or anywhere else to weld at the centre",
         "Συγκόλληση: κλικ σε επιλεγμένο σημείο για συγκόλληση πάνω του ή οπουδήποτε αλλού για συγκόλληση στο κέντρο",

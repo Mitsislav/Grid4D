@@ -6,18 +6,21 @@
 //! Sweep moves its first child spline (the profile) along its second (the path);
 //! the Loft stretches a skin over all its child splines; the Boolean combines
 //! its first two children (each with its own children, other generators'
-//! results included) as solids.
+//! results included) as solids; the Symmetry shows its children with their
+//! mirror image; the Join merges its children into one mesh.
 
 use glam::Mat4;
 use grid4d_geom::{
     PolyMesh,
     boolean::{self, BooleanError},
+    ops::{OptimizeOptions, optimize},
     spline::{Interpolation, Polyline, SplinePrimitive, Text},
     subdivision::{self, SubdivisionOptions},
     surface::{self, Extrusion, Lathe, Loft, Sweep},
+    symmetry::{self, Symmetry},
     uv,
 };
-use grid4d_scene::{Boolean, MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
+use grid4d_scene::{Boolean, Join, MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
 
 use crate::{
     Purpose,
@@ -34,6 +37,8 @@ pub(crate) enum Options {
     Sweep(Sweep),
     Loft(Loft),
     Boolean(Boolean),
+    Symmetry(Symmetry),
+    Join(Join),
 }
 
 /// Something a generator wants its user to know about its result (shown in
@@ -131,6 +136,8 @@ pub(crate) fn options(kind: &ObjectKind, purpose: Purpose) -> Option<Options> {
         ObjectKind::Sweep(sweep) => Some(Options::Sweep(sweep)),
         ObjectKind::Loft(loft) => Some(Options::Loft(loft)),
         ObjectKind::Boolean(boolean) => Some(Options::Boolean(boolean)),
+        ObjectKind::Symmetry(symmetry) => Some(Options::Symmetry(symmetry)),
+        ObjectKind::Join(join) => Some(Options::Join(join)),
         _ => None,
     }
 }
@@ -154,7 +161,10 @@ pub(crate) fn gather(
     match options {
         Options::Sweep(_) => return gather_sweep(scene, id, purpose, frame, inputs),
         Options::Loft(_) => return gather_loft(scene, id, purpose, frame, inputs),
-        Options::Boolean(_) => return gather_boolean(scene, id, purpose, frame, 0, inputs),
+        Options::Boolean(_) => return gather_solids(scene, id, purpose, frame, Operands::Two, 0, inputs),
+        Options::Symmetry(_) | Options::Join(_) => {
+            return gather_solids(scene, id, purpose, frame, Operands::All, 0, inputs);
+        }
         Options::Subdivision(_) | Options::Extrude { .. } | Options::Lathe(_) => {}
     }
     let &first = scene.children(id).first()?;
@@ -164,21 +174,38 @@ pub(crate) fn gather(
         // Its own: a spline's line colour would not suit a solid.
         Options::Extrude { hierarchical, .. } => (scene.get(id)?.data.display_color, hierarchical),
         Options::Lathe(_) => (scene.get(id)?.data.display_color, false),
-        Options::Sweep(_) | Options::Loft(_) | Options::Boolean(_) => return None,
+        Options::Sweep(_) | Options::Loft(_) | Options::Boolean(_) | Options::Symmetry(_) | Options::Join(_) => {
+            return None;
+        }
     };
     let into_generator = scene.world_matrix_at(id, frame).inverse();
     stack.push(first);
     while let Some(node_id) = stack.pop() {
         let Some(node) = scene.get(node_id) else { continue };
         let data = &node.data;
-        if !purpose.shows(data)
-            || !scene.layers().shows_own(data.layer, purpose == Purpose::Render)
-            || !data.enabled
-            || data.kind.is_generator()
-        {
-            continue; // hidden parts are left out; nested generators are not merged
+        if !purpose.shows(data) || !scene.layers().shows_own(data.layer, purpose == Purpose::Render) || !data.enabled {
+            continue; // hidden parts are left out
         }
         let kind = data.kind_at(frame);
+        if data.kind.is_generator() {
+            // A cage may be a generator of solids (a Join, a Boolean, a
+            // Symmetry): its result is smoothed; other generators inside a
+            // cage are left out.
+            if matches!(options, Options::Subdivision(_))
+                && let Some(nested) = options_of_solids(&kind, purpose)
+            {
+                let mut gathered = Vec::new();
+                if gather_solids(scene, node_id, purpose, frame, nested.1, 1, &mut gathered).is_some() {
+                    inputs.push(Input {
+                        source: Source::Generated(nested.0, gathered),
+                        matrix: into_generator * scene.world_matrix_at(node_id, frame),
+                        links: Vec::new(),
+                        operand: 0,
+                    });
+                }
+            }
+            continue;
+        }
         let source = match (&*kind, options) {
             (ObjectKind::Polygon { mesh, .. }, Options::Subdivision(_)) => Some(Source::Mesh(mesh.clone())),
             (kind, Options::Subdivision(_)) if editable_mesh_exists(kind) => Some(Source::Primitive(kind.clone())),
@@ -283,22 +310,64 @@ fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs: 
     Some(colour)
 }
 
-/// The Boolean's inputs: its first two children, each with its visible,
-/// enabled descendants that have a surface (operand 0 and 1), in the
-/// generator's space. A generator among them enters with its own inputs
-/// (its children are its, not the Boolean's), up to [`MAX_NESTING`] deep.
-fn gather_boolean(
+/// A generator of solids' options and which children it takes; `None` for
+/// other kinds.
+fn options_of_solids(kind: &ObjectKind, purpose: Purpose) -> Option<(Options, Operands)> {
+    match options(kind, purpose)? {
+        options @ Options::Boolean(_) => Some((options, Operands::Two)),
+        options @ (Options::Symmetry(_) | Options::Join(_)) => Some((options, Operands::All)),
+        Options::Subdivision(_)
+        | Options::Extrude { .. }
+        | Options::Lathe(_)
+        | Options::Sweep(_)
+        | Options::Loft(_) => None,
+    }
+}
+
+/// Which children a generator of solids takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Operands {
+    /// The first two, apart (a Boolean's A and B).
+    Two,
+    /// All of them, as one (a Symmetry's or a Join's).
+    All,
+}
+
+/// The inputs of a generator of solids (a Boolean, Symmetry, Join): its
+/// first two children (operand 0 and 1) or all of them (operand 0), each with
+/// its visible, enabled descendants that have a surface, in the generator's
+/// space. A generator among them enters with its own inputs (its children are
+/// its, not this one's), up to [`MAX_NESTING`] deep. The colour returned is
+/// the Boolean's own, else the first child's (the result stands in for it).
+fn gather_solids(
     scene: &Scene,
     id: NodeId,
     purpose: Purpose,
     frame: f64,
+    operands: Operands,
     nesting: u32,
     inputs: &mut Vec<Input>,
 ) -> Option<[f32; 3]> {
-    let colour = scene.get(id)?.data.display_color;
+    let own = scene.get(id)?.data.display_color;
+    let colour = match operands {
+        Operands::Two => own,
+        Operands::All => scene
+            .children(id)
+            .first()
+            .and_then(|&c| scene.get(c))
+            .map_or(own, |c| c.data.display_color),
+    };
     let into_generator = scene.world_matrix_at(id, frame).inverse();
     let mut stack = Vec::new();
-    for (operand, &child) in (0u8..).zip(scene.children(id).iter().take(2)) {
+    let count = match operands {
+        Operands::Two => 2,
+        Operands::All => usize::MAX,
+    };
+    for (k, &child) in (0u8..).zip(scene.children(id).iter().take(count)) {
+        let operand = match operands {
+            Operands::Two => k,
+            Operands::All => 0,
+        };
         stack.push(child);
         while let Some(node_id) = stack.pop() {
             let Some(node) = scene.get(node_id) else { continue };
@@ -315,7 +384,12 @@ fn gather_boolean(
                 // A generator: its result stands in for it and its children.
                 let mut nested = Vec::new();
                 let gathered = match options {
-                    Options::Boolean(_) => gather_boolean(scene, node_id, purpose, frame, nesting + 1, &mut nested),
+                    Options::Boolean(_) => {
+                        gather_solids(scene, node_id, purpose, frame, Operands::Two, nesting + 1, &mut nested)
+                    }
+                    Options::Symmetry(_) | Options::Join(_) => {
+                        gather_solids(scene, node_id, purpose, frame, Operands::All, nesting + 1, &mut nested)
+                    }
                     _ => gather(scene, node_id, &options, purpose, frame, &mut Vec::new(), &mut nested),
                 };
                 if gathered.is_some() {
@@ -371,6 +445,28 @@ pub(crate) fn build_all(inputs: &[Input], options: &Options) -> Built {
     let mut merged = Merged::default();
     let mesh = match options {
         Options::Boolean(settings) => return build_boolean(inputs, *settings),
+        Options::Symmetry(settings) => {
+            for input in inputs {
+                add_surface(&mut merged, input);
+            }
+            symmetry::mirror(&merged.finish(), settings)
+        }
+        Options::Join(settings) => {
+            for input in inputs {
+                add_surface(&mut merged, input);
+            }
+            let mesh = merged.finish();
+            if settings.weld && mesh.face_count() > 0 {
+                let weld = OptimizeOptions {
+                    merge_points: true,
+                    tolerance: settings.tolerance.clamp(0.0, Join::MAX_TOLERANCE),
+                    unused_points: true,
+                };
+                optimize(&mesh, None, &weld).map_or(mesh, |rebuilt| rebuilt.mesh)
+            } else {
+                mesh
+            }
+        }
         Options::Subdivision(options) => {
             for input in inputs {
                 add_surface(&mut merged, input);
@@ -528,6 +624,12 @@ pub fn generator_color(scene: &Scene, id: NodeId) -> Option<[f32; 3]> {
             .first()
             .and_then(|&cage| scene.get(cage))
             .map(|cage| cage.data.display_color),
+        // The result stands in for the first child.
+        Options::Symmetry(_) | Options::Join(_) => scene
+            .children(id)
+            .first()
+            .and_then(|&first| scene.get(first))
+            .map(|first| first.data.display_color),
         Options::Extrude { .. } | Options::Lathe(_) | Options::Sweep(_) | Options::Loft(_) | Options::Boolean(_) => {
             Some(node.data.display_color)
         }

@@ -112,8 +112,9 @@ pub fn show(ui: &mut Ui, editor: &mut EditorState) {
                 ..IconStyle::default()
             };
             if icon_button(ui, Icon::Object(tag), style, create_tooltip(tag)).clicked() {
-                // Alt + click wraps the selected object, as in C4D.
-                let alt = ui.input(|i| i.modifiers.alt);
+                // Alt + click wraps the selected object, as in C4D (an
+                // Instance links it either way).
+                let alt = ui.input(|i| i.modifiers.alt) && tag != ObjectKindTag::Instance;
                 editor.commands.push(if alt {
                     EditorCommand::WrapInGenerator(tag)
                 } else {
@@ -292,6 +293,11 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Boolean => {
             key("Add Boolean: its first two children as solids (Alt: around the selected object)")
         }
+        ObjectKindTag::Symmetry => {
+            key("Add Symmetry: its children and their mirror image (Alt: around the selected object)")
+        }
+        ObjectKindTag::Join => key("Add Join: its children as one mesh (Alt: around the selected objects)"),
+        ObjectKindTag::Instance => key("Add Instance: shows the selected object again, without a copy"),
         ObjectKindTag::Cloner => key("Add Cloner: repeats its children (Alt: around the selected object)"),
         ObjectKindTag::PlainEffector => key("Add Plain effector: moves, turns, scales the selected Cloner's clones"),
         ObjectKindTag::RandomEffector => key("Add Random effector: varies the selected Cloner's clones at random"),

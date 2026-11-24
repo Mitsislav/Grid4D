@@ -68,8 +68,14 @@ pub(crate) fn bake(doc: &Document, selection: &[NodeId], simulated: &Overrides) 
                 original: node.id,
                 data: copy(&eval, &doc.scene, node, original, frame, simulated),
             });
-            // A Cloner's copy (a Null) holds its clones as objects.
-            if original.data.enabled && matches!(original.data.kind, ObjectKind::Cloner { .. }) {
+            // A Cloner's or an Instance's copy (a Null) holds its clones (the
+            // shapes it shows) as objects.
+            if original.data.enabled
+                && matches!(
+                    original.data.kind,
+                    ObjectKind::Cloner { .. } | ObjectKind::Instance { .. }
+                )
+            {
                 baked.extend(
                     clone_objects(&eval, &doc.scene, node.id, frame)
                         .into_iter()
@@ -201,6 +207,8 @@ fn copy(
             interpolation: text.interpolation,
             components: Components::default(),
         },
+        // An Instance's shapes are its clones (added by the caller).
+        ObjectKind::Instance { .. } => ObjectKind::Null,
         generator if generator.is_generator() => match shown.filter(|_| original.data.enabled) {
             Some(mesh) => {
                 if let Some(colour) = grid4d_eval::generator_color(scene, node.id) {

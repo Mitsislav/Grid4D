@@ -48,7 +48,12 @@ fn version_4_kinds() -> Vec<ObjectKindTag> {
         .filter(|t| {
             !matches!(
                 t,
-                ObjectKindTag::Sky | ObjectKindTag::Environment | ObjectKindTag::Boolean
+                ObjectKindTag::Sky
+                    | ObjectKindTag::Environment
+                    | ObjectKindTag::Boolean
+                    | ObjectKindTag::Symmetry
+                    | ObjectKindTag::Instance
+                    | ObjectKindTag::Join
             )
         })
         .collect()
@@ -523,6 +528,10 @@ proptest! {
         merge_faces in any::<bool>(),
         select_cut_edges in any::<bool>(),
         weld in prop_oneof![Just(0.01f32), 0.0f32..100.0],
+        plane in 0usize..3,
+        switches in (any::<bool>(), any::<bool>(), any::<bool>(), any::<bool>()),
+        tolerance in prop_oneof![Just(0.1f32), 0.0f32..100.0],
+        linked in any::<bool>(),
     ) {
         let mut doc = document(objects, Vec::new(), Vec::new());
         let boolean = grid4d_scene::Boolean {
@@ -532,11 +541,31 @@ proptest! {
             weld,
         };
         let id = doc.scene.insert(Node::new("Boolean", ObjectKind::Boolean(boolean)));
-        doc.scene.insert_child(id, Node::new("A", ObjectKindTag::Cube.default_kind())).unwrap();
+        let a = doc.scene.insert_child(id, Node::new("A", ObjectKindTag::Cube.default_kind())).unwrap();
+        // Step 17.4: a Symmetry, a Join, an Instance (linked or not).
+        let symmetry = grid4d_geom::symmetry::Symmetry {
+            plane: grid4d_geom::symmetry::MirrorPlane::ALL[plane],
+            weld: switches.0,
+            tolerance: weld.min(100.0),
+            hold: switches.1,
+            flip: switches.2,
+        };
+        doc.scene.insert(Node::new("Symmetry", ObjectKind::Symmetry(symmetry)));
+        let join = grid4d_scene::Join { weld: switches.3, tolerance };
+        doc.scene.insert(Node::new("Join", ObjectKind::Join(join)));
+        let instance = ObjectKind::Instance { reference: linked.then_some(a) };
+        doc.scene.insert(Node::new("Instance", instance.clone()));
         let bytes = grid4d_io::to_bytes(&doc).unwrap();
         let loaded = grid4d_io::from_bytes(&bytes).unwrap();
-        let back = loaded.scene.iter().find(|(_, n)| n.data.name == "Boolean").unwrap().1;
+        let named = |name: &str| loaded.scene.iter().find(|(_, n)| n.data.name == name).unwrap().1;
+        let back = named("Boolean");
         prop_assert_eq!(&back.data.kind, &ObjectKind::Boolean(boolean));
+        prop_assert_eq!(&named("Symmetry").data.kind, &ObjectKind::Symmetry(symmetry));
+        prop_assert_eq!(&named("Join").data.kind, &ObjectKind::Join(join));
+        let ObjectKind::Instance { reference } = named("Instance").data.kind else {
+            panic!("an Instance")
+        };
+        prop_assert_eq!(reference.and_then(|r| loaded.scene.get(r)).map(|n| n.data.name.as_str()), linked.then_some("A"));
         prop_assert!(grid4d_io::to_bytes(&loaded).unwrap() == bytes);
         prop_assert!(grid4d_io::from_bytes(&labelled(&bytes, 5)).is_err());
     }

@@ -433,6 +433,9 @@ impl ObjectKind {
             | Self::SubdivisionSurface { .. }
             | Self::Loft(_)
             | Self::Boolean(_)
+            | Self::Symmetry(_)
+            | Self::Instance { .. }
+            | Self::Join(_)
             | Self::Spline { .. }
             // The lattice is edited, not keyed.
             | Self::Ffd { .. } => &[],

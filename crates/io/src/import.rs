@@ -149,6 +149,7 @@ pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>
             linking.objects.retain_mut(|id| map(*id).map(|new| *id = new).is_some());
         }
         ObjectKind::Camera { lens, .. } => lens.focus_object = lens.focus_object.and_then(&map),
+        ObjectKind::Instance { reference } => *reference = reference.and_then(&map),
         _ => {}
     }
 }
@@ -168,6 +169,7 @@ pub fn refers_to_objects(data: &NodeData) -> bool {
         ObjectKind::Cloner { object, effectors, .. } => object.is_some() || !effectors.is_empty(),
         ObjectKind::Light { linking, .. } => !linking.objects.is_empty(),
         ObjectKind::Camera { lens, .. } => lens.focus_object.is_some(),
+        ObjectKind::Instance { reference } => reference.is_some(),
         _ => false,
     };
     tags || kind

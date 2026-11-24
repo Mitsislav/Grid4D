@@ -117,11 +117,17 @@ fn golden_with(mesh: grid4d_geom::PolyMesh) -> Document {
 /// The kinds of object version 5 adds ([`full_v5_document`] has them).
 const VERSION_5_KINDS: [ObjectKindTag; 2] = [ObjectKindTag::Sky, ObjectKindTag::Environment];
 /// The kinds of object version 6 adds ([`full_document`] has them; none yet).
-const VERSION_6_KINDS: [ObjectKindTag; 1] = [ObjectKindTag::Boolean];
+const VERSION_6_KINDS: [ObjectKindTag; 4] = [
+    ObjectKindTag::Boolean,
+    ObjectKindTag::Symmetry,
+    ObjectKindTag::Instance,
+    ObjectKindTag::Join,
+];
 
 /// Everything a version 6 file can hold (see `docs/FILE_FORMAT.md`): version
 /// 5's, and what Phase 17 adds as it arrives — a Boolean with every setting
-/// changed and its two inputs (17.3).
+/// changed and its two inputs (17.3); a Symmetry and a Join with every
+/// setting changed, an Instance of the sphere (17.4).
 fn full_document() -> (Document, SimulationCache) {
     let (mut doc, cache) = full_v5_document();
     let boolean = doc.scene.insert(Node::new(
@@ -139,6 +145,36 @@ fn full_document() -> (Document, SimulationCache) {
     doc.scene
         .insert_child(boolean, Node::new("Ball", ObjectKindTag::Sphere.default_kind()))
         .unwrap();
+    let symmetry = doc.scene.insert(Node::new(
+        "Symmetry",
+        ObjectKind::Symmetry(grid4d_geom::symmetry::Symmetry {
+            plane: grid4d_geom::symmetry::MirrorPlane::Xz,
+            weld: false,
+            tolerance: 0.25,
+            hold: false,
+            flip: true,
+        }),
+    ));
+    doc.scene
+        .insert_child(symmetry, Node::new("Half", ObjectKindTag::Cube.default_kind()))
+        .unwrap();
+    let join = doc.scene.insert(Node::new(
+        "Join",
+        ObjectKind::Join(grid4d_scene::Join {
+            weld: false,
+            tolerance: 2.5,
+        }),
+    ));
+    doc.scene
+        .insert_child(join, Node::new("Part", ObjectKindTag::Cube.default_kind()))
+        .unwrap();
+    let sphere = doc.scene.iter().find(|(_, n)| n.data.name == "Sphere").unwrap().0;
+    doc.scene.insert(Node::new(
+        "Instance",
+        ObjectKind::Instance {
+            reference: Some(sphere),
+        },
+    ));
     (doc, cache)
 }
 

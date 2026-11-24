@@ -441,6 +441,46 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.polyline(&block, true);
             c.ellipse((0.7, 0.32), (0.22, 0.22));
         }
+        ObjectKindTag::Symmetry => {
+            // A half shape and its mirror image across a dashed line.
+            let half: [P; 5] = [(0.5, 0.12), (0.22, 0.24), (0.12, 0.56), (0.3, 0.88), (0.5, 0.88)];
+            c.fill_with(&half, soft);
+            c.polyline(&half, false);
+            let mirrored: Vec<P> = half.iter().map(|&(x, y)| (1.0 - x, y)).collect();
+            c.polyline(&mirrored, false);
+            for k in 0..4 {
+                let y = 0.1 + 0.21 * k as f32;
+                c.line((0.5, y), (0.5, y + 0.11));
+            }
+        }
+        ObjectKindTag::Instance => {
+            // A shape and its copy behind it, linked by an arrow.
+            let back = [(0.42, 0.1), (0.9, 0.1), (0.9, 0.58), (0.42, 0.58)];
+            c.polyline(&back, true);
+            let front = [(0.1, 0.42), (0.58, 0.42), (0.58, 0.9), (0.1, 0.9)];
+            c.fill_with(&front, soft);
+            c.polyline(&front, true);
+            c.line((0.34, 0.66), (0.66, 0.34));
+            c.line((0.66, 0.34), (0.52, 0.36));
+            c.line((0.66, 0.34), (0.64, 0.48));
+        }
+        ObjectKindTag::Join => {
+            // Two blocks pressed into one: one outline, the seam faint.
+            let outline = [
+                (0.08, 0.3),
+                (0.5, 0.3),
+                (0.5, 0.18),
+                (0.92, 0.18),
+                (0.92, 0.82),
+                (0.08, 0.82),
+            ];
+            c.fill_with(&outline, soft);
+            c.polyline(&outline, true);
+            for k in 0..3 {
+                let y = 0.36 + 0.16 * k as f32;
+                c.line((0.5, y), (0.5, y + 0.08));
+            }
+        }
         ObjectKindTag::Sweep => {
             // A tube following a curve: its two edges and its end opening.
             let curve = |offset: f32| -> Vec<P> {

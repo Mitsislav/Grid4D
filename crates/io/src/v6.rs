@@ -22,6 +22,7 @@ use std::{
 };
 
 use glam::{Vec2, Vec3};
+use grid4d_geom::symmetry::{MirrorPlane, Symmetry};
 use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
     cloner::{CloneOrder, Cloner, Distribution, GridArray, Layout, Linear, Radial, StepMode, Surface},
@@ -35,8 +36,8 @@ use grid4d_geom::{
     surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep},
 };
 use grid4d_scene::{
-    AreaShape, Boolean, BooleanMode, Denoise, Environment, Lens, LinkMode, Linking, NoiseThreshold, Pass, PngPasses,
-    RenderRegion, ShutterPosition, Sky, SunPlacement,
+    AreaShape, Boolean, BooleanMode, Denoise, Environment, Join, Lens, LinkMode, Linking, NoiseThreshold, Pass,
+    PngPasses, RenderRegion, ShutterPosition, Sky, SunPlacement,
 };
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
@@ -2391,6 +2392,40 @@ enum KindDto {
         #[serde(default = "default_weld", skip_serializing_if = "is_default_weld")]
         weld: f32,
     },
+    /// A Symmetry generator (version 6, step 17.4); defaults omitted.
+    Symmetry {
+        #[serde(default, skip_serializing_if = "MirrorPlaneDto::is_zy")]
+        plane: MirrorPlaneDto,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        weld: bool,
+        /// cm; 0.01 when absent.
+        #[serde(
+            default = "default_symmetry_tolerance",
+            skip_serializing_if = "is_default_symmetry_tolerance"
+        )]
+        tolerance: f32,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        hold: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        flip: bool,
+    },
+    /// An Instance (version 6, step 17.4): the object it shows, by index in
+    /// `objects` (written by the object, resolved once every object exists).
+    Instance {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference: Option<usize>,
+    },
+    /// A Join generator (version 6, step 17.4); defaults omitted.
+    Join {
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        weld: bool,
+        /// cm; 0.1 when absent.
+        #[serde(
+            default = "default_join_tolerance",
+            skip_serializing_if = "is_default_join_tolerance"
+        )]
+        tolerance: f32,
+    },
     /// A Loft generator (added in step 9.7); defaults omitted.
     Loft {
         subdivision_u: u32,
@@ -3540,6 +3575,7 @@ fn link_objects(kind: &mut ObjectKind, indices: &[usize], ids: &[NodeId]) {
         ObjectKind::Camera { lens, .. } => {
             lens.focus_object = indices.first().and_then(|&i| ids.get(i).copied());
         }
+        ObjectKind::Instance { reference } => *reference = indices.first().and_then(|&i| ids.get(i).copied()),
         _ => {}
     }
 }
@@ -3814,6 +3850,70 @@ enum FalloffDto {
     None,
     Linear,
     InverseSquare,
+}
+
+/// The plane a Symmetry mirrors across (version 6, step 17.4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MirrorPlaneDto {
+    Xy,
+    #[default]
+    Zy,
+    Xz,
+}
+
+impl MirrorPlaneDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_zy(&self) -> bool {
+        *self == Self::Zy
+    }
+}
+
+impl From<MirrorPlane> for MirrorPlaneDto {
+    fn from(plane: MirrorPlane) -> Self {
+        match plane {
+            MirrorPlane::Xy => Self::Xy,
+            MirrorPlane::Zy => Self::Zy,
+            MirrorPlane::Xz => Self::Xz,
+        }
+    }
+}
+
+impl From<MirrorPlaneDto> for MirrorPlane {
+    fn from(plane: MirrorPlaneDto) -> Self {
+        match plane {
+            MirrorPlaneDto::Xy => Self::Xy,
+            MirrorPlaneDto::Zy => Self::Zy,
+            MirrorPlaneDto::Xz => Self::Xz,
+        }
+    }
+}
+
+fn default_symmetry_tolerance() -> f32 {
+    Symmetry::default().tolerance
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_default_symmetry_tolerance(tolerance: &f32) -> bool {
+    tolerance.to_bits() == default_symmetry_tolerance().to_bits()
+}
+
+fn default_join_tolerance() -> f32 {
+    Join::default().tolerance
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_default_join_tolerance(tolerance: &f32) -> bool {
+    tolerance.to_bits() == default_join_tolerance().to_bits()
 }
 
 /// What a Boolean keeps (version 6, step 17.3).
@@ -4470,6 +4570,7 @@ impl KindDto {
                 linking: Some(linking), ..
             } => linking.objects.clone(),
             Self::Camera { lens: Some(lens), .. } => lens.focus_object.into_iter().collect(),
+            Self::Instance { reference } => reference.iter().copied().collect(),
             _ => Vec::new(),
         }
     }
@@ -4487,6 +4588,9 @@ impl KindDto {
             }
             (Self::Camera { lens: Some(dto), .. }, ObjectKind::Camera { lens, .. }) => {
                 dto.focus_object = lens.focus_object.and_then(|id| objects.get(&id).copied());
+            }
+            (Self::Instance { reference: dto }, ObjectKind::Instance { reference }) => {
+                *dto = reference.and_then(|id| objects.get(&id).copied());
             }
             _ => {}
         }
@@ -4777,6 +4881,19 @@ impl KindDto {
                 merge_faces: boolean.merge_faces,
                 select_cut_edges: boolean.select_cut_edges,
                 weld: boolean.weld,
+            },
+            ObjectKind::Symmetry(symmetry) => Self::Symmetry {
+                plane: symmetry.plane.into(),
+                weld: symmetry.weld,
+                tolerance: symmetry.tolerance,
+                hold: symmetry.hold,
+                flip: symmetry.flip,
+            },
+            // The link is written by the object (`link_objects`).
+            ObjectKind::Instance { .. } => Self::Instance { reference: None },
+            ObjectKind::Join(join) => Self::Join {
+                weld: join.weld,
+                tolerance: join.tolerance,
             },
             ObjectKind::Loft(loft) => Self::Loft {
                 subdivision_u: loft.subdivision_u,
@@ -5213,6 +5330,25 @@ impl KindDto {
                 seed,
                 reset_coordinates,
             }),
+            Self::Symmetry {
+                plane,
+                weld,
+                tolerance,
+                hold,
+                flip,
+            } => ObjectKind::Symmetry(Symmetry {
+                plane: plane.into(),
+                weld,
+                tolerance: tolerance.clamp(0.0, Symmetry::MAX_TOLERANCE),
+                hold,
+                flip,
+            }),
+            // Resolved once every object exists.
+            Self::Instance { .. } => ObjectKind::Instance { reference: None },
+            Self::Join { weld, tolerance } => ObjectKind::Join(Join {
+                weld,
+                tolerance: tolerance.clamp(0.0, Join::MAX_TOLERANCE),
+            }),
             Self::Boolean {
                 mode,
                 merge_faces,
@@ -5356,6 +5492,8 @@ impl KindDto {
         match *self {
             Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } | Self::Loft { .. } => Vec::new(),
             Self::Boolean { weld, .. } => vec![weld],
+            Self::Symmetry { tolerance, .. } | Self::Join { tolerance, .. } => vec![tolerance],
+            Self::Instance { .. } => Vec::new(),
             Self::Cloner { ref layout, .. } => layout.parameters(),
             Self::PlainEffector(ref dto) | Self::RandomEffector(ref dto) => dto.parameters(),
             Self::Extrude { offset, movement, .. } => vec![offset, movement[0], movement[1], movement[2]],

@@ -22,7 +22,7 @@ screenshots come from the application itself.
 9. [Files](#9-files)
 10. [Timeline and playback](#10-timeline-and-playback)
 11. [Polygon modelling](#11-polygon-modelling)
-12. [Generators: Subdivision Surface and Boolean](#12-generators-subdivision-surface-and-boolean)
+12. [Generators: Subdivision Surface, Boolean, Symmetry, Instance and Join](#12-generators-subdivision-surface-boolean-symmetry-instance-and-join)
 13. [Splines](#13-splines)
 14. [Deformers](#14-deformers)
 15. [The Cloner](#15-the-cloner)
@@ -460,7 +460,7 @@ any time. To edit their points and polygons, make them editable
 
 **Generators** (Create ▸ Generator, or the green buttons at the right end of the
 command palette) build their shape from their children. The Subdivision Surface
-smooths a polygon mesh ([§12](#12-generators-subdivision-surface-and-boolean)); the Extrude
+smooths a polygon mesh ([§12](#12-generators-subdivision-surface-boolean-symmetry-instance-and-join)); the Extrude
 turns a spline into a solid ([§13.4](#134-extrude-from-outline-to-solid)) and
 the Lathe turns one around an axis ([§13.5](#135-lathe-turning-a-profile)) and
 the Sweep moves one along another ([§13.6](#136-sweep-a-profile-along-a-path))
@@ -1337,11 +1337,11 @@ Polygons that collapse are removed.
 - It works on the selected points (or those of the selected edges or polygons), or
   on the whole object when nothing is selected.
 
-## 12. Generators: Subdivision Surface and Boolean
+## 12. Generators: Subdivision Surface, Boolean, Symmetry, Instance and Join
 
 A **generator** is an object that builds its shape from its children. This
-section covers the **Subdivision Surface** and the **Boolean** (§12.5); the
-spline generators (Extrude,
+section covers the **Subdivision Surface**, the **Boolean** (§12.5) and the
+**Symmetry**, **Instance** and **Join** (§12.6); the spline generators (Extrude,
 Lathe, Sweep, Loft) are in [§13.4–13.7](#134-extrude-from-outline-to-solid).
 The Subdivision Surface turns a coarse polygon mesh, the **cage**,
 into a smooth, rounded surface. The result updates live while you keep modelling
@@ -1464,6 +1464,56 @@ Good to know:
   edges selected when *Select Cut Edges* is on) and removes both inputs; one
   undo step brings everything back. **Current State to Object** makes a copy
   and keeps the Boolean. Renders and exported files use the result.
+
+### 12.6 Symmetry, Instance and Join
+
+Three small helpers that keep modelling quick and undoable.
+
+![A cone as one half; the Symmetry adds its mirror image](images/manual/symmetry.png)
+
+**Symmetry** — model one half, see the whole. Select the half and **Alt +
+click** the Symmetry button (or Alt with **Create ▸ Generator ▸ Symmetry**):
+its children are shown together with their mirror image, joined where they
+meet the mirror plane.
+
+| Parameter | Meaning |
+|-----------|---------|
+| Mirror Plane | **ZY** mirrors left and right (the default), **XY** front and back, **XZ** up and down — the Symmetry's own planes, so turning or moving it moves the mirror. |
+| Weld Points | Points of the half and of its mirror that meet at the plane become one point, so the whole has no seam. |
+| Tolerance | How near the plane a point counts as on it (0.01 cm). |
+| Hold Points on Plane | Points within the tolerance are moved exactly onto the plane, so a point that is a hair off never opens a gap. |
+| Flip | The mirror image comes first: the shape is the same, the order of its points changes. |
+
+Keep modelling the half: its points, edges and polygons stay editable in the
+component modes while the mirror follows each change. The mirror half's
+textures are mirrored back so they read the right way round. **Make Editable**
+(C) bakes the whole into one polygon object, the half's points first, so a
+selection you made on the half still names the same points.
+
+**Instance** — the same object shown again, without a copy. Select an object
+and click the Instance button (**Create ▸ Generator ▸ Instance**): the new
+Instance shows that object and everything below it — deformed, animated, a
+generator's result — at its own place. Change the original and every
+Instance follows. A thousand Instances cost almost nothing, since no shape is
+copied. Pick another object in **Reference Object** (Attribute Manager ▸
+Object) to show something else.
+
+- An Instance with its own material shows its copy in that material; without
+  one the copy keeps the original's.
+- Clicking a copy in the view selects the Instance.
+- An Instance of itself, of an object above it, or a chain of Instances that
+  comes back to its start shows nothing; so does one whose object was
+  deleted (undo brings it back).
+- **Make Editable** (C) turns an Instance into a group of real copies;
+  **Current State to Object** and exported files do the same.
+
+**Join** — its children as one mesh. Select the objects (or their group)
+and **Alt + click** the Join button: they are merged into one polygon mesh,
+and points closer than **Tolerance** (0.1 cm) are joined when **Weld** is on.
+As the input of another generator the Join counts as one object: put it in a
+Subdivision Surface to smooth separate parts together, or make it a
+Boolean's second input to cut with several shapes at once. **Make Editable**
+gives one polygon object.
 
 ## 13. Splines
 

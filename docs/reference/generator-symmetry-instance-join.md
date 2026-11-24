@@ -45,8 +45,9 @@ single input.
 - **Editing**: the children are hidden while the generator is enabled, and in
   component modes the active child stays editable as a cage under the whole;
   every edit shows mirrored the same frame.
-- UVs are mirrored with the points (the mirror reuses the half's UVs: both
-  halves share the texture, as expected for symmetric models).
+- UVs: the mirror reuses the half's UVs with U turned round (U → 1 − U),
+  so both halves share the texture and neither shows it mirrored (every
+  generator's rule: no face with a mirrored picture).
 - Make Editable bakes the welded whole into one polygon object (the half's
   points first, so its selections still name the same points); Current State
   to Object copies it; export bakes it.
@@ -61,6 +62,9 @@ single input.
 
 ### Behaviour
 
+- **Creating**: with an object selected, Create ▸ Generator ▸ Instance (or
+  its button, with or without Alt) makes an Instance of it; without a
+  selection the Instance shows nothing until a Reference Object is chosen.
 - Shows the reference object **and its subtree** as evaluated (deformed,
   animated, a generator's result) at the Instance's own placement: the
   Instance's matrix replaces the reference's world matrix for the copy.
@@ -97,7 +101,9 @@ single input.
 - Each child's UVs are kept; selections are not (the result is new geometry).
 - The children are hidden while the Join is enabled. As the input of another
   generator it counts as **one** object: a Subdivision Surface over a Join
-  smooths the welded whole; a Boolean takes a Join of several cutters as B.
+  smooths the welded whole (a Subdivision Surface's cage may be a Join,
+  Symmetry or Boolean: its result is smoothed); a Boolean takes a Join of
+  several cutters as B.
 - Make Editable gives one polygon object; Current State to Object copies it;
   export bakes it.
 
@@ -115,24 +121,36 @@ single input.
 
 | Case | Target |
 |------|--------|
-| Symmetry of a half of 100 000 points | ≤ 10 ms a rebuild; by hand today (mirror, join, Optimize the points at the plane) it costs 21 ms |
-| A thousand Instances of a 10 000-triangle object | the frame stays within the 10 000-object budget (≥ 60 fps); no mesh copied |
+| Symmetry of a half of 100 000 points | ≤ 10 ms a rebuild (by hand, 21 ms): **5.1 ms** (17.4) |
+| A thousand Instances of a 10 000-triangle object | the frame stays within the 10 000-object budget (≥ 60 fps); no mesh copied: **0.17 ms** to evaluate the scene after one moves (17.4) |
 
-## Acceptance criteria
+## Decisions made while implementing (2026-11-24)
 
-- [ ] Symmetry of a half cube (open at the plane) gives a closed cube: every
+1. The mirror's U is turned round (see UVs above).
+2. An Instance is listed with the generators (menu, toolbar) but builds
+   nothing from children: it adds its shapes to the list the Cloner's clones
+   are in, so the viewport, picking and the renderer draw them without a
+   copy; filtered with the generators.
+3. An Instance inside a Boolean's input gives no surface (its copies are not
+   meshes of its own); Make Editable it first.
+4. A Subdivision Surface's cage may be a generator of solids (Boolean,
+   Symmetry, Join); other generators inside a cage are still left out.
+
+## Acceptance criteria (all met in 17.4)
+
+- [x] Symmetry of a half cube (open at the plane) gives a closed cube: every
       edge between two faces, no point doubled at the plane.
-- [ ] A point 0.005 cm off the plane is held on it; with Hold off and Weld
+- [x] A point 0.005 cm off the plane is held on it; with Hold off and Weld
       off, the halves stay apart.
-- [ ] Moving a child point updates both halves the same frame; idle frames
+- [x] Moving a child point updates both halves the same frame; idle frames
       do not rebuild.
-- [ ] An Instance draws its reference at its own placement, adds no GPU mesh
+- [x] An Instance draws its reference at its own placement, adds no GPU mesh
       and follows the reference's edits and animation.
-- [ ] An Instance of its own parent, and two Instances of each other, show
+- [x] An Instance of its own parent, and two Instances of each other, show
       nothing and never hang.
-- [ ] Join of two cubes that touch, welded, has the shared points once; a
+- [x] Join of two cubes that touch, welded, has the shared points once; a
       Subdivision Surface over it smooths across the join.
-- [ ] Make Editable on each gives the shown mesh in one undo step; undo
+- [x] Make Editable on each gives the shown mesh in one undo step; undo
       restores the generator and its children exactly.
-- [ ] Saved as v6 and reopened the same; a v5 file naming these kinds is
+- [x] Saved as v6 and reopened the same; a v5 file naming these kinds is
       refused.

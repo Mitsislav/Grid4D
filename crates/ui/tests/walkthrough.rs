@@ -594,6 +594,44 @@ fn boolean_picture() {
     save(&mut h, &dir, "boolean");
 }
 
+/// The manual's picture of the Symmetry: a turned cone as one half, the
+/// other made by the Symmetry, the Symmetry selected:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored symmetry_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn symmetry_picture() {
+    use grid4d_scene::{Node, ObjectKindTag};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::new("Symmetry");
+    let symmetry = doc
+        .scene
+        .insert(Node::new("Symmetry", ObjectKindTag::Symmetry.default_kind()));
+    let mut wing = Node::new("Wing", ObjectKindTag::Cone.default_kind());
+    wing.data.transform.position = glam::Vec3::new(110.0, 40.0, 0.0);
+    wing.data.transform.rotation = glam::Vec3::new(0.0, 0.0, -0.7);
+    doc.scene.insert_child(symmetry, wing).unwrap();
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    h.state_mut()
+        .editor
+        .commands
+        .push(grid4d_ui::EditorCommand::FrameSelected);
+    h.run_steps(4);
+    let tab = h
+        .get_all_by_label("Object")
+        .map(|node| node.rect())
+        .filter(|rect| rect.top() > SIZE[1] * 0.5)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    click(&mut h, tab.center());
+    h.run_steps(2);
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "symmetry");
+}
+
 /// The manual's picture of the render region: the demo scene with a region
 /// over part of the view, rendered there by the Render View:
 ///

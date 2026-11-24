@@ -20,8 +20,15 @@ deformers).
   leaves the cut edges selected. Coplanar faces, shared edges and touching
   shapes are handled exactly. A very heavy Boolean keeps its last result
   while you drag and updates when you let go.
+- **Symmetry, Instance and Join** — three new objects. The Symmetry shows
+  its children with their mirror image, welded at the mirror plane, while
+  you keep modelling the half. The Instance shows another object again at
+  its own place without copying it (a thousand cost almost nothing). The
+  Join merges its children into one mesh, so another generator can take
+  them as one: a Subdivision Surface over separate parts, a Boolean cutting
+  with several shapes.
 - **Files** — documents are saved in `.g4d` format version 6, which holds
-  the Boolean; Grid4D 1.3's other features will add to it until 1.3 is
+  the Boolean, Symmetry, Instance and Join; Grid4D 1.3's other features will add to it until 1.3 is
   released. Every earlier file opens unchanged; Grid4D 1.2 cannot open
   version 6 files and says they come from a newer Grid4D.
 

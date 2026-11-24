@@ -31,7 +31,7 @@ opens every older file, and 1.2 refuses the new files with its existing
 |------|----------|-------------------|
 | 17.1 | nothing yet but the version number | — |
 | 17.3 | the **Boolean** object: `mode`, `merge_faces`, `select_cut_edges`, `weld` (done; hard cut edges come with 17.8) | a new object kind (`type: "boolean"`; refused in a version 5 file) |
-| 17.4 | the **Symmetry**, **Instance** and **Join** objects; an Instance's link | new object kinds; the link by object index, resolved like a Cloner's |
+| 17.4 | the **Symmetry** (`plane`, `weld`, `tolerance`, `hold`, `flip`), **Instance** (`reference`) and **Join** (`weld`, `tolerance`) objects (done) | new object kinds (refused in a version 5 file); the link by object index, resolved like a camera's focus object |
 | 17.5 | the **Spline Boolean** and **Reduce** objects | new object kinds |
 | 17.6 – 17.7 | nothing: soft selection and the modelling tools' options are editor state, never saved in a document | — |
 | 17.8 | **edge creases** and **hard edges** on a polygon object; the Phong tag's **weighted normals** | the `polygon` kind (`creases`, `hard`); the `phong` tag (`weighted`) |

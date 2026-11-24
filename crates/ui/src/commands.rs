@@ -700,10 +700,15 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             create_effector(doc, editor, viewport, tag);
         }
         EditorCommand::CreateObject(tag) => {
+            let mut data = new_object_data(tag, &doc.scene, viewport.camera());
+            // A new Instance shows the selected object.
+            if let ObjectKind::Instance { reference } = &mut data.kind {
+                *reference = editor.selection.active().filter(|&id| doc.scene.contains(id));
+            }
             let edit = SceneEdit::Insert {
                 parent: None,
                 index: usize::MAX,
-                data: new_object_data(tag, &doc.scene, viewport.camera()),
+                data,
             };
             commit(doc, editor, "Create Object", vec![edit], |inverses, selection| {
                 // The inverse of an insert is the detach of the new node.
@@ -918,6 +923,15 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             commit(doc, editor, "Make Editable", edits, |_, _| {});
         }
         EditorCommand::CurrentStateToObject => current_state_to_object(doc, editor),
+        // An Instance wraps nothing: it links the selected object instead.
+        EditorCommand::WrapInGenerator(ObjectKindTag::Instance) => {
+            apply(
+                EditorCommand::CreateObject(ObjectKindTag::Instance),
+                doc,
+                editor,
+                viewport,
+            );
+        }
         EditorCommand::WrapInGenerator(tag) => wrap_in_generator(doc, editor, viewport, tag),
         EditorCommand::ToggleParentGenerator => {
             let mut generators: Vec<NodeId> = Vec::new();
@@ -2642,9 +2656,10 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId], simulated: &grid4d_
             });
             continue;
         }
-        // A Cloner becomes a Null holding its clones as polygon objects.
-        if let ObjectKind::Cloner { .. } = &*kind {
-            if enabled_generator(id).is_none() {
+        // A Cloner (or an Instance) becomes a Null holding its clones (the
+        // shapes it shows) as polygon objects.
+        if matches!(&*kind, ObjectKind::Cloner { .. } | ObjectKind::Instance { .. }) {
+            if !node.data.enabled {
                 continue;
             }
             let eval = evaluated.get_or_insert_with(|| {
@@ -2843,6 +2858,9 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Sweep
         | ObjectKindTag::Loft
         | ObjectKindTag::Boolean
+        | ObjectKindTag::Symmetry
+        | ObjectKindTag::Instance
+        | ObjectKindTag::Join
         | ObjectKindTag::Cloner => {}
     }
     data
@@ -2894,6 +2912,9 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Sweep
         | ObjectKindTag::Loft
         | ObjectKindTag::Boolean
+        | ObjectKindTag::Symmetry
+        | ObjectKindTag::Instance
+        | ObjectKindTag::Join
         | ObjectKindTag::Cloner => palette().icon_generator,
         ObjectKindTag::Circle
         | ObjectKindTag::Rectangle
@@ -5161,6 +5182,67 @@ mod tests {
         assert_eq!(doc.scene.get(empty).unwrap().parent(), None);
         assert!(doc.scene.children(empty).is_empty());
         assert_eq!(doc.scene.get(empty).unwrap().data.name, "Subdivision Surface.1");
+    }
+
+    #[test]
+    fn a_new_instance_links_the_selected_object_and_bakes_into_copies() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let sphere = id_of(&doc, "Sphere");
+        editor.selection.set_single(sphere);
+        // Alt + click (wrapping) does the same as a plain click for an Instance.
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::WrapInGenerator(ObjectKindTag::Instance)],
+        );
+        let instance = editor.selection.active().unwrap();
+        assert_eq!(
+            doc.scene.get(instance).unwrap().data.kind,
+            ObjectKind::Instance {
+                reference: Some(sphere)
+            }
+        );
+        assert_eq!(doc.scene.get(sphere).unwrap().parent(), None, "nothing wrapped");
+        let before = doc.scene.get(instance).unwrap().data.clone();
+
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        assert_eq!(doc.scene.get(instance).unwrap().data.kind, ObjectKind::Null);
+        let copies = doc.scene.children(instance).to_vec();
+        assert_eq!(copies.len(), 1, "a copy of the sphere");
+        assert!(matches!(
+            doc.scene.get(copies[0]).unwrap().data.kind,
+            ObjectKind::Polygon { .. }
+        ));
+        assert!(doc.scene.contains(sphere), "the reference stays");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(instance).unwrap().data, before);
+        assert!(doc.scene.children(instance).is_empty());
+    }
+
+    #[test]
+    fn make_editable_on_a_symmetry_bakes_the_whole_with_the_half_first() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let cube = id_of(&doc, "Cube");
+        editor.selection.set_single(cube);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::WrapInGenerator(ObjectKindTag::Symmetry)],
+        );
+        let symmetry = editor.selection.active().unwrap();
+        let half = grid4d_eval::editable_mesh(&doc.scene.get(cube).unwrap().data.kind).unwrap();
+        let expected = grid4d_eval::generator_mesh(&doc.scene, symmetry, 0.0).unwrap();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let ObjectKind::Polygon { mesh, .. } = &doc.scene.get(symmetry).unwrap().data.kind else {
+            panic!("not baked")
+        };
+        assert_eq!(mesh.mesh(), &expected);
+        assert!(mesh.mesh().face_count() >= half.face_count());
+        assert!(!doc.scene.contains(cube), "the child goes with it");
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(cube).unwrap().parent(), Some(symmetry));
     }
 
     #[test]

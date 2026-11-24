@@ -322,6 +322,16 @@ box tests before exact surface tests, one winding number per group, a
 small hasher. A Boolean slower than 33 ms keeps its result while a pointer
 button is held (R9).
 
+### Step 17.4: Symmetry and Instances
+
+| What | 17.1 (by hand) | 17.4 | Target |
+|------|----------------|------|--------|
+| A half of 100 000 points mirrored and welded at the plane | 21 ms (mirror, join, Optimize) | 5.1 ms (the Symmetry generator) | ≤ 10 ms: met |
+| A thousand Instances of a 10 000-triangle ball: evaluating after one moves | — | 0.17 ms, no mesh copied | within the 10 000-object budget |
+
+The Symmetry's first version took 12.8 ms: it built a vector per face; it
+now writes points and faces straight into the mesh with one reused buffer.
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

@@ -972,6 +972,9 @@ pub fn exportable_at(doc: &Document, simulated: &grid4d_eval::Overrides) -> Obje
                     data.kind = ObjectKind::Null;
                 }
             }
+        } else if matches!(data.kind, ObjectKind::Instance { .. }) {
+            // Written as a group of the shapes it shows (below).
+            data.kind = ObjectKind::Null;
         } else if let Some(mesh) = grid4d_eval::editable_mesh(&data.kind_at(f64::from(doc.time.frame()))) {
             data.kind = ObjectKind::polygon(MeshHandle::new(mesh));
         }
@@ -1002,7 +1005,8 @@ pub fn exportable_at(doc: &Document, simulated: &grid4d_eval::Overrides) -> Obje
         let parent = node.parent().and_then(|p| index_of.get(&p).copied());
         let index = nodes.len();
         index_of.insert(id, index);
-        let cloner = node.data.enabled && matches!(node.data.kind, ObjectKind::Cloner { .. });
+        let cloner =
+            node.data.enabled && matches!(node.data.kind, ObjectKind::Cloner { .. } | ObjectKind::Instance { .. });
         nodes.push(ObjectEntry { parent, data });
         // A Cloner is written as a group of its clones.
         if cloner {

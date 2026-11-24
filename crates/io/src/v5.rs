@@ -40,6 +40,19 @@ const NEW_VALUES: &[NewValue] = &[
         field: "type",
         value: "boolean",
     },
+    // Step 17.4: the Symmetry, Instance and Join objects.
+    NewValue {
+        field: "type",
+        value: "symmetry",
+    },
+    NewValue {
+        field: "type",
+        value: "instance",
+    },
+    NewValue {
+        field: "type",
+        value: "join",
+    },
 ];
 
 /// A version 5 `document.json`, already parsed, as version 6 (see the module

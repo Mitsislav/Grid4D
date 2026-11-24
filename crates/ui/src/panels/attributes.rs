@@ -18,9 +18,10 @@ use grid4d_geom::spline::{
     ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape, SplineType, Text, TextAlign,
 };
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
+use grid4d_geom::symmetry::{MirrorPlane, Symmetry};
 use grid4d_scene::{
     AreaShape, Axis, Body, Boolean, BooleanMode, Channel, CollisionShape, Document, Environment, Falloff, Inherit,
-    KeyState, Lens, LightDetails, LightShadow, LightType, LinkMode, Linking, MassMode, Material, MaterialId,
+    Join, KeyState, Lens, LightDetails, LightShadow, LightType, LinkMode, Linking, MassMode, Material, MaterialId,
     MaterialTag, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, Placement, Projection, Scene, SceneEdit,
     ShutterPosition, SimulationSettings, Sky, SplineHandle, SunPlacement, Tag, TagKind, TextureSlot, TimeSettings,
 };
@@ -1040,6 +1041,16 @@ fn object_tab(
             ObjectKind::Sweep(sweep) => sweep_rows(ui, k, sweep),
             ObjectKind::Loft(loft) => loft_rows(ui, loft),
             ObjectKind::Boolean(boolean) => boolean_rows(ui, boolean, note),
+            ObjectKind::Symmetry(symmetry) => symmetry_rows(ui, symmetry),
+            ObjectKind::Join(join) => join_rows(ui, join),
+            ObjectKind::Instance { reference } => {
+                if let Some((scene, owner)) = links {
+                    object_row(ui, "Reference Object", reference, scene, owner);
+                }
+                ui.label("");
+                ui.label(RichText::new(tr("Shows its reference object again, without a copy")).color(p().text_dim));
+                ui.end_row();
+            }
             ObjectKind::Cloner {
                 cloner,
                 object,
@@ -2680,6 +2691,59 @@ fn loft_rows(ui: &mut Ui, loft: &mut Loft) {
     cap_rows(ui, &mut loft.start_cap, &mut loft.end_cap, &mut loft.cap_type);
     ui.label("");
     ui.label(RichText::new(tr("A skin over its child splines")).color(p().text_dim));
+    ui.end_row();
+}
+
+/// The Symmetry's rows (`docs/reference/generator-symmetry-instance-join.md`).
+fn symmetry_rows(ui: &mut Ui, symmetry: &mut Symmetry) {
+    attr_label(ui, "Mirror Plane", LABEL_WIDTH);
+    let label = |plane: MirrorPlane| match plane {
+        MirrorPlane::Xy => "XY",
+        MirrorPlane::Zy => "ZY",
+        MirrorPlane::Xz => "XZ",
+    };
+    let combo = egui::ComboBox::from_id_salt("grid4d.attr.symmetry.plane")
+        .selected_text(label(symmetry.plane))
+        .show_ui(ui, |ui| {
+            for plane in MirrorPlane::ALL {
+                ui.selectable_value(&mut symmetry.plane, plane, label(plane));
+            }
+        })
+        .response;
+    ui.ctx()
+        .accesskit_node_builder(combo.id, |node| node.set_label(tr("Mirror Plane")));
+    ui.end_row();
+    check_row(ui, "Weld Points", &mut symmetry.weld);
+    attr_label(ui, "Tolerance", LABEL_WIDTH);
+    ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        widgets::length(ui, &mut symmetry.tolerance)
+            .speed(0.01)
+            .range(0.0..=Symmetry::MAX_TOLERANCE)
+            .max_decimals(3),
+    );
+    ui.end_row();
+    check_row(ui, "Hold Points on Plane", &mut symmetry.hold);
+    check_row(ui, "Flip", &mut symmetry.flip);
+    ui.label("");
+    ui.label(RichText::new(tr("Its children and their mirror image")).color(p().text_dim));
+    ui.end_row();
+}
+
+/// The Join's rows (`docs/reference/generator-symmetry-instance-join.md`).
+fn join_rows(ui: &mut Ui, join: &mut Join) {
+    check_row(ui, "Weld", &mut join.weld);
+    attr_label(ui, "Tolerance", LABEL_WIDTH);
+    ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        widgets::length(ui, &mut join.tolerance)
+            .speed(0.01)
+            .range(0.0..=Join::MAX_TOLERANCE)
+            .max_decimals(3),
+    );
+    ui.end_row();
+    ui.label("");
+    ui.label(RichText::new(tr("Its children as one mesh")).color(p().text_dim));
     ui.end_row();
 }
 

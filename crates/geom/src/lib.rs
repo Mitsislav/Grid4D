@@ -37,6 +37,7 @@ pub mod selection;
 pub mod spline;
 pub mod subdivision;
 pub mod surface;
+pub mod symmetry;
 mod topology;
 mod triangulate;
 pub mod uv;
