@@ -124,6 +124,6 @@ edge cases) and acceptance criteria that can become tests. The matching phase in
 | 17.5 | [`generator-spline-boolean.md`](generator-spline-boolean.md) — 2D booleans of splines, a generator producing a curve, spline generators reading it | implemented 2026-11-24 |
 | 17.5 | [`generator-reduce.md`](generator-reduce.md) — quadric edge collapse to a share, borders, seams and hard edges kept, the order computed once | implemented 2026-11-24 (hard edges with 17.8) |
 | 17.6 | [`modeling-soft-selection.md`](modeling-soft-selection.md) — radius, falloff, volume or surface distance, the colour ramp | implemented 2026-11-25 |
-| 17.6 – 17.7 | [`modeling-tools-2.md`](modeling-tools-2.md) — Slide, Plane Cut, Polygon Pen, Extrude along Spline, Mirror, Array, Bevel's custom profile and mitres | Slide implemented 2026-11-25; the rest draft |
+| 17.6 – 17.7 | [`modeling-tools-2.md`](modeling-tools-2.md) — Slide, Plane Cut, Polygon Pen, Extrude along Spline, Mirror, Array, Bevel's custom profile and mitres | implemented 2026-11-25 |
 | 17.8 | [`modeling-creases-normals.md`](modeling-creases-normals.md) — edge creases (semi-sharp rules), hard edges, weighted normals (replaces the planned `modeling-sds-weights.md`) | draft 2026-11-09 |
 | 17.9 | [`deformer-2.md`](deformer-2.md) — Wrap, Follow Spline, Displace (pictures in evaluation), Project to Surface, Smooth, Explode, Point Offsets | draft 2026-11-09 |

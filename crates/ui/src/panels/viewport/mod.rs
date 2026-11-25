@@ -10,6 +10,7 @@ mod join_tools;
 mod mesh_tools;
 mod overlay;
 mod pen_tool;
+mod polygon_pen;
 mod render_region;
 mod select_tools;
 mod snapping;
@@ -321,6 +322,7 @@ pub struct ViewportPanel {
     point_stroke: Option<spline_tools::PointStroke>,
     /// The Pen's press, pull and preview.
     pen: pen_tool::PenState,
+    polygon_pen: polygon_pen::PolygonPenState,
     /// A deformer's strength handle being dragged.
     deformer_drag: Option<deformer_tools::DeformerDrag>,
     /// The render region being drawn or reshaped.
@@ -392,6 +394,7 @@ impl ViewportPanel {
             handle_dragging: None,
             point_stroke: None,
             pen: pen_tool::PenState::default(),
+            polygon_pen: polygon_pen::PolygonPenState::default(),
             deformer_drag: None,
             region_drag: None,
             times: frame_time::FrameTimes::default(),
@@ -822,6 +825,7 @@ impl ViewportPanel {
         if !navigating && !gizmo_owns_pointer {
             self.evaluate(doc);
             if !self.pen_tool(ui, &response, rect, doc, editor)
+                && !self.polygon_pen(ui, &response, rect, doc, editor)
                 && !self.handle_drag(ui, &response, rect, doc, editor)
                 && !self.mesh_tools(ui, &response, rect, doc, editor)
                 && !self.cut_tools(ui, &response, rect, editor)
@@ -960,6 +964,7 @@ impl ViewportPanel {
         }
         if interactive {
             self.paint_pen(painter, rect, doc, editor);
+            self.paint_polygon_pen(painter, rect, editor);
             self.paint_deformer_handle(painter, rect, doc, editor);
             self.paint_render_region(painter, rect, doc);
         }
@@ -1060,7 +1065,7 @@ impl ViewportPanel {
             }
             // The brush circle shows what Live Selection will paint; the cut
             // tools draw their own preview.
-            Tool::LiveSelection | Tool::LoopCut | Tool::LineCut | Tool::Pen => {}
+            Tool::LiveSelection | Tool::LoopCut | Tool::LineCut | Tool::Pen | Tool::PolygonPen => {}
             // A click with Bevel/Bridge/Weld still selects; show what it would pick.
             Tool::Bevel | Tool::Bridge | Tool::Weld => {
                 let view = self.screen_view(rect);
@@ -1075,7 +1080,11 @@ impl ViewportPanel {
             | Tool::Rotate
             | Tool::Extrude
             | Tool::Inset
-            | Tool::Slide => {
+            | Tool::Slide
+            | Tool::PlaneCut
+            | Tool::ExtrudeAlongSpline
+            | Tool::Mirror
+            | Tool::Array => {
                 let view = self.screen_view(rect);
                 let radius = metrics::COMPONENT_PICK_RADIUS;
                 self.hover
@@ -1732,6 +1741,15 @@ const fn component_hint(component: Component, tool: Tool, active: bool) -> &'sta
             return key("Weld: click a selected point to weld onto it, or anywhere else to weld at the centre");
         }
         Tool::Pen => return Tool::Pen.hint(),
+        Tool::PlaneCut => {
+            return key(
+                "Plane Cut: drag left/right to move the cutting plane · Apply in the Attribute Manager · Esc cancels",
+            );
+        }
+        Tool::PolygonPen => return Tool::PolygonPen.hint(),
+        Tool::ExtrudeAlongSpline => return Tool::ExtrudeAlongSpline.hint(),
+        Tool::Mirror => return Tool::Mirror.hint(),
+        Tool::Array => return Tool::Array.hint(),
         Tool::Slide => {
             return match component {
                 Component::Point => key(
@@ -2328,6 +2346,44 @@ mod tests {
         assert_eq!(after.mesh().points()[1..], before.mesh().points()[1..]);
         assert_eq!(h.editor.history.undo_len(), steps + 1);
         assert_eq!(h.editor.history.undo_label(), Some("Slide"));
+    }
+
+    #[test]
+    fn the_polygon_pen_closes_a_polygon_on_its_first_point() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Polygons, Tool::PolygonPen);
+        let faces = h.mesh(cube).mesh().face_count();
+        let steps = h.editor.history.undo_len();
+        // Four clicks in the empty view around the cube, then the first again.
+        let rect = h.viewport.view_rect;
+        let c = rect.left_top() + vec2(rect.width() * 0.1, rect.height() * 0.1);
+        let corners = [c, c + vec2(60.0, 0.0), c + vec2(60.0, 50.0), c + vec2(0.0, 50.0)];
+        let click = |h: &mut Harness, at: Pos2| {
+            h.frame(vec![Event::PointerMoved(at), Harness::button(at, true)]);
+            h.frame(vec![Harness::button(at, false)]);
+        };
+        for &at in &corners {
+            click(&mut h, at);
+        }
+        assert_eq!(h.viewport.polygon_pen.corners.len(), 4);
+        // Backspace drops the last corner; a click puts it back.
+        h.frame(vec![Event::Key {
+            key: egui::Key::Backspace,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }]);
+        assert_eq!(h.viewport.polygon_pen.corners.len(), 3);
+        click(&mut h, corners[3]);
+        click(&mut h, corners[0]);
+        h.frame(vec![]);
+        let after = h.mesh(cube);
+        assert_eq!(after.mesh().face_count(), faces + 1, "one new polygon");
+        assert_eq!(after.mesh().face(faces).len(), 4, "a quad");
+        assert_eq!(h.editor.history.undo_len(), steps + 1, "one undo step");
+        assert_eq!(h.editor.history.undo_label(), Some("Polygon Pen"));
+        assert!(h.viewport.polygon_pen.corners.is_empty());
     }
 
     #[test]

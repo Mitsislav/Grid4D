@@ -304,6 +304,11 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 Tool::Inset,
                 Tool::Bevel,
                 Tool::Slide,
+                Tool::PlaneCut,
+                Tool::PolygonPen,
+                Tool::ExtrudeAlongSpline,
+                Tool::Mirror,
+                Tool::Array,
                 Tool::Bridge,
                 Tool::Weld,
                 Tool::LoopCut,
@@ -315,6 +320,10 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     }
                     Tool::Bridge => key("Then drag from one polygon or border edge to another"),
                     Tool::Weld => key("Then click a selected point, or anywhere else for the centre"),
+                    Tool::PolygonPen => key("Then click points in the viewport; click the first to close"),
+                    Tool::ExtrudeAlongSpline | Tool::Mirror | Tool::Array => {
+                        key("Then set its options and Apply in the Attribute Manager")
+                    }
                     _ => key("Then drag left or right in the viewport, or Apply in the Attribute Manager"),
                 };
                 let item = ui

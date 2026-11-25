@@ -1916,6 +1916,7 @@ a curve read by the spline generators, D45; quadric edge collapses ordered
 once and replayed when Keep changes), and soft selection and Slide, 17.6
 (weights by a falloff of the distance through space or along the edges,
 used by the gizmo and Tweak, shown as a ramp on the points; points and loops
-slid along their edges, Duplicate inserting a loop). Next: Plane Cut, the
-Polygon Pen, Extrude along Spline, Mirror, Array and Bevel's profiles
-(17.7).
+slid along their edges, Duplicate inserting a loop), and the tools of 17.7
+(Plane Cut sharing Line Cut's code, the Polygon Pen, Extrude along Spline,
+Mirror, Array, Bevel's Custom profile and Patch mitres). Next: edge
+creases, hard edges and weighted normals (17.8).

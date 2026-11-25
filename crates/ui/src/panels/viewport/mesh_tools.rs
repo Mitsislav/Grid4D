@@ -24,6 +24,10 @@ pub(in crate::panels::viewport) struct MeshDrag {
     /// share of the rails for Slide).
     per_point: f32,
     offset: f32,
+    /// Where the offset starts (Plane Cut: its plane's place; others 0).
+    base: f32,
+    /// The object's placement, for planes in world space.
+    context: modeling::Context,
     /// Slide: the view's right in object space (where single points go).
     direction: Vec3,
 }
@@ -75,10 +79,11 @@ impl ViewportPanel {
             return true;
         }
         if let Some(pointer) = pointer {
-            let offset = (pointer.x - drag.start.x) * drag.per_point;
+            let offset = drag.base + (pointer.x - drag.start.x) * drag.per_point;
             if offset != drag.offset {
                 drag.offset = offset;
-                let data = modeling::apply(&drag.before, tool, drag.component, &editor.modeling_settings, offset)
+                let settings = &editor.modeling_settings;
+                let data = modeling::apply(&drag.before, tool, drag.component, settings, offset, &drag.context)
                     .unwrap_or_else(|| drag.before.clone());
                 if let Some(node) = doc.scene.get_mut(drag.node) {
                     node.data = data;
@@ -87,7 +92,7 @@ impl ViewportPanel {
         }
         if !down && let Gesture::MeshTool(drag) = std::mem::take(&mut self.gesture) {
             if let Some(offset) = modeling::offset_mut(tool, &mut editor.modeling_settings)
-                && drag.offset != 0.0
+                && drag.offset != drag.base
             {
                 *offset = drag.offset;
             }
@@ -109,6 +114,14 @@ impl ViewportPanel {
         if !modeling::works_in(editor.tool, component) {
             return None;
         }
+        // Tools without an Offset run only from Apply.
+        let mut settings = editor.modeling_settings;
+        let base = *modeling::offset_mut(editor.tool, &mut settings)?;
+        let base = if editor.tool == crate::Tool::PlaneCut {
+            base
+        } else {
+            0.0
+        };
         let (evaluated, mesh, components) = self.evaluated.polygon(node)?;
         let world = evaluated.world;
         let centre = world.transform_point3(mesh.bounds().map_or(Vec3::ZERO, |b| b.center()));
@@ -148,7 +161,9 @@ impl ViewportPanel {
             before: doc.scene.get(node)?.data.clone(),
             start: origin?,
             per_point,
-            offset: 0.0,
+            offset: base,
+            base,
+            context: modeling::Context { world, path: None },
             direction,
         })
     }

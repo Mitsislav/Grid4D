@@ -789,6 +789,49 @@ fn soft_selection_picture() {
     save(&mut h, &dir, "soft_selection");
 }
 
+/// The manual's picture of Bevel's Custom profile: a box whose top edges are
+/// bevelled with the Cove preset, the Bevel tool's page with the profile's
+/// points:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored bevel_profile_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn bevel_profile_picture() {
+    use grid4d_geom::ops::{BevelProfile, BevelShape, ProfilePreset};
+    use grid4d_scene::{MeshHandle, Node, ObjectKind};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::new("Bevel");
+    let cube = grid4d_geom::primitives::cube(glam::Vec3::new(300.0, 150.0, 200.0), [1, 1, 1]);
+    // The top face's edges, by corner.
+    let top = (0..cube.face_count()).find(|&f| cube.face_normal(f).y > 0.9).unwrap();
+    let corners: grid4d_geom::BitSet = cube.corner_range(top).collect();
+    let id = doc
+        .scene
+        .insert(Node::new("Box", ObjectKind::polygon(MeshHandle::new(cube))));
+    if let ObjectKind::Polygon { components, .. } = &mut doc.scene.get_mut(id).unwrap().data.kind {
+        components.make_mut().selected.edges = corners;
+    }
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    h.run_steps(2);
+    {
+        let editor = &mut h.state_mut().editor;
+        editor.mode = grid4d_ui::EditMode::Edges;
+        editor.tool = grid4d_ui::Tool::Bevel;
+        let bevel = &mut editor.modeling_settings.bevel;
+        bevel.offset = 40.0;
+        bevel.shape = BevelShape::Custom;
+        bevel.profile = BevelProfile::preset(ProfilePreset::Cove);
+        editor.commands.push(grid4d_ui::EditorCommand::ApplyMeshTool);
+        editor.commands.push(grid4d_ui::EditorCommand::FrameScene);
+    }
+    h.run_steps(4);
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "bevel_profile");
+}
+
 /// The manual's picture of the render region: the demo scene with a region
 /// over part of the view, rendered there by the Render View:
 ///

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use glam::Vec3;
 
-use super::{Builder, Corner, Rebuilt, corner_faces, next_corner};
+use super::{Builder, Corner, NEW, Rebuilt, corner_faces, next_corner};
 use crate::{BitSet, Component, MeshError, PolyMesh, Topology, loops::Ring, u32_index, us};
 
 /// Connects `selected` points (or the middles of `selected` unique edges) that
@@ -189,14 +189,11 @@ pub fn line_cut(
     cut: &LineCut,
     visible: impl Fn(Vec3) -> bool,
 ) -> Result<Rebuilt, MeshError> {
-    let mut builder = Builder::new(mesh);
     let span = cut.from.cross(cut.to);
     let normal = span.normalize_or_zero();
     if normal == Vec3::ZERO {
-        return keep_all(builder, mesh);
+        return keep_all(Builder::new(mesh), mesh);
     }
-    let scale = mesh.bounds().map_or(1.0, |(min, max)| (max - min).length().max(1e-6));
-    let eps = scale * 1e-6;
     let denominator = span.dot(normal);
     // Where along the line a position lies (0 at `from`, 1 at `to`), if the cut reaches it.
     let along = |x: Vec3| -> Option<f32> {
@@ -210,7 +207,27 @@ pub fn line_cut(
         };
         (reached && visible(x)).then(|| beta / (alpha + beta))
     };
-    let distance = |p: u32| (mesh.points()[us(p)] - cut.eye).dot(normal);
+    cut_by_plane(mesh, topology, cut.eye, normal, along, cut.connect, None)
+}
+
+/// Cuts `mesh` along the plane through `origin` with unit `normal`, where
+/// `along` accepts a crossing (giving its place along the cut, to pair
+/// crossings in one face); `faces`, when given, are the only ones split
+/// (their neighbours gain the points on shared edges). See [`line_cut`].
+fn cut_by_plane(
+    mesh: &PolyMesh,
+    topology: &Topology,
+    origin: Vec3,
+    normal: Vec3,
+    along: impl Fn(Vec3) -> Option<f32>,
+    connect: bool,
+    faces: Option<&BitSet>,
+) -> Result<Rebuilt, MeshError> {
+    let mut builder = Builder::new(mesh);
+    let scale = mesh.bounds().map_or(1.0, |(min, max)| (max - min).length().max(1e-6));
+    let eps = scale * 1e-6;
+    let in_scope = |f: usize| faces.is_none_or(|set| set.contains(f));
+    let distance = |p: u32| (mesh.points()[us(p)] - origin).dot(normal);
 
     // Points the plane passes through, and new points on the edges it crosses.
     let mut on_point: HashMap<u32, f32> = HashMap::new();
@@ -226,6 +243,9 @@ pub fn line_cut(
     for (e, &[a, b]) in topology.edges().iter().enumerate() {
         let (da, db) = (distance(a), distance(b));
         if da.abs() <= eps || db.abs() <= eps || (da > 0.0) == (db > 0.0) {
+            continue;
+        }
+        if !topology.edge_faces(e).iter().any(|&f| in_scope(us(f))) {
             continue;
         }
         let t = da / (da - db);
@@ -253,7 +273,7 @@ pub fn line_cut(
             corners.push(builder.on_edge(f, c, q, if forward { t } else { 1.0 - t }));
             crossings.push((corners.len() - 1, s));
         }
-        if !cut.connect || crossings.len() < 2 {
+        if !connect || !in_scope(f) || crossings.len() < 2 {
             builder.push(&corners, f);
             continue;
         }
@@ -286,6 +306,139 @@ pub fn line_cut(
         }
     }
     builder.finish()
+}
+
+/// A Plane Cut: `cuts` parallel planes `spacing` apart, centred on the plane
+/// through `origin` with normal `normal` (the mesh's space).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlaneCut {
+    pub origin: Vec3,
+    pub normal: Vec3,
+    pub cuts: u32,
+    pub spacing: f32,
+    /// Separate the pieces at the cuts (the points on them doubled).
+    pub split: bool,
+}
+
+impl PlaneCut {
+    pub const MAX_CUTS: u32 = 64;
+
+    /// The planes' offsets along the normal from `origin`.
+    fn offsets(&self) -> impl Iterator<Item = f32> + '_ {
+        let n = self.cuts.clamp(1, Self::MAX_CUTS);
+        let middle = f32::from(u16::try_from(n - 1).unwrap_or(0)) * 0.5;
+        (0..n).map(move |k| (f32::from(u16::try_from(k).unwrap_or(0)) - middle) * self.spacing)
+    }
+}
+
+/// Cuts every polygon (of `faces`, when given: the selection) the planes of
+/// `cut` cross, along them: new points lie on the planes, the cuts are the
+/// new edges; a plane through a point or along an edge adds nothing there.
+pub fn plane_cut(
+    mesh: &PolyMesh,
+    topology: &Topology,
+    cut: &PlaneCut,
+    faces: Option<&BitSet>,
+) -> Result<Rebuilt, MeshError> {
+    let normal = cut.normal.normalize_or_zero();
+    if normal == Vec3::ZERO || !cut.origin.is_finite() {
+        return keep_all(Builder::new(mesh), mesh);
+    }
+    let across = normal.any_orthonormal_vector();
+    let along = |x: Vec3| Some(x.dot(across));
+    let mut result: Option<Rebuilt> = None;
+    let mut new_edges: Vec<[u32; 2]> = Vec::new();
+    for offset in cut.offsets() {
+        let origin = cut.origin + normal * offset;
+        let step = match &result {
+            None => cut_by_plane(mesh, topology, origin, normal, along, true, faces)?,
+            Some(done) => {
+                let scope: Option<BitSet> = faces.map(|set| {
+                    (0..done.mesh.face_count())
+                        .filter(|&f| done.face_origin[f] != NEW && set.contains(us(done.face_origin[f])))
+                        .collect()
+                });
+                let topology = Topology::build(&done.mesh);
+                cut_by_plane(&done.mesh, &topology, origin, normal, along, true, scope.as_ref())?
+            }
+        };
+        // Earlier cuts' edges, renumbered into this step's mesh.
+        let back: HashMap<u32, u32> = step
+            .point_origin
+            .iter()
+            .enumerate()
+            .filter(|&(_, &o)| o != NEW)
+            .map(|(i, &o)| (o, u32_index(i)))
+            .collect();
+        new_edges = new_edges
+            .iter()
+            .filter_map(|&[a, b]| Some([*back.get(&a)?, *back.get(&b)?]))
+            .collect();
+        new_edges.extend_from_slice(&step.new_edges);
+        result = Some(match result {
+            None => step,
+            Some(done) => done.then(step),
+        });
+    }
+    let Some(mut result) = result else {
+        return keep_all(Builder::new(mesh), mesh);
+    };
+    result.new_edges = new_edges;
+    if cut.split {
+        split_at_planes(&mut result, cut, normal);
+    }
+    Ok(result)
+}
+
+/// Doubles every point lying on one of `cut`'s planes for the faces on each
+/// side of it, so the pieces come apart.
+fn split_at_planes(result: &mut Rebuilt, cut: &PlaneCut, normal: Vec3) {
+    let mesh = &result.mesh;
+    let scale = mesh.bounds().map_or(1.0, |(min, max)| (max - min).length().max(1e-6));
+    let eps = scale * 1e-5;
+    let offsets: Vec<f32> = cut.offsets().collect();
+    let height = |p: Vec3| (p - cut.origin).dot(normal);
+    let on_plane = |p: Vec3| offsets.iter().any(|&o| (height(p) - o).abs() <= eps);
+    // Which slab between the planes a face lies in.
+    let slab = |f: usize| offsets.iter().filter(|&&o| height(mesh.face_center(f)) > o).count();
+    let mut points = mesh.points().to_vec();
+    let mut origins = result.point_origin.clone();
+    let mut copies: HashMap<(u32, usize), u32> = HashMap::new();
+    let mut first_slab: HashMap<u32, usize> = HashMap::new();
+    let mut faces: Vec<Vec<u32>> = Vec::with_capacity(mesh.face_count());
+    for f in 0..mesh.face_count() {
+        let s = slab(f);
+        let face = mesh
+            .face(f)
+            .iter()
+            .map(|&p| {
+                if !on_plane(mesh.points()[us(p)]) {
+                    return p;
+                }
+                let keeper = *first_slab.entry(p).or_insert(s);
+                if keeper == s {
+                    return p;
+                }
+                *copies.entry((p, s)).or_insert_with(|| {
+                    points.push(mesh.points()[us(p)]);
+                    origins.push(result.point_origin[us(p)]);
+                    u32_index(points.len() - 1)
+                })
+            })
+            .collect();
+        faces.push(face);
+    }
+    if copies.is_empty() {
+        return;
+    }
+    let uvs = mesh.uvs().map(<[glam::Vec2]>::to_vec);
+    let Ok(mut split) = PolyMesh::from_faces(points, faces) else {
+        return;
+    };
+    if split.set_uvs(uvs).is_ok() {
+        result.mesh = split;
+        result.point_origin = origins;
+    }
 }
 
 /// The two arcs of the cycle `items` between positions `i` and `j`, both inclusive.
@@ -559,5 +712,51 @@ mod tests {
         let out = line_cut(&quad, &topology, &cut, |_| true).unwrap();
         assert_eq!((out.mesh.point_count(), out.mesh.face_count()), (4, 2), "no new points");
         assert_clean(&out.mesh);
+    }
+
+    #[test]
+    fn a_plane_cut_through_a_cube_cuts_one_loop_per_plane() {
+        let cube = crate::primitives::cube(Vec3::splat(100.0), [1, 1, 1]);
+        let topology = Topology::build(&cube);
+        let mut cut = PlaneCut {
+            origin: Vec3::ZERO,
+            normal: Vec3::Y,
+            cuts: 1,
+            spacing: 10.0,
+            split: false,
+        };
+        let one = plane_cut(&cube, &topology, &cut, None).unwrap();
+        assert_eq!(one.mesh.point_count(), 8 + 4);
+        assert_eq!(one.mesh.face_count(), 6 + 4, "four side quads split");
+        assert_eq!(one.new_edges.len(), 4);
+        for [a, b] in &one.new_edges {
+            for p in [a, b] {
+                assert!(one.mesh.points()[us(*p)].y.abs() < 1e-4, "on the plane");
+            }
+        }
+        assert_clean(&one.mesh);
+        cut.cuts = 3;
+        let three = plane_cut(&cube, &topology, &cut, None).unwrap();
+        assert_eq!(three.mesh.point_count(), 8 + 12);
+        assert_eq!(three.new_edges.len(), 12, "three loops");
+        let heights: std::collections::BTreeSet<i32> = three
+            .new_edges
+            .iter()
+            .map(|[a, _]| three.mesh.points()[us(*a)].y.round() as i32)
+            .collect();
+        assert_eq!(heights.into_iter().collect::<Vec<_>>(), vec![-10, 0, 10]);
+        assert_clean(&three.mesh);
+        // Split: the two halves come apart (the points on the cut doubled).
+        cut.cuts = 1;
+        cut.split = true;
+        let apart = plane_cut(&cube, &topology, &cut, None).unwrap();
+        assert_eq!(apart.mesh.point_count(), 8 + 8);
+        assert_eq!(Topology::build(&apart.mesh).boundary_edge_count(), 8, "two open rims");
+        // Only the selected polygons: one side face cut, its neighbours gain points.
+        cut.split = false;
+        let side = (0..cube.face_count()).find(|&f| cube.face_normal(f).x > 0.9).unwrap();
+        let only = plane_cut(&cube, &topology, &cut, Some(&set(&[side]))).unwrap();
+        assert_eq!(only.mesh.face_count(), 7);
+        assert_eq!(only.new_edges.len(), 1);
     }
 }

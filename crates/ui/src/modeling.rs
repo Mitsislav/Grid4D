@@ -21,6 +21,11 @@ pub(crate) const fn works_in(tool: Tool, component: Component) -> bool {
             | (Tool::Inset, Component::Polygon)
             | (Tool::Bevel, Component::Point | Component::Edge)
             | (Tool::Slide, Component::Point | Component::Edge)
+            | (
+                Tool::PlaneCut | Tool::Mirror | Tool::Array,
+                Component::Point | Component::Edge | Component::Polygon
+            )
+            | (Tool::ExtrudeAlongSpline, Component::Polygon)
     )
 }
 
@@ -31,6 +36,7 @@ pub(crate) fn offset_mut(tool: Tool, settings: &mut ModelingSettings) -> Option<
         Tool::Inset => Some(&mut settings.inset.offset),
         Tool::Bevel => Some(&mut settings.bevel.offset),
         Tool::Slide => Some(&mut settings.slide.offset),
+        Tool::PlaneCut => Some(&mut settings.plane_cut.offset),
         Tool::LiveSelection
         | Tool::RectangleSelection
         | Tool::LoopSelection
@@ -42,7 +48,11 @@ pub(crate) fn offset_mut(tool: Tool, settings: &mut ModelingSettings) -> Option<
         | Tool::LineCut
         | Tool::Bridge
         | Tool::Weld
-        | Tool::Pen => None,
+        | Tool::Pen
+        | Tool::PolygonPen
+        | Tool::ExtrudeAlongSpline
+        | Tool::Mirror
+        | Tool::Array => None,
     }
 }
 
@@ -115,6 +125,55 @@ pub(crate) fn loop_cut(mesh: &MeshHandle, edge: usize, fractions: &[f32]) -> Opt
     ops::loop_cut(source, topology, &ring, edge, fractions).ok()
 }
 
+/// What a tool needs beyond the object: where it stands, and Extrude along
+/// Spline's path (in the object's space).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Context {
+    pub(crate) world: glam::Mat4,
+    pub(crate) path: Option<grid4d_geom::spline::Polyline>,
+}
+
+impl Context {
+    /// The object `id`'s placement in `scene` at `frame`, and the path
+    /// `settings` link (moved into the object's space).
+    pub(crate) fn of(
+        scene: &grid4d_scene::Scene,
+        id: grid4d_scene::NodeId,
+        settings: &ModelingSettings,
+        frame: f64,
+    ) -> Self {
+        let world = scene.world_matrix_at(id, frame);
+        let path = settings.along_spline.and_then(|spline| {
+            let mut curve = spline_polyline(scene, spline, frame)?;
+            let into = world.inverse() * scene.world_matrix_at(spline, frame);
+            for point in &mut curve.points {
+                *point = into.transform_point3(*point);
+            }
+            Some(curve)
+        });
+        Self { world, path }
+    }
+}
+
+/// A spline object's curve as it is drawn at `frame` (its own space); `None`
+/// for other objects.
+pub(crate) fn spline_polyline(
+    scene: &grid4d_scene::Scene,
+    id: grid4d_scene::NodeId,
+    frame: f64,
+) -> Option<grid4d_geom::spline::Polyline> {
+    let kind = scene.get(id)?.data.kind_at(frame);
+    match &*kind {
+        ObjectKind::SplinePrimitive(primitive) => Some(primitive.polyline()),
+        ObjectKind::Text(text) => Some(grid4d_text::text_spline(text).sample(text.interpolation)),
+        ObjectKind::Spline {
+            spline, interpolation, ..
+        } => Some(spline.spline().sample(*interpolation)),
+        ObjectKind::SplineBoolean(_) => grid4d_eval::generator_curve(scene, id, frame),
+        _ => None,
+    }
+}
+
 /// `data` (a polygon object) with `tool` applied at `offset` to its selected
 /// components of kind `component` — to every visible one when none is selected.
 /// `None` if the tool does not apply here or would change nothing.
@@ -124,11 +183,13 @@ pub(crate) fn apply(
     component: Component,
     settings: &ModelingSettings,
     offset: f32,
+    context: &Context,
 ) -> Option<NodeData> {
     let ObjectKind::Polygon { mesh, components } = &data.kind else {
         return None;
     };
-    if !works_in(tool, component) || offset == 0.0 {
+    let offset_matters = matches!(tool, Tool::Extrude | Tool::Inset | Tool::Bevel | Tool::Slide);
+    if !works_in(tool, component) || (offset_matters && offset == 0.0) {
         return None;
     }
     let (source, topology) = (mesh.mesh(), mesh.topology());
@@ -191,6 +252,53 @@ pub(crate) fn apply(
             let rebuilt = ops::bevel(source, topology, &edges, &points, &options).ok()?;
             return rebuilt_data(data, rebuilt, Fresh::edges_if(component == Component::Edge));
         }
+        (Tool::PlaneCut, _) => {
+            let cut = settings.plane_cut;
+            let (origin, normal) = cut.plane.in_object(offset, context.world);
+            let faces = (component == Component::Polygon && cut.selected_only).then_some(&state.selected.polygons);
+            let plane = ops::PlaneCut {
+                origin,
+                normal,
+                cuts: cut.cuts,
+                spacing: cut.spacing,
+                split: cut.split,
+            };
+            let rebuilt = ops::plane_cut(source, topology, &plane, faces).ok()?;
+            return rebuilt_data(data, rebuilt, Fresh::EdgesSelected);
+        }
+        (Tool::Mirror, _) => {
+            let m = settings.mirror;
+            let (origin, normal) = m.plane.in_object(0.0, context.world);
+            let faces = polygons_in_scope(state, component);
+            let options = ops::Mirror {
+                origin,
+                normal,
+                duplicate: m.duplicate,
+                weld: m.weld,
+                tolerance: m.tolerance,
+            };
+            let rebuilt = ops::mirror(source, faces, &options).ok()?;
+            let fresh = if m.duplicate {
+                Fresh::PolygonsSelected
+            } else {
+                Fresh::Unselected
+            };
+            return rebuilt_data(data, rebuilt, fresh);
+        }
+        (Tool::Array, _) => {
+            let faces = polygons_in_scope(state, component);
+            let rebuilt = ops::array(source, faces, &settings.array).ok()?;
+            return rebuilt_data(data, rebuilt, Fresh::PolygonsSelected);
+        }
+        (Tool::ExtrudeAlongSpline, Component::Polygon) => {
+            let path = context.path.as_ref()?;
+            let mut faces = state.selected.polygons.clone();
+            faces.remove_all(&state.hidden.polygons);
+            if faces.is_empty() {
+                return None;
+            }
+            ops::extrude_along(source, topology, &faces, path, &settings.along).ok()?
+        }
         (Tool::Slide, Component::Point | Component::Edge) => {
             let rails = slide_rails(source, topology, state, component, settings.slide_direction)?;
             let options = ops::SlideOptions {
@@ -223,6 +331,11 @@ pub(crate) fn apply(
         components,
     };
     Some(data)
+}
+
+/// The selected polygons in Polygons mode (none: the whole object), visible.
+fn polygons_in_scope(state: &ComponentState, component: Component) -> Option<&BitSet> {
+    (component == Component::Polygon && !state.selected.polygons.is_empty()).then_some(&state.selected.polygons)
 }
 
 /// What the selected points or edges of `state` slide along: single points
@@ -283,14 +396,30 @@ mod tests {
     fn nothing_selected_means_every_visible_polygon() {
         let mut cube = polygon_cube();
         let settings = ModelingSettings::default();
-        let all = apply(&cube, Tool::Inset, Component::Polygon, &settings, 10.0).unwrap();
+        let all = apply(
+            &cube,
+            Tool::Inset,
+            Component::Polygon,
+            &settings,
+            10.0,
+            &Context::default(),
+        )
+        .unwrap();
         assert_eq!(mesh_of(&all).mesh().face_count(), 6 + 6 * 4, "every face inset");
 
         let ObjectKind::Polygon { components, .. } = &mut cube.kind else {
             unreachable!()
         };
         components.make_mut().hidden.polygons.insert_range(1..6);
-        let one = apply(&cube, Tool::Inset, Component::Polygon, &settings, 10.0).unwrap();
+        let one = apply(
+            &cube,
+            Tool::Inset,
+            Component::Polygon,
+            &settings,
+            10.0,
+            &Context::default(),
+        )
+        .unwrap();
         assert_eq!(
             mesh_of(&one).mesh().face_count(),
             6 + 4,
@@ -318,6 +447,7 @@ mod tests {
             Component::Edge,
             &ModelingSettings::default(),
             10.0,
+            &Context::default(),
         )
         .unwrap();
         let ObjectKind::Polygon { mesh, components } = &out.kind else {
@@ -347,7 +477,7 @@ mod tests {
         };
         components.make_mut().selected.edges = corners;
         let mut settings = ModelingSettings::default();
-        let slid = apply(&data, Tool::Slide, Component::Edge, &settings, 0.5).unwrap();
+        let slid = apply(&data, Tool::Slide, Component::Edge, &settings, 0.5, &Context::default()).unwrap();
         let moved = mesh_of(&slid).mesh();
         assert_eq!(moved.face_count(), mesh.face_count(), "a slide keeps the topology");
         let row: Vec<f32> = (0..mesh.point_count())
@@ -359,13 +489,104 @@ mod tests {
             "{row:?}"
         );
         settings.slide.duplicate = true;
-        let doubled = apply(&data, Tool::Slide, Component::Edge, &settings, 0.5).unwrap();
+        let doubled = apply(&data, Tool::Slide, Component::Edge, &settings, 0.5, &Context::default()).unwrap();
         assert_eq!(
             mesh_of(&doubled).mesh().face_count(),
             mesh.face_count() + 4,
             "a loop inserted"
         );
-        assert!(apply(&data, Tool::Slide, Component::Polygon, &settings, 0.5).is_none());
+        assert!(
+            apply(
+                &data,
+                Tool::Slide,
+                Component::Polygon,
+                &settings,
+                0.5,
+                &Context::default()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn plane_cut_mirror_array_and_extrude_along_a_spline() {
+        let cube = polygon_cube();
+        let settings = ModelingSettings::default();
+        let here = Context::default();
+        // A horizontal cut through the middle: four new points on the plane.
+        let cut = apply(&cube, Tool::PlaneCut, Component::Polygon, &settings, 0.0, &here).unwrap();
+        assert_eq!(mesh_of(&cut).mesh().point_count(), 8 + 4);
+        let ObjectKind::Polygon { components, .. } = &cut.kind else {
+            unreachable!()
+        };
+        assert_eq!(
+            components.selected().edges.len(),
+            8,
+            "the cut's edges selected (by corner)"
+        );
+        // A world plane on an object moved up by 50: the cut lies at its bottom.
+        let mut world_cut = settings;
+        world_cut.plane_cut.plane = crate::ToolPlane::WorldXz;
+        let moved = Context {
+            world: glam::Mat4::from_translation(glam::Vec3::Y * 50.0),
+            path: None,
+        };
+        let low = apply(&cube, Tool::PlaneCut, Component::Polygon, &world_cut, 10.0, &moved).unwrap();
+        let new_y: Vec<f32> = mesh_of(&low).mesh().points()[8..].iter().map(|p| p.y).collect();
+        assert!(new_y.iter().all(|&y| (y + 40.0).abs() < 1e-3), "{new_y:?}");
+        // Mirror: doubled, the image selected; Array: three copies.
+        let mirrored = apply(&cube, Tool::Mirror, Component::Polygon, &settings, 0.0, &here).unwrap();
+        assert_eq!(mesh_of(&mirrored).mesh().face_count(), 12);
+        let ObjectKind::Polygon { components, .. } = &mirrored.kind else {
+            unreachable!()
+        };
+        assert_eq!(components.selected().polygons.len(), 6);
+        let copies = apply(&cube, Tool::Array, Component::Polygon, &settings, 0.0, &here).unwrap();
+        assert_eq!(mesh_of(&copies).mesh().face_count(), 6 * 4);
+        // Extrude along Spline: the selected top along a straight path.
+        let mut top = cube;
+        let ObjectKind::Polygon { mesh, components } = &mut top.kind else {
+            unreachable!()
+        };
+        let face = (0..mesh.mesh().face_count())
+            .find(|&f| mesh.mesh().face_normal(f).y > 0.9)
+            .unwrap();
+        components.make_mut().selected.polygons.insert(face);
+        let path = grid4d_geom::spline::Polyline {
+            points: vec![glam::Vec3::ZERO, glam::Vec3::new(0.0, 0.0, 300.0)],
+            segments: vec![grid4d_geom::spline::Segment {
+                count: 2,
+                closed: false,
+            }],
+        };
+        let along = Context {
+            world: glam::Mat4::IDENTITY,
+            path: Some(path),
+        };
+        assert!(
+            apply(
+                &top,
+                Tool::ExtrudeAlongSpline,
+                Component::Polygon,
+                &settings,
+                0.0,
+                &here
+            )
+            .is_none(),
+            "no spline: nothing"
+        );
+        let out = apply(
+            &top,
+            Tool::ExtrudeAlongSpline,
+            Component::Polygon,
+            &settings,
+            0.0,
+            &along,
+        )
+        .unwrap();
+        assert_eq!(mesh_of(&out).mesh().face_count(), 6 + 4 * 10);
+        let height = mesh_of(&out).mesh().face_center(face).y;
+        assert!(height > 300.0, "the end moved up along the path's length: {height}");
     }
 
     #[test]
@@ -373,20 +594,64 @@ mod tests {
         let cube = polygon_cube();
         let settings = ModelingSettings::default();
         assert!(
-            apply(&cube, Tool::Extrude, Component::Point, &settings, 10.0).is_none(),
+            apply(
+                &cube,
+                Tool::Extrude,
+                Component::Point,
+                &settings,
+                10.0,
+                &Context::default()
+            )
+            .is_none(),
             "points: later"
         );
-        assert!(apply(&cube, Tool::Inset, Component::Edge, &settings, 10.0).is_none());
         assert!(
-            apply(&cube, Tool::Extrude, Component::Polygon, &settings, 0.0).is_none(),
+            apply(
+                &cube,
+                Tool::Inset,
+                Component::Edge,
+                &settings,
+                10.0,
+                &Context::default()
+            )
+            .is_none()
+        );
+        assert!(
+            apply(
+                &cube,
+                Tool::Extrude,
+                Component::Polygon,
+                &settings,
+                0.0,
+                &Context::default()
+            )
+            .is_none(),
             "offset 0"
         );
         assert!(
-            apply(&cube, Tool::Extrude, Component::Edge, &settings, 10.0).is_none(),
+            apply(
+                &cube,
+                Tool::Extrude,
+                Component::Edge,
+                &settings,
+                10.0,
+                &Context::default()
+            )
+            .is_none(),
             "a closed cube has no border edge"
         );
         let mut plain = cube;
         plain.kind = ObjectKindTag::Cube.default_kind();
-        assert!(apply(&plain, Tool::Extrude, Component::Polygon, &settings, 10.0).is_none());
+        assert!(
+            apply(
+                &plain,
+                Tool::Extrude,
+                Component::Polygon,
+                &settings,
+                10.0,
+                &Context::default()
+            )
+            .is_none()
+        );
     }
 }

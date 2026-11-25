@@ -246,7 +246,12 @@ const fn tool_icon(tool: Tool) -> Icon {
         | Tool::Bridge
         | Tool::Weld
         | Tool::Pen
-        | Tool::Slide => Icon::Move,
+        | Tool::Slide
+        | Tool::PlaneCut
+        | Tool::PolygonPen
+        | Tool::ExtrudeAlongSpline
+        | Tool::Mirror
+        | Tool::Array => Icon::Move,
     }
 }
 
@@ -268,6 +273,11 @@ const fn tool_tooltip(tool: Tool) -> &'static str {
         Tool::Weld => "Weld",
         Tool::Pen => "Pen",
         Tool::Slide => "Slide",
+        Tool::PlaneCut => "Plane Cut",
+        Tool::PolygonPen => "Polygon Pen",
+        Tool::ExtrudeAlongSpline => "Extrude along Spline",
+        Tool::Mirror => "Mirror",
+        Tool::Array => "Array",
     }
 }
 

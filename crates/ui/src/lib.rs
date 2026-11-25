@@ -50,8 +50,8 @@ pub mod workspace;
 pub use commands::{CommandQueue, EditorCommand, SelectMode, SplineOp};
 pub use editor::{
     AnimationSettings, BuildInfo, CurveKey, CurveSelection, EditMode, EditorState, FrameCurves, KeySelection,
-    MaterialDrag, MaterialSelection, ModelingSettings, Selection, SelectionSettings, SnapSettings, SnapType, TagRef,
-    Tool, TransformSettings,
+    MaterialDrag, MaterialSelection, MirrorSettings, ModelingSettings, PlaneCutSettings, Selection, SelectionSettings,
+    SnapSettings, SnapType, TagRef, Tool, ToolPlane, TransformSettings,
 };
 pub use file::{DocumentFile, FileAction, FileDialogs, NativeDialogs, UnsavedChoice};
 pub use history::{History, UndoGroup};

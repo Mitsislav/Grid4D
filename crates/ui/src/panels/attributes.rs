@@ -1203,6 +1203,7 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 }
                 ui.end_row();
                 check_row(ui, "Limit", &mut m.limit);
+                bevel_profile_rows(ui, m);
             }
             Tool::Bridge => {
                 let m = &mut editor.modeling_settings.bridge;
@@ -1255,6 +1256,78 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 check_row(ui, "Clamp", &mut m.clamp);
                 check_row(ui, "Keep Curvature", &mut m.keep_curvature);
                 check_row(ui, "Duplicate", &mut m.duplicate);
+            }
+            Tool::PlaneCut => {
+                let m = &mut editor.modeling_settings.plane_cut;
+                plane_row(ui, "grid4d.attr.plane_cut.plane", &mut m.plane);
+                attr_label(ui, "Offset", LABEL_WIDTH);
+                ui.add_sized([FIELD_WIDTH, 19.0], widgets::length(ui, &mut m.offset).speed(0.5))
+                    .on_hover_text(tr("A drag in the viewport sets it"));
+                ui.end_row();
+                count_row(ui, "Cuts", &mut m.cuts, 1);
+                attr_label(ui, "Spacing", LABEL_WIDTH);
+                ui.add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    widgets::length(ui, &mut m.spacing).speed(0.5).range(0.0..=100_000.0),
+                );
+                ui.end_row();
+                check_row(ui, "Selected Only", &mut m.selected_only);
+                check_row(ui, "Split", &mut m.split);
+            }
+            Tool::PolygonPen => {
+                attr_label(ui, "Snap Distance", LABEL_WIDTH);
+                ui.add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    DragValue::new(&mut editor.modeling_settings.pen_snap)
+                        .speed(0.5)
+                        .range(1.0..=100.0)
+                        .suffix(" px"),
+                );
+                ui.end_row();
+            }
+            Tool::ExtrudeAlongSpline => {
+                let owner = editor.selection.active().unwrap_or_default();
+                let m = &mut editor.modeling_settings;
+                object_row(ui, "Spline", &mut m.along_spline, &doc.scene, owner);
+                big_count_row(
+                    ui,
+                    "Steps",
+                    &mut m.along.steps,
+                    1,
+                    grid4d_geom::ops::AlongSpline::MAX_STEPS,
+                );
+                angle_row(ui, k, "Twist", &mut m.along.twist, -36_000.0..=36_000.0);
+                scale_percent_row(ui, "End Scale", &mut m.along.end_scale);
+                check_row(ui, "Follow Path", &mut m.along.follow);
+            }
+            Tool::Mirror => {
+                let m = &mut editor.modeling_settings.mirror;
+                plane_row(ui, "grid4d.attr.mirror.plane", &mut m.plane);
+                check_row(ui, "Duplicate", &mut m.duplicate);
+                check_row(ui, "Weld", &mut m.weld);
+                attr_label(ui, "Tolerance", LABEL_WIDTH);
+                ui.add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    widgets::length(ui, &mut m.tolerance)
+                        .speed(0.01)
+                        .range(0.0..=100.0)
+                        .max_decimals(3),
+                );
+                ui.end_row();
+            }
+            Tool::Array => {
+                let m = &mut editor.modeling_settings.array;
+                big_count_row(ui, "Copies", &mut m.copies, 1, grid4d_geom::ops::Array::MAX_COPIES);
+                for (axis, label) in ["Offset . X", "Offset . Y", "Offset . Z"].into_iter().enumerate() {
+                    attr_label(ui, label, LABEL_WIDTH);
+                    ui.add_sized([FIELD_WIDTH, 19.0], widgets::length(ui, &mut m.offset[axis]).speed(0.5));
+                    ui.end_row();
+                }
+                for (axis, label) in [(1, "Rotation . H"), (0, "Rotation . P"), (2, "Rotation . B")] {
+                    angle_row(ui, k, label, &mut m.rotation[axis], -36_000.0..=36_000.0);
+                }
+                scale_percent_row(ui, "Scale", &mut m.scale);
+                check_row(ui, "Weld", &mut m.weld);
             }
             Tool::LineCut => {
                 let m = &mut editor.modeling_settings.line_cut;
@@ -1319,6 +1392,127 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
             RichText::new(tr("Or drag left/right in the viewport: every drag is a new operation")).color(p().text_dim),
         );
     }
+}
+
+/// A modelling tool's plane (object or world axis plane).
+fn plane_row(ui: &mut Ui, id: &str, plane: &mut crate::ToolPlane) {
+    attr_label(ui, "Plane", LABEL_WIDTH);
+    let combo = egui::ComboBox::from_id_salt(id)
+        .selected_text(tr(plane.label()))
+        .show_ui(ui, |ui| {
+            for option in crate::ToolPlane::ALL {
+                ui.selectable_value(plane, option, tr(option.label()));
+            }
+        })
+        .response;
+    ui.ctx()
+        .accesskit_node_builder(combo.id, |node| node.set_label(tr("Plane")));
+    ui.end_row();
+}
+
+/// A whole number from `min` to `max`.
+fn big_count_row(ui: &mut Ui, label: &str, value: &mut u32, min: u32, max: u32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    ui.add_sized([FIELD_WIDTH, 19.0], DragValue::new(value).speed(0.2).range(min..=max));
+    ui.end_row();
+}
+
+/// A factor shown in percent (0 – 1000 %).
+fn scale_percent_row(ui: &mut Ui, label: &str, value: &mut f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let mut percent = *value * 100.0;
+    if ui
+        .add_sized(
+            [FIELD_WIDTH, 19.0],
+            DragValue::new(&mut percent).speed(0.5).range(0.0..=1000.0).suffix(" %"),
+        )
+        .changed()
+    {
+        *value = percent / 100.0;
+    }
+    ui.end_row();
+}
+
+/// Bevel's profile (Round or Custom, its points and presets) and mitres.
+fn bevel_profile_rows(ui: &mut Ui, m: &mut grid4d_geom::ops::BevelOptions) {
+    use grid4d_geom::ops::{BevelProfile, BevelShape, Mitres, ProfilePreset};
+    attr_label(ui, "Profile", LABEL_WIDTH);
+    let combo = egui::ComboBox::from_id_salt("grid4d.attr.bevel.shape")
+        .selected_text(tr(m.shape.label()))
+        .show_ui(ui, |ui| {
+            for shape in BevelShape::ALL {
+                ui.selectable_value(&mut m.shape, shape, tr(shape.label()));
+            }
+        })
+        .response;
+    ui.ctx()
+        .accesskit_node_builder(combo.id, |node| node.set_label(tr("Profile")));
+    ui.end_row();
+    if m.shape == BevelShape::Custom {
+        attr_label(ui, "Preset", LABEL_WIDTH);
+        let mut picked = None;
+        let combo = egui::ComboBox::from_id_salt("grid4d.attr.bevel.preset")
+            .selected_text(tr("Choose…"))
+            .show_ui(ui, |ui| {
+                for preset in ProfilePreset::ALL {
+                    if ui.selectable_label(false, tr(preset.label())).clicked() {
+                        picked = Some(preset);
+                    }
+                }
+            })
+            .response;
+        ui.ctx()
+            .accesskit_node_builder(combo.id, |node| node.set_label(tr("Preset")));
+        ui.end_row();
+        if let Some(preset) = picked {
+            m.profile = BevelProfile::preset(preset);
+        }
+        // The points, from the first face's side (1, 0) to the second's (0, 1).
+        let mut points = m.profile.points().to_vec();
+        let mut changed = false;
+        let mut remove = None;
+        let count = points.len();
+        for (i, point) in points.iter_mut().enumerate() {
+            attr_label(ui, &trf("Point {0}", &[&(i + 1).to_string()]), LABEL_WIDTH);
+            ui.horizontal(|ui| {
+                for value in [&mut point.x, &mut point.y] {
+                    let field = ui.add_sized([46.0, 19.0], DragValue::new(value).speed(0.01).range(-1.0..=2.0));
+                    changed |= field.changed();
+                }
+                if count > 2 && ui.small_button("×").on_hover_text(tr("Remove this point")).clicked() {
+                    remove = Some(i);
+                }
+            });
+            ui.end_row();
+        }
+        if let Some(i) = remove {
+            points.remove(i);
+            changed = true;
+        }
+        ui.label("");
+        if points.len() < BevelProfile::MAX && ui.button(tr("Add Point")).clicked() {
+            // Halfway between the last two.
+            let n = points.len();
+            points.insert(n - 1, (points[n - 2] + points[n - 1]) * 0.5);
+            changed = true;
+        }
+        ui.end_row();
+        if changed {
+            m.profile = BevelProfile::new(&points);
+        }
+    }
+    attr_label(ui, "Mitres", LABEL_WIDTH);
+    let combo = egui::ComboBox::from_id_salt("grid4d.attr.bevel.mitres")
+        .selected_text(tr(m.mitres.label()))
+        .show_ui(ui, |ui| {
+            for mitres in Mitres::ALL {
+                ui.selectable_value(&mut m.mitres, mitres, tr(mitres.label()));
+            }
+        })
+        .response;
+    ui.ctx()
+        .accesskit_node_builder(combo.id, |node| node.set_label(tr("Mitres")));
+    ui.end_row();
 }
 
 /// Soft selection (`docs/reference/modeling-soft-selection.md`): shown with

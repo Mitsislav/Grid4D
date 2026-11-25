@@ -143,7 +143,7 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
         _ => SelectMode::Remove,
     };
 
-    match rng.below(55) {
+    match rng.below(56) {
         0..=2 => EditorCommand::CreateObject(tag(rng)),
         3 => EditorCommand::CreateObject(ObjectKindTag::Cube),
         4 => EditorCommand::CreateChild(tag(rng)),
@@ -426,7 +426,16 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
                     EditorCommand::UvCommand(op)
                 }
                 _ => {
-                    editor.tool = [Tool::Extrude, Tool::Inset, Tool::Bevel, Tool::Slide][rng.below(4)];
+                    editor.tool = [
+                        Tool::Extrude,
+                        Tool::Inset,
+                        Tool::Bevel,
+                        Tool::Slide,
+                        Tool::PlaneCut,
+                        Tool::Mirror,
+                        Tool::Array,
+                        Tool::ExtrudeAlongSpline,
+                    ][rng.below(8)];
                     let settings = &mut editor.modeling_settings;
                     settings.extrude.offset = rng.range(-50.0, 50.0);
                     settings.inset.offset = rng.range(0.0, 20.0);
@@ -434,6 +443,19 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
                     settings.slide.offset = rng.range(-1.0, 1.0);
                     settings.slide.keep_curvature = rng.chance(2);
                     settings.slide.duplicate = rng.chance(3);
+                    settings.plane_cut.offset = rng.range(-100.0, 100.0);
+                    settings.plane_cut.cuts = 1 + u32::try_from(rng.below(3)).unwrap();
+                    settings.plane_cut.split = rng.chance(3);
+                    settings.mirror.duplicate = rng.chance(2);
+                    settings.array.copies = 1 + u32::try_from(rng.below(3)).unwrap();
+                    settings.bevel.mitres = grid4d_geom::ops::Mitres::ALL[rng.below(2)];
+                    settings.bevel.shape = grid4d_geom::ops::BevelShape::ALL[rng.below(2)];
+                    // A spline to extrude along, when there is one.
+                    settings.along_spline = doc
+                        .scene
+                        .iter()
+                        .find(|(_, n)| n.data.kind.is_spline())
+                        .map(|(id, _)| id);
                     EditorCommand::ApplyMeshTool
                 }
             }
@@ -475,6 +497,28 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
             EditorCommand::StopRenderQueue,
         ][rng.below(3)]
         .clone(),
+        // The Polygon Pen closing a polygon on the active polygon object.
+        54 => match editor
+            .selection
+            .active()
+            .and_then(|id| Some((id, polygon_counts(doc, id)?)))
+        {
+            Some((node, [points, edges, _])) if points > 0 && edges > 0 => {
+                editor.tool = Tool::PolygonPen;
+                let corners = (0..3 + rng.below(2))
+                    .map(|_| match rng.below(3) {
+                        0 => grid4d_geom::ops::PenCorner::Point(u32::try_from(rng.below(points)).unwrap()),
+                        1 => grid4d_geom::ops::PenCorner::Edge {
+                            edge: rng.below(edges),
+                            t: rng.range(0.1, 0.9),
+                        },
+                        _ => grid4d_geom::ops::PenCorner::New(rng.vec(200.0)),
+                    })
+                    .collect();
+                EditorCommand::PenPolygon { node, corners }
+            }
+            _ => EditorCommand::SelectAll,
+        },
         47 => EditorCommand::Undo,
         48 => EditorCommand::Redo,
         // A click on the timeline: temporary values give way to the curves.

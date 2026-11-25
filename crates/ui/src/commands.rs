@@ -117,6 +117,11 @@ pub enum EditorCommand {
     PenClose,
     /// The Pen: finishes the spline being drawn (the next click starts a new one).
     PenFinish,
+    /// Polygon Pen: a new polygon on `node` through `corners` (one undo step).
+    PenPolygon {
+        node: NodeId,
+        corners: Vec<ops::PenCorner>,
+    },
     /// Renders the scene at the current frame through the active view, in the
     /// background, and opens the Picture Viewer (Shift+R). Stops a render that runs.
     RenderToPictureViewer,
@@ -645,6 +650,24 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             }
         }
         EditorCommand::PenFinish => editor.pen_finished = editor.selection.active(),
+        EditorCommand::PenPolygon { node, corners } => {
+            let data = doc.scene.get(node).and_then(|n| {
+                let ObjectKind::Polygon { mesh, .. } = &n.data.kind else {
+                    return None;
+                };
+                let rebuilt = ops::pen_polygon(mesh.mesh(), mesh.topology(), &corners).ok()?;
+                crate::modeling::rebuilt_data(&n.data, rebuilt, crate::modeling::Fresh::PolygonsSelected)
+            });
+            if let Some(data) = data {
+                commit(
+                    doc,
+                    editor,
+                    crate::Tool::PolygonPen.label(),
+                    vec![SceneEdit::SetData { id: node, data }],
+                    |_, _| {},
+                );
+            }
+        }
         EditorCommand::BrowseRenderOutput => {
             if let Some(output) = file::pick_render_output(doc, editor) {
                 let mut settings = doc.render.clone();
@@ -963,11 +986,12 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             let tool = editor.tool;
             let mut settings = editor.modeling_settings;
             let offset = crate::modeling::offset_mut(tool, &mut settings).map_or(0.0, |o| *o);
+            let frame = f64::from(doc.time.frame());
             if let Some((id, component)) = component_target(doc, editor)
-                && let Some(data) = doc
-                    .scene
-                    .get(id)
-                    .and_then(|n| crate::modeling::apply(&n.data, tool, component, &settings, offset))
+                && let Some(data) = doc.scene.get(id).and_then(|n| {
+                    let context = crate::modeling::Context::of(&doc.scene, id, &settings, frame);
+                    crate::modeling::apply(&n.data, tool, component, &settings, offset, &context)
+                })
             {
                 commit(
                     doc,

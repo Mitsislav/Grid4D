@@ -40,6 +40,16 @@ pub enum Tool {
     /// Mesh ▸ Slide: drag to slide the selected points or edge loops along
     /// the edges next to them.
     Slide,
+    /// Mesh ▸ Plane Cut: cuts the object with planes (drag moves them).
+    PlaneCut,
+    /// Mesh ▸ Polygon Pen: click points to draw a new polygon.
+    PolygonPen,
+    /// Mesh ▸ Extrude along Spline: the selected polygons along a spline.
+    ExtrudeAlongSpline,
+    /// Mesh ▸ Mirror: the selected polygons mirrored across a plane.
+    Mirror,
+    /// Mesh ▸ Array: copies of the selected polygons.
+    Array,
 }
 
 impl Tool {
@@ -73,6 +83,11 @@ impl Tool {
             Self::Weld => "Weld",
             Self::Pen => "Pen",
             Self::Slide => "Slide",
+            Self::PlaneCut => "Plane Cut",
+            Self::PolygonPen => "Polygon Pen",
+            Self::ExtrudeAlongSpline => "Extrude along Spline",
+            Self::Mirror => "Mirror",
+            Self::Array => "Array",
         }
     }
 
@@ -89,7 +104,14 @@ impl Tool {
             Self::LineCut => "K~K",
             Self::Bevel => "M~S",
             Self::Bridge => "B",
-            Self::Weld | Self::Pen | Self::Slide => "",
+            Self::Weld
+            | Self::Pen
+            | Self::Slide
+            | Self::PlaneCut
+            | Self::PolygonPen
+            | Self::ExtrudeAlongSpline
+            | Self::Mirror
+            | Self::Array => "",
             Self::Move => "E",
             Self::Scale => "T",
             Self::Rotate => "R",
@@ -122,6 +144,15 @@ impl Tool {
                 "Pen: click to add a point · drag to pull its tangents · click the first point to close · Esc finishes"
             }
             Self::Slide => "Slide works on the selected points or edge loops of a polygon object",
+            Self::PlaneCut => "Plane Cut: in a component mode, drag left/right to move the cutting plane, or Apply",
+            Self::PolygonPen => {
+                "Polygon Pen: click points, edges or the surface · click the first point to close · Backspace undoes a point · Esc cancels"
+            }
+            Self::ExtrudeAlongSpline => {
+                "Extrude along Spline: pick a spline in the Attribute Manager, then Apply to the selected polygons"
+            }
+            Self::Mirror => "Mirror: Apply mirrors the selected polygons (or the whole object) across the plane",
+            Self::Array => "Array: Apply copies the selected polygons (or the whole object)",
         }
     }
 
@@ -142,7 +173,17 @@ impl Tool {
     /// The Mesh menu's modelling tools: drag in the viewport, or Apply.
     #[must_use]
     pub const fn is_mesh_tool(self) -> bool {
-        matches!(self, Self::Extrude | Self::Inset | Self::Bevel | Self::Slide)
+        matches!(
+            self,
+            Self::Extrude
+                | Self::Inset
+                | Self::Bevel
+                | Self::Slide
+                | Self::PlaneCut
+                | Self::ExtrudeAlongSpline
+                | Self::Mirror
+                | Self::Array
+        )
     }
 
     /// The tools that join components: Bridge (drag between two) and Weld (click).
@@ -164,7 +205,7 @@ impl Tool {
             || self.is_mesh_tool()
             || self.is_cut_tool()
             || self.is_join_tool()
-            || matches!(self, Self::Pen)
+            || matches!(self, Self::Pen | Self::PolygonPen)
     }
 }
 
@@ -284,6 +325,99 @@ pub struct ModelingSettings {
     /// The direction (object space) single points slide towards with
     /// positive offsets: the last drag's, the object's X axis at first.
     pub slide_direction: glam::Vec3,
+    pub plane_cut: PlaneCutSettings,
+    pub mirror: MirrorSettings,
+    pub array: grid4d_geom::ops::Array,
+    pub along: grid4d_geom::ops::AlongSpline,
+    /// Extrude along Spline's path.
+    pub along_spline: Option<NodeId>,
+    /// Polygon Pen: clicks this near (points) a point or edge use it.
+    pub pen_snap: f32,
+}
+
+/// A plane of a modelling tool: one of the object's or the world's axis
+/// planes, through its origin.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ToolPlane {
+    ObjectXy,
+    #[default]
+    ObjectZy,
+    ObjectXz,
+    WorldXy,
+    WorldZy,
+    WorldXz,
+}
+
+impl ToolPlane {
+    pub const ALL: [Self; 6] = [
+        Self::ObjectXy,
+        Self::ObjectZy,
+        Self::ObjectXz,
+        Self::WorldXy,
+        Self::WorldZy,
+        Self::WorldXz,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ObjectXy => "Object XY",
+            Self::ObjectZy => "Object ZY",
+            Self::ObjectXz => "Object XZ",
+            Self::WorldXy => "World XY",
+            Self::WorldZy => "World ZY",
+            Self::WorldXz => "World XZ",
+        }
+    }
+
+    /// The plane's normal, and whether it is the world's (else the object's).
+    #[must_use]
+    pub const fn normal(self) -> (glam::Vec3, bool) {
+        match self {
+            Self::ObjectXy => (glam::Vec3::Z, false),
+            Self::ObjectZy => (glam::Vec3::X, false),
+            Self::ObjectXz => (glam::Vec3::Y, false),
+            Self::WorldXy => (glam::Vec3::Z, true),
+            Self::WorldZy => (glam::Vec3::X, true),
+            Self::WorldXz => (glam::Vec3::Y, true),
+        }
+    }
+
+    /// The plane moved `offset` along its normal, in the space of an object
+    /// whose world matrix is `world`: (a point on it, its unit normal).
+    #[must_use]
+    pub fn in_object(self, offset: f32, world: glam::Mat4) -> (glam::Vec3, glam::Vec3) {
+        let (normal, is_world) = self.normal();
+        if !is_world || world.determinant().abs() <= f32::EPSILON {
+            return (normal * offset, normal);
+        }
+        let into = world.inverse();
+        let origin = into.transform_point3(normal * offset);
+        // Normals go through the inverse transpose.
+        let turned = world.transpose().transform_vector3(normal).normalize_or(normal);
+        (origin, turned)
+    }
+}
+
+/// Plane Cut's options.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlaneCutSettings {
+    pub plane: ToolPlane,
+    /// Where the (middle) plane lies along its normal (a drag moves it).
+    pub offset: f32,
+    pub cuts: u32,
+    pub spacing: f32,
+    pub selected_only: bool,
+    pub split: bool,
+}
+
+/// Mirror's options.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MirrorSettings {
+    pub plane: ToolPlane,
+    pub duplicate: bool,
+    pub weld: bool,
+    pub tolerance: f32,
 }
 
 /// Loop/Path Cut options.
@@ -360,6 +494,9 @@ impl Default for ModelingSettings {
                 subdivision: 0,
                 depth: 1.0,
                 limit: true,
+                shape: grid4d_geom::ops::BevelShape::Round,
+                profile: grid4d_geom::ops::BevelProfile::default(),
+                mitres: grid4d_geom::ops::Mitres::Default,
             },
             bridge: BridgeOptions {
                 subdivision: 0,
@@ -374,6 +511,31 @@ impl Default for ModelingSettings {
             // docs/reference/modeling-tools-2.md: no offset, clamped.
             slide: grid4d_geom::ops::SlideOptions::default(),
             slide_direction: glam::Vec3::X,
+            // docs/reference/modeling-tools-2.md.
+            plane_cut: PlaneCutSettings {
+                plane: ToolPlane::ObjectXz,
+                offset: 0.0,
+                cuts: 1,
+                spacing: 10.0,
+                selected_only: false,
+                split: false,
+            },
+            mirror: MirrorSettings {
+                plane: ToolPlane::ObjectZy,
+                duplicate: true,
+                weld: true,
+                tolerance: 0.01,
+            },
+            array: grid4d_geom::ops::Array {
+                copies: 3,
+                offset: glam::Vec3::new(100.0, 0.0, 0.0),
+                rotation: glam::Vec3::ZERO,
+                scale: 1.0,
+                weld: false,
+            },
+            along: grid4d_geom::ops::AlongSpline::default(),
+            along_spline: None,
+            pen_snap: 10.0,
         }
     }
 }

@@ -42,6 +42,14 @@ deformers).
 - **Slide** — a new tool (Mesh ▸ Slide) moves points along their edges and
   edge loops across their neighbours, keeping the surface's shape;
   optionally along the curve, or leaving the loop and sliding a new one.
+- **More modelling tools** — **Plane Cut** cuts an object with one or more
+  parallel planes (optionally splitting it); the **Polygon Pen** draws new
+  polygons on points, edges or the surface, and pulls quads out of open
+  edges; **Extrude along Spline** extrudes polygons along a spline's shape
+  with twist and taper; **Mirror** and **Array** mirror or repeat polygons
+  inside an object. **Bevel** gains a Custom profile (with Chamfer, Step
+  and Cove presets) and Patch mitres that turn a rounded profile round a
+  corner.
 - **Files** — documents are saved in `.g4d` format version 6, which holds
   the Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce; Grid4D 1.3's other features will add to it until 1.3 is
   released. Every earlier file opens unchanged; Grid4D 1.2 cannot open

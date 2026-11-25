@@ -54,7 +54,7 @@
 
 | Option | Range | Default | Effect |
 |--------|-------|---------|--------|
-| Plane | Free · Object XY / ZY / XZ · World XY / ZY / XZ | Free | Free: drawn by a line in the view (the plane through it along the view); the others: an axis plane placed by the handle. |
+| Plane | Object XY / ZY / XZ · World XY / ZY / XZ (Free: Line Cut's Infinite option) | Object XZ | Free: drawn by a line in the view (the plane through it along the view); the others: an axis plane placed by the handle. |
 | Cuts | 1 – 64 | 1 | Parallel cuts. |
 | Spacing | length | 10 cm | Between parallel cuts. |
 | Selected Only | bool | off | Cut only the selected polygons. |
@@ -128,19 +128,49 @@
 - A Custom profile with *n* points makes *n − 1* rows across the bevel
   (Subdivision is then ignored).
 
-## Acceptance criteria
+## Decisions made while implementing (2026-11-25)
 
-- [ ] Every tool: Apply and a drag give the same mesh for the same options;
-      one undo step; selections carried (property test per tool).
-- [ ] Slide clamps at neighbours; a loop slid 50 % lies halfway on every
+1. **Plane Cut's Free plane is Line Cut's Infinite option** (a line drawn
+   in the view already cuts along the plane through it); Plane Cut keeps
+   the six axis planes, moved along their normal by Offset — what a drag
+   sets. It shares Line Cut's cutting code (`cut_by_plane`); several cuts
+   run one after another, their origins composed.
+2. **Mirror, Array and Extrude along Spline run from Apply only** (they
+   have no single amount for a drag to set).
+3. **Mirror and Array work on the selected polygons in Polygons mode**,
+   the whole object otherwise; Extrude along Spline only on selected
+   polygons. Mirror's image reads its UVs with U turned round, as the
+   Symmetry's does.
+4. **Extrude along Spline keeps every point and face number and appends**
+   the rings (like Extrude), so the selected region is the moved end; the
+   path is the spline's first segment resampled at equal lengths, the
+   profile carried by parallel transport.
+5. **The Polygon Pen's N-Gons option is left out**: a closed polygon is
+   always one polygon (Connect or Triangulate can split it). Its corners
+   snap to points, then edges, then the surface, then the plane through the
+   object facing the view.
+6. **Bevel's Custom profile** is kept as up to 16 points in the corner's
+   axes ((1, 0) on the first face's side, (0, 1) on the second's), presets
+   Chamfer, Step and Cove; edited as rows of numbers in the Tool page.
+   **Patch mitres** fill a corner of three or more bevelled edges with
+   triangles to a point pulled from the hole's middle towards the original
+   corner (by half the Depth, Round; by 0.3, Custom).
+
+## Acceptance criteria (all met in 17.6 – 17.7)
+
+- [x] Every tool: Apply and a drag give the same mesh for the same options;
+      one undo step; selections carried (a randomized test over shapes and
+      planes for Plane Cut, Mirror and Array; the random-command test runs
+      every tool).
+- [x] Slide clamps at neighbours; a loop slid 50 % lies halfway on every
       ring edge; Duplicate inserts a loop.
-- [ ] Plane Cut on a cube through its centre gives 4 new quads' worth of
+- [x] Plane Cut on a cube through its centre gives 4 new quads' worth of
       points, all on the plane; 3 cuts give 3 loops.
-- [ ] Polygon Pen closes a quad welded to four existing points; a dragged
+- [x] Polygon Pen closes a quad welded to four existing points; a dragged
       border edge makes one new quad.
-- [ ] Extrude along Spline of one quad along a quarter circle, 10 steps:
+- [x] Extrude along Spline of one quad along a quarter circle, 10 steps:
       40 side quads, the end quad turned 90°.
-- [ ] Mirror of half a cube welded gives a closed cube; Array of 3 gives 3
+- [x] Mirror of half a cube welded gives a closed cube; Array of 3 gives 3
       pieces at the offsets.
-- [ ] A Custom bevel profile's rows follow its points; Patch mitres leave no
+- [x] A Custom bevel profile's rows follow its points; Patch mitres leave no
       gap at a cube's corner.

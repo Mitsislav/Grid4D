@@ -27,7 +27,12 @@ impl ViewportPanel {
             | Tool::LineCut
             | Tool::Bevel
             | Tool::Pen
-            | Tool::Slide => false,
+            | Tool::Slide
+            | Tool::PlaneCut
+            | Tool::PolygonPen
+            | Tool::ExtrudeAlongSpline
+            | Tool::Mirror
+            | Tool::Array => false,
         }
     }
 

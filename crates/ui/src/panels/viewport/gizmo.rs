@@ -94,7 +94,12 @@ impl GizmoGeometry {
                 | Tool::Bridge
                 | Tool::Weld
                 | Tool::Pen
-                | Tool::Slide => false,
+                | Tool::Slide
+                | Tool::PlaneCut
+                | Tool::PolygonPen
+                | Tool::ExtrudeAlongSpline
+                | Tool::Mirror
+                | Tool::Array => false,
             };
             if locked {
                 return None;
@@ -245,7 +250,12 @@ impl GizmoGeometry {
                 | Tool::Bridge
                 | Tool::Weld
                 | Tool::Pen
-                | Tool::Slide => {}
+                | Tool::Slide
+                | Tool::PlaneCut
+                | Tool::PolygonPen
+                | Tool::ExtrudeAlongSpline
+                | Tool::Mirror
+                | Tool::Array => {}
             }
         }
         painter.circle_filled(self.origin_px, 3.5, p().text_strong);
@@ -395,7 +405,12 @@ impl PointEdit {
             | Tool::Bridge
             | Tool::Weld
             | Tool::Pen
-            | Tool::Slide => Mat4::from_translation(self.moved * weight),
+            | Tool::Slide
+            | Tool::PlaneCut
+            | Tool::PolygonPen
+            | Tool::ExtrudeAlongSpline
+            | Tool::Mirror
+            | Tool::Array => Mat4::from_translation(self.moved * weight),
         }
     }
 
@@ -701,7 +716,12 @@ fn apply_component_drag(
         | Tool::Bridge
         | Tool::Weld
         | Tool::Pen
-        | Tool::Slide => return,
+        | Tool::Slide
+        | Tool::PlaneCut
+        | Tool::PolygonPen
+        | Tool::ExtrudeAlongSpline
+        | Tool::Mirror
+        | Tool::Array => return,
     }
     edit.apply(geo.tool, geo.axes[axis], scene, node);
 }
@@ -772,7 +792,12 @@ fn apply_drag(
         | Tool::Bridge
         | Tool::Weld
         | Tool::Pen
-        | Tool::Slide => return,
+        | Tool::Slide
+        | Tool::PlaneCut
+        | Tool::PolygonPen
+        | Tool::ExtrudeAlongSpline
+        | Tool::Mirror
+        | Tool::Array => return,
     }
     node.data.set_transform_at(&shown, keying.frame, keying.autokey);
 }

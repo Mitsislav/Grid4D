@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 17 — Modelling 2 (v1.3) |
-| Last step done | 17.6 — soft selection and Slide: points around the selection follow transforms by a falloff, shown as a ramp; points and loops slid along their edges (2026-11-25) |
-| Next step | 17.7 — Plane Cut, Polygon Pen, Extrude along Spline, Mirror, Array, Bevel profiles |
-| Tests | 1029 (and 22 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's, the Reduce's and soft selection's pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
+| Last step done | 17.7 — Plane Cut, Polygon Pen, Extrude along Spline, Mirror, Array, Bevel's Custom profile and Patch mitres (2026-11-25) |
+| Next step | 17.8 — edge creases, hard edges, weighted normals |
+| Tests | 1039 (and 23 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's, the Reduce's, soft selection's and the Bevel profile's pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2740,6 +2740,7 @@ risks R5 – R8 go with it.
 | 17.4 | Symmetry, Instance and Join. `grid4d_geom::symmetry` (`Symmetry`, `MirrorPlane`, `mirror`: the half and its image wound the other way, welded and held at the plane, faces in the plane not doubled, the mirror's U turned round, the half's point numbers kept; 5.1 ms for a 100 000-point half); `ObjectKind::{Symmetry, Join}` take all their children (`gather_solids`, hidden as cages), the Join merged and welded; a Subdivision Surface's cage may now be a Join, Symmetry or Boolean; `ObjectKind::Instance { reference }` shows its reference's subtree as clones owned by the Instance (its Cloners' clones and nested Instances too, chains up to 16, cycles show nothing, its own material over them; 0.17 ms to evaluate a thousand), created linked to the selection; Make Editable, Current State and export bake all three; `.g4d` v6 `symmetry`, `instance` (by index), `join`, refused in v5; icons, pages, tooltips, Greek; the manual's §12.6 with a picture | 999 |
 | 17.5 | The Spline Boolean and Reduce. `grid4d_geom::spline_boolean` (closed outlines flattened onto a plane, edges cut where they cross or touch by exact orientation tests, merged within 0.001 cm, each classified by a ray and chained into outlines and holes; Union, Subtract, Intersect, Exclusive; 71 ms for a hundred circles; a fuzz target in CI); the first generator whose result is a curve, drawn and picked as one, its splines hidden, read by Extrude, Lathe, Sweep, Loft and another Spline Boolean (D45); `grid4d_geom::reduce` (`CollapseOrder`: triangles and UV wedges, quadric costs, borders and seams held by constraint planes, half-edge collapses so the points and UVs are the input's own, no flips, pinches or doubled faces; `replay` merges numbers only: 3.8 s for the order of a million triangles, 24 ms for a replay to 10 %); `ObjectKind::Reduce` with Keep (animatable), borders, seams, children together or apart, the order kept while only Keep changes; Make Editable (a Linear spline; a mesh), Current State and export; `.g4d` v6 `spline_boolean`, `reduce`, track `keep`, refused in v5; icons, pages, tooltips, Greek; the manual's §12.7 and §13.9 with pictures | 1017 |
 | 17.6 | Soft selection and Slide. `grid4d_geom::soft` (four falloffs, distance through space by a grid of cells or along the edges by Dijkstra, hidden points weigh nothing); `TransformSettings::soft` on the Move, Scale and Rotate tool pages; the gizmo's point edits and Tweak move, turn and scale each point by its weight (world-space distances); the ramp on the points (a weight in the overlay's point flags, mixed in the shader; the viewport recomputes the weights only when something changed; the allocation-free frame test runs with it on). `grid4d_geom::ops::slide` (rails of points and loops, the loop's two sides from its faces, Clamp, Keep Curvature, Duplicate through Loop/Path Cut); `Tool::Slide` in the Mesh menu, a drag or Apply, one undo step; Greek; the manual's §11.4 with a picture and §11.8 | 1029 |
+| 17.7 | Modelling tools 2. Plane Cut (`ops::plane_cut`: Line Cut's cutting code shared, several parallel cuts composed, Split doubling the points on the planes, Selected Only), object or world axis planes moved by a drag; the Polygon Pen (`viewport/polygon_pen.rs`: corners on points, edges, the surface or the view's plane, closed on the first, Backspace, Esc; `ops::pen_polygon` wound with its neighbours; Ctrl + drag pulls a quad out of a border edge); Extrude along Spline (`ops::extrude_along`: the path resampled, parallel transport, twist, end scale; indices kept); Mirror and Array (`ops::{mirror, array}`, images' UVs turned, welds); Bevel's Custom profile (presets Chamfer, Step, Cove; points edited in the Tool page) and Patch mitres; `modeling::Context` (world matrix, path); a randomized test of carried points; Greek; the manual's §11.9 – §11.11 with a picture | 1039 |
 
 **17.1 — Specs, the format version 6, the modelling budget**
 
@@ -2967,6 +2968,25 @@ risks R5 – R8 go with it.
   flags.
 - **8-byte settings by value.** Clippy asks for `SoftSelection` to be
   passed by value; it is.
+
+**17.7 — modelling tools 2**
+
+*Problems and solutions:*
+- **Plane Cut is a Line Cut without ends.** Line Cut already split faces
+  along a plane, paired crossings and recorded the new edges; its core
+  became `cut_by_plane`, which both call. Several cuts run one after
+  another; their origins and new edges are carried through each step.
+- **World planes on moved objects.** The plane is taken into the object's
+  space (its point by the inverse matrix, its normal by the transpose); a
+  test cuts an object raised by 50 cm with the world's XZ plane at 10 cm.
+- **Tools with nothing to drag.** Mirror, Array and Extrude along Spline
+  have no single amount, so a viewport drag does nothing for them and
+  Apply runs them; the drag starts only for tools with an Offset.
+- **Extrude along Spline keeps the numbers.** Like Extrude it appends the
+  rings and moves the region's own faces to the end, so the region's
+  selection is the end afterwards.
+- **A cove's last point showed "-0.00".** cos 90° is not exactly 0 in f32;
+  the presets' ends are set exactly.
 
 ## Phase 16 — Render quality (2026-11-07 – 2026-11-09)
 

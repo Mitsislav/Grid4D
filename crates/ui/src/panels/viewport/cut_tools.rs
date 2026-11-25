@@ -44,7 +44,12 @@ impl ViewportPanel {
             | Tool::Bridge
             | Tool::Weld
             | Tool::Pen
-            | Tool::Slide => {
+            | Tool::Slide
+            | Tool::PlaneCut
+            | Tool::PolygonPen
+            | Tool::ExtrudeAlongSpline
+            | Tool::Mirror
+            | Tool::Array => {
                 self.loop_preview = None;
                 false
             }

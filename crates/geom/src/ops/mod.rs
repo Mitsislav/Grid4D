@@ -14,19 +14,21 @@ mod bridge;
 mod cut;
 mod extrude;
 mod rebuild;
+mod shape;
 mod slide;
 
 use std::collections::HashSet;
 
 use glam::{Vec2, Vec3};
 
-pub use bevel::{BevelOptions, bevel};
+pub use bevel::{BevelOptions, BevelProfile, BevelShape, Mitres, ProfilePreset, bevel};
 pub use bridge::{BridgeOptions, bridge_edges, bridge_polygons};
-pub use cut::{LineCut, connect, line_cut, loop_cut};
+pub use cut::{LineCut, PlaneCut, connect, line_cut, loop_cut, plane_cut};
 pub use extrude::{
     EdgeExtrudeOptions, EdgeExtrusion, ExtrudeOptions, InsetOptions, extrude_edges, extrude_polygons, inset, pieces,
 };
 pub use rebuild::{OptimizeOptions, delete, dissolve, melt, optimize, weld};
+pub use shape::{AlongSpline, Array, Mirror, PenCorner, array, extrude_along, mirror, pen_polygon};
 pub use slide::{Rail, SlideOptions, loop_rails, point_rails, slide, slide_duplicate};
 
 use crate::{BitSet, ComponentSet, MeshError, PolyMesh, Topology, selection, u32_index, us};

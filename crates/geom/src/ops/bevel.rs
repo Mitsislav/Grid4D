@@ -18,6 +18,153 @@ pub struct BevelOptions {
     pub depth: f32,
     /// Clamp the offset so that new points never pass each other.
     pub limit: bool,
+    /// Round (Subdivision and Depth) or the Custom profile.
+    pub shape: BevelShape,
+    /// The Custom profile's points.
+    pub profile: BevelProfile,
+    /// How corners where several bevelled edges meet are filled.
+    pub mitres: Mitres,
+}
+
+/// A bevel's cross-section.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum BevelShape {
+    /// Subdivision rows bulged by Depth.
+    #[default]
+    Round,
+    /// Rows through the points of [`BevelProfile`].
+    Custom,
+}
+
+impl BevelShape {
+    pub const ALL: [Self; 2] = [Self::Round, Self::Custom];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Round => "Round",
+            Self::Custom => "Custom",
+        }
+    }
+}
+
+/// How a corner where three or more bevelled edges meet is filled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Mitres {
+    /// One polygon over the hole.
+    #[default]
+    Default,
+    /// Triangles to a point pulled towards the corner, so the profile turns
+    /// the corner.
+    Patch,
+}
+
+impl Mitres {
+    pub const ALL: [Self; 2] = [Self::Default, Self::Patch];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Default => "Default",
+            Self::Patch => "Patch",
+        }
+    }
+}
+
+/// A Custom bevel profile: up to [`BevelProfile::MAX`] points from (1, 0) to
+/// (0, 1) in the corner's own axes — (s, t) is the original edge's point
+/// plus `s` times the way to the first face's side and `t` times the way to
+/// the second's. Kept in a fixed array so options stay plain values.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BevelProfile {
+    points: [Vec2; BevelProfile::MAX],
+    count: u8,
+}
+
+/// The ready-made Custom profiles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProfilePreset {
+    /// A straight cut.
+    Chamfer,
+    /// A step into the corner.
+    Step,
+    /// A hollow quarter circle.
+    Cove,
+}
+
+impl ProfilePreset {
+    pub const ALL: [Self; 3] = [Self::Chamfer, Self::Step, Self::Cove];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Chamfer => "Chamfer",
+            Self::Step => "Step",
+            Self::Cove => "Cove",
+        }
+    }
+}
+
+impl BevelProfile {
+    /// The most points a profile holds.
+    pub const MAX: usize = 16;
+
+    /// A profile through `points` (the first `MAX`; fewer than two: a chamfer).
+    #[must_use]
+    pub fn new(points: &[Vec2]) -> Self {
+        let mut profile = Self {
+            points: [Vec2::ZERO; Self::MAX],
+            count: 0,
+        };
+        for (slot, &point) in profile.points.iter_mut().zip(points.iter().filter(|p| p.is_finite())) {
+            *slot = point;
+            profile.count += 1;
+        }
+        if profile.count < 2 {
+            return Self::preset(ProfilePreset::Chamfer);
+        }
+        profile
+    }
+
+    #[must_use]
+    pub fn preset(preset: ProfilePreset) -> Self {
+        match preset {
+            ProfilePreset::Chamfer => Self::new(&[Vec2::X, Vec2::Y]),
+            ProfilePreset::Step => Self::new(&[
+                Vec2::X,
+                Vec2::new(0.5, 0.0),
+                Vec2::new(0.5, 0.5),
+                Vec2::new(0.0, 0.5),
+                Vec2::Y,
+            ]),
+            ProfilePreset::Cove => {
+                let arc: Vec<Vec2> = (0..=6)
+                    .map(|k| {
+                        let a = std::f32::consts::FRAC_PI_2 * k as f32 / 6.0;
+                        // The ends exactly (cos 90° is not quite 0 in f32).
+                        match k {
+                            0 => Vec2::X,
+                            6 => Vec2::Y,
+                            _ => Vec2::new(a.cos(), a.sin()),
+                        }
+                    })
+                    .collect();
+                Self::new(&arc)
+            }
+        }
+    }
+
+    /// Its points, in order.
+    #[must_use]
+    pub fn points(&self) -> &[Vec2] {
+        &self.points[..usize::from(self.count)]
+    }
+}
+
+impl Default for BevelProfile {
+    fn default() -> Self {
+        Self::preset(ProfilePreset::Chamfer)
+    }
 }
 
 /// Longest a mitred point may move, as a multiple of the offset.
@@ -226,7 +373,24 @@ pub fn bevel(
                 at = to;
             }
             let closed = next.get(&at) == Some(&start);
-            if closed && cycle.len() >= 3 {
+            if closed && cycle.len() >= 3 && options.mitres == Mitres::Patch && cycle.len() > 3 {
+                // Triangles to a point pulled from the hole's middle towards
+                // the original corner, as far as the profile bulges.
+                let middle = cycle.iter().map(|&p| builder.position(p)).sum::<Vec3>() / cycle.len() as f32;
+                let pull = match options.shape {
+                    BevelShape::Round => options.depth * 0.5,
+                    BevelShape::Custom => 0.3,
+                };
+                let centre = builder.add_point(middle + (position(*v) - middle) * pull);
+                for (i, &a) in cycle.iter().enumerate() {
+                    let b = cycle[(i + 1) % cycle.len()];
+                    builder.push_new(&[
+                        Corner::Point(a, Vec2::ZERO),
+                        Corner::Point(b, Vec2::ZERO),
+                        Corner::Point(centre, Vec2::ZERO),
+                    ]);
+                }
+            } else if closed && cycle.len() >= 3 {
                 let patch: Vec<Corner> = cycle.iter().map(|&p| Corner::Point(p, Vec2::ZERO)).collect();
                 builder.push_new(&patch);
             }
@@ -250,6 +414,21 @@ fn profile(
         builder.position(builder.point(from)),
         builder.position(builder.point(to)),
     );
+    if options.shape == BevelShape::Custom {
+        // In the corner's axes: (1, 0) is `from`, (0, 1) is `to`.
+        let origin = builder.position(corner);
+        let (along_a, along_b) = (a - origin, b - origin);
+        let points = options.profile.points();
+        let mut column = Vec::with_capacity(points.len());
+        column.push(from);
+        for p in &points[1..points.len() - 1] {
+            let q = builder.add_point(origin + along_a * p.x + along_b * p.y);
+            owner.insert(q, corner);
+            column.push(Corner::Point(q, Vec2::ZERO));
+        }
+        column.push(to);
+        return column;
+    }
     let middle = (a + b) * 0.5;
     let control = middle + (builder.position(corner) - middle) * options.depth;
     let steps = options.subdivision + 1;
@@ -275,6 +454,12 @@ mod tests {
         offset: 0.2,
         subdivision: 0,
         depth: 1.0,
+        shape: BevelShape::Round,
+        profile: BevelProfile {
+            points: [Vec2::ZERO; BevelProfile::MAX],
+            count: 0,
+        },
+        mitres: Mitres::Default,
         limit: true,
     };
 
@@ -421,5 +606,59 @@ mod tests {
         assert_eq!(out.mesh, quad);
         let none = bevel(&quad, &topology, &BitSet::new(), &BitSet::new(), &OPTIONS).unwrap();
         assert_eq!(none.mesh, quad);
+    }
+
+    #[test]
+    fn a_custom_profile_gives_one_row_per_segment() {
+        let cube = shapes::cube(2.0);
+        let topology = Topology::build(&cube);
+        let edge = edge(&topology, 0, 1);
+        for preset in ProfilePreset::ALL {
+            let profile = BevelProfile::preset(preset);
+            let options = BevelOptions {
+                shape: BevelShape::Custom,
+                profile,
+                subdivision: 5,
+                ..OPTIONS
+            };
+            let out = bevel(&cube, &topology, &set(&[edge]), &BitSet::new(), &options).unwrap();
+            let rows = profile.points().len() - 1;
+            let ends = if rows > 1 { 2 } else { 0 };
+            assert_eq!(
+                out.mesh.face_count(),
+                6 + rows + ends,
+                "{preset:?}: the strip's rows follow its points"
+            );
+            assert_clean(&out.mesh);
+        }
+    }
+
+    #[test]
+    fn patch_mitres_fill_a_cube_corner_without_a_gap() {
+        let cube = shapes::cube(2.0);
+        let topology = Topology::build(&cube);
+        let all: BitSet = (0..topology.edge_count()).collect();
+        let options = BevelOptions {
+            subdivision: 2,
+            mitres: Mitres::Patch,
+            ..OPTIONS
+        };
+        let out = bevel(&cube, &topology, &all, &BitSet::new(), &options).unwrap();
+        assert!(assert_clean(&out.mesh).is_closed(), "no gap at the corners");
+        let default = bevel(
+            &cube,
+            &topology,
+            &all,
+            &BitSet::new(),
+            &BevelOptions {
+                subdivision: 2,
+                ..OPTIONS
+            },
+        )
+        .unwrap();
+        assert!(
+            out.mesh.face_count() > default.mesh.face_count(),
+            "the corners are patched with triangles"
+        );
     }
 }

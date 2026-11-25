@@ -1342,9 +1342,15 @@ off the selected **points** (Points mode):
 | Subdivision | 0 gives a flat chamfer; more gives rows across the bevel, along a rounded profile. |
 | Depth | How round the profile is: 100 % round, 0 % flat, negative hollow. |
 | Limit | Keeps the new points from passing each other (no overlapping polygons). |
+| Profile | **Round**: Subdivision and Depth shape it. **Custom**: the rows follow the points listed below it (Subdivision is then not used). |
+| Preset | Custom only: fills the points with **Chamfer** (a straight cut), **Step** (a step into the edge) or **Cove** (a hollow curve). |
+| Point 1, 2, … | Custom only: each point of the profile, from the first polygon's side (1, 0) to the second's (0, 1), measured from the original edge. **×** removes a point, **Add Point** adds one before the last. |
+| Mitres | Where three or more bevelled edges meet: **Default** closes the corner with one polygon; **Patch** fills it with triangles to a point pulled towards the corner, so a rounded profile turns the corner. |
+
+![The top edges of a box bevelled with the Cove preset; the Custom profile's points in the Bevel tool's page](images/manual/bevel_profile.png)
 
 - Where three bevelled edges meet (a cube's corner) a small polygon closes the
-  corner.
+  corner (or a patch, with Patch mitres).
 - Border edges (edges with a single polygon) are not bevelled.
 - The long edges of the new strips become the selection, so another bevel can round
   them further.
@@ -1378,6 +1384,68 @@ Polygons that collapse are removed.
 - **Unused Points** removes points that no polygon uses.
 - It works on the selected points (or those of the selected edges or polygons), or
   on the whole object when nothing is selected.
+
+### 11.10 Plane Cut and Polygon Pen
+
+**Plane Cut** (Mesh ▸ Plane Cut) cuts the object with flat planes: every
+polygon a plane crosses is split along it, and the cut edges become the
+selection. Drag left or right in the viewport to move the plane along its
+direction, or set it and click **Apply**.
+
+| Option | Meaning |
+|--------|---------|
+| Plane | One of the object's axis planes (**Object XY / ZY / XZ**) or the world's (**World XY / ZY / XZ**), through the origin. |
+| Offset | How far the plane is moved along its direction (a drag sets it). |
+| Cuts / Spacing | Several parallel cuts, this far apart, centred on the plane. |
+| Selected Only | In Polygons mode: cut only the selected polygons. |
+| Split | The pieces come apart at the cut (the points on it are doubled). |
+
+To cut along a line you draw instead, use Line Cut with **Infinite Cut** on
+(§11.6).
+
+**Polygon Pen** (Mesh ▸ Polygon Pen) draws new polygons onto a polygon
+object, in any component mode:
+
+- **Click** an existing point to use it, an edge to put a new point on it
+  (the polygons beside the edge gain the point too), the surface to place a
+  point there, or empty space to place one in the plane through the object
+  facing you. **Snap Distance** is how near (in points on screen) a click
+  must be to a point or edge.
+- **Click the first point** again to close the polygon: it is added in one
+  undo step and selected. **Backspace** takes back the last point; **Esc**
+  drops them all.
+- **Ctrl + drag** an open border edge to pull a new quad out of it (one undo
+  step; Esc during the drag puts it back).
+
+### 11.11 Extrude along Spline, Mirror and Array
+
+**Extrude along Spline** (Mesh ▸ Extrude along Spline) extrudes the selected
+polygons along the shape of a spline: pick the spline in the tool's
+**Spline** field, set the options and click **Apply**. The spline's shape
+starts at the selection's centre, along its direction; where the spline
+itself lies does not matter.
+
+| Option | Meaning |
+|--------|---------|
+| Spline | The path: any spline, Text or Spline Boolean. |
+| Steps | Rows of side polygons along it. |
+| Twist | How much the profile turns over the whole path. |
+| End Scale | The profile's size at the end (it changes evenly along the way). |
+| Follow Path | On: the profile turns with the path. Off: it only moves. |
+
+**Mirror** (Mesh ▸ Mirror) mirrors the selected polygons (the whole object
+when none are selected, or outside Polygons mode) across a plane, with
+**Apply**: **Plane** as for Plane Cut; **Duplicate** keeps the original and
+adds the mirror image (off: turns the polygons over to the other side);
+**Weld** joins points that meet at the plane within **Tolerance**. The
+mirror image comes out the right way round, textures included.
+
+**Array** (Mesh ▸ Array) makes copies of the selected polygons (or the whole
+object), each one **Offset** further, turned by **Rotation** (H, P, B, about
+the selection's centre) and sized by **Scale** more than the last;
+**Copies** sets how many. **Weld** joins points of neighbouring copies that
+touch. The copies are new pieces of the same object, and they become the
+selection.
 
 ## 12. Generators: Subdivision Surface, Boolean, Symmetry, Instance, Join and Reduce
 

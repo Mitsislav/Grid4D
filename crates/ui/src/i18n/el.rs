@@ -274,6 +274,11 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Apply to Views", "Εφαρμογή στις προβολές"),
     ("Arc", "Τόξο"),
     ("Area", "Επιφάνεια"),
+    ("Array", "Πίνακας αντιγράφων"),
+    (
+        "Array: Apply copies the selected polygons (or the whole object)",
+        "Πίνακας αντιγράφων: η Εφαρμογή αντιγράφει τα επιλεγμένα πολύγωνα (ή όλο το αντικείμενο)",
+    ),
     ("Aspect", "Αναλογία"),
     ("Assign Material", "Ανάθεση υλικού"),
     ("Attribute Manager", "Διαχείριση Ιδιοτήτων"),
@@ -398,6 +403,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Center S-Shape", "Κέντρο σε σχήμα S"),
     ("Centimetres", "Εκατοστά"),
     ("Centred", "Κεντραρισμένο"),
+    ("Chamfer", "Λοξοτομή"),
     (
         "Changed but not recorded: dropped when the frame changes · click: set a key · Shift+Ctrl+click: delete the track",
         "Αλλαγμένο χωρίς καταγραφή: χάνεται όταν αλλάξει το καρέ · κλικ: κλειδί · Shift+Ctrl+κλικ: διαγραφή του καναλιού",
@@ -417,6 +423,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Επιλέξτε εικόνες για χρήση ως υφές",
     ),
     ("Choose where to save", "Επιλέξτε πού θα αποθηκευτεί"),
+    ("Choose…", "Επιλογή…"),
     ("Circle", "Κύκλος"),
     ("Clamp", "Περιορισμός"),
     ("Clamp Indirect", "Περιορισμός έμμεσου φωτός"),
@@ -494,6 +501,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Σύστημα συντεταγμένων: Κόσμου (κλικ για Αντικειμένου)",
     ),
     ("Coordinates", "Συντεταγμένες"),
+    ("Copies", "Αντίγραφα"),
     (
         "Copies stand up along the surface",
         "Τα αντίγραφα στέκονται κάθετα στην επιφάνεια",
@@ -512,6 +520,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Count . X", "Πλήθος . X"),
     ("Count . Y", "Πλήθος . Y"),
     ("Count . Z", "Πλήθος . Z"),
+    ("Cove", "Κοίλο"),
     (
         "Coverage: how much of each pixel objects fill",
         "Κάλυψη: πόσο από κάθε pixel γεμίζουν τα αντικείμενα",
@@ -536,6 +545,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Custom", "Προσαρμοσμένο"),
     ("Custom Density", "Προσαρμοσμένη πυκνότητα"),
     ("Custom Mass", "Προσαρμοσμένη μάζα"),
+    ("Cuts", "Κοπές"),
     ("Cylinder", "Κύλινδρος"),
     ("Cylindrical", "Κυλινδρική"),
     ("Dark", "Σκούρο"),
@@ -715,6 +725,11 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Extrude / Inset tool (drag left or right)",
         "Εργαλείο Εξώθησης / Ένθεσης (σύρσιμο αριστερά ή δεξιά)",
     ),
+    ("Extrude along Spline", "Εξώθηση κατά μήκος καμπύλης"),
+    (
+        "Extrude along Spline: pick a spline in the Attribute Manager, then Apply to the selected polygons",
+        "Εξώθηση κατά μήκος καμπύλης: επιλέξτε καμπύλη στον Διαχειριστή ιδιοτήτων και μετά Εφαρμογή στα επιλεγμένα πολύγωνα",
+    ),
     (
         "Extrude does not work on points yet: use Edges or Polygons mode",
         "Η Εξώθηση δεν δουλεύει ακόμη σε σημεία: χρησιμοποιήστε λειτουργία Ακμών ή Πολυγώνων",
@@ -764,6 +779,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Focal Length", "Εστιακή απόσταση"),
     ("Focus Distance", "Απόσταση εστίασης"),
     ("Focus Object", "Αντικείμενο εστίασης"),
+    ("Follow Path", "Ακολουθία διαδρομής"),
     ("Font", "Γραμματοσειρά"),
     (
         "Forget the simulated frames; they are simulated again as you visit them",
@@ -1188,10 +1204,16 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Millimetres", "Χιλιοστά"),
     ("Minimum Samples", "Ελάχιστα δείγματα"),
     ("Minimum Time", "Ελάχιστος χρόνος"),
+    ("Mirror", "Κατοπτρισμός"),
     ("Mirror Plane", "Επίπεδο κατοπτρισμού"),
+    (
+        "Mirror: Apply mirrors the selected polygons (or the whole object) across the plane",
+        "Κατοπτρισμός: η Εφαρμογή κατοπτρίζει τα επιλεγμένα πολύγωνα (ή όλο το αντικείμενο) ως προς το επίπεδο",
+    ),
     ("Missing Plugin", "Plugin που λείπει"),
     ("Missing textures: {0}", "Υφές που λείπουν: {0}"),
     ("Missing: {0}", "Λείπει: {0}"),
+    ("Mitres", "Γωνίες"),
     ("Mode", "Λειτουργία"),
     ("Model", "Μοντέλο"),
     ("Model mode", "Λειτουργία μοντέλου"),
@@ -1334,6 +1356,9 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Object ID", "ID αντικειμένου"),
     ("Object Manager", "Διαχείριση Αντικειμένων"),
     ("Object Properties", "Ιδιότητες αντικειμένου"),
+    ("Object XY", "XY αντικειμένου"),
+    ("Object XZ", "XZ αντικειμένου"),
+    ("Object ZY", "ZY αντικειμένου"),
     ("Objects", "Αντικείμενα"),
     ("Off", "Όχι"),
     ("Offset", "Μετατόπιση"),
@@ -1406,6 +1431,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Pass", "Πέρασμα"),
     ("Passes", "Περάσματα"),
     ("Paste", "Επικόλληση"),
+    ("Patch", "Μπάλωμα"),
     ("Path Tracer", "Ιχνηλάτης διαδρομών"),
     ("Pen", "Πένα"),
     (
@@ -1439,6 +1465,15 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Pitch", "Κλίση"),
     ("Plain", "Απλός"),
     ("Plane", "Επίπεδο"),
+    ("Plane Cut", "Κοπή με επίπεδο"),
+    (
+        "Plane Cut: drag left/right to move the cutting plane · Apply in the Attribute Manager · Esc cancels",
+        "Κοπή με επίπεδο: σύρετε αριστερά/δεξιά για να μετακινήσετε το επίπεδο κοπής · Εφαρμογή στον Διαχειριστή ιδιοτήτων · Esc ακυρώνει",
+    ),
+    (
+        "Plane Cut: in a component mode, drag left/right to move the cutting plane, or Apply",
+        "Κοπή με επίπεδο: σε λειτουργία στοιχείων, σύρετε αριστερά/δεξιά για να μετακινήσετε το επίπεδο κοπής, ή Εφαρμογή",
+    ),
     ("Planned", "Προγραμματίζεται"),
     (
         "Planned — not implemented yet",
@@ -1453,6 +1488,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Plugin", "Plugin"),
     ("Plugin Parameter", "Παράμετρος plugin"),
     ("Plugins", "Plugins"),
+    ("Point {0}", "Σημείο {0}"),
     ("Points", "Σημεία"),
     (
         "Points mode edits the lattice",
@@ -1468,6 +1504,11 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Polygon", "Πολύγωνο"),
     ("Polygon Center", "Κέντρο πολυγώνου"),
+    ("Polygon Pen", "Πένα πολυγώνων"),
+    (
+        "Polygon Pen: click points, edges or the surface · click the first point to close · Backspace undoes a point · Esc cancels",
+        "Πένα πολυγώνων: κάντε κλικ σε σημεία, ακμές ή στην επιφάνεια · κλικ στο πρώτο σημείο κλείνει · Backspace αναιρεί ένα σημείο · Esc ακυρώνει",
+    ),
     ("Polygons", "Πολύγωνα"),
     (
         "Polygons grow into neighbours sharing an edge; off: sharing a point is enough",
@@ -1497,6 +1538,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Previous / next frame", "Προηγούμενο / επόμενο καρέ"),
     ("Previous / next key", "Προηγούμενο / επόμενο κλειδί"),
     ("Previous Frame", "Προηγούμενο καρέ"),
+    ("Profile", "Προφίλ"),
     ("Project", "Προβολή από σχήμα"),
     ("Project Settings", "Ρυθμίσεις έργου"),
     ("Project Settings…", "Ρυθμίσεις έργου…"),
@@ -1609,6 +1651,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Remove the textures no material uses",
         "Αφαιρεί τις υφές που δεν χρησιμοποιεί κανένα υλικό",
     ),
+    ("Remove this point", "Αφαίρεση αυτού του σημείου"),
     ("Remove this texture", "Αφαιρεί αυτή την υφή"),
     (
         "Removes the noise left in finished renders, keeping edges and textures",
@@ -1745,6 +1788,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Rotational Mass", "Μάζα περιστροφής"),
     ("Roughness", "Τραχύτητα"),
     ("Roughness Texture", "Υφή τραχύτητας"),
+    ("Round", "Στρογγυλό"),
     ("Rounding", "Στρογγύλεμα"),
     ("Rounding Radius", "Ακτίνα στρογγυλέματος"),
     ("Run", "Εκτέλεση"),
@@ -1888,6 +1932,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Επιλέξτε πρώτα τα αντικείμενα για ετικέτα",
     ),
     ("Selected Object as Camera", "Το επιλεγμένο αντικείμενο ως κάμερα"),
+    ("Selected Only", "Μόνο τα επιλεγμένα"),
     ("Set First Point", "Ορισμός πρώτου σημείου"),
     ("Set Interpolation", "Ορισμός παρεμβολής"),
     ("Set Key", "Ορισμός κλειδιού"),
@@ -1988,6 +2033,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Λειαίνει το πρώτο του παιδί (τον κλωβό)",
     ),
     ("Snap", "Έλξη"),
+    ("Snap Distance", "Απόσταση έλξης"),
     ("Snap Radius", "Ακτίνα έλξης"),
     (
         "Snapping on / off (right-click the snap button: settings)",
@@ -2019,6 +2065,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Spin Steps", "Βήματα περιστροφής"),
     ("Spline", "Καμπύλη"),
     ("Spline Boolean", "Boolean καμπυλών"),
+    ("Split", "Διαχωρισμός"),
     ("Spot", "Προβολέας"),
     (
         "Spreads copies of the selected objects over the surface of the one selected last",
@@ -2035,6 +2082,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Starts a new script", "Ξεκινά νέο script"),
     ("Static Mesh", "Στατικό πλέγμα"),
     ("Step", "Βήμα"),
+    ("Steps", "Βήματα"),
     ("Steps per Frame", "Βήματα ανά καρέ"),
     ("Stop", "Διακοπή"),
     ("Stop (F7)", "Διακοπή (F7)"),
@@ -2240,6 +2288,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Μετά κλικ σε επιλεγμένο σημείο ή οπουδήποτε αλλού για το κέντρο",
     ),
     (
+        "Then click points in the viewport; click the first to close",
+        "Μετά κάντε κλικ σε σημεία στην προβολή· κλικ στο πρώτο κλείνει",
+    ),
+    (
         "Then drag from one polygon or border edge to another",
         "Μετά σύρετε από ένα πολύγωνο ή ακμή ορίου σε άλλο",
     ),
@@ -2250,6 +2302,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Then hover an edge and click (Loop/Path Cut) or drag a line (Line Cut) in the viewport",
         "Μετά περάστε πάνω από ακμή και κάντε κλικ (Κοπή βρόχου/διαδρομής) ή σύρετε γραμμή (Κοπή γραμμής) στην προβολή",
+    ),
+    (
+        "Then set its options and Apply in the Attribute Manager",
+        "Μετά ορίστε τις επιλογές του και Εφαρμογή στον Διαχειριστή ιδιοτήτων",
     ),
     ("Thickness", "Πάχος"),
     (
@@ -2432,6 +2488,9 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("World Axis", "Άξονας κόσμου"),
     ("World Coordinates", "Συντεταγμένες κόσμου"),
     ("World Grid", "Πλέγμα κόσμου"),
+    ("World XY", "XY κόσμου"),
+    ("World XZ", "XZ κόσμου"),
+    ("World ZY", "ZY κόσμου"),
     (
         "Write the picture to a file and link it",
         "Γράφει την εικόνα σε αρχείο και τη συνδέει",
