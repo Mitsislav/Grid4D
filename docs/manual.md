@@ -496,7 +496,7 @@ The light's settings are on the Attribute Manager's **Object** tab:
 | Two-Sided (Area: Rectangle, Disc) | Shines from both faces, each at full strength; off, only along −Z (it is dark from behind). |
 | Linking | **Exclude** (the default): the light lights everything except the objects listed below. **Include**: it lights only the objects listed. |
 | Objects | The objects the Linking applies to, each together with its children. Pick one from **Add…**; **×** takes it off the list. A deleted object shows as *(deleted)* and no longer counts. |
-| Light Group | A name: lights (and Skies or Environments) with the same name form a group, which renders will be able to output as a pass of its own (*planned*). |
+| Light Group | A name: lights (and Skies or Environments) with the same name form a group, which renders can output as a pass of its own (the **Light Groups** pass, [§20.1](#201-render-settings)). |
 
 **Light linking.** An object a light does not light gets none of its light
 and casts no shadow of it — useful to brighten one product without
@@ -942,8 +942,8 @@ earlier version.
 
 **Files and Grid4D versions.** Each Grid4D opens every file an earlier one
 saved, unchanged, and saves in its own version of the format, which holds
-what it adds: Grid4D 1.1 saves version 4, Grid4D 1.2 version 5, the coming
-Grid4D 1.3 (in development) version 6. An older Grid4D cannot open a file saved by a newer
+what it adds: Grid4D 1.1 saves version 4, Grid4D 1.2 version 5, Grid4D 1.3
+version 6. An older Grid4D cannot open a file saved by a newer
 one: it says the file comes from a newer Grid4D. To hand a document to
 someone on an older version, keep a copy saved by that version.
 
@@ -3451,16 +3451,26 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   guides and snapping for tools other than Move.
 - **Modelling**:
   Extrude on points; Path mode for Loop/Path Cut; Bevel in Polygons mode and its
-  Solid, Proportional and Radial modes; Bridge point by point.
+  Solid, Proportional and Radial modes; Bridge point by point; soft selection
+  for the modelling tools (it works with move, scale, rotate and Tweak); creases
+  on points (only edges have them); editing normals by hand.
+- **Booleans and other modelling objects**: the Boolean takes two inputs
+  (group more under a Join or a Null); a very heavy Boolean shows its last
+  result while you drag and updates when you let go; the Spline Boolean works
+  in one plane; the Reduce cannot be painted (no weights); no remeshing,
+  volume modelling or retopology.
 - **Simulation**: a body per part of a cloned group (Individual Elements),
   Ghost bodies, triggers (On Collision), Follow Position springs and joints; soft bodies, cloth, particles,
   forces and connectors are not planned for the first simulation release.
 - **Deformers**: splines are not deformed; component modes show the
-  undeformed points; no handles for size and angle (only strength has one);
-  an FFD's lattice cannot be animated.
+  undeformed points, and editing the deformed shape itself (Point Offsets) is
+  planned for 1.4; no handles for size and angle (only Bend, Twist, Taper and
+  Bulge have a strength handle); an FFD's lattice cannot be animated. Follow
+  Spline follows only a spline's first segment, and not a Spline Boolean's
+  curve; Project to Surface does not take a generator as its target, nor a
+  target's deformed shape; Displace reads a picture's brightness only.
 - **Generators**: the Subdivision Surface has one type (Catmull-Clark) and no
-  edge weights (creases) or UV options (its UVs are smoothed with the
-  surface). The Extrude has no bevels (fillets), Delaunay or grid caps, or
+  UV options (its UVs are smoothed with the surface). The Extrude has no bevels (fillets), Delaunay or grid caps, or
   selections for its caps; neither have the Lathe and the Sweep (no Isoparm
   display either). The Sweep has no rail spline, no Scale and Rotation graphs
   and no Keep Segments. The Loft has no Adapt UV (its UVs follow its
@@ -3505,15 +3515,14 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   only, without settings (map size, attenuation, transparency); fixed SSAO
   settings; no render resolution (camera pyramids use the view's proportions) and
   no depth-of-field handles.
-- **Filter**: entries for kinds of objects Grid4D does not have yet (splines,
-  deformers, …) and for the axes, handles, guides, SDS cage, n-gon lines and
+- **Filter**: entries for the axes, handles, guides, SDS cage, n-gon lines and
   horizon; Default, Geometry Only and presets; the filter is not saved with the
   document.
 - **Lights**: the Square Spot, Parallel and IES types, visible light (fog),
   and the per-light switches (no illumination, ambient, diffuse or specular
   only); an Area light's viewport shadow is not softened by its size;
-  linking objects by dragging them from the Object Manager, separate lists
-  for light and shadow, and the light groups' render passes.
+  linking objects by dragging them from the Object Manager, and separate lists
+  for light and shadow.
 - **Lens and shutter**: no exposure from the F-Stop or shutter, ISO, lens
   distortion, vignetting or a custom aperture picture; the viewport shows no
   blur; an object whose shape changes its number of polygons during the
@@ -3526,11 +3535,11 @@ The roadmap is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md). Not there 
   maps); one surround at a time; parallel views keep their gradient.
 - **Interchange and rendering**: animation in glTF, import
   and export dialogs (scale, axis flips, visible or selected objects only); the
-  Render Region (Alt+R) and a Render View that updates while you edit; several
-  render settings per document, Preview Range, a render frame rate of its own,
-  DPI and film aspect; movie files, multi-pass and layered files, 32-bit
-  OpenEXR, OpenEXR from Save As; a render queue, and the Picture Viewer's
-  filters, channels, comparison and animation playback.
+  Alt+R shortcut for the render region; several render settings per document,
+  Preview Range, a render frame rate of its own, DPI and film aspect; movie
+  files and layered files other than OpenEXR, 32-bit colour in OpenEXR,
+  OpenEXR from Save As; the Picture Viewer's filters, comparison and animation
+  playback.
 - **Workspace**: panels in windows of their own, saving your own layouts.
 - **Preferences**: a shortcut for the window; the F-Curve editor's values and
   the status bar in the chosen unit; a scale per document.
