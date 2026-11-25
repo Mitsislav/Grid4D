@@ -1534,7 +1534,7 @@ rendering.
 
 ---
 
-## Phase 17 — Modelling 2 (v1.3)
+## Phase 17 — Modelling 2 (v1.3) ✅
 
 **Goal:** the modelling tools a hard-surface or product artist reaches for
 every day — live booleans and symmetry, soft and precise component editing,
@@ -1899,30 +1899,14 @@ parser (`cargo fuzz`, nightly: short on push, long weekly), `cargo bench
 
 ---
 
-**Next action:** Phase 16 (render quality, v1.2) is complete (2026-11-07 –
-2026-11-09) and released as 1.2.0 (`.g4d` version 5 frozen). Phase 17
-(modelling 2, v1.3) started on 2026-11-09: 17.1 is done (nine specs in
-`docs/reference/`, the names reviewed, `.g4d` v6 written with version 5
-frozen and upgraded as JSON, the modelling budget measured), and so is the
-boolean spike, 17.2 (`grid4d-geom::boolean` and `exact`: the plane-based
-method chosen, D39), and the Boolean generator, 17.3 (work only near the
-cut, n-gons merged back, UVs, cut edges, weld; the generator with nesting,
-its page, Make Editable, `.g4d` v6 `boolean`, the drag fallback of R9), and
-Symmetry, Instance and Join, 17.4 (mirroring welded at the plane in 5 ms
-for a 100 000-point half; Instances as clones of the reference's shapes, no
-copy; a Join counted as one input by other generators), and the Spline
-Boolean and Reduce, 17.5 (2D booleans of splines by exact orientation tests,
-a curve read by the spline generators, D45; quadric edge collapses ordered
-once and replayed when Keep changes), and soft selection and Slide, 17.6
-(weights by a falloff of the distance through space or along the edges,
-used by the gizmo and Tweak, shown as a ramp on the points; points and loops
-slid along their edges, Duplicate inserting a loop), and the tools of 17.7
-(Plane Cut sharing Line Cut's code, the Polygon Pen, Extrude along Spline,
-Mirror, Array, Bevel's Custom profile and Patch mitres), and edge
-creases, hard edges and weighted normals, 17.8 (semi-sharp Catmull-Clark,
-hard edges drawn as a split mesh, the strongest faces' normals), and the
-deformers, 17.9 (Wrap, Follow Spline, Displace with pictures handed to
-evaluation, Project to Surface, Smooth, Explode; the stack hands deformers
-whole meshes; Point Offsets moved to 1.4, R5), and the acceptance run,
-the walkthrough and the budget re-measured, 17.10a. Next: release 1.3.0
-prepared, `.g4d` v6 frozen (17.10b).
+**Next action:** Phase 17 (modelling 2, v1.3) is complete (2026-11-09 –
+2026-11-26): the live Boolean on exact plane-based predicates (D39),
+Symmetry, Instance and Join, the Spline Boolean feeding the spline
+generators (D45) and the Reduce, soft selection and Slide, Plane Cut, the
+Polygon Pen, Extrude along Spline, Mirror, Array and Bevel profiles, edge
+creases, hard edges and weighted normals, and six deformers (Wrap, Follow
+Spline, Displace, Project to Surface, Smooth, Explode; Point Offsets moved
+to 1.4, R5); its acceptance runs as `crates/ui/tests/acceptance_17.rs`,
+and release 1.3.0 is prepared (`.g4d` version 6 frozen). Next is Phase 18
+(fields and motion graphics 2, v1.4): its plan written out in detail first,
+as Phase 17's was, then its specs.

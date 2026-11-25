@@ -5,12 +5,12 @@ Notable changes to Grid4D, newest first. Versions follow
 opens every file of the same major version; the plugin and script interfaces
 may grow in a minor version and change only in a major one.
 
-## [Unreleased]
+## [1.3.0] - 2026-11-26
 
-Grid4D 1.3 in development: modelling (planned: live booleans, symmetry,
-instances, joined and reduced meshes, spline booleans, soft selection, new
-modelling tools, edge creases, hard edges and weighted normals, new
-deformers).
+Modelling: live Booleans, Symmetry, Instances, Join and Reduce; Spline
+Booleans; soft selection, Slide and new modelling tools; edge creases, hard
+edges and weighted normals; six new deformers. Every 1.0, 1.1 and 1.2
+document opens as before.
 
 - **Boolean** — a new generator combines its first two children as solids,
   live: Subtract (holes and cut-outs), Union, Intersect, or Without (the
@@ -64,11 +64,13 @@ deformers).
   asked; **Explode** flings polygons apart as its Strength rises.
 - **Fixes** — an empty object link (an Instance's reference, a deformer's
   spline or target) reads "None" in the chosen language; the Boolean's
-  warning wraps instead of running out of the Attribute Manager.
+  warning wraps instead of running out of the Attribute Manager. The `url`
+  library is updated to 2.5.9 for RUSTSEC-2026-0592 (Grid4D itself never
+  reads a URL it was given).
 - **Files** — documents are saved in `.g4d` format version 6, which holds
   the Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce, creases,
-  hard edges, weighted normals and the new deformers; Grid4D 1.3's other features will add to it until 1.3 is
-  released. Every earlier file opens unchanged; Grid4D 1.2 cannot open
+  hard edges, weighted normals and the new deformers, and is now final
+  (frozen). Every earlier file opens unchanged; Grid4D 1.2 cannot open
   version 6 files and says they come from a newer Grid4D.
 
 ## [1.2.0] - 2026-11-09

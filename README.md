@@ -29,11 +29,15 @@ Direct3D 12 or Metal (any from the last decade).
 ## What it does
 
 - **Modelling** — parametric primitives; polygon modelling in Points, Edges
-  and Polygons modes (extrude, inset, bevel, bridge, loop and line cuts,
-  weld, melt, dissolve, optimize) with snapping; Subdivision Surfaces.
-- **Splines** — spline shapes, the Pen, point and handle editing; surfaces
-  from splines: Extrude, Lathe, Sweep, Loft; 3D text.
-- **Deformers and clones** — Bend, Twist, Taper, Bulge and FFD; a Cloner
+  and Polygons modes (extrude, inset, bevel with custom profiles, bridge,
+  loop, line and plane cuts, slide, the Polygon Pen, mirror, array, extrude
+  along a spline, weld, melt, dissolve, optimize) with snapping and soft
+  selection; live Booleans, Symmetry, Instances, Join and Reduce;
+  Subdivision Surfaces with edge creases; hard edges and weighted normals.
+- **Splines** — spline shapes, the Pen, point and handle editing; Spline
+  Booleans; surfaces from splines: Extrude, Lathe, Sweep, Loft; 3D text.
+- **Deformers and clones** — Bend, Twist, Taper, Bulge, FFD, Wrap, Follow
+  Spline, Displace, Project to Surface, Smooth and Explode; a Cloner
   (linear, radial, grid, on a surface) with Plain and Random effectors — all
   live and non-destructive.
 - **Animation** — keys on positions and on object parameters, Autokeying,
@@ -69,7 +73,7 @@ Direct3D 12 or Metal (any from the last decade).
 - [The `.g4d` file format](docs/FILE_FORMAT.md), so other programs can read
   and write it.
 - [Changelog](CHANGELOG.md) and the [plan](docs/IMPLEMENTATION_PLAN.md),
-  including what comes after 1.2.
+  including what comes after 1.3.
 - [Architecture](docs/ARCHITECTURE.md) — how the code is organised, for
   contributors; [performance](docs/performance.md) — what is measured.
 

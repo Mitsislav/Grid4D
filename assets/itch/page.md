@@ -29,11 +29,16 @@ hand.
 > Manager, an Attribute Manager and a timeline — so you spend your time making
 > things instead of hunting for buttons.
 >
-> **Model** — parametric primitives, polygon modelling (extrude, inset, bevel,
-> bridge, loop and line cuts, weld), Subdivision Surfaces, splines drawn with the
-> Pen, and surfaces made from them: Extrude, Lathe, Sweep, Loft and 3D text.
+> **Model** (new in 1.3) — live Booleans that cut solids while you move
+> them, Symmetry, Instances, Join and Reduce; polygon modelling with soft
+> selection (extrude, inset, bevel with custom profiles, bridge, loop, line
+> and plane cuts, slide, the Polygon Pen, mirror, array, extrude along a
+> spline, weld); Subdivision Surfaces with edge creases, hard edges and
+> weighted normals; splines drawn with the Pen, Spline Booleans, and
+> surfaces made from splines: Extrude, Lathe, Sweep, Loft and 3D text.
 >
-> **Deform and clone** — Bend, Twist, Taper, Bulge and FFD deformers; a Cloner
+> **Deform and clone** — Bend, Twist, Taper, Bulge, FFD, Wrap, Follow Spline,
+> Displace, Project to Surface, Smooth and Explode deformers; a Cloner
 > (linear, radial, grid, on a surface) with Plain and Random effectors, all live
 > and non-destructive.
 >
@@ -45,7 +50,7 @@ hand.
 > clear coat), layered Material tags with projections, and a UV Editor with
 > unwrapping, relaxing and packing.
 >
-> **Render** (new in 1.2) — a built-in path tracer with area lights, a
+> **Render** — a built-in path tracer with area lights, a
 > daylight sky and HDR surroundings, light linking, depth of field and motion
 > blur, subsurface scattering and displacement; adaptive sampling and a
 > denoiser for clean pictures sooner; a Render View that keeps rendering while

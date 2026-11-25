@@ -40,6 +40,7 @@ opens every older file, and 1.2 refuses the new files with its existing
 New keyable object parameters (a Reduce's percentage, a deformer's strength)
 are new values of a track's parameter name; each is listed with its step.
 
+- **Frozen since 1.3 (2026-11-26).** What follows held during Phase 17.
 - **Additive until 1.3 ships.** During Phase 17 version 6 grows only by
   optional fields left out while they have their default, and by new types
   and values. A document that uses none of Phase 17's features writes exactly

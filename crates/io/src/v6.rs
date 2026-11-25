@@ -1,4 +1,4 @@
-//! Format version 6 (current, Grid4D 1.3, growing until 1.3 ships): a zip
+//! Format version 6 (current, Grid4D 1.3, **frozen**): a zip
 //! archive. `document.json` holds the document (under the tag `"grid4d"`),
 //! and each mesh is a binary file `meshes/<index>.bin`.
 //!
@@ -11,10 +11,11 @@
 //! (modelling: live booleans and other modelling objects, creases and hard
 //! edges, weighted normals, new deformers); version 5 files are read through
 //! these types after [`crate::v5::upgrade`], version 4 and 3 files after
-//! [`crate::v4::upgrade`] and [`crate::v3::upgrade`] too. Until 1.3 is
-//! released version 6 grows only additively: an optional field left out while
-//! it has its default, or a new type or value, each also listed in `v5.rs`
-//! (what a version 5 file drops or refuses) and in `docs/FILE_FORMAT.md`.
+//! [`crate::v4::upgrade`] and [`crate::v3::upgrade`] too. Grid4D 1.3 is
+//! released: never change these types — new data means a `v7` module (which
+//! becomes current), a migration from version 6 and fixtures of its own;
+//! `demo_v6.g4d` and `full_v6.g4d` then stay as they are, like the version 5
+//! ones.
 
 use std::{
     collections::HashMap,

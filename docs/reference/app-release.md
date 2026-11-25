@@ -34,7 +34,7 @@ large for memory — Grid4D says so in words and loses no work it could keep.
   Phase 13, 1.0.0-rc.1 for the first release candidate (the packages of
   14.6), 1.0.0 for the first stable release, 1.1.0 for Phase 15 (materials,
   UVs and textures; `.g4d` version 4), 1.2.0 for Phase 16 (render quality;
-  `.g4d` version 5).
+  `.g4d` version 5), 1.3.0 for Phase 17 (modelling; `.g4d` version 6).
 
 ## Behaviour (14.3)
 

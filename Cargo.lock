@@ -1583,9 +1583,9 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -1897,7 +1897,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "eframe",
  "egui",
@@ -1917,7 +1917,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-eval"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "criterion",
  "glam 0.34.2",
@@ -1931,7 +1931,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-geom"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "criterion",
  "glam 0.34.2",
@@ -1940,7 +1940,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-io"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "criterion",
  "exr",
@@ -1961,7 +1961,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-plugin"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -1971,7 +1971,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-plugin-gear"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -1981,7 +1981,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-plugin-scatter"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -1991,7 +1991,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-plugin-wave"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -2001,7 +2001,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-raytrace"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "criterion",
  "glam 0.34.2",
@@ -2016,7 +2016,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-render"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "allocation-counter",
  "bytemuck",
@@ -2031,7 +2031,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-scene"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -2040,7 +2040,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-script"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "glam 0.34.2",
  "grid4d-geom",
@@ -2053,7 +2053,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-sim"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "criterion",
  "glam 0.34.2",
@@ -2065,7 +2065,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-text"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "epaint_default_fonts",
  "glam 0.34.2",
@@ -2075,7 +2075,7 @@ dependencies = [
 
 [[package]]
 name = "grid4d-ui"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -4734,9 +4734,9 @@ checksum = "ca718471876992059f251e33aafc334346ada08042b7661dd1fe313a9bced557"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",

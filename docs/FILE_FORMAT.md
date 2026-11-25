@@ -2,7 +2,7 @@
 
 The specification of Grid4D's document files, so that other programs can read
 and write them. This describes **format version 6**, which Grid4D 1.3
-(in development) writes. Version 5 (Grid4D 1.2, **frozen**), version 4
+writes (**frozen**). Version 5 (Grid4D 1.2, **frozen**), version 4
 (Grid4D 1.1, **frozen**) and version 3 (Grid4D 1.0, **frozen**) are the same
 format without the later versions' additions — see
 [Version 6 and version 5](#version-6-and-version-5),
@@ -10,10 +10,10 @@ format without the later versions' additions — see
 [Version 4 and version 3](#version-4-and-version-3) and
 [Versions](#versions).
 
-> Version 6 grows while Grid4D 1.3 is developed, only by optional fields and
-> new types (listed below as they arrive), and is frozen when 1.3 is
-> released. Version 5 was completed with Grid4D 1.2 (2026-11-09) and version
-> 4 with Grid4D 1.1 (2026-11-07); they never change.
+> Version 6 was completed with Grid4D 1.3 (2026-11-26) and is **frozen**:
+> it never changes; later data will come in a version 7. Version 5 was
+> completed with Grid4D 1.2 (2026-11-09) and version 4 with Grid4D 1.1
+> (2026-11-07); they never change either.
 
 ## The container
 
@@ -335,8 +335,7 @@ make the file invalid.
 ## Version 6 and version 5
 
 Version 6 keeps everything about version 5 — the container, every field and
-its meaning — and only adds to it. What it adds (Grid4D 1.3, Phase 17), as
-each step arrives:
+its meaning — and only adds to it. What it adds (Grid4D 1.3, Phase 17):
 
 | Addition | Since |
 |----------|-------|
@@ -406,7 +405,7 @@ its `version` says `3`.
 | 3 | the zip archive above, `"format": "grid4d"`; Grid4D 1.0 | yes, converted when opened |
 | 4 | the same archive with version 4's additions; Grid4D 1.1 (frozen) | yes, converted when opened |
 | 5 | the same archive with version 5's additions; Grid4D 1.2 (frozen) | yes, converted when opened |
-| 6 | the same archive with version 6's additions; Grid4D 1.3 (in development) | yes; written |
+| 6 | the same archive with version 6's additions; Grid4D 1.3 (frozen) | yes; written |
 
 A version grows during development only by optional fields and new types.
 **From Grid4D 1.0 a released version never changes:** new data means a new
