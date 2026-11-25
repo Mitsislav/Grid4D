@@ -16,7 +16,7 @@ use std::{
 };
 
 use glam::{Mat3, Mat4, Vec2, Vec3};
-use grid4d_geom::{PolyMesh, Smoothing, TriMesh, Triangulator};
+use grid4d_geom::{PolyMesh, TriMesh, Triangulator};
 use grid4d_scene::{
     Channel, ColorSpace, Material, MaterialId, Materials, MeshHandle, NodeData, ObjectKind, PictureChannel, Tag, Tags,
     Texture, TextureId, TextureSlot, TextureSource, Textures,
@@ -632,7 +632,7 @@ fn texts(
         }
         let normal_matrix = Mat3::from_mat4(*world).inverse().transpose();
         // Per-corner normals in the mesh's corner order (what the viewport shows).
-        triangulator.triangulate(mesh, Smoothing::Angle(data.tags.smoothing_angle()), &mut tri);
+        triangulator.triangulate(mesh, data.tags.smoothing(), &mut tri);
 
         let _ = writeln!(body, "o {}", one_line(&data.name));
         if mtl_name.is_some() {

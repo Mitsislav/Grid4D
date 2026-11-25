@@ -49,7 +49,8 @@ impl ViewportPanel {
             | Tool::PolygonPen
             | Tool::ExtrudeAlongSpline
             | Tool::Mirror
-            | Tool::Array => {
+            | Tool::Array
+            | Tool::Crease => {
                 self.loop_preview = None;
                 false
             }

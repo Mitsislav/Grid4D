@@ -344,6 +344,7 @@ each step arrives:
 | the kind `boolean` (`mode`, `merge_faces`, `select_cut_edges`, `weld`) | step 17.3 |
 | the kinds `symmetry`, `instance` (its `reference` by index) and `join` | step 17.4 |
 | the kinds `spline_boolean` (`mode`, `plane`) and `reduce` (`keep`, `keep_borders`, `keep_seams`, `together`); the track parameter `keep` | step 17.5 |
+| the `polygon` kind's `creases` (groups `{ "edges": ranges by corner, "percent": 1 – 100 }`) and `hard` (`edges` ranges); the `phong` tag's `weighted` (false when absent); the `boolean` kind's `hard_cut_edges` (false), the `reduce` kind's `keep_hard` (true) | step 17.8 |
 
 A version 5 file is read as a version 6 file with the version number
 changed, minus any field this table lists; a `type` or other value version 6

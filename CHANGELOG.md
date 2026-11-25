@@ -50,8 +50,15 @@ deformers).
   inside an object. **Bevel** gains a Custom profile (with Chamfer, Step
   and Cove presets) and Patch mitres that turn a rounded profile round a
   corner.
+- **Creases, hard edges, weighted normals** — edges of a Subdivision
+  Surface's cage can be creased (Mesh ▸ Crease) so they stay sharp; edges
+  can be made hard (Mesh ▸ Normals) so the shading splits along them, also
+  in exported files; the Phong tag's Weighted Normals keep large flat faces
+  flat next to bevels. A Boolean can mark its cut edges hard, and the
+  Reduce keeps hard edges.
 - **Files** — documents are saved in `.g4d` format version 6, which holds
-  the Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce; Grid4D 1.3's other features will add to it until 1.3 is
+  the Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce, creases,
+  hard edges and weighted normals; Grid4D 1.3's other features will add to it until 1.3 is
   released. Every earlier file opens unchanged; Grid4D 1.2 cannot open
   version 6 files and says they come from a newer Grid4D.
 

@@ -99,7 +99,8 @@ impl GizmoGeometry {
                 | Tool::PolygonPen
                 | Tool::ExtrudeAlongSpline
                 | Tool::Mirror
-                | Tool::Array => false,
+                | Tool::Array
+                | Tool::Crease => false,
             };
             if locked {
                 return None;
@@ -255,7 +256,8 @@ impl GizmoGeometry {
                 | Tool::PolygonPen
                 | Tool::ExtrudeAlongSpline
                 | Tool::Mirror
-                | Tool::Array => {}
+                | Tool::Array
+                | Tool::Crease => {}
             }
         }
         painter.circle_filled(self.origin_px, 3.5, p().text_strong);
@@ -410,7 +412,8 @@ impl PointEdit {
             | Tool::PolygonPen
             | Tool::ExtrudeAlongSpline
             | Tool::Mirror
-            | Tool::Array => Mat4::from_translation(self.moved * weight),
+            | Tool::Array
+            | Tool::Crease => Mat4::from_translation(self.moved * weight),
         }
     }
 
@@ -721,7 +724,8 @@ fn apply_component_drag(
         | Tool::PolygonPen
         | Tool::ExtrudeAlongSpline
         | Tool::Mirror
-        | Tool::Array => return,
+        | Tool::Array
+        | Tool::Crease => return,
     }
     edit.apply(geo.tool, geo.axes[axis], scene, node);
 }
@@ -797,7 +801,8 @@ fn apply_drag(
         | Tool::PolygonPen
         | Tool::ExtrudeAlongSpline
         | Tool::Mirror
-        | Tool::Array => return,
+        | Tool::Array
+        | Tool::Crease => return,
     }
     node.data.set_transform_at(&shown, keying.frame, keying.autokey);
 }

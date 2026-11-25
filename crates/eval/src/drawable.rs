@@ -8,15 +8,27 @@ use grid4d_scene::{CAMERA_MARKER_SIZE, DEFAULT_PHONG_ANGLE, LIGHT_MARKER_RADIUS,
 use crate::{MeshKey, Ratio};
 
 /// How a drawn mesh's normals are smoothed: its Phong angle (radians), kept as
-/// bits so it can be part of the renderer's cache key.
+/// bits so it can be part of the renderer's cache key, and whether its
+/// normals are weighted (step 17.8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Shading(u32);
+pub struct Shading(u32, bool);
 
 impl Shading {
     #[must_use]
     pub fn from_angle(radians: f32) -> Self {
         // `+ 0.0` keeps -0.0 and 0.0 one key.
-        Self((radians.clamp(0.0, std::f32::consts::PI) + 0.0).to_bits())
+        Self((radians.clamp(0.0, std::f32::consts::PI) + 0.0).to_bits(), false)
+    }
+
+    /// The key of `smoothing` (Flat is angle 0, Smooth 180°).
+    #[must_use]
+    pub fn of(smoothing: Smoothing) -> Self {
+        match smoothing {
+            Smoothing::Flat => Self::from_angle(0.0),
+            Smoothing::Smooth => Self::from_angle(std::f32::consts::PI),
+            Smoothing::Angle(angle) => Self::from_angle(angle),
+            Smoothing::Weighted(angle) => Self(Self::from_angle(angle).0, true),
+        }
     }
 
     #[must_use]
@@ -26,7 +38,11 @@ impl Shading {
 
     #[must_use]
     pub const fn smoothing(self) -> Smoothing {
-        Smoothing::Angle(self.angle())
+        if self.1 {
+            Smoothing::Weighted(self.angle())
+        } else {
+            Smoothing::Angle(self.angle())
+        }
     }
 }
 

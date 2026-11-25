@@ -251,7 +251,8 @@ const fn tool_icon(tool: Tool) -> Icon {
         | Tool::PolygonPen
         | Tool::ExtrudeAlongSpline
         | Tool::Mirror
-        | Tool::Array => Icon::Move,
+        | Tool::Array
+        | Tool::Crease => Icon::Move,
     }
 }
 
@@ -278,6 +279,7 @@ const fn tool_tooltip(tool: Tool) -> &'static str {
         Tool::ExtrudeAlongSpline => "Extrude along Spline",
         Tool::Mirror => "Mirror",
         Tool::Array => "Array",
+        Tool::Crease => "Crease",
     }
 }
 

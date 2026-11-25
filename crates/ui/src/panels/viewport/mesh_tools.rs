@@ -133,6 +133,10 @@ impl ViewportPanel {
             .inverse()
             .transform_vector3(self.camera.right())
             .normalize_or(Vec3::X);
+        if editor.tool == crate::Tool::Crease {
+            // A crease from 0 to 100 % over 200 points of travel.
+            per_point = 1.0 / 200.0;
+        }
         if editor.tool == crate::Tool::Slide {
             // A share of the rails' mean length, towards the side the drag goes.
             let (source, topology) = (mesh.mesh(), mesh.topology());

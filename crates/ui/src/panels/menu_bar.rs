@@ -282,6 +282,23 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                     ui.close();
                 }
             });
+            ui.menu_button(tr("Normals"), |ui| {
+                let polygon = editor
+                    .selection
+                    .active()
+                    .and_then(|id| doc.scene.get(id))
+                    .is_some_and(|n| matches!(n.data.kind, grid4d_scene::ObjectKind::Polygon { .. }));
+                for op in crate::modeling::HardOp::ALL {
+                    if ui
+                        .add_enabled(polygon, Button::new(tr(op.label())))
+                        .on_disabled_hover_text(tr("Select a polygon object"))
+                        .clicked()
+                    {
+                        editor.commands.push(EditorCommand::HardEdges(op));
+                        ui.close();
+                    }
+                }
+            });
             ui.menu_button(tr("Spline"), |ui| {
                 let spline = crate::commands::active_spline(doc, editor).is_some();
                 for op in crate::commands::SplineOp::ALL {
@@ -309,6 +326,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 Tool::ExtrudeAlongSpline,
                 Tool::Mirror,
                 Tool::Array,
+                Tool::Crease,
                 Tool::Bridge,
                 Tool::Weld,
                 Tool::LoopCut,

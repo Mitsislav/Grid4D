@@ -34,7 +34,7 @@ opens every older file, and 1.2 refuses the new files with its existing
 | 17.4 | the **Symmetry** (`plane`, `weld`, `tolerance`, `hold`, `flip`), **Instance** (`reference`) and **Join** (`weld`, `tolerance`) objects (done) | new object kinds (refused in a version 5 file); the link by object index, resolved like a camera's focus object |
 | 17.5 | the **Spline Boolean** (`mode`, `plane`) and **Reduce** (`keep`, `keep_borders`, `keep_seams`, `together`) objects; `keep` as a track's parameter (done) | new object kinds and a parameter name (each refused in a version 5 file) |
 | 17.6 – 17.7 | nothing: soft selection and the modelling tools' options are editor state, never saved in a document | — |
-| 17.8 | **edge creases** and **hard edges** on a polygon object; the Phong tag's **weighted normals** | the `polygon` kind (`creases`, `hard`); the `phong` tag (`weighted`) |
+| 17.8 | **edge creases** and **hard edges** on a polygon object; the Phong tag's **weighted normals**; the Boolean's `hard_cut_edges`, the Reduce's `keep_hard` (done) | the `polygon` kind (`creases`, `hard`) and the `phong` tag (`weighted`), dropped from a version 5 file |
 | 17.9 | the **Wrap**, **Follow Spline**, **Displace**, **Project to Surface**, **Smooth**, **Explode** (and perhaps **Point Offsets**) deformers; their links (a spline, a target object, a texture) | new object kinds; links by index |
 
 New keyable object parameters (a Reduce's percentage, a deformer's strength)

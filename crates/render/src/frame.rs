@@ -1216,6 +1216,7 @@ mod tests {
                 node.data.tags = vec![grid4d_scene::Tag::Phong {
                     angle_limit: true,
                     angle,
+                    weighted: false,
                 }];
             }
             doc.scene.insert(node);

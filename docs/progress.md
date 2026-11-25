@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 17 — Modelling 2 (v1.3) |
-| Last step done | 17.7 — Plane Cut, Polygon Pen, Extrude along Spline, Mirror, Array, Bevel's Custom profile and Patch mitres (2026-11-25) |
-| Next step | 17.8 — edge creases, hard edges, weighted normals |
-| Tests | 1039 (and 23 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's, the Reduce's, soft selection's and the Bevel profile's pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
+| Last step done | 17.8 — edge creases for the Subdivision Surface, hard edges, weighted normals (2026-11-25) |
+| Next step | 17.9 — the deformers (Wrap, Follow Spline, Displace, Project to Surface, Smooth, Explode) |
+| Tests | 1046 (and 24 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's, the Reduce's, soft selection's, the Bevel profile's and the crease's pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2741,6 +2741,7 @@ risks R5 – R8 go with it.
 | 17.5 | The Spline Boolean and Reduce. `grid4d_geom::spline_boolean` (closed outlines flattened onto a plane, edges cut where they cross or touch by exact orientation tests, merged within 0.001 cm, each classified by a ray and chained into outlines and holes; Union, Subtract, Intersect, Exclusive; 71 ms for a hundred circles; a fuzz target in CI); the first generator whose result is a curve, drawn and picked as one, its splines hidden, read by Extrude, Lathe, Sweep, Loft and another Spline Boolean (D45); `grid4d_geom::reduce` (`CollapseOrder`: triangles and UV wedges, quadric costs, borders and seams held by constraint planes, half-edge collapses so the points and UVs are the input's own, no flips, pinches or doubled faces; `replay` merges numbers only: 3.8 s for the order of a million triangles, 24 ms for a replay to 10 %); `ObjectKind::Reduce` with Keep (animatable), borders, seams, children together or apart, the order kept while only Keep changes; Make Editable (a Linear spline; a mesh), Current State and export; `.g4d` v6 `spline_boolean`, `reduce`, track `keep`, refused in v5; icons, pages, tooltips, Greek; the manual's §12.7 and §13.9 with pictures | 1017 |
 | 17.6 | Soft selection and Slide. `grid4d_geom::soft` (four falloffs, distance through space by a grid of cells or along the edges by Dijkstra, hidden points weigh nothing); `TransformSettings::soft` on the Move, Scale and Rotate tool pages; the gizmo's point edits and Tweak move, turn and scale each point by its weight (world-space distances); the ramp on the points (a weight in the overlay's point flags, mixed in the shader; the viewport recomputes the weights only when something changed; the allocation-free frame test runs with it on). `grid4d_geom::ops::slide` (rails of points and loops, the loop's two sides from its faces, Clamp, Keep Curvature, Duplicate through Loop/Path Cut); `Tool::Slide` in the Mesh menu, a drag or Apply, one undo step; Greek; the manual's §11.4 with a picture and §11.8 | 1029 |
 | 17.7 | Modelling tools 2. Plane Cut (`ops::plane_cut`: Line Cut's cutting code shared, several parallel cuts composed, Split doubling the points on the planes, Selected Only), object or world axis planes moved by a drag; the Polygon Pen (`viewport/polygon_pen.rs`: corners on points, edges, the surface or the view's plane, closed on the first, Backspace, Esc; `ops::pen_polygon` wound with its neighbours; Ctrl + drag pulls a quad out of a border edge); Extrude along Spline (`ops::extrude_along`: the path resampled, parallel transport, twist, end scale; indices kept); Mirror and Array (`ops::{mirror, array}`, images' UVs turned, welds); Bevel's Custom profile (presets Chamfer, Step, Cove; points edited in the Tool page) and Patch mitres; `modeling::Context` (world matrix, path); a randomized test of carried points; Greek; the manual's §11.9 – §11.11 with a picture | 1039 |
+| 17.8 | Edge creases, hard edges, weighted normals. `ComponentState::{creases, hard}` (by corner; carried across rebuilding operations); semi-sharp Catmull-Clark (`subdivision::subdivide_creased`: sharpness 6 × the share, crease rules for edge and point, the halves carrying one level less, 100 % sharp throughout), the Subdivision Surface reading its cage's creases (`Source::Mesh` with `EdgeMarks`); hard edges drawn and exported as a mesh split along them (`split_hard_edges`, eval's shown mesh, `file::exportable`); `Smoothing::Weighted` (the strongest faces by area × angle), the Phong tag's Weighted Normals, the shading key's flag, glTF / OBJ export; the Crease tool, Mesh ▸ Normals (Make Hard, Make Soft, Hard from Angle, Clear Hard Edges), the edges' colours; the Boolean's Hard Cut Edges, the Reduce's Keep Hard Edges; `.g4d` v6 `creases`, `hard`, `weighted` (dropped from a v5 file), `hard_cut_edges`, `keep_hard`; Greek; the manual's §12.3 with a picture and §18.1 | 1046 |
 
 **17.1 — Specs, the format version 6, the modelling budget**
 
@@ -2987,6 +2988,27 @@ risks R5 – R8 go with it.
   selection is the end afterwards.
 - **A cove's last point showed "-0.00".** cos 90° is not exactly 0 in f32;
   the presets' ends are set exactly.
+
+**17.8 — edge creases, hard edges, weighted normals**
+
+*Problems and solutions:*
+- **Hard edges without new plumbing.** Rather than teach the renderer, the
+  path tracer and both exporters about per-edge flags, a polygon object with
+  hard edges is drawn (and exported) through a copy whose points are doubled
+  along them: every consumer's normals then split there by themselves.
+- **One hard edge splits nothing.** A test marked a single cube edge hard
+  and found no split: the faces round each end still join the other way
+  round. That is how hard edges work; the test now marks a loop.
+- **Weighted normals were nearly the old ones.** 1.2's normals already
+  weighed faces by area, so area × angle changed a bevelled box by a
+  degree or two; weighted normals now count only the strongest faces (at
+  least half the largest weight), which keeps the big faces exactly flat.
+- **"50 % in between" at two levels.** Creases are measured in levels
+  (6 × the share); at two levels anything from 34 % is fully sharp. The
+  test checks the in-between case at four levels.
+- **A struct's attributes moved.** Inserting the crease type between
+  `SetDto`'s derive line and its definition took the derive with it; the
+  compiler's flood of errors pointed straight at it.
 
 ## Phase 16 — Render quality (2026-11-07 – 2026-11-09)
 

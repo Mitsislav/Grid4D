@@ -143,7 +143,7 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
         _ => SelectMode::Remove,
     };
 
-    match rng.below(56) {
+    match rng.below(57) {
         0..=2 => EditorCommand::CreateObject(tag(rng)),
         3 => EditorCommand::CreateObject(ObjectKindTag::Cube),
         4 => EditorCommand::CreateChild(tag(rng)),
@@ -435,7 +435,8 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
                         Tool::Mirror,
                         Tool::Array,
                         Tool::ExtrudeAlongSpline,
-                    ][rng.below(8)];
+                        Tool::Crease,
+                    ][rng.below(9)];
                     let settings = &mut editor.modeling_settings;
                     settings.extrude.offset = rng.range(-50.0, 50.0);
                     settings.inset.offset = rng.range(0.0, 20.0);
@@ -443,6 +444,7 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
                     settings.slide.offset = rng.range(-1.0, 1.0);
                     settings.slide.keep_curvature = rng.chance(2);
                     settings.slide.duplicate = rng.chance(3);
+                    settings.crease = rng.range(0.0, 1.0);
                     settings.plane_cut.offset = rng.range(-100.0, 100.0);
                     settings.plane_cut.cuts = 1 + u32::try_from(rng.below(3)).unwrap();
                     settings.plane_cut.split = rng.chance(3);
@@ -497,6 +499,8 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
             EditorCommand::StopRenderQueue,
         ][rng.below(3)]
         .clone(),
+        // Mesh ▸ Normals.
+        55 => EditorCommand::HardEdges(crate::modeling::HardOp::ALL[rng.below(4)]),
         // The Polygon Pen closing a polygon on the active polygon object.
         54 => match editor
             .selection

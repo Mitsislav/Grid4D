@@ -526,6 +526,11 @@ pub const CONTEXT: u32 = 4;
 /// Instance flag: a point soft selection reaches; its weight (0 – 255) is in
 /// bits 8 – 15 (the colour runs from the wire's to the selection's).
 pub const SOFT: u32 = 8;
+/// Instance flag: a hard edge (Edges mode shows it in the hover colour).
+pub const HARD: u32 = 16;
+/// Instance flag: a creased edge; its crease (0 – 255) is in bits 8 – 15
+/// (the colour runs from the wire's towards the selection's).
+pub const CREASE: u32 = 32;
 
 /// Soft selection's weight per point of the overlay's mesh, and a number that
 /// changes whenever they do (the overlay rebuilds only then).
@@ -757,6 +762,18 @@ impl ComponentOverlay {
 
         self.edges.clear();
         let selected_edges = edges_from_corners(&selected.edges, topology);
+        let hard_edges = edges_from_corners(&state.hard, topology);
+        // Each edge's crease: its corners' largest, as 0 – 255.
+        let mut creased: HashMap<usize, u32> = HashMap::new();
+        if component == Component::Edge {
+            for (&corner, &percent) in &state.creases {
+                if let Some(e) = topology.corner_edge(idx(corner)) {
+                    let value = u32::from(percent) * 255 / 100;
+                    let entry = creased.entry(idx(e)).or_insert(0);
+                    *entry = (*entry).max(value);
+                }
+            }
+        }
         self.edges.extend(
             topology
                 .edges()
@@ -768,7 +785,8 @@ impl ComponentOverlay {
                     b: at(b),
                     flags: match component {
                         Component::Edge if selected_edges.contains(e) => SELECTED,
-                        Component::Edge => 0,
+                        Component::Edge if hard_edges.contains(e) => HARD,
+                        Component::Edge => creased.get(&e).map_or(0, |&v| CREASE | (v << 8)),
                         Component::Point | Component::Polygon => CONTEXT,
                     },
                     pad: 0,

@@ -34,6 +34,41 @@ use crate::{
     editable_mesh,
 };
 
+/// A polygon object's edge creases (percent) and hard edges, by point pair
+/// (smaller first, sorted): what a generator reads from beside its mesh.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct EdgeMarks {
+    creases: Vec<([u32; 2], u8)>,
+    hard: Vec<[u32; 2]>,
+}
+
+impl EdgeMarks {
+    /// The marks of `components` on `mesh` (an edge's crease is its corners'
+    /// largest).
+    fn of(mesh: &MeshHandle, components: &grid4d_scene::Components) -> Self {
+        let state = components.state();
+        if state.creases.is_empty() && state.hard.is_empty() {
+            return Self::default();
+        }
+        let topology = mesh.topology();
+        let pair = |corner: usize| topology.corner_edge(corner).map(|e| topology.edges()[e as usize]);
+        let mut creases: std::collections::BTreeMap<[u32; 2], u8> = std::collections::BTreeMap::new();
+        for (&corner, &percent) in &state.creases {
+            if let Some(edge) = pair(corner as usize) {
+                let entry = creases.entry(edge).or_insert(0);
+                *entry = (*entry).max(percent);
+            }
+        }
+        let mut hard: Vec<[u32; 2]> = state.hard.iter().filter_map(pair).collect();
+        hard.sort_unstable();
+        hard.dedup();
+        Self {
+            creases: creases.into_iter().collect(),
+            hard,
+        }
+    }
+}
+
 /// What a generator makes from its inputs, for one evaluation's purpose.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Options {
@@ -80,6 +115,9 @@ pub struct Built {
     pub curve: Option<Polyline>,
     /// A Boolean's edges along the cut (point pairs of `mesh`).
     pub cut_edges: Vec<[u32; 2]>,
+    /// Edges shading splits along (point pairs of `mesh`): a Boolean's cut
+    /// with Hard Cut Edges.
+    pub hard: Vec<[u32; 2]>,
     pub note: Option<GeneratorNote>,
 }
 
@@ -103,8 +141,9 @@ pub(crate) struct Input {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Source {
-    /// A polygon object's mesh (compared by id).
-    Mesh(MeshHandle),
+    /// A polygon object's mesh (compared by id) and its edges' creases and
+    /// hard flags.
+    Mesh(MeshHandle, EdgeMarks),
     /// A primitive's parameters (its mesh is generated when needed).
     Primitive(ObjectKind),
     /// A spline primitive's parameters (its curve is sampled when needed).
@@ -127,7 +166,7 @@ impl Source {
             Self::Text(text) => Some(grid4d_text::text_spline(text).sample(text.interpolation)),
             Self::Spline(spline, interpolation) => Some(spline.spline().sample(*interpolation)),
             Self::Generated(options @ Options::SplineBoolean(_), inputs) => build_all(inputs, options).curve,
-            Self::Mesh(_) | Self::Primitive(_) | Self::Generated(..) => None,
+            Self::Mesh(..) | Self::Primitive(_) | Self::Generated(..) => None,
         }
     }
 }
@@ -255,7 +294,9 @@ pub(crate) fn gather(
             continue;
         }
         let source = match (&*kind, options) {
-            (ObjectKind::Polygon { mesh, .. }, Options::Subdivision(_)) => Some(Source::Mesh(mesh.clone())),
+            (ObjectKind::Polygon { mesh, components }, Options::Subdivision(_)) => {
+                Some(Source::Mesh(mesh.clone(), EdgeMarks::of(mesh, components)))
+            }
             (kind, Options::Subdivision(_)) if editable_mesh_exists(kind) => Some(Source::Primitive(kind.clone())),
             (ObjectKind::SplinePrimitive(primitive), Options::Extrude { .. } | Options::Lathe(_)) => {
                 Some(Source::SplinePrimitive(*primitive))
@@ -271,7 +312,7 @@ pub(crate) fn gather(
         };
         if let Some(source) = source {
             let links = match source {
-                Source::Mesh(_) | Source::Primitive(_) => deform::input_chain(scene, node_id, id, frame),
+                Source::Mesh(..) | Source::Primitive(_) => deform::input_chain(scene, node_id, id, frame),
                 Source::SplinePrimitive(_) | Source::Text(_) | Source::Spline(..) | Source::Generated(..) => Vec::new(),
             };
             inputs.push(Input {
@@ -527,7 +568,9 @@ fn gather_solids(
                 continue;
             }
             let source = match &*kind {
-                ObjectKind::Polygon { mesh, .. } => Some(Source::Mesh(mesh.clone())),
+                ObjectKind::Polygon { mesh, components } => {
+                    Some(Source::Mesh(mesh.clone(), EdgeMarks::of(mesh, components)))
+                }
                 kind if editable_mesh_exists(kind) => Some(Source::Primitive(kind.clone())),
                 _ => None,
             };
@@ -549,8 +592,15 @@ fn gather_solids(
 /// result) to `merged`; curves add nothing.
 fn add_surface(merged: &mut Merged, input: &Input) {
     match &input.source {
-        Source::Mesh(handle) if input.links.is_empty() => merged.add(handle.mesh(), input.matrix),
-        Source::Mesh(handle) => merged.add(&deform::deform_mesh(handle.mesh(), &input.links), input.matrix),
+        Source::Mesh(handle, marks) => {
+            let offset = u32::try_from(merged.points.len()).unwrap_or(u32::MAX);
+            if input.links.is_empty() {
+                merged.add(handle.mesh(), input.matrix);
+            } else {
+                merged.add(&deform::deform_mesh(handle.mesh(), &input.links), input.matrix);
+            }
+            merged.mark(marks, offset);
+        }
         Source::Primitive(kind) => {
             if let Some(mesh) = editable_mesh(kind) {
                 merged.add(&deform::deform_mesh(&mesh, &input.links), input.matrix);
@@ -612,7 +662,12 @@ pub(crate) fn build_all(inputs: &[Input], options: &Options) -> Built {
             for input in inputs {
                 add_surface(&mut merged, input);
             }
-            subdivision::subdivide(&merged.finish(), options)
+            let creases: subdivision::Creases = merged
+                .creases
+                .iter()
+                .map(|(&edge, &percent)| (edge, subdivision::sharpness(percent)))
+                .collect();
+            subdivision::subdivide_creased(&merged.finish(), options, &creases)
         }
         Options::Extrude { extrusion, .. } => {
             for input in inputs {
@@ -666,9 +721,7 @@ pub(crate) fn build_all(inputs: &[Input], options: &Options) -> Built {
     };
     Built {
         mesh,
-        curve: None,
-        cut_edges: Vec::new(),
-        note: None,
+        ..Built::default()
     }
 }
 
@@ -680,6 +733,7 @@ pub(crate) fn reduce_orders(inputs: &[Input], reduce: Reduce) -> Arc<Vec<Collaps
         seams: reduce.keep_seams,
     };
     let mut groups: Vec<(u32, Merged)> = Vec::new();
+    // Hard edges kept like borders when asked.
     for input in inputs {
         let at = match groups.iter().position(|(operand, _)| *operand == input.operand) {
             Some(at) => at,
@@ -693,7 +747,14 @@ pub(crate) fn reduce_orders(inputs: &[Input], reduce: Reduce) -> Arc<Vec<Collaps
     Arc::new(
         groups
             .into_iter()
-            .map(|(_, merged)| CollapseOrder::new(&merged.finish(), constraints))
+            .map(|(_, merged)| {
+                let kept = if reduce.keep_hard {
+                    merged.hard.clone()
+                } else {
+                    std::collections::HashSet::new()
+                };
+                CollapseOrder::keeping(&merged.finish(), constraints, &kept)
+            })
             .collect(),
     )
 }
@@ -728,6 +789,11 @@ fn build_boolean(inputs: &[Input], settings: Boolean) -> Built {
     }
     match boolean::boolean(&a, &b, settings.mode, settings.options()) {
         Ok(result) => Built {
+            hard: if settings.hard_cut_edges {
+                result.cut_edges.clone()
+            } else {
+                Vec::new()
+            },
             mesh: result.mesh,
             cut_edges: result.cut_edges,
             ..Built::default()
@@ -750,9 +816,23 @@ struct Merged {
     points: Vec<glam::Vec3>,
     faces: Vec<Vec<u32>>,
     uvs: Vec<glam::Vec2>,
+    /// The merged parts' creased edges (by point pair) and their percent.
+    creases: std::collections::HashMap<[u32; 2], u8>,
+    /// The merged parts' hard edges (by point pair).
+    hard: std::collections::HashSet<[u32; 2]>,
 }
 
 impl Merged {
+    /// Adds a part's edge marks, its points numbered from `offset`.
+    fn mark(&mut self, marks: &EdgeMarks, offset: u32) {
+        let moved = |[a, b]: [u32; 2]| [a + offset, b + offset];
+        for &(edge, percent) in &marks.creases {
+            let entry = self.creases.entry(moved(edge)).or_insert(0);
+            *entry = (*entry).max(percent);
+        }
+        self.hard.extend(marks.hard.iter().map(|&edge| moved(edge)));
+    }
+
     /// Adds `mesh` placed by `matrix`.
     fn add(&mut self, mesh: &PolyMesh, matrix: Mat4) {
         let Ok(offset) = u32::try_from(self.points.len()) else {

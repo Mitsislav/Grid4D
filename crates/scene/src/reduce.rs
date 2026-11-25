@@ -10,6 +10,8 @@ pub struct Reduce {
     pub keep_borders: bool,
     /// UV seams are kept like borders.
     pub keep_seams: bool,
+    /// Hard edges are kept like borders (step 17.8).
+    pub keep_hard: bool,
     /// All children reduced as one mesh; off: each child keeps its own share.
     pub together: bool,
 }
@@ -21,6 +23,7 @@ impl Default for Reduce {
             keep: 0.5,
             keep_borders: true,
             keep_seams: true,
+            keep_hard: true,
             together: true,
         }
     }

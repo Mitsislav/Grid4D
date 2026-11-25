@@ -1315,6 +1315,22 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 );
                 ui.end_row();
             }
+            Tool::Crease => {
+                let m = &mut editor.modeling_settings;
+                attr_label(ui, "Crease", LABEL_WIDTH);
+                let mut percent = m.crease * 100.0;
+                if ui
+                    .add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut percent).speed(0.5).range(0.0..=100.0).suffix(" %"),
+                    )
+                    .on_hover_text(tr("A drag in the viewport sets it"))
+                    .changed()
+                {
+                    m.crease = percent / 100.0;
+                }
+                ui.end_row();
+            }
             Tool::Array => {
                 let m = &mut editor.modeling_settings.array;
                 big_count_row(ui, "Copies", &mut m.copies, 1, grid4d_geom::ops::Array::MAX_COPIES);
@@ -1588,7 +1604,11 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
         .num_columns(2)
         .spacing([6.0, 4.0])
         .show(ui, |ui| match tag {
-            Tag::Phong { angle_limit, angle } => {
+            Tag::Phong {
+                angle_limit,
+                angle,
+                weighted,
+            } => {
                 check_row(ui, "Angle Limit", angle_limit);
                 if *angle_limit {
                     angle_row(ui, k, "Phong Angle", angle, 0.0..=180.0);
@@ -1597,6 +1617,7 @@ fn tag_ui(ui: &mut Ui, tag: &mut Tag, scene: &Scene, owner: NodeId) {
                     ui.label(RichText::new(tr("no limit (180°)")).color(p().text_dim));
                     ui.end_row();
                 }
+                check_row(ui, "Weighted Normals", weighted);
             }
             Tag::Protection {
                 position,
@@ -3077,6 +3098,7 @@ fn reduce_rows(ui: &mut Ui, k: &mut KeyRows, reduce: &mut Reduce) {
     percent_row(ui, k, "Keep", &mut reduce.keep);
     check_row(ui, "Keep Borders", &mut reduce.keep_borders);
     check_row(ui, "Keep UV Seams", &mut reduce.keep_seams);
+    check_row(ui, "Keep Hard Edges", &mut reduce.keep_hard);
     check_row(ui, "Children Together", &mut reduce.together);
     ui.label("");
     ui.label(RichText::new(tr("Its children with fewer polygons")).color(p().text_dim));
@@ -3106,6 +3128,7 @@ fn boolean_rows(ui: &mut Ui, boolean: &mut Boolean, note: Option<GeneratorNote>)
     ui.end_row();
     check_row(ui, "Merge Faces", &mut boolean.merge_faces);
     check_row(ui, "Select Cut Edges", &mut boolean.select_cut_edges);
+    check_row(ui, "Hard Cut Edges", &mut boolean.hard_cut_edges);
     attr_label(ui, "Weld", LABEL_WIDTH);
     ui.add_sized(
         [FIELD_WIDTH, 19.0],

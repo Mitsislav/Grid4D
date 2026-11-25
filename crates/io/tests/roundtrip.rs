@@ -182,6 +182,7 @@ fn document(objects: Vec<RandomObject>, materials: Vec<([f32; 3], f32)>, layers:
             data.tags.push(Tag::Phong {
                 angle_limit: true,
                 angle,
+                weighted: false,
             });
         }
         if let Some([position, scale, rotation]) = object.protection {
@@ -543,6 +544,7 @@ proptest! {
             merge_faces,
             select_cut_edges,
             weld,
+            hard_cut_edges: switches.0,
         };
         let id = doc.scene.insert(Node::new("Boolean", ObjectKind::Boolean(boolean)));
         let a = doc.scene.insert_child(id, Node::new("A", ObjectKindTag::Cube.default_kind())).unwrap();
@@ -569,6 +571,7 @@ proptest! {
             keep: reduce.0,
             keep_borders: reduce.1,
             keep_seams: reduce.2,
+            keep_hard: reduce.1,
             together: reduce.3,
         };
         let mut reducer = Node::new("Reduce", ObjectKind::Reduce(reduce));

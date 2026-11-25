@@ -130,7 +130,9 @@ const VERSION_6_KINDS: [ObjectKindTag; 6] = [
 /// 5's, and what Phase 17 adds as it arrives — a Boolean with every setting
 /// changed and its two inputs (17.3); a Symmetry and a Join with every
 /// setting changed, an Instance of the sphere (17.4); a Spline Boolean and a
-/// Reduce with every setting changed, the Reduce's Keep keyed (17.5).
+/// Reduce with every setting changed, the Reduce's Keep keyed (17.5); a
+/// polygon object with creases and hard edges, a weighted Phong tag, the
+/// Boolean's hard cut edges and the Reduce's Keep Hard Edges off (17.8).
 fn full_document() -> (Document, SimulationCache) {
     let (mut doc, cache) = full_v5_document();
     let boolean = doc.scene.insert(Node::new(
@@ -140,6 +142,7 @@ fn full_document() -> (Document, SimulationCache) {
             merge_faces: false,
             select_cut_edges: false,
             weld: 0.5,
+            hard_cut_edges: true,
         }),
     ));
     doc.scene
@@ -196,6 +199,7 @@ fn full_document() -> (Document, SimulationCache) {
             keep: 0.25,
             keep_borders: false,
             keep_seams: false,
+            keep_hard: false,
             together: false,
         }),
     );
@@ -207,6 +211,24 @@ fn full_document() -> (Document, SimulationCache) {
     doc.scene
         .insert_child(reduce, Node::new("Heavy", ObjectKindTag::Sphere.default_kind()))
         .unwrap();
+    // Step 17.8: creases at two values, hard edges, weighted normals.
+    let cube = grid4d_geom::primitives::cube(Vec3::splat(100.0), [1, 1, 1]);
+    let mut state = ComponentState::default();
+    state.creases.extend([(0u32, 100u8), (1, 100), (5, 35)]);
+    state.hard.insert_range(8..12);
+    let mut creased = Node::new(
+        "Creased",
+        ObjectKind::Polygon {
+            mesh: MeshHandle::new(cube),
+            components: Components::new(state),
+        },
+    );
+    creased.data.tags.push(Tag::Phong {
+        angle_limit: true,
+        angle: 0.5,
+        weighted: true,
+    });
+    doc.scene.insert(creased);
     (doc, cache)
 }
 
@@ -490,6 +512,7 @@ fn full_v3_document() -> (Document, SimulationCache) {
         Tag::Phong {
             angle_limit: true,
             angle: 0.6,
+            weighted: false,
         },
         Tag::Protection {
             position: true,

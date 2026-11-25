@@ -27,6 +27,8 @@ const SELECTED: u32 = 1u;
 const HOVERED: u32 = 2u;
 const CONTEXT: u32 = 4u;
 const SOFT: u32 = 8u;
+const HARD: u32 = 16u;
+const CREASE: u32 = 32u;
 
 struct VertexOut {
     @builtin(position) clip_position: vec4<f32>,
@@ -61,6 +63,14 @@ fn flag_color(flags: u32) -> vec4<f32> {
     }
     if ((flags & CONTEXT) != 0u) {
         return vec4<f32>(camera.wire.rgb, camera.wire.a * camera.alphas.z);
+    }
+    if ((flags & HARD) != 0u) {
+        return camera.hover;
+    }
+    if ((flags & CREASE) != 0u) {
+        // Creased: towards the selection's colour by the crease.
+        let crease = f32((flags >> 8u) & 255u) / 255.0;
+        return mix(camera.wire, camera.selected, 0.25 + 0.5 * crease);
     }
     if ((flags & SOFT) != 0u) {
         // Soft selection: from the wire's colour to the selection's by weight.

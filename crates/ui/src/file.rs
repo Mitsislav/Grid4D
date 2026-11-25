@@ -992,6 +992,15 @@ pub fn exportable_at(doc: &Document, simulated: &grid4d_eval::Overrides) -> Obje
         if let Some(mesh) = evaluated.deformed(id) {
             data.kind = ObjectKind::polygon(mesh.clone());
         }
+        // Hard edges: written as the split the viewport shows (points doubled
+        // along them), so the files' normals split there too.
+        if let ObjectKind::Polygon { mesh, components } = &data.kind
+            && !components.state().hard.is_empty()
+        {
+            let edges = grid4d_geom::selection::edges_from_corners(&components.state().hard, mesh.topology());
+            let split = grid4d_geom::split_hard_edges(mesh.mesh(), mesh.topology(), &edges);
+            data.kind = ObjectKind::polygon(MeshHandle::new(split));
+        }
         // A simulated object where the simulation put it.
         if let Some(world) = simulated.get(id) {
             let parent = node
@@ -1198,6 +1207,31 @@ pub fn sync_window(ctx: &egui::Context, doc: &Document, editor: &mut EditorState
     }
     if let Some(title) = editor.file.title_update(doc, &editor.history) {
         ctx.send_viewport_cmd(ViewportCommand::Title(title));
+    }
+}
+
+#[cfg(test)]
+mod hard_edge_tests {
+    use grid4d_scene::{ComponentState, Components, Document, MeshHandle, Node, ObjectKind};
+
+    #[test]
+    fn exported_hard_edges_split_the_mesh() {
+        let mut doc = Document::new("export");
+        let cube = grid4d_geom::primitives::cube(glam::Vec3::splat(100.0), [1, 1, 1]);
+        let mut state = ComponentState::default();
+        state.hard.extend(cube.corner_range(0));
+        doc.scene.insert(Node::new(
+            "Box",
+            ObjectKind::Polygon {
+                mesh: MeshHandle::new(cube.clone()),
+                components: Components::new(state),
+            },
+        ));
+        let objects = super::exportable(&doc);
+        let ObjectKind::Polygon { mesh, .. } = &objects.nodes[0].data.kind else {
+            panic!("a polygon object")
+        };
+        assert_eq!(mesh.mesh().point_count(), cube.point_count() + 4);
     }
 }
 

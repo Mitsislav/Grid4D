@@ -17,7 +17,12 @@ pub const DEFAULT_PHONG_ANGLE: f32 = 80.0 * std::f32::consts::PI / 180.0;
 pub enum Tag {
     /// How the object's mesh is smoothed. With `angle_limit` off everything
     /// connected is smooth; otherwise edges sharper than `angle` (radians) stay hard.
-    Phong { angle_limit: bool, angle: f32 },
+    /// `weighted`: weighted normals (large faces stay flat, step 17.8).
+    Phong {
+        angle_limit: bool,
+        angle: f32,
+        weighted: bool,
+    },
     /// Channels of the transform the viewport and the Coordinates fields may not change.
     Protection {
         position: bool,
@@ -76,6 +81,7 @@ impl TagKind {
             Self::Phong => Tag::Phong {
                 angle_limit: true,
                 angle: DEFAULT_PHONG_ANGLE,
+                weighted: false,
             },
             Self::Protection => Tag::Protection {
                 position: true,
@@ -252,6 +258,9 @@ pub trait Tags {
     /// The object's smoothing angle (radians): its Phong tag's, 180° with the
     /// angle limit off, or [`DEFAULT_PHONG_ANGLE`] without a tag.
     fn smoothing_angle(&self) -> f32;
+    /// How its normals are made: its smoothing angle, weighted when its
+    /// Phong tag asks for weighted normals.
+    fn smoothing(&self) -> grid4d_geom::Smoothing;
     fn protection(&self) -> Protection;
     /// Its Target tag, if that names a target.
     fn aim(&self) -> Option<Aim>;
@@ -269,7 +278,7 @@ impl Tags for [Tag] {
     fn smoothing_angle(&self) -> f32 {
         self.iter()
             .find_map(|tag| match *tag {
-                Tag::Phong { angle_limit, angle } => Some(if angle_limit {
+                Tag::Phong { angle_limit, angle, .. } => Some(if angle_limit {
                     angle.clamp(0.0, std::f32::consts::PI)
                 } else {
                     std::f32::consts::PI
@@ -277,6 +286,15 @@ impl Tags for [Tag] {
                 Tag::Protection { .. } | Tag::Target { .. } | Tag::Material(_) | Tag::Dynamics(_) => None,
             })
             .unwrap_or(DEFAULT_PHONG_ANGLE)
+    }
+
+    fn smoothing(&self) -> grid4d_geom::Smoothing {
+        let weighted = self.iter().any(|tag| matches!(tag, Tag::Phong { weighted: true, .. }));
+        if weighted {
+            grid4d_geom::Smoothing::Weighted(self.smoothing_angle())
+        } else {
+            grid4d_geom::Smoothing::Angle(self.smoothing_angle())
+        }
     }
 
     fn protection(&self) -> Protection {
@@ -339,6 +357,7 @@ mod tests {
             Tag::Phong {
                 angle_limit: false,
                 angle: 0.3,
+                weighted: false,
             },
             TagKind::Protection.default_tag(),
             TagKind::Target.default_tag(),

@@ -24,14 +24,24 @@ use serde_json::Value;
 
 use crate::{
     IoError,
-    upgrade::{Added, NewValue, additions},
+    upgrade::{Added, NewValue, Place, additions},
 };
 
 pub(crate) const VERSION: u32 = 5;
 
-/// Everything version 6 adds as fields, by step of Phase 17 (none yet: step
-/// 17.1 makes the version, later steps fill it).
-const ADDED: &[Added] = &[];
+/// Everything version 6 adds as fields, by step of Phase 17.
+const ADDED: &[Added] = &[
+    // Step 17.8: edge creases and hard edges on polygon objects, weighted
+    // normals on the Phong tag.
+    Added {
+        place: Place::Kind("polygon"),
+        fields: &["creases", "hard"],
+    },
+    Added {
+        place: Place::Tag("phong"),
+        fields: &["weighted"],
+    },
+];
 
 /// Every value version 6 adds to a closed set, by step of Phase 17.
 const NEW_VALUES: &[NewValue] = &[
@@ -122,6 +132,33 @@ mod tests {
             "tracks": [{ "param": "keep", "keys": [] }]
         }));
         assert!(upgrade(keyed).is_err(), "a Reduce's Keep");
+    }
+
+    #[test]
+    fn creases_hard_edges_and_weighted_normals_are_dropped_from_a_version_5_file() {
+        let v5 = json!({
+            "format": "grid4d",
+            "version": 5,
+            "document": {
+                "name": "Shot",
+                "objects": [{
+                    "name": "Box",
+                    "kind": {
+                        "type": "polygon",
+                        "mesh": 0,
+                        "creases": [{ "edges": [[0, 1]], "percent": 50 }],
+                        "hard": { "edges": [[0, 3]] }
+                    },
+                    "tags": [{ "type": "phong", "angle_limit": true, "angle": 1.0, "weighted": true }]
+                }]
+            },
+            "meshes": []
+        });
+        let v6 = upgrade(v5).unwrap();
+        let object = &v6["document"]["objects"][0];
+        assert!(object["kind"].get("creases").is_none() && object["kind"].get("hard").is_none());
+        assert!(object["tags"][0].get("weighted").is_none());
+        assert_eq!(object["tags"][0]["angle"], 1.0);
     }
 
     #[test]

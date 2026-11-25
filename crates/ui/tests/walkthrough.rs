@@ -832,6 +832,61 @@ fn bevel_profile_picture() {
     save(&mut h, &dir, "bevel_profile");
 }
 
+/// The manual's picture of edge creases: a box under a Subdivision Surface,
+/// its top edges creased to 100 % (sharp) and its middle ring left round,
+/// in Edges mode with the Crease tool's page:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored crease_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn crease_picture() {
+    use grid4d_scene::{ComponentState, Components, MeshHandle, Node, ObjectKind, ObjectKindTag};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::new("Creases");
+    let sds = doc.scene.insert(Node::new(
+        "Subdivision Surface",
+        ObjectKindTag::SubdivisionSurface.default_kind(),
+    ));
+    let cube = grid4d_geom::primitives::cube(glam::Vec3::new(300.0, 200.0, 200.0), [1, 1, 1]);
+    let top = (0..cube.face_count()).find(|&f| cube.face_normal(f).y > 0.9).unwrap();
+    let topology = grid4d_geom::Topology::build(&cube);
+    let mut state = ComponentState::default();
+    for c in cube.corner_range(top) {
+        let e = topology.corner_edge(c).unwrap() as usize;
+        for &corner in topology.edge_corners(e) {
+            state.creases.insert(corner, 100);
+        }
+    }
+    let cage = doc
+        .scene
+        .insert_child(
+            sds,
+            Node::new(
+                "Box",
+                ObjectKind::Polygon {
+                    mesh: MeshHandle::new(cube),
+                    components: Components::new(state),
+                },
+            ),
+        )
+        .unwrap();
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    h.state_mut().editor.selection.set_single(cage);
+    h.run_steps(2);
+    {
+        let editor = &mut h.state_mut().editor;
+        editor.mode = grid4d_ui::EditMode::Edges;
+        editor.tool = grid4d_ui::Tool::Crease;
+        editor.commands.push(grid4d_ui::EditorCommand::FrameScene);
+    }
+    h.run_steps(4);
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "crease");
+}
+
 /// The manual's picture of the render region: the demo scene with a region
 /// over part of the view, rendered there by the Render View:
 ///

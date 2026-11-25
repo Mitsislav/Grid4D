@@ -152,6 +152,8 @@ const CONSTRAINT_WEIGHT: f64 = 1000.0;
 struct Work<'a> {
     order: &'a mut CollapseOrder,
     constraints: Constraints,
+    /// Edges kept besides borders and seams (hard edges).
+    kept: &'a std::collections::HashSet<[u32; 2]>,
     quadrics: Vec<Quadric>,
     /// The triangles as collapses change them (dead ones `u32::MAX`).
     triangles: Vec<[u32; 3]>,
@@ -176,6 +178,13 @@ impl CollapseOrder {
     /// left out) under `constraints`.
     #[must_use]
     pub fn new(mesh: &PolyMesh, constraints: Constraints) -> Self {
+        Self::keeping(mesh, constraints, &std::collections::HashSet::new())
+    }
+
+    /// [`new`](Self::new), also keeping the line of every edge in `kept`
+    /// (point pairs, smaller first: hard edges).
+    #[must_use]
+    pub fn keeping(mesh: &PolyMesh, constraints: Constraints, kept: &std::collections::HashSet<[u32; 2]>) -> Self {
         let mut order = Self {
             points: mesh.points().to_vec(),
             ..Self::default()
@@ -185,7 +194,7 @@ impl CollapseOrder {
             order.triangles.clear();
             return order;
         }
-        let mut work = Work::new(&mut order, constraints);
+        let mut work = Work::new(&mut order, constraints, kept);
         work.run();
         order
     }
@@ -312,7 +321,11 @@ impl CollapseOrder {
 }
 
 impl<'a> Work<'a> {
-    fn new(order: &'a mut CollapseOrder, constraints: Constraints) -> Self {
+    fn new(
+        order: &'a mut CollapseOrder,
+        constraints: Constraints,
+        kept: &'a std::collections::HashSet<[u32; 2]>,
+    ) -> Self {
         let n = order.points.len();
         let mut around = vec![Vec::new(); n];
         let mut quadrics = vec![Quadric::default(); n];
@@ -339,6 +352,7 @@ impl<'a> Work<'a> {
         let mut work = Self {
             order,
             constraints,
+            kept,
             quadrics,
             triangles,
             corners,
@@ -446,12 +460,17 @@ impl<'a> Work<'a> {
     /// line: an open border, an edge of more than two faces, or a UV seam
     /// whose UVs split at `p`'s end (where they split only at the far end,
     /// as on a sphere's pole, `p` itself is not on the cut).
-    fn holds(&self, near: &Near) -> bool {
+    fn holds(&self, p: u32, near: &Near) -> bool {
         match near.count {
             1 => self.constraints.borders,
-            2 => self.constraints.seams && near.split,
+            2 => (self.constraints.seams && near.split) || self.is_hard(p, near.point),
             _ => true, // more than two faces: never moved across
         }
+    }
+
+    /// Whether edge `p`–`q` is one of the kept (hard) edges.
+    fn is_hard(&self, p: u32, q: u32) -> bool {
+        !self.kept.is_empty() && self.kept.contains(&[p.min(q), p.max(q)])
     }
 
     /// Whether edge `p`–`q` (with `count` triangles) keeps its line (it holds
@@ -460,10 +479,11 @@ impl<'a> Work<'a> {
         match count {
             1 => self.constraints.borders,
             2 => {
-                self.constraints.seams && {
-                    let ([first, second], _) = self.edge_wedges(p, q);
-                    first[0] != second[0] || first[1] != second[1]
-                }
+                self.is_hard(p, q)
+                    || self.constraints.seams && {
+                        let ([first, second], _) = self.edge_wedges(p, q);
+                        first[0] != second[0] || first[1] != second[1]
+                    }
             }
             _ => true,
         }
@@ -602,8 +622,8 @@ impl<'a> Work<'a> {
         }
         // A point on kept edges slides only along them (and a corner of
         // them stays).
-        let kept = around_from.iter().filter(|n| self.holds(n)).count();
-        if kept > 0 && (kept != 2 || !self.holds(edge)) {
+        let kept = around_from.iter().filter(|n| self.holds(from, n)).count();
+        if kept > 0 && (kept != 2 || !self.holds(from, edge)) {
             return false;
         }
         // Topology: two border points join only along their border edge; the

@@ -51,7 +51,7 @@ mod shapes;
 pub use bitset::BitSet;
 pub use bvh::{Bvh, BvhSplit, RayHit};
 pub use mesh::{MeshError, PolyMesh};
-pub use normals::Smoothing;
+pub use normals::{Smoothing, split_hard_edges};
 pub use selection::{Component, ComponentSet};
 pub use topology::Topology;
 pub use triangulate::{TriMesh, Triangulator, triangulate_outlines};

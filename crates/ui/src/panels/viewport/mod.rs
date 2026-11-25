@@ -1084,7 +1084,8 @@ impl ViewportPanel {
             | Tool::PlaneCut
             | Tool::ExtrudeAlongSpline
             | Tool::Mirror
-            | Tool::Array => {
+            | Tool::Array
+            | Tool::Crease => {
                 let view = self.screen_view(rect);
                 let radius = metrics::COMPONENT_PICK_RADIUS;
                 self.hover
@@ -1750,6 +1751,14 @@ const fn component_hint(component: Component, tool: Tool, active: bool) -> &'sta
         Tool::ExtrudeAlongSpline => return Tool::ExtrudeAlongSpline.hint(),
         Tool::Mirror => return Tool::Mirror.hint(),
         Tool::Array => return Tool::Array.hint(),
+        Tool::Crease => {
+            return match component {
+                Component::Edge => key(
+                    "Crease: drag left/right to set the selected edges' crease · Apply in the Attribute Manager · Esc cancels",
+                ),
+                Component::Point | Component::Polygon => key("Crease works on edges: switch to Edges mode"),
+            };
+        }
         Tool::Slide => {
             return match component {
                 Component::Point => key(

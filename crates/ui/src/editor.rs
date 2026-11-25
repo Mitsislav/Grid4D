@@ -50,6 +50,8 @@ pub enum Tool {
     Mirror,
     /// Mesh ▸ Array: copies of the selected polygons.
     Array,
+    /// Mesh ▸ Crease: drag to set the selected edges' crease.
+    Crease,
 }
 
 impl Tool {
@@ -88,6 +90,7 @@ impl Tool {
             Self::ExtrudeAlongSpline => "Extrude along Spline",
             Self::Mirror => "Mirror",
             Self::Array => "Array",
+            Self::Crease => "Crease",
         }
     }
 
@@ -111,7 +114,8 @@ impl Tool {
             | Self::PolygonPen
             | Self::ExtrudeAlongSpline
             | Self::Mirror
-            | Self::Array => "",
+            | Self::Array
+            | Self::Crease => "",
             Self::Move => "E",
             Self::Scale => "T",
             Self::Rotate => "R",
@@ -153,6 +157,9 @@ impl Tool {
             }
             Self::Mirror => "Mirror: Apply mirrors the selected polygons (or the whole object) across the plane",
             Self::Array => "Array: Apply copies the selected polygons (or the whole object)",
+            Self::Crease => {
+                "Crease: in Edges mode, drag left/right to set the selected edges' crease for the Subdivision Surface"
+            }
         }
     }
 
@@ -183,6 +190,7 @@ impl Tool {
                 | Self::ExtrudeAlongSpline
                 | Self::Mirror
                 | Self::Array
+                | Self::Crease
         )
     }
 
@@ -333,6 +341,8 @@ pub struct ModelingSettings {
     pub along_spline: Option<NodeId>,
     /// Polygon Pen: clicks this near (points) a point or edge use it.
     pub pen_snap: f32,
+    /// Crease: the crease the selected edges get (0 – 1; a drag sets it).
+    pub crease: f32,
 }
 
 /// A plane of a modelling tool: one of the object's or the world's axis
@@ -536,6 +546,7 @@ impl Default for ModelingSettings {
             along: grid4d_geom::ops::AlongSpline::default(),
             along_spline: None,
             pen_snap: 10.0,
+            crease: 1.0,
         }
     }
 }

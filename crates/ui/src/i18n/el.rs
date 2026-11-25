@@ -428,6 +428,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Clamp", "Περιορισμός"),
     ("Clamp Indirect", "Περιορισμός έμμεσου φωτός"),
     ("Clear", "Καθαρισμός"),
+    ("Clear Hard Edges", "Καθαρισμός σκληρών ακμών"),
     ("Clear Override", "Καθαρισμός παράκαμψης"),
     ("Clear Recent", "Καθαρισμός πρόσφατων"),
     ("Clear Render Region", "Καθαρισμός περιοχής render"),
@@ -524,6 +525,19 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Coverage: how much of each pixel objects fill",
         "Κάλυψη: πόσο από κάθε pixel γεμίζουν τα αντικείμενα",
+    ),
+    ("Crease", "Πτύχωση"),
+    (
+        "Crease works on edges: switch to Edges mode",
+        "Η πτύχωση δουλεύει σε ακμές: περάστε σε λειτουργία Ακμών",
+    ),
+    (
+        "Crease: drag left/right to set the selected edges' crease · Apply in the Attribute Manager · Esc cancels",
+        "Πτύχωση: σύρετε αριστερά/δεξιά για να ορίσετε την πτύχωση των επιλεγμένων ακμών · Εφαρμογή στον Διαχειριστή ιδιοτήτων · Esc ακυρώνει",
+    ),
+    (
+        "Crease: in Edges mode, drag left/right to set the selected edges' crease for the Subdivision Surface",
+        "Πτύχωση: σε λειτουργία Ακμών, σύρετε αριστερά/δεξιά για να ορίσετε την πτύχωση των επιλεγμένων ακμών για το Subdivision Surface",
     ),
     ("Create", "Δημιουργία"),
     ("Create Caps", "Δημιουργία καπακιών"),
@@ -884,7 +898,9 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("HD 1080 (1920 × 1080)", "HD 1080 (1920 × 1080)"),
     ("HD 720 (1280 × 720)", "HD 720 (1280 × 720)"),
     ("HUD", "HUD"),
+    ("Hard Cut Edges", "Σκληρές ακμές κοπής"),
     ("Hard Interpolation", "Σκληρή παρεμβολή"),
+    ("Hard from Angle", "Σκληρές από γωνία"),
     (
         "Haze: 2 a clear mountain sky, 3 a clear day, 6 – 10 hazy",
         "Θολούρα: 2 καθαρός ορεινός ουρανός, 3 καθαρή μέρα, 6 – 10 θολός",
@@ -998,6 +1014,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Keep", "Διατήρηση"),
     ("Keep Borders", "Διατήρηση ορίων"),
     ("Keep Curvature", "Διατήρηση καμπυλότητας"),
+    ("Keep Hard Edges", "Διατήρηση σκληρών ακμών"),
     ("Keep UV Seams", "Διατήρηση ραφών UV"),
     ("Keep Y-Axis Length", "Διατήρηση μήκους άξονα Y"),
     (
@@ -1139,6 +1156,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Make Editable", "Μετατροπή σε επεξεργάσιμο"),
     ("Make Editable (C)", "Μετατροπή σε επεξεργάσιμο (C)"),
+    ("Make Hard", "Σκληρές"),
+    ("Make Soft", "Μαλακές"),
     (
         "Makes each copy bigger or smaller by up to this much",
         "Μεγαλώνει ή μικραίνει κάθε αντίγραφο έως τόσο",
@@ -1325,6 +1344,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Normal Strength", "Ισχύς καθέτων"),
     ("Normal Texture", "Υφή καθέτων (normal map)"),
     ("Normal and Bump", "Κάθετα και ανάγλυφο"),
+    ("Normals", "Κάθετες"),
     ("Not Added to the Render Queue", "Δεν προστέθηκαν στην ουρά render"),
     (
         "Not saved: Save is off in the Render Settings.",
@@ -2442,6 +2462,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Wave", "Κύμα"),
     ("Wavefront OBJ (.obj + .mtl)", "Wavefront OBJ (.obj + .mtl)"),
     ("Wavelength", "Μήκος κύματος"),
+    ("Weighted Normals", "Σταθμισμένες κάθετες"),
     ("Weld", "Συγκόλληση"),
     ("Weld Points", "Συγκόλληση σημείων"),
     (

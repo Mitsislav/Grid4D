@@ -137,13 +137,13 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
         }
         match &data.kind {
             ObjectKind::Polygon { mesh, .. } => {
-                let angle = data.tags.smoothing_angle();
+                let smoothing = data.tags.smoothing();
                 // Its material (own or inherited), else its display colour.
                 let look = match effective.get(index).copied().flatten() {
                     Some(material) => Look::Material(material),
                     None => Look::Colour(data.display_color.map(f32::to_bits)),
                 };
-                if let Some(index) = writer.mesh(mesh, look, angle, &data.name, objects)? {
+                if let Some(index) = writer.mesh(mesh, look, smoothing, &data.name, objects)? {
                     node.insert("mesh".into(), json!(index));
                 }
             }
@@ -325,7 +325,7 @@ struct Writer {
     extensions: std::collections::BTreeSet<&'static str>,
     /// One glTF mesh per (mesh, look, Phong angle): objects sharing all three
     /// share the mesh.
-    mesh_of: HashMap<(MeshId, Look, u32), Option<usize>>,
+    mesh_of: HashMap<(MeshId, Look, u32, bool), Option<usize>>,
     triangulator: Triangulator,
     tri: TriMesh,
 }
@@ -539,21 +539,27 @@ impl Writer {
         Ok(index)
     }
 
-    /// The glTF mesh of `handle` looking like `look`, smoothed up to `angle`
-    /// (radians; written on first use); `None` for a mesh without polygons.
+    /// The glTF mesh of `handle` looking like `look`, smoothed by `smoothing`
+    /// (written on first use); `None` for a mesh without polygons.
     fn mesh(
         &mut self,
         handle: &MeshHandle,
         look: Look,
-        angle: f32,
+        smoothing: Smoothing,
         name: &str,
         objects: &Objects,
     ) -> Result<Option<usize>, IoError> {
-        let key = (handle.id(), look, angle.to_bits());
+        let (angle, weighted) = match smoothing {
+            Smoothing::Flat => (0.0, false),
+            Smoothing::Smooth => (std::f32::consts::PI, false),
+            Smoothing::Angle(angle) => (angle, false),
+            Smoothing::Weighted(angle) => (angle, true),
+        };
+        let key = (handle.id(), look, angle.to_bits(), weighted);
         if let Some(&index) = self.mesh_of.get(&key) {
             return Ok(index);
         }
-        let index = self.write_mesh(handle, look, angle, name, objects)?;
+        let index = self.write_mesh(handle, look, smoothing, name, objects)?;
         self.mesh_of.insert(key, index);
         Ok(index)
     }
@@ -562,7 +568,7 @@ impl Writer {
         &mut self,
         handle: &MeshHandle,
         look: Look,
-        angle: f32,
+        smoothing: Smoothing,
         name: &str,
         objects: &Objects,
     ) -> Result<Option<usize>, IoError> {
@@ -571,7 +577,7 @@ impl Writer {
             return Ok(None);
         }
         let mut tri = std::mem::take(&mut self.tri);
-        self.triangulator.triangulate(mesh, Smoothing::Angle(angle), &mut tri);
+        self.triangulator.triangulate(mesh, smoothing, &mut tri);
         let has_uvs = tri.uvs.len() == tri.positions.len();
 
         // Corners that agree in position, normal and UV share one vertex.
@@ -1160,6 +1166,7 @@ mod tests {
         let flat = vertices(vec![grid4d_scene::Tag::Phong {
             angle_limit: true,
             angle: 0.0,
+            weighted: false,
         }]);
         assert!(
             flat > smooth,
@@ -1168,6 +1175,7 @@ mod tests {
         let unlimited = vertices(vec![grid4d_scene::Tag::Phong {
             angle_limit: false,
             angle: 0.0,
+            weighted: false,
         }]);
         assert!(unlimited <= smooth);
     }

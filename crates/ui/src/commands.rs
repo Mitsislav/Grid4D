@@ -305,6 +305,8 @@ pub enum EditorCommand {
     /// visible ones when none), with the editor's UV settings: its UVs or its
     /// seams change. One undo step if anything changed.
     UvCommand(crate::uv_tools::UvOp),
+    /// Mesh ▸ Normals: the active polygon object's hard edges (one undo step).
+    HardEdges(crate::modeling::HardOp),
     /// A click, frame or loop in a component mode on polygon object `node`:
     /// `hits` are the picked points, unique edges or polygons — none for empty
     /// space, which clears the selection on a plain click. One undo step if
@@ -1081,6 +1083,21 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
                     editor,
                     "Weld",
                     vec![SceneEdit::SetData { id: node, data }],
+                    |_, _| {},
+                );
+            }
+        }
+        EditorCommand::HardEdges(op) => {
+            let data = editor.selection.active().and_then(|id| {
+                let node = doc.scene.get(id)?;
+                crate::modeling::apply_hard(&node.data, op).map(|d| (id, d))
+            });
+            if let Some((id, data)) = data {
+                commit(
+                    doc,
+                    editor,
+                    op.label(),
+                    vec![SceneEdit::SetData { id, data }],
                     |_, _| {},
                 );
             }
@@ -2738,6 +2755,12 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId], simulated: &grid4d_
             // A Boolean's cut edges come selected, ready for a bevel.
             if matches!(&*kind, ObjectKind::Boolean(boolean) if boolean.select_cut_edges) {
                 select_edges(&built.mesh, &built.cut_edges, &mut state);
+            }
+            // Hard cut edges stay hard on the baked object.
+            if !built.hard.is_empty() {
+                let mut marks = ComponentState::default();
+                select_edges(&built.mesh, &built.hard, &mut marks);
+                state.hard = marks.selected.edges;
             }
             cages.extend(inputs(node));
             built.mesh
@@ -5573,6 +5596,7 @@ mod tests {
         let _ = Tag::Phong {
             angle_limit: true,
             angle: 0.0,
+            weighted: false,
         };
     }
 

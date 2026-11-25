@@ -26,6 +26,7 @@ pub(crate) const fn works_in(tool: Tool, component: Component) -> bool {
                 Component::Point | Component::Edge | Component::Polygon
             )
             | (Tool::ExtrudeAlongSpline, Component::Polygon)
+            | (Tool::Crease, Component::Edge)
     )
 }
 
@@ -37,6 +38,7 @@ pub(crate) fn offset_mut(tool: Tool, settings: &mut ModelingSettings) -> Option<
         Tool::Bevel => Some(&mut settings.bevel.offset),
         Tool::Slide => Some(&mut settings.slide.offset),
         Tool::PlaneCut => Some(&mut settings.plane_cut.offset),
+        Tool::Crease => Some(&mut settings.crease),
         Tool::LiveSelection
         | Tool::RectangleSelection
         | Tool::LoopSelection
@@ -88,10 +90,16 @@ pub(crate) fn rebuilt_data(data: &NodeData, rebuilt: Rebuilt, fresh: Fresh) -> O
         edges: components.state().seams.clone(),
         ..grid4d_geom::ComponentSet::default()
     };
+    let hard = grid4d_geom::ComponentSet {
+        edges: components.state().hard.clone(),
+        ..grid4d_geom::ComponentSet::default()
+    };
     let mut state = ComponentState {
         selected: rebuilt.carry(components.selected(), topology),
         hidden: rebuilt.carry(components.hidden(), topology),
         seams: rebuilt.carry(&seams, topology).edges,
+        creases: carry_creases(&rebuilt, &components.state().creases, mesh.mesh(), topology),
+        hard: rebuilt.carry(&hard, topology).edges,
     };
     match fresh {
         Fresh::EdgesSelected if !rebuilt.new_edges.is_empty() => state.selected.edges = rebuilt.new_edge_corners(),
@@ -111,6 +119,47 @@ pub(crate) fn rebuilt_data(data: &NodeData, rebuilt: Rebuilt, fresh: Fresh) -> O
         components: Components::new(state),
     };
     Some(data)
+}
+
+/// `creases` (by corner of `source`) on the rebuilt mesh: an edge whose two
+/// ends come from the ends of a creased edge keeps its crease.
+pub(crate) fn carry_creases(
+    rebuilt: &Rebuilt,
+    creases: &std::collections::BTreeMap<u32, u8>,
+    source: &grid4d_geom::PolyMesh,
+    topology: &grid4d_geom::Topology,
+) -> std::collections::BTreeMap<u32, u8> {
+    let mut out = std::collections::BTreeMap::new();
+    if creases.is_empty() {
+        return out;
+    }
+    // Each creased edge by its points, its largest percent.
+    let mut by_edge: std::collections::HashMap<[u32; 2], u8> = std::collections::HashMap::new();
+    for (&corner, &percent) in creases {
+        let Some(e) = topology.corner_edge(corner as usize) else {
+            continue;
+        };
+        let [a, b] = topology.edges()[e as usize];
+        let entry = by_edge.entry([a, b]).or_insert(0);
+        *entry = (*entry).max(percent);
+    }
+    let _ = source;
+    let mesh = &rebuilt.mesh;
+    let origin = |p: u32| rebuilt.point_origin.get(p as usize).copied().unwrap_or(ops::NEW);
+    for f in 0..mesh.face_count() {
+        let range = mesh.corner_range(f);
+        for c in range.clone() {
+            let next = if c + 1 == range.end { range.start } else { c + 1 };
+            let (a, b) = (origin(mesh.corner_points()[c]), origin(mesh.corner_points()[next]));
+            if a == ops::NEW || b == ops::NEW {
+                continue;
+            }
+            if let Some(&percent) = by_edge.get(&[a.min(b), a.max(b)]) {
+                out.insert(c as u32, percent);
+            }
+        }
+    }
+    out
 }
 
 /// A Loop/Path Cut of `mesh` across unique edge `edge` at `fractions` (the ring
@@ -252,6 +301,37 @@ pub(crate) fn apply(
             let rebuilt = ops::bevel(source, topology, &edges, &points, &options).ok()?;
             return rebuilt_data(data, rebuilt, Fresh::edges_if(component == Component::Edge));
         }
+        (Tool::Crease, Component::Edge) => {
+            // Every corner of each selected edge gets the crease (0 removes it).
+            let edges = selection::edges_from_corners(&state.selected.edges, topology);
+            if edges.is_empty() {
+                return None;
+            }
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "clamped to 0 – 100"
+            )]
+            let percent = (offset.clamp(0.0, 1.0) * 100.0).round() as u8;
+            let mut creases = state.creases.clone();
+            for e in edges.iter() {
+                for &corner in topology.edge_corners(e) {
+                    if percent == 0 {
+                        creases.remove(&corner);
+                    } else {
+                        creases.insert(corner, percent);
+                    }
+                }
+            }
+            if creases == state.creases {
+                return None;
+            }
+            let mut data = data.clone();
+            if let ObjectKind::Polygon { components, .. } = &mut data.kind {
+                components.make_mut().creases = creases;
+            }
+            return Some(data);
+        }
         (Tool::PlaneCut, _) => {
             let cut = settings.plane_cut;
             let (origin, normal) = cut.plane.in_object(offset, context.world);
@@ -330,6 +410,84 @@ pub(crate) fn apply(
         mesh: MeshHandle::new(result),
         components,
     };
+    Some(data)
+}
+
+/// What Mesh ▸ Normals does to hard edges.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HardOp {
+    /// The selected edges become hard.
+    MakeHard,
+    /// The selected edges stop being hard.
+    MakeSoft,
+    /// Every edge whose polygons meet at more than the Phong angle becomes
+    /// hard (and only those).
+    FromAngle,
+    /// No edge is hard.
+    Clear,
+}
+
+impl HardOp {
+    pub const ALL: [Self; 4] = [Self::MakeHard, Self::MakeSoft, Self::FromAngle, Self::Clear];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::MakeHard => "Make Hard",
+            Self::MakeSoft => "Make Soft",
+            Self::FromAngle => "Hard from Angle",
+            Self::Clear => "Clear Hard Edges",
+        }
+    }
+}
+
+/// `data` (a polygon object) with its hard edges changed by `op`; `None`
+/// if nothing changes.
+pub(crate) fn apply_hard(data: &NodeData, op: HardOp) -> Option<NodeData> {
+    let ObjectKind::Polygon { mesh, components } = &data.kind else {
+        return None;
+    };
+    let (source, topology) = (mesh.mesh(), mesh.topology());
+    let state = components.state();
+    let selected = selection::edges_from_corners(&state.selected.edges, topology);
+    let corners_of = |edges: &BitSet| {
+        let mut corners = BitSet::new();
+        for e in edges.iter() {
+            for &c in topology.edge_corners(e) {
+                corners.insert(c as usize);
+            }
+        }
+        corners
+    };
+    let mut hard = state.hard.clone();
+    match op {
+        HardOp::MakeHard => hard.extend(corners_of(&selected).iter()),
+        HardOp::MakeSoft => hard.remove_all(&corners_of(&selected)),
+        HardOp::Clear => hard.clear(),
+        HardOp::FromAngle => {
+            use grid4d_scene::Tags;
+            let limit = data.tags.smoothing_angle();
+            let sharp: BitSet = (0..topology.edge_count())
+                .filter(|&e| match topology.edge_faces(e) {
+                    &[f, g] => {
+                        source
+                            .face_normal(f as usize)
+                            .angle_between(source.face_normal(g as usize))
+                            > limit + 1e-4
+                    }
+                    _ => false,
+                })
+                .collect();
+            hard = corners_of(&sharp);
+        }
+    }
+    if hard == state.hard {
+        return None;
+    }
+    let mut data = data.clone();
+    if let ObjectKind::Polygon { components, .. } = &mut data.kind {
+        components.make_mut().hard = hard;
+    }
     Some(data)
 }
 
@@ -587,6 +745,79 @@ mod tests {
         assert_eq!(mesh_of(&out).mesh().face_count(), 6 + 4 * 10);
         let height = mesh_of(&out).mesh().face_center(face).y;
         assert!(height > 300.0, "the end moved up along the path's length: {height}");
+    }
+
+    #[test]
+    fn hard_edges_and_creases_are_set_and_carried() {
+        let cube = polygon_cube();
+        let found = apply_hard(&cube, HardOp::FromAngle).unwrap();
+        let ObjectKind::Polygon { components, .. } = &found.kind else {
+            unreachable!()
+        };
+        assert_eq!(
+            components.state().hard.len(),
+            24,
+            "a cube's 12 edges, both corners each"
+        );
+        assert!(
+            apply_hard(&found, HardOp::FromAngle).is_none(),
+            "again: nothing changes"
+        );
+        let sphere = grid4d_eval::editable_mesh(&ObjectKindTag::Sphere.default_kind()).unwrap();
+        let mut round = Node::new("Sphere", ObjectKind::polygon(MeshHandle::new(sphere))).data;
+        round.tags.push(grid4d_scene::Tag::Phong {
+            angle_limit: true,
+            angle: 40f32.to_radians(),
+            weighted: false,
+        });
+        assert!(
+            apply_hard(&round, HardOp::FromAngle).is_none(),
+            "a smooth sphere has none"
+        );
+        let cleared = apply_hard(&found, HardOp::Clear).unwrap();
+        let ObjectKind::Polygon { components, .. } = &cleared.kind else {
+            unreachable!()
+        };
+        assert!(components.state().hard.is_empty());
+        // Crease the selected edges, then bevel another edge: the crease stays.
+        let mut creased = cube;
+        let ObjectKind::Polygon { mesh, components } = &mut creased.kind else {
+            unreachable!()
+        };
+        let topology = mesh.topology().clone();
+        let edge = topology.edge_corners(0)[0] as usize;
+        components.make_mut().selected.edges.insert(edge);
+        let settings = ModelingSettings::default();
+        let here = Context::default();
+        let with = apply(&creased, Tool::Crease, Component::Edge, &settings, 0.6, &here).unwrap();
+        let ObjectKind::Polygon { components, .. } = &with.kind else {
+            unreachable!()
+        };
+        assert_eq!(components.state().creases.len(), 2, "both corners of the edge");
+        assert!(components.state().creases.values().all(|&p| p == 60));
+        let [a, b] = topology.edges()[0];
+        let mut other = with.clone();
+        let ObjectKind::Polygon { components, .. } = &mut other.kind else {
+            unreachable!()
+        };
+        let far = (0..topology.edge_count())
+            .find(|&e| !topology.edges()[e].contains(&a) && !topology.edges()[e].contains(&b))
+            .unwrap();
+        components.make_mut().selected.edges = topology.edge_corners(far).iter().map(|&c| c as usize).collect();
+        let bevelled = apply(&other, Tool::Bevel, Component::Edge, &settings, 10.0, &here).unwrap();
+        let ObjectKind::Polygon { mesh, components } = &bevelled.kind else {
+            unreachable!()
+        };
+        assert_eq!(components.state().creases.len(), 2, "carried across the bevel");
+        let corner = *components.state().creases.keys().next().unwrap() as usize;
+        let e = mesh.topology().corner_edge(corner).unwrap() as usize;
+        let ends = mesh.topology().edges()[e].map(|p| mesh.mesh().points()[p as usize]);
+        let original = [a, b].map(|p| polygon_cube_points()[p as usize]);
+        assert!(ends.iter().all(|p| original.contains(p)), "on the same edge");
+    }
+
+    fn polygon_cube_points() -> Vec<glam::Vec3> {
+        mesh_of(&polygon_cube()).mesh().points().to_vec()
     }
 
     #[test]

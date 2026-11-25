@@ -151,6 +151,11 @@ pub struct ComponentState {
     /// UV seams: edges flagged by corner, like an edge selection (an edge is a
     /// seam when any of its corners is flagged). Unwrap cuts along them.
     pub seams: BitSet,
+    /// Edge creases for the Subdivision Surface: percent (1 – 100) by corner;
+    /// an edge's crease is the largest of its corners' (step 17.8).
+    pub creases: std::collections::BTreeMap<u32, u8>,
+    /// Hard edges, by corner like seams: shading splits along them.
+    pub hard: BitSet,
 }
 
 /// A polygon object's [`ComponentState`], shared copy-on-write: snapshots (undo

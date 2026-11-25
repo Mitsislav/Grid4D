@@ -1918,5 +1918,7 @@ once and replayed when Keep changes), and soft selection and Slide, 17.6
 used by the gizmo and Tweak, shown as a ramp on the points; points and loops
 slid along their edges, Duplicate inserting a loop), and the tools of 17.7
 (Plane Cut sharing Line Cut's code, the Polygon Pen, Extrude along Spline,
-Mirror, Array, Bevel's Custom profile and Patch mitres). Next: edge
-creases, hard edges and weighted normals (17.8).
+Mirror, Array, Bevel's Custom profile and Patch mitres), and edge
+creases, hard edges and weighted normals, 17.8 (semi-sharp Catmull-Clark,
+hard edges drawn as a split mesh, the strongest faces' normals). Next: the
+deformers (17.9).

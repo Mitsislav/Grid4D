@@ -4,9 +4,27 @@
 //! points towards the smooth limit surface. The bilinear variant splits the same
 //! way without moving anything (Linear Pre-Subdivision).
 
+use std::collections::HashMap;
+
 use glam::{Vec2, Vec3};
 
 use crate::{PolyMesh, Topology, u32_index, us};
+
+/// Edge creases for [`subdivide_creased`]: each edge (its two points, smaller
+/// first) with its sharpness in levels — [`f32::INFINITY`] sharp at every
+/// level (spec `docs/reference/modeling-creases-normals.md`).
+pub type Creases = HashMap<[u32; 2], f32>;
+
+/// A crease's sharpness from a percent (1 – 100): 6 × the share, 100 % sharp
+/// at every level.
+#[must_use]
+pub fn sharpness(percent: u8) -> f32 {
+    if percent >= 100 {
+        f32::INFINITY
+    } else {
+        f32::from(percent) / 100.0 * MAX_LEVEL as f32
+    }
+}
 
 /// How points on an open border are smoothed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -35,12 +53,22 @@ pub const MAX_LEVEL: u32 = 6;
 /// with Catmull-Clark (both clamped to [`MAX_LEVEL`]).
 #[must_use]
 pub fn subdivide(mesh: &PolyMesh, options: &SubdivisionOptions) -> PolyMesh {
+    subdivide_creased(mesh, options, &Creases::new())
+}
+
+/// [`subdivide`] honouring `creases` with the semi-sharp rules: an edge of
+/// sharpness *s* ≥ 1 splits at its middle and pulls its points along it, one
+/// of 0 < *s* < 1 blends the smooth and sharp rules by *s*, and its halves
+/// carry *s* − 1 to the next level (linear levels keep it).
+#[must_use]
+pub fn subdivide_creased(mesh: &PolyMesh, options: &SubdivisionOptions, creases: &Creases) -> PolyMesh {
     let mut current = mesh.clone();
+    let mut creases = creases.clone();
     for _ in 0..options.linear_pre.min(MAX_LEVEL) {
-        current = level(&current, false, options.boundary);
+        (current, creases) = level(&current, false, options.boundary, &creases);
     }
     for _ in 0..options.levels.min(MAX_LEVEL) {
-        current = level(&current, true, options.boundary);
+        (current, creases) = level(&current, true, options.boundary, &creases);
     }
     current
 }
@@ -48,10 +76,11 @@ pub fn subdivide(mesh: &PolyMesh, options: &SubdivisionOptions) -> PolyMesh {
 /// One level: face points, edge points and (with `smooth`) moved old points; every
 /// face with *k* corners becomes *k* quads (corner, edge point, face point,
 /// previous edge point). New points follow: old points, edge points, face points.
-fn level(mesh: &PolyMesh, smooth: bool, boundary: Boundary) -> PolyMesh {
+fn level(mesh: &PolyMesh, smooth: bool, boundary: Boundary, creases: &Creases) -> (PolyMesh, Creases) {
     let topology = Topology::build(mesh);
     let points = mesh.points();
     let face_points: Vec<Vec3> = (0..mesh.face_count()).map(|f| mesh.face_center(f)).collect();
+    let sharp = |e: usize| creases.get(&topology.edges()[e]).copied().unwrap_or(0.0);
 
     let edge_points: Vec<Vec3> = topology
         .edges()
@@ -60,7 +89,10 @@ fn level(mesh: &PolyMesh, smooth: bool, boundary: Boundary) -> PolyMesh {
         .map(|(e, &[a, b])| {
             let middle = (points[us(a)] + points[us(b)]) * 0.5;
             match topology.edge_faces(e) {
-                &[f, g] if smooth => (middle * 2.0 + face_points[us(f)] + face_points[us(g)]) * 0.25,
+                &[f, g] if smooth => {
+                    let soft = (middle * 2.0 + face_points[us(f)] + face_points[us(g)]) * 0.25;
+                    soft.lerp(middle, sharp(e).clamp(0.0, 1.0))
+                }
                 _ => middle,
             }
         })
@@ -68,11 +100,26 @@ fn level(mesh: &PolyMesh, smooth: bool, boundary: Boundary) -> PolyMesh {
 
     let moved: Vec<Vec3> = if smooth {
         (0..mesh.point_count())
-            .map(|p| smoothed_point(mesh, &topology, &face_points, p, boundary))
+            .map(|p| {
+                let soft = smoothed_point(mesh, &topology, &face_points, p, boundary);
+                creased_point(mesh, &topology, p, soft, &sharp)
+            })
             .collect()
     } else {
         points.to_vec()
     };
+    // The halves of a creased edge carry its sharpness, one level less.
+    let n_points = u32_index(mesh.point_count());
+    let mut next = Creases::new();
+    for (e, &[a, b]) in topology.edges().iter().enumerate() {
+        let s = sharp(e);
+        let carried = if smooth { s - 1.0 } else { s };
+        if carried > 0.0 {
+            let middle = n_points + u32_index(e);
+            next.insert([a.min(middle), a.max(middle)], carried);
+            next.insert([b.min(middle), b.max(middle)], carried);
+        }
+    }
 
     let n = mesh.point_count();
     let edge_index = |e: u32| u32_index(n + us(e));
@@ -108,12 +155,42 @@ fn level(mesh: &PolyMesh, smooth: bool, boundary: Boundary) -> PolyMesh {
         }
     }
     let Ok(mut result) = PolyMesh::from_faces(new_points, faces) else {
-        return mesh.clone(); // cannot happen: every quad has four distinct points
+        return (mesh.clone(), Creases::new()); // cannot happen: every quad has four distinct points
     };
     if source_uvs.is_some() {
         let _ = result.set_uvs(Some(uvs));
     }
-    result
+    (result, next)
+}
+
+/// Where old point `p` moves with creases: on two creased edges along them
+/// (the crease rule), on three or more it stays (a corner), on fewer as
+/// `soft` — blended by the creases' mean sharpness below 1.
+fn creased_point(mesh: &PolyMesh, topology: &Topology, p: usize, soft: Vec3, sharp: &impl Fn(usize) -> f32) -> Vec3 {
+    let points = mesh.points();
+    let creased: Vec<(usize, f32)> = topology
+        .point_edges(p)
+        .iter()
+        .map(|&e| us(e))
+        .filter(|&e| topology.edge_faces(e).len() == 2)
+        .map(|e| (e, sharp(e)))
+        .filter(|&(_, s)| s > 0.0)
+        .collect();
+    if creased.len() < 2 {
+        return soft;
+    }
+    let position = points[p];
+    let sharp_rule = if creased.len() == 2 {
+        let other = |e: usize| {
+            let [a, b] = topology.edges()[e];
+            points[us(if us(a) == p { b } else { a })]
+        };
+        (other(creased[0].0) + position * 6.0 + other(creased[1].0)) / 8.0
+    } else {
+        position
+    };
+    let mean = creased.iter().map(|&(_, s)| s.min(1.0)).sum::<f32>() / creased.len() as f32;
+    soft.lerp(sharp_rule, mean.clamp(0.0, 1.0))
 }
 
 /// Where old point `p` moves: the Catmull-Clark rule inside the surface, the
@@ -310,5 +387,36 @@ mod tests {
         let uvs = out.uvs().unwrap();
         assert_eq!(uvs.len(), 16);
         assert!(uvs.contains(&Vec2::splat(0.5)), "the face point's UV is the average");
+    }
+
+    #[test]
+    fn creases_keep_a_cube_sharp_and_blend_monotonically() {
+        let cube = shapes::cube(2.0);
+        let topology = Topology::build(&cube);
+        let all = |percent: u8| -> Creases { topology.edges().iter().map(|&e| (e, sharpness(percent))).collect() };
+        let options = options(2);
+        // The farthest any point reaches towards a corner (1, 1, 1).
+        let reach = |mesh: &PolyMesh| mesh.points().iter().map(|p| p.x + p.y + p.z).fold(f32::MIN, f32::max);
+        let sharp = subdivide_creased(&cube, &options, &all(100));
+        assert!((reach(&sharp) - 3.0).abs() < 1e-5, "the corners stay exactly");
+        for p in sharp.points() {
+            let on_face = [p.x, p.y, p.z].iter().any(|c| (c.abs() - 1.0).abs() < 1e-5);
+            assert!(on_face, "every point stays on the cube's faces: {p}");
+        }
+        let round = subdivide_creased(&cube, &options, &all(0));
+        assert_eq!(round, subdivide(&cube, &options), "0 % is today's surface");
+        let mut last = reach(&round);
+        for percent in [10, 25, 50, 75, 100] {
+            let r = reach(&subdivide_creased(&cube, &options, &all(percent)));
+            assert!(r >= last - 1e-5, "{percent} %: {r} after {last}");
+            last = r;
+        }
+        // 50 % is sharp for three levels: at four the last one rounds it a little.
+        let four = SubdivisionOptions { levels: 4, ..options };
+        let half = reach(&subdivide_creased(&cube, &four, &all(50)));
+        assert!(
+            half < 3.0 - 1e-4 && half > reach(&subdivide(&cube, &four)),
+            "50 % in between: {half}"
+        );
     }
 }

@@ -15,6 +15,8 @@ pub struct Boolean {
     pub select_cut_edges: bool,
     /// Points of the result closer than this are welded (cm, ≥ 0).
     pub weld: f32,
+    /// The edges along the cut are hard edges (step 17.8).
+    pub hard_cut_edges: bool,
 }
 
 impl Boolean {
@@ -39,6 +41,7 @@ impl Default for Boolean {
             merge_faces: true,
             select_cut_edges: true,
             weld: 0.01,
+            hard_cut_edges: false,
         }
     }
 }

@@ -32,7 +32,8 @@ impl ViewportPanel {
             | Tool::PolygonPen
             | Tool::ExtrudeAlongSpline
             | Tool::Mirror
-            | Tool::Array => false,
+            | Tool::Array
+            | Tool::Crease => false,
         }
     }
 

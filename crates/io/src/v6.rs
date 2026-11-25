@@ -1957,6 +1957,9 @@ enum TagDto {
         angle_limit: bool,
         /// Radians.
         angle: f32,
+        /// Weighted normals (version 6, step 17.8); false when absent.
+        #[serde(default, skip_serializing_if = "is_false")]
+        weighted: bool,
     },
     Protection {
         position: bool,
@@ -2057,7 +2060,15 @@ impl TagDto {
     fn new(tag: &Tag, refs: &Refs) -> Self {
         let index = |id: Option<NodeId>| id.and_then(|id| refs.objects.get(&id).copied());
         match *tag {
-            Tag::Phong { angle_limit, angle } => Self::Phong { angle_limit, angle },
+            Tag::Phong {
+                angle_limit,
+                angle,
+                weighted,
+            } => Self::Phong {
+                angle_limit,
+                angle,
+                weighted,
+            },
             Tag::Protection {
                 position,
                 scale,
@@ -2095,9 +2106,14 @@ impl TagDto {
     fn into_tag(self, ids: &[NodeId], materials: &[MaterialId]) -> Tag {
         let id = |index: Option<usize>| index.and_then(|i| ids.get(i).copied());
         match self {
-            Self::Phong { angle_limit, angle } => Tag::Phong {
+            Self::Phong {
+                angle_limit,
+                angle,
+                weighted,
+            } => Tag::Phong {
                 angle_limit,
                 angle: angle.clamp(0.0, std::f32::consts::PI),
+                weighted,
             },
             Self::Protection {
                 position,
@@ -2315,6 +2331,13 @@ enum KindDto {
         hidden: SetDto,
         #[serde(default, skip_serializing_if = "SetDto::is_empty")]
         seams: SetDto,
+        /// Edge creases (version 6, step 17.8): groups of `edges` ranges
+        /// (by corner) with their percent.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        creases: Vec<CreaseDto>,
+        /// Hard edges (version 6, step 17.8), as `edges` ranges.
+        #[serde(default, skip_serializing_if = "SetDto::is_empty")]
+        hard: SetDto,
     },
     /// Added to v3 before its release (additive): files without it still load.
     SubdivisionSurface {
@@ -2396,6 +2419,9 @@ enum KindDto {
         /// cm; 0.01 when absent.
         #[serde(default = "default_weld", skip_serializing_if = "is_default_weld")]
         weld: f32,
+        /// Step 17.8; false when absent.
+        #[serde(default, skip_serializing_if = "is_false")]
+        hard_cut_edges: bool,
     },
     /// A Symmetry generator (version 6, step 17.4); defaults omitted.
     Symmetry {
@@ -2447,6 +2473,9 @@ enum KindDto {
         keep_borders: bool,
         #[serde(default = "yes", skip_serializing_if = "is_true")]
         keep_seams: bool,
+        /// Step 17.8; true when absent.
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        keep_hard: bool,
         #[serde(default = "yes", skip_serializing_if = "is_true")]
         together: bool,
     },
@@ -4095,6 +4124,63 @@ impl From<BoundaryDto> for Boundary {
     }
 }
 
+/// Edges of one crease value (version 6, step 17.8).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreaseDto {
+    /// Inclusive corner ranges.
+    edges: Vec<[u32; 2]>,
+    /// 1 – 100.
+    percent: u8,
+}
+
+impl CreaseDto {
+    /// The creases grouped by percent, each group as corner ranges.
+    fn groups(creases: &std::collections::BTreeMap<u32, u8>) -> Vec<Self> {
+        let mut by_percent: std::collections::BTreeMap<u8, BitSet> = std::collections::BTreeMap::new();
+        for (&corner, &percent) in creases {
+            if let Ok(corner) = usize::try_from(corner) {
+                by_percent.entry(percent).or_default().insert(corner);
+            }
+        }
+        by_percent
+            .into_iter()
+            .map(|(percent, corners)| Self {
+                edges: corners
+                    .ranges()
+                    .map(|(first, last)| [first, last].map(|i| u32::try_from(i).unwrap_or(u32::MAX)))
+                    .collect(),
+                percent,
+            })
+            .collect()
+    }
+
+    /// The creases, checked against `mesh`'s corners.
+    fn into_map(
+        groups: Vec<Self>,
+        mesh: &PolyMesh,
+        object: &str,
+    ) -> Result<std::collections::BTreeMap<u32, u8>, IoError> {
+        let mut map = std::collections::BTreeMap::new();
+        for group in groups {
+            if !(1..=100).contains(&group.percent) {
+                return Err(IoError::Invalid(format!(
+                    "object \"{object}\" has a crease of {} % (1 – 100)",
+                    group.percent
+                )));
+            }
+            let set = SetDto {
+                edges: group.edges,
+                ..SetDto::default()
+            }
+            .into_set(mesh, object, "creases")?;
+            for corner in set.edges.iter() {
+                map.insert(u32::try_from(corner).unwrap_or(u32::MAX), group.percent);
+            }
+        }
+        Ok(map)
+    }
+}
+
 /// Flagged components as inclusive index ranges `[first, last]`, ascending;
 /// edges by corner (see `grid4d_geom::ComponentSet`). Empty lists are omitted.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -4846,6 +4932,11 @@ impl KindDto {
                     edges: components.state().seams.clone(),
                     ..ComponentSet::default()
                 }),
+                creases: CreaseDto::groups(&components.state().creases),
+                hard: SetDto::new(&ComponentSet {
+                    edges: components.state().hard.clone(),
+                    ..ComponentSet::default()
+                }),
             },
             ObjectKind::SubdivisionSurface {
                 viewport_levels,
@@ -4980,6 +5071,7 @@ impl KindDto {
                 merge_faces: boolean.merge_faces,
                 select_cut_edges: boolean.select_cut_edges,
                 weld: boolean.weld,
+                hard_cut_edges: boolean.hard_cut_edges,
             },
             ObjectKind::Symmetry(symmetry) => Self::Symmetry {
                 plane: symmetry.plane.into(),
@@ -5002,6 +5094,7 @@ impl KindDto {
                 keep: reduce.keep,
                 keep_borders: reduce.keep_borders,
                 keep_seams: reduce.keep_seams,
+                keep_hard: reduce.keep_hard,
                 together: reduce.together,
             },
             ObjectKind::Loft(loft) => Self::Loft {
@@ -5211,6 +5304,8 @@ impl KindDto {
                 selected,
                 hidden,
                 seams,
+                creases,
+                hard,
             } => {
                 let mesh = meshes.get(mesh).cloned().ok_or_else(|| {
                     IoError::Invalid(format!(
@@ -5222,6 +5317,8 @@ impl KindDto {
                     selected: selected.into_set(mesh.mesh(), object, "selection")?,
                     hidden: hidden.into_set(mesh.mesh(), object, "hidden")?,
                     seams: seams.into_set(mesh.mesh(), object, "seams")?.edges,
+                    creases: CreaseDto::into_map(creases, mesh.mesh(), object)?,
+                    hard: hard.into_set(mesh.mesh(), object, "hard edges")?.edges,
                 };
                 ObjectKind::Polygon {
                     mesh,
@@ -5325,7 +5422,7 @@ impl KindDto {
                 let state = ComponentState {
                     selected: selected.into_counts(count, 0, 0, object, "selected")?,
                     hidden: hidden.into_counts(count, 0, 0, object, "hidden")?,
-                    seams: BitSet::new(),
+                    ..ComponentState::default()
                 };
                 ObjectKind::Ffd {
                     ffd,
@@ -5466,11 +5563,13 @@ impl KindDto {
                 keep,
                 keep_borders,
                 keep_seams,
+                keep_hard,
                 together,
             } => ObjectKind::Reduce(Reduce {
                 keep: keep.clamp(0.0, 1.0),
                 keep_borders,
                 keep_seams,
+                keep_hard,
                 together,
             }),
             Self::Boolean {
@@ -5478,11 +5577,13 @@ impl KindDto {
                 merge_faces,
                 select_cut_edges,
                 weld,
+                hard_cut_edges,
             } => ObjectKind::Boolean(Boolean {
                 mode: mode.into(),
                 merge_faces,
                 select_cut_edges,
                 weld: weld.clamp(0.0, Boolean::MAX_WELD),
+                hard_cut_edges,
             }),
             Self::Loft {
                 subdivision_u,
@@ -5599,7 +5700,7 @@ impl KindDto {
                 let state = ComponentState {
                     selected: selected.into_counts(count, 0, 0, object, "selected")?,
                     hidden: hidden.into_counts(count, 0, 0, object, "hidden")?,
-                    seams: BitSet::new(),
+                    ..ComponentState::default()
                 };
                 ObjectKind::Spline {
                     spline: SplineHandle::new(spline),
@@ -5959,6 +6060,7 @@ mod tests {
         doc.scene.get_mut(cube).unwrap().data.tags = vec![Tag::Phong {
             angle_limit: false,
             angle: 0.3,
+            weighted: false,
         }];
         doc.scene.get_mut(sphere).unwrap().data.tags = vec![Tag::Protection {
             position: true,
@@ -5980,7 +6082,8 @@ mod tests {
             tags("Cube"),
             [Tag::Phong {
                 angle_limit: false,
-                angle: 0.3
+                angle: 0.3,
+                weighted: false,
             }]
         );
         assert_eq!(tags("Sphere"), doc.scene.get(sphere).unwrap().data.tags);

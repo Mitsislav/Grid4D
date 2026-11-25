@@ -463,7 +463,7 @@ impl EvaluatedScene {
             let mut drawable = drawable(&kind, data.display_color).map(|d| {
                 let material = own_material.filter(|_| !d.marker);
                 Drawable {
-                    shading: Shading::from_angle(data.tags.smoothing_angle()),
+                    shading: Shading::of(data.tags.smoothing()),
                     color: material.map_or(d.color, |m| m.color),
                     surface: material.map_or(d.surface, Surface::of),
                     ..d
@@ -476,10 +476,11 @@ impl EvaluatedScene {
             if let ObjectKind::Polygon { mesh, components } = &*kind {
                 polygons.insert(id, (mesh.clone(), components.clone()));
                 let hidden = &components.hidden().polygons;
-                let mesh = if hidden.is_empty() {
+                let hard = &components.state().hard;
+                let mesh = if hidden.is_empty() && hard.is_empty() {
                     mesh
                 } else {
-                    &shown_mesh(shown, id, mesh, hidden).mesh
+                    &shown_mesh(shown, id, mesh, hidden, hard).mesh
                 };
                 meshes.insert(mesh.id(), mesh.clone());
                 pick = PickShape::Mesh(mesh.id());
@@ -560,7 +561,7 @@ impl EvaluatedScene {
                 pick = PickShape::Mesh(mesh.id());
                 drawable = Some(Drawable {
                     key: MeshKey::Polygon(mesh.id()),
-                    shading: Shading::from_angle(data.tags.smoothing_angle()),
+                    shading: Shading::of(data.tags.smoothing()),
                     scale: Vec3::ONE,
                     color: own_material.map_or(data.display_color, |m| m.color),
                     surface: own_material.map_or_else(Surface::default, Surface::of),
@@ -598,7 +599,7 @@ impl EvaluatedScene {
                         let shown = material.or(cage_material).and_then(|m| materials.get(m));
                         drawable = Some(Drawable {
                             key: MeshKey::Polygon(mesh.id()),
-                            shading: Shading::from_angle(tags.smoothing_angle()),
+                            shading: Shading::of(tags.smoothing()),
                             scale: Vec3::ONE,
                             color: shown.map_or(result.colour, |m| m.color),
                             surface: shown.map_or_else(Surface::default, Surface::of),
@@ -1555,7 +1556,19 @@ fn generated_mesh<'a>(
             _ => (generator::build_all(inputs, &options), None),
         };
         let took = start.elapsed();
-        let mesh = MeshHandle::new(built.mesh);
+        // Hard edges (a Boolean's cut) split the shading: shown with their
+        // points doubled.
+        let mesh = if built.hard.is_empty() {
+            MeshHandle::new(built.mesh)
+        } else {
+            let topology = grid4d_geom::Topology::build(&built.mesh);
+            let wanted: std::collections::HashSet<[u32; 2]> =
+                built.hard.iter().map(|&[a, b]| [a.min(b), a.max(b)]).collect();
+            let edges: BitSet = (0..topology.edge_count())
+                .filter(|&e| wanted.contains(&topology.edges()[e]))
+                .collect();
+            MeshHandle::new(grid4d_geom::split_hard_edges(&built.mesh, &topology, &edges))
+        };
         let entry = generated.entry(id).or_insert_with(|| Generated {
             options,
             inputs: Vec::new(),
@@ -1586,25 +1599,47 @@ fn generated_mesh<'a>(
     Some(entry)
 }
 
-/// A polygon object's mesh without its hidden polygons.
+/// A polygon object's mesh as drawn: without its hidden polygons, its points
+/// doubled along its hard edges (so shading splits there).
 #[derive(Debug)]
 struct Shown {
     source: MeshId,
     hidden: BitSet,
+    hard: BitSet,
     mesh: MeshHandle,
 }
 
-/// The cached shown mesh of `id`, rebuilt if its mesh or hidden polygons changed.
-fn shown_mesh<'a>(shown: &'a mut HashMap<NodeId, Shown>, id: NodeId, mesh: &MeshHandle, hidden: &BitSet) -> &'a Shown {
-    let build = || Shown {
-        source: mesh.id(),
-        hidden: hidden.clone(),
-        mesh: MeshHandle::new(mesh.mesh().with_faces_where(|f| !hidden.contains(f))),
+/// The cached shown mesh of `id`, rebuilt if its mesh, hidden polygons or
+/// hard edges (by corner) changed.
+fn shown_mesh<'a>(
+    shown: &'a mut HashMap<NodeId, Shown>,
+    id: NodeId,
+    mesh: &MeshHandle,
+    hidden: &BitSet,
+    hard: &BitSet,
+) -> &'a Shown {
+    let build = || {
+        let split = if hard.is_empty() {
+            mesh.mesh().clone()
+        } else {
+            let edges = grid4d_geom::selection::edges_from_corners(hard, mesh.topology());
+            grid4d_geom::split_hard_edges(mesh.mesh(), mesh.topology(), &edges)
+        };
+        Shown {
+            source: mesh.id(),
+            hidden: hidden.clone(),
+            hard: hard.clone(),
+            mesh: MeshHandle::new(if hidden.is_empty() {
+                split
+            } else {
+                split.with_faces_where(|f| !hidden.contains(f))
+            }),
+        }
     };
     shown
         .entry(id)
         .and_modify(|entry| {
-            if entry.source != mesh.id() || entry.hidden != *hidden {
+            if entry.source != mesh.id() || entry.hidden != *hidden || entry.hard != *hard {
                 *entry = build();
             }
         })
@@ -1873,10 +1908,12 @@ mod tests {
         doc.scene.get_mut(cube).unwrap().data.tags = vec![Tag::Phong {
             angle_limit: true,
             angle: 0.0,
+            weighted: false,
         }];
         doc.scene.get_mut(sphere).unwrap().data.tags = vec![Tag::Phong {
             angle_limit: false,
             angle: 0.2,
+            weighted: false,
         }];
         eval.update(&doc.scene);
         assert_eq!(shading(&eval, cube), Shading::from_angle(0.0), "flat");
@@ -4238,5 +4275,71 @@ mod tests {
         let wanted: f64 = orders.iter().map(|o| (o.triangle_count() as f64 * 0.3).round()).sum();
         let got = result_of(&eval, reduce).mesh().face_count() as f64;
         assert!((got - wanted).abs() <= wanted * 0.02, "{got} of {wanted}");
+    }
+
+    #[test]
+    fn creases_reach_the_subdivision_surface_and_hard_edges_split_the_shown_mesh() {
+        let mut doc = Document::new("creases");
+        let sds = doc.scene.insert(Node::new(
+            "Subdivision Surface",
+            ObjectKindTag::SubdivisionSurface.default_kind(),
+        ));
+        let cube = grid4d_geom::primitives::cube(Vec3::splat(200.0), [1, 1, 1]);
+        let corners = cube.corner_count();
+        let mut state = grid4d_scene::ComponentState::default();
+        state
+            .creases
+            .extend((0..corners).map(|c| (u32::try_from(c).unwrap(), 100u8)));
+        let cage = doc
+            .scene
+            .insert_child(
+                sds,
+                Node::new(
+                    "Cage",
+                    ObjectKind::Polygon {
+                        mesh: MeshHandle::new(cube.clone()),
+                        components: Components::new(state),
+                    },
+                ),
+            )
+            .unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let smooth = result_of(&eval, sds);
+        let reach = smooth
+            .mesh()
+            .points()
+            .iter()
+            .map(|p| p.x + p.y + p.z)
+            .fold(f32::MIN, f32::max);
+        assert!(
+            (reach - 300.0).abs() < 1e-3,
+            "fully creased: the corners stay ({reach})"
+        );
+        // A polygon object with a loop of hard edges is drawn split there.
+        let topology = grid4d_geom::Topology::build(&cube);
+        let mut hard = grid4d_scene::ComponentState::default();
+        hard.hard.extend(cube.corner_range(0));
+        let _ = topology;
+        let object = doc.scene.insert(Node::new(
+            "Hard",
+            ObjectKind::Polygon {
+                mesh: MeshHandle::new(cube.clone()),
+                components: Components::new(hard),
+            },
+        ));
+        eval.update(&doc.scene);
+        let shown = result_of(&eval, object);
+        assert_eq!(
+            shown.mesh().point_count(),
+            cube.point_count() + 4,
+            "points doubled along the loop"
+        );
+        assert_eq!(
+            eval.polygon(object).unwrap().1.mesh().point_count(),
+            cube.point_count(),
+            "edited as it is"
+        );
+        let _ = cage;
     }
 }

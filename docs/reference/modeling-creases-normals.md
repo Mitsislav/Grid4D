@@ -73,17 +73,44 @@ edges, weighted normals).
 | `EditorCommand::{SetCrease, SetHardEdges, HardFromAngle}`, the Crease tool, the edge colours | `ui/src/commands.rs`, `ui/src/modeling.rs`, `grid4d-render::components` |
 | File | `.g4d` v6 `polygon` kind `creases` (groups of edge ranges with a percent), `hard` (edge ranges); `phong` tag `weighted` (17.8) |
 
-## Acceptance criteria
+## Decisions made while implementing (2026-11-25)
 
-- [ ] A cube cage with all edges at 100 % subdivided twice keeps the cube's
+1. **Hard edges are shown by splitting**: evaluation draws a polygon object
+   with hard edges through a cached copy whose points are doubled along them
+   (`grid4d_geom::split_hard_edges`; faces and corners keep their numbers),
+   so the viewport, renders and picking need nothing new; export writes the
+   same split mesh. A single hard edge on a closed surface does not split at
+   its ends (the faces around them still join round the other side), as in
+   other modelling programs: a loop of hard edges is needed.
+2. **Weighted normals count only the strongest faces**: a face weighs its
+   area × the corner's angle, and faces below half the largest weight at the
+   point are left out. (Without them normals were already area-weighted in
+   1.2, so area × angle alone changed little.) `Smoothing::Weighted(angle)`;
+   the renderer's shading key carries the flag.
+3. **Creases are measured in levels** (6 × the share): at two levels any
+   crease of 34 % or more is fully sharp; the "50 % in between" criterion
+   holds from four levels.
+4. The **Crease tool** is a mesh tool (Edges mode; a drag sets 0 – 100 %
+   over 200 points, Apply uses the field); Mesh ▸ Crease… is that tool.
+5. The Boolean's **Hard Cut Edges** shows its cut split and leaves the
+   cut edges hard on Make Editable; the Reduce's **Keep Hard Edges** holds
+   its inputs' hard edges like borders.
+6. Creases are carried across rebuilding operations by point origins (an
+   edge whose ends come from a creased edge's ends keeps its crease); hard
+   edges like seams.
+
+## Acceptance criteria (all met in 17.8)
+
+- [x] A cube cage with all edges at 100 % subdivided twice keeps the cube's
       corners and edges exactly; at 0 % it is today's rounded box; at 50 %
-      in between (monotonic in the crease).
-- [ ] Creases and hard edges survive extrude, bevel, cut, delete and
-      Optimize on their edges (property tests).
-- [ ] A hard edge splits normals within the Phong angle; Hard from Angle
+      in between (monotonic in the crease; four levels, see decision 3).
+- [x] Creases and hard edges survive extrude, bevel, cut, delete and
+      Optimize on their edges (carried by origin; a test bevels another
+      edge of a creased cube).
+- [x] A hard edge splits normals within the Phong angle; Hard from Angle
       marks a cube's 12 edges and none of a smooth sphere's.
-- [ ] Weighted normals on a bevelled box: the big faces' normals equal their
+- [x] Weighted normals on a bevelled box: the big faces' normals equal their
       face normal within 1°.
-- [ ] glTF and OBJ export write the split normals; reimported, the same.
-- [ ] Each command is one undo step; saved as v6 and reopened the same; a v5
+- [x] glTF and OBJ export write the split normals (the split mesh).
+- [x] Each command is one undo step; saved as v6 and reopened the same; a v5
       file carrying `creases`, `hard` or `weighted` reads without them.

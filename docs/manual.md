@@ -1506,6 +1506,16 @@ Select the generator and open **Attribute Manager ▸ Object**:
 | Linear Pre-Subdivision | Splits the cage this many times *without* smoothing before the smoothing levels, which keeps the result closer to the cage. |
 | Boundary Interpolation | How open borders (the edge of a plane) are smoothed. **Edge and Corner** keeps a border's corners in place; **Edge** rounds them off as well. |
 
+**Creases** keep chosen edges of the cage sharp without extra edge loops.
+Select the cage's edges in Edges mode and pick **Mesh ▸ Crease**: drag left
+or right in the view to set their crease (from 0 %, round as usual, to 100 %,
+sharp at every level), or type it in the tool's **Crease** field and click
+**Apply**. Creased edges are tinted in Edges mode. A crease below 100 % stays
+sharp for the first levels and rounds off after them (each 1/6 of the crease
+is one level), so a softer crease makes a softer edge.
+
+![A box under a Subdivision Surface, its top edges creased to 100 %](images/manual/crease.png)
+
 ### 12.4 Switching it off and baking it
 
 - **Q** switches the generator off and on, and so does its check mark in the Object
@@ -2361,7 +2371,16 @@ Controls how smooth the object looks.
 - **Angle Limit** on: edges between polygons that meet at more than the **Phong
   Angle** stay hard, flatter ones are shaded smooth. 0° gives faceted, flat shading.
 - **Angle Limit** off: everything connected is shaded smooth.
-- The setting also decides the normals written by glTF and OBJ export.
+- **Weighted Normals**: where a large flat polygon meets narrow ones (a
+  bevelled box), the large one stays perfectly flat and only the narrow ones
+  bend the shading — clean shading on low-poly hard-surface models.
+- **Hard edges** split the shading even below the Phong Angle. Select edges
+  and use **Mesh ▸ Normals ▸ Make Hard** (**Make Soft** undoes it); **Hard
+  from Angle** marks every edge sharper than the Phong Angle, **Clear Hard
+  Edges** removes them all. Hard edges show in their own colour in Edges
+  mode. A Boolean's **Hard Cut Edges** marks the edges along its cut.
+- The setting (and the hard edges) also decide the normals written by glTF
+  and OBJ export.
 - Objects without a Phong tag are smoothed up to 80°. (Cinema 4D instead shades
   objects without a Phong tag flat.)
 
