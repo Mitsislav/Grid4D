@@ -348,6 +348,36 @@ corners; and no re-insertion of every edge of the kept point after a
 collapse — costs only grow, so an entry is checked when it comes out and
 goes back in only if its cost has risen (5 s → 3.8 s).
 
+### Step 17.10: Phase 17's budget re-measured
+
+The same example on 2026-11-26 (release build, the reference machine;
+times move by up to a third between runs while the machine is busy):
+
+| Live object | Case | Target | 1.3 |
+|-------------|------|--------|-----|
+| Boolean | a bevelled box (1 728 triangles) minus two cylinders | ≤ 8 ms a rebuild | 10.9 ms: not met, but under R9's 33 ms, so it rebuilds live while a cutter is dragged |
+| Boolean | two spheres of 50 000 triangles | ≤ 150 ms a rebuild | 160 ms: close; kept during a drag, rebuilt on release (R9) |
+| Symmetry | a half of 100 000 points | ≤ 10 ms a rebuild | 5.1 ms: met |
+| Reduce | a million triangles: the collapse order / a change of Keep | ≤ 5 s once / ≤ 100 ms | 3.5 s / 30 ms: met |
+| Every one | idle frames | no rebuild, no allocation | met (the steady-frame test; generators rebuild only when their inputs change) |
+
+The deformers of 17.9, each under a sphere of 32 768 polygons whose
+deformer's Strength changes every frame (what dragging the value costs):
+
+| Deformer | A frame |
+|----------|---------|
+| Wrap | 1.4 – 2.1 ms |
+| Displace (noise, 3 octaves) | 3.8 – 5.1 ms |
+| Smooth (10 passes, Keep Volume) | 9.3 – 12 ms |
+| Explode (polygons split) | 7.0 – 9.3 ms |
+| Project to Surface (Nearest Point, onto a 2 cm smaller sphere of 18 000 triangles) | 24 – 28 ms |
+
+Project to Surface first took 180 ms on a sphere 20 cm away: the
+nearest-point search visited the hierarchy in a fixed order and allocated a
+stack per point. It now visits the nearer child first, with a fixed stack
+(65 ms at 20 cm; 24 ms at 2 cm, where decals and shrink-wrapped shells
+are). The search's cost grows with how far the points travel.
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

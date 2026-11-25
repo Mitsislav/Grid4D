@@ -62,6 +62,9 @@ deformers).
   picture's brightness; **Project to Surface** pulls an object onto
   another; **Smooth** evens out points, keeping volume and borders if
   asked; **Explode** flings polygons apart as its Strength rises.
+- **Fixes** — an empty object link (an Instance's reference, a deformer's
+  spline or target) reads "None" in the chosen language; the Boolean's
+  warning wraps instead of running out of the Attribute Manager.
 - **Files** — documents are saved in `.g4d` format version 6, which holds
   the Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce, creases,
   hard edges, weighted normals and the new deformers; Grid4D 1.3's other features will add to it until 1.3 is

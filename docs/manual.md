@@ -1122,6 +1122,20 @@ be animated yet. **Make Editable** bakes the shape at the current frame.
 Modelling works on **polygon objects**: meshes of points, edges and polygons that
 you shape directly.
 
+Where to find what, for a typical hard-surface model:
+
+| To … | Use | See |
+|------|-----|-----|
+| shape points, edges and polygons, softly or exactly | the move, scale and rotate tools with **Soft Selection**, **Slide** | §11.4, §11.8 |
+| add detail | **Extrude**, **Inset**, **Bevel** (with a **Custom** profile), **Loop/Path Cut**, **Plane Cut**, the **Polygon Pen** | §11.5 – §11.10 |
+| repeat or mirror part of a mesh, or run it along a path | **Mirror**, **Array**, **Extrude along Spline** | §11.11 |
+| cut solids into each other, live | the **Boolean** | §12.5 |
+| model half and see the whole | the **Symmetry** | §12.6 |
+| smooth with sharp corners | the **Subdivision Surface** with **creases** | §12.3 |
+| make a heavy mesh lighter | the **Reduce** | §12.7 |
+| clean shading on flat panels | **hard edges** and **Weighted Normals** (Phong tag) | §18.1 |
+| bend, wrap, displace or project a whole object | the **deformers** | §14 |
+
 ### 11.1 Make Editable
 
 Select a primitive and press **C** (or click the top button of the mode palette, or

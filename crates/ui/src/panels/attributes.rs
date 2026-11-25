@@ -2099,7 +2099,7 @@ fn object_row(ui: &mut Ui, label: &str, value: &mut Option<NodeId>, scene: &Scen
     attr_label(ui, label, LABEL_WIDTH);
     let name = value
         .and_then(|id| scene.get(id))
-        .map_or(key("None"), |n| n.data.name.as_str());
+        .map_or(tr("None"), |n| n.data.name.as_str());
     egui::ComboBox::from_id_salt(("grid4d.attr.tag.link", label))
         .selected_text(name)
         .width(FIELD_WIDTH + 40.0)
@@ -3332,7 +3332,11 @@ fn boolean_rows(ui: &mut Ui, boolean: &mut Boolean, note: Option<GeneratorNote>)
             p().warning,
         ),
     };
-    ui.label(RichText::new(text).color(colour));
+    // Wrapped like the deformers' hints: a long note must not widen the column.
+    ui.vertical(|ui| {
+        ui.set_max_width(FIELD_WIDTH * 1.5);
+        ui.add(egui::Label::new(RichText::new(text).color(colour)).wrap());
+    });
     ui.end_row();
 }
 

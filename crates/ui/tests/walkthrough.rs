@@ -337,6 +337,76 @@ fn pass(dir: &Path, language: Language, theme: ColorTheme) {
     }
     h.state_mut().editor.show_render_settings = false;
     h.run_steps(2);
+
+    // Modelling 2 (Grid4D 1.3): the Object pages of Phase 17's objects and
+    // deformers, then its tools' pages on the editable sphere.
+    use grid4d_scene::ObjectKindTag as K;
+    for (k, kind) in [
+        K::Boolean,
+        K::Symmetry,
+        K::Join,
+        K::SplineBoolean,
+        K::Reduce,
+        K::Wrap,
+        K::FollowSpline,
+        K::Displace,
+        K::ProjectToSurface,
+        K::Smooth,
+        K::Explode,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = h
+            .state_mut()
+            .doc
+            .scene
+            .insert(grid4d_scene::Node::new(kind.label(), kind.default_kind()));
+        h.state_mut().editor.selection.set_single(id);
+        h.state_mut().editor.panes.show = Some(Pane::Attributes);
+        h.run_steps(3);
+        let tab = h
+            .get_all_by_label(grid4d_ui::i18n::tr("Object"))
+            .map(|node| node.rect())
+            .filter(|rect| rect.top() > SIZE[1] * 0.5)
+            .min_by(|a, b| a.top().total_cmp(&b.top()));
+        if let Some(tab) = tab {
+            click(&mut h, tab.center());
+        }
+        save(
+            &mut h,
+            dir,
+            &format!(
+                "{tag}-10-object-{k:02}-{}",
+                kind.label().to_lowercase().replace(' ', "-")
+            ),
+        );
+    }
+    let sphere = named(h.state(), "Sphere");
+    for (k, (tool, mode)) in [
+        (grid4d_ui::Tool::Bevel, grid4d_ui::EditMode::Edges),
+        (grid4d_ui::Tool::Slide, grid4d_ui::EditMode::Edges),
+        (grid4d_ui::Tool::Crease, grid4d_ui::EditMode::Edges),
+        (grid4d_ui::Tool::PlaneCut, grid4d_ui::EditMode::Polygons),
+        (grid4d_ui::Tool::ExtrudeAlongSpline, grid4d_ui::EditMode::Polygons),
+        (grid4d_ui::Tool::Mirror, grid4d_ui::EditMode::Polygons),
+        (grid4d_ui::Tool::Array, grid4d_ui::EditMode::Polygons),
+        (grid4d_ui::Tool::Move, grid4d_ui::EditMode::Points),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let shell = h.state_mut();
+        shell.editor.selection.set_single(sphere);
+        (shell.editor.tool, shell.editor.mode) = (tool, mode);
+        shell.editor.modeling_settings.bevel.shape = grid4d_geom::ops::BevelShape::Custom;
+        shell.editor.panes.show = Some(Pane::Attributes);
+        h.run_steps(3);
+        save(&mut h, dir, &format!("{tag}-11-tool-{k}"));
+    }
+    let shell = h.state_mut();
+    (shell.editor.tool, shell.editor.mode) = (grid4d_ui::Tool::Move, grid4d_ui::EditMode::Model);
+    h.run_steps(2);
 }
 
 #[test]

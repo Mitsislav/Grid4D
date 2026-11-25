@@ -1923,5 +1923,6 @@ creases, hard edges and weighted normals, 17.8 (semi-sharp Catmull-Clark,
 hard edges drawn as a split mesh, the strongest faces' normals), and the
 deformers, 17.9 (Wrap, Follow Spline, Displace with pictures handed to
 evaluation, Project to Surface, Smooth, Explode; the stack hands deformers
-whole meshes; Point Offsets moved to 1.4, R5). Next: the manual, the
-acceptance run, the budget and release 1.3 (17.10).
+whole meshes; Point Offsets moved to 1.4, R5), and the acceptance run,
+the walkthrough and the budget re-measured, 17.10a. Next: release 1.3.0
+prepared, `.g4d` v6 frozen (17.10b).

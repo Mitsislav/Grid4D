@@ -26,7 +26,10 @@
 //!   scan (once per change of the input) and a replay to 10 % (a change of
 //!   Keep);
 //! * **the Spline Boolean** (step 17.5): a hundred overlapping circles of 128
-//!   points united.
+//!   points united;
+//! * **the deformers** (step 17.9): a sphere of about 65 000 triangles under
+//!   each new deformer, its strength changed every frame and the scene
+//!   evaluated (the cost of dragging a deformer's value).
 
 use std::{
     error::Error,
@@ -360,6 +363,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         "  the Spline Boolean: a hundred overlapping circles united ({points} points): {}",
         ms(time)
     );
+    println!("Deformers (a sphere of 32 768 polygons, strength changed per frame)");
+    for (name, time) in deformer_cases()? {
+        println!("  {name:<20} {} a frame", ms(time));
+    }
     println!("Boolean (Subtract)");
     let options = BooleanOptions::default();
     for (name, a, b, runs) in boolean_cases()? {
@@ -390,4 +397,70 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
+}
+
+/// Each new deformer under a sphere of 32 768 polygons: the evaluation of a
+/// frame after its strength changed (step 17.9). Project to Surface pulls the
+/// sphere onto one 2 cm smaller (a nearest-point search costs more the
+/// farther the points travel).
+fn deformer_cases() -> Result<Vec<(&'static str, Duration)>, Box<dyn Error>> {
+    use grid4d_geom::deformers as d;
+    let cases = [
+        ("Wrap", ObjectKind::Wrap(d::Wrap::default())),
+        (
+            "Displace (noise)",
+            ObjectKind::Displace {
+                displace: d::Displace::default(),
+                texture: None,
+            },
+        ),
+        (
+            "Project to Surface",
+            ObjectKind::ProjectToSurface {
+                project: d::ProjectToSurface::default(),
+                target: None,
+            },
+        ),
+        ("Smooth (10 passes)", ObjectKind::Smooth(d::Smooth::default())),
+        (
+            "Explode",
+            ObjectKind::Explode(d::Explode {
+                strength: 0.5,
+                ..d::Explode::default()
+            }),
+        ),
+    ];
+    let mut times = Vec::new();
+    for (name, mut kind) in cases {
+        let mut doc = Document::new("deformer");
+        let sphere = doc
+            .scene
+            .insert(Node::new("Sphere", polygon(primitives::sphere(100.0, 256))));
+        if let ObjectKind::ProjectToSurface { target, .. } = &mut kind {
+            let ball = Node::new("Target", polygon(primitives::sphere(98.0, 96)));
+            *target = Some(doc.scene.insert(ball));
+        }
+        let deformer = doc.scene.insert_child(sphere, Node::new(name, kind))?;
+        let mut evaluated = EvaluatedScene::new();
+        evaluated.update(&doc.scene);
+        let mut step = 0u16;
+        let time = median(9, || {
+            step += 1;
+            let strength = 0.5 + f32::from(step % 10) * 0.05;
+            if let Some(node) = doc.scene.get_mut(deformer) {
+                match &mut node.data.kind {
+                    ObjectKind::Wrap(d) => d.strength = strength,
+                    ObjectKind::Displace { displace, .. } => displace.strength = strength,
+                    ObjectKind::ProjectToSurface { project, .. } => project.strength = strength,
+                    ObjectKind::Smooth(d) => d.strength = strength,
+                    ObjectKind::Explode(d) => d.strength = strength,
+                    _ => {}
+                }
+            }
+            evaluated.update(&doc.scene);
+            black_box(evaluated.deformed(sphere));
+        });
+        times.push((name, time));
+    }
+    Ok(times)
 }

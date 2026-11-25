@@ -193,21 +193,44 @@ impl Bvh {
     #[must_use]
     pub fn nearest(&self, points: &[Vec3], query: Vec3) -> Option<(Vec3, u32)> {
         let mut best: Option<(f32, Vec3, u32)> = None;
-        let mut stack: Vec<usize> = Vec::with_capacity(64);
         if self.nodes.is_empty() {
             return None;
         }
-        stack.push(0);
+        // The squared distance from the query to a node's box.
+        let gap = |n: usize| {
+            let node = &self.nodes[n];
+            (node.min - query)
+                .max(query - node.max)
+                .max(Vec3::ZERO)
+                .length_squared()
+        };
+        // A fixed stack (see `MAX_DEPTH`), the nearer child on top, so a
+        // good answer comes early and prunes the rest.
+        let mut stack = [(0usize, 0.0f32); MAX_DEPTH];
+        let mut len = 1;
+        stack[0] = (0, gap(0));
         let at = |p: u32| points.get(us(p)).copied().unwrap_or(Vec3::NAN);
-        while let Some(n) = stack.pop() {
-            let node = self.nodes[n];
-            let outside = (node.min - query).max(query - node.max).max(Vec3::ZERO);
-            if best.is_some_and(|(d, _, _)| outside.length_squared() > d) {
+        while len > 0 {
+            len -= 1;
+            let (n, distance) = stack[len];
+            if best.is_some_and(|(d, _, _)| distance > d) {
                 continue;
             }
+            let node = self.nodes[n];
             if node.count == 0 {
-                stack.push(us(node.first));
-                stack.push(us(node.first) + 1);
+                let (l, r) = (us(node.first), us(node.first) + 1);
+                let (gl, gr) = (gap(l), gap(r));
+                let (near, far) = if gl <= gr {
+                    ((l, gl), (r, gr))
+                } else {
+                    ((r, gr), (l, gl))
+                };
+                for item in [far, near] {
+                    if len < stack.len() && best.is_none_or(|(d, _, _)| item.1 <= d) {
+                        stack[len] = item;
+                        len += 1;
+                    }
+                }
                 continue;
             }
             let start = us(node.first);
