@@ -20,9 +20,10 @@ use std::{
 };
 
 use grid4d_eval::Ambient;
+use grid4d_geom::deformers::{DisplaceSource, GreyPicture};
 use grid4d_io::{Pixels, TextureImage};
 use grid4d_raytrace::{Picture, Pictures, Texels};
-use grid4d_scene::{ColorSpace, Texture, TextureId, TextureSource, Textures};
+use grid4d_scene::{ColorSpace, ObjectKind, Scene, Texture, TextureId, TextureSource, Textures};
 
 /// How often a linked file is checked for changes.
 const CHECK_EVERY: Duration = Duration::from_secs(1);
@@ -513,5 +514,127 @@ mod tests {
         cache.update(&textures);
         assert!(!cache.entries.contains_key(&logo));
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// The widest grey picture handed to evaluation (a Displace's picture is
+/// read per point, so a smaller level suffices).
+const GREY_WIDTH: u32 = 1024;
+
+/// The textures a Displace deformer of `scene` reads, each once.
+fn displaced_textures(scene: &Scene, out: &mut Vec<TextureId>) {
+    out.clear();
+    for (_, node) in scene.iter() {
+        if let ObjectKind::Displace {
+            displace,
+            texture: Some(texture),
+        } = &node.data.kind
+            && displace.source == DisplaceSource::Texture
+            && !out.contains(texture)
+        {
+            out.push(*texture);
+        }
+    }
+}
+
+/// `picture`'s brightness (luminance), at most [`GREY_WIDTH`] wide.
+fn grey_of(picture: &Picture) -> GreyPicture {
+    let (width, height) = picture.size();
+    let scale = (f64::from(GREY_WIDTH) / f64::from(width.max(1))).min(1.0);
+    let to = |side: u32| {
+        let scaled = (f64::from(side) * scale).round().max(1.0);
+        // At most the picture's own side, which fits in a u32.
+        u32::try_from(scaled as u64).unwrap_or(side).clamp(1, side.max(1))
+    };
+    let (w, h) = (to(width), to(height));
+    let mut values = Vec::with_capacity(usize::try_from(u64::from(w) * u64::from(h)).unwrap_or(0));
+    for y in 0..h {
+        for x in 0..w {
+            let uv = glam::Vec2::new((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+            let texel = picture.sample(uv);
+            values.push(0.2126 * texel.x + 0.7152 * texel.y + 0.0722 * texel.z);
+        }
+    }
+    GreyPicture {
+        width: w,
+        height: h,
+        values: values.into(),
+    }
+}
+
+/// The grey pictures `scene`'s Displace deformers read, made from the
+/// texture `pictures` (`made` keeps conversions by picture, so an unchanged
+/// picture is not converted again).
+pub(crate) fn grey_pictures(
+    scene: &Scene,
+    pictures: &Pictures,
+    made: &mut HashMap<TextureId, (Arc<Picture>, Arc<GreyPicture>)>,
+) -> grid4d_eval::Pictures {
+    let mut used = Vec::new();
+    displaced_textures(scene, &mut used);
+    let mut out = grid4d_eval::Pictures::default();
+    for id in used {
+        let Some(picture) = pictures.get(id) else { continue };
+        let grey = match made.get(&id) {
+            Some((source, grey)) if Arc::ptr_eq(source, picture) => Arc::clone(grey),
+            _ => {
+                let grey = Arc::new(grey_of(picture));
+                made.insert(id, (Arc::clone(picture), Arc::clone(&grey)));
+                grey
+            }
+        };
+        out.insert(id, grey);
+    }
+    out
+}
+
+/// The grey pictures the editor's evaluations hand Displace deformers
+/// (editor state): brought up to date by [`update`](Self::update) once a
+/// frame, which looks at the document again only when it changed.
+#[derive(Debug, Default)]
+pub struct GreyPictures {
+    revision: Option<u64>,
+    used: Vec<TextureId>,
+    versions: Vec<Option<u64>>,
+    made: HashMap<TextureId, (Arc<Picture>, Arc<GreyPicture>)>,
+    current: grid4d_eval::Pictures,
+}
+
+impl GreyPictures {
+    /// Keeps the pictures in step with `scene` and the decoded `cache`.
+    pub fn update(&mut self, scene: &Scene, cache: &TextureCache) {
+        let revision = scene.revision();
+        let mut changed = false;
+        if self.revision != Some(revision) {
+            self.revision = Some(revision);
+            let before = self.used.clone();
+            displaced_textures(scene, &mut self.used);
+            changed = before != self.used;
+        }
+        if self.used.is_empty() {
+            if !self.current.is_empty() {
+                self.current = grid4d_eval::Pictures::default();
+                self.made.clear();
+            }
+            return;
+        }
+        let versions_differ = self.versions.len() != self.used.len()
+            || self
+                .used
+                .iter()
+                .zip(&self.versions)
+                .any(|(&id, &v)| cache.version(id) != v);
+        if !changed && !versions_differ {
+            return;
+        }
+        self.versions = self.used.iter().map(|&id| cache.version(id)).collect();
+        self.current = grey_pictures(scene, &cache.pictures(scene.textures()), &mut self.made);
+        self.made.retain(|id, _| self.used.contains(id));
+    }
+
+    /// The pictures, by texture.
+    #[must_use]
+    pub const fn pictures(&self) -> &grid4d_eval::Pictures {
+        &self.current
     }
 }

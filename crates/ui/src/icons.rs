@@ -648,6 +648,117 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
             c.fill_with(&outline, soft);
             c.polyline(&outline, true);
         }
+        ObjectKindTag::Wrap => {
+            // A band laid round a drum.
+            c.ellipse((0.5, 0.2), (0.32, 0.1));
+            c.line((0.18, 0.2), (0.18, 0.8));
+            c.line((0.82, 0.2), (0.82, 0.8));
+            let around = |y: f32| -> Vec<P> {
+                (0..=12)
+                    .map(|i| {
+                        let a = PI * i as f32 / 12.0;
+                        (0.5 + 0.32 * a.cos(), y + 0.1 * a.sin())
+                    })
+                    .collect()
+            };
+            let (top, bottom) = (around(0.42), around(0.6));
+            let mut band = top.clone();
+            band.extend(bottom.iter().rev());
+            c.fill_with(&band, soft);
+            c.polyline(&top, false);
+            c.polyline(&bottom, false);
+            c.polyline(&around(0.8), false);
+        }
+        ObjectKindTag::FollowSpline => {
+            // A path with a block bent along it.
+            let path: Vec<P> = (0..=16)
+                .map(|i| {
+                    let t = i as f32 / 16.0;
+                    (0.1 + 0.8 * t, 0.62 - 0.3 * (PI * t).sin())
+                })
+                .collect();
+            let lifted: Vec<P> = path[4..13].iter().map(|&(x, y)| (x, y - 0.14)).collect();
+            let mut block = path[4..13].to_vec();
+            block.extend(lifted.iter().rev());
+            c.fill_with(&block, soft);
+            c.polyline(&block, true);
+            c.polyline(&path, false);
+        }
+        ObjectKindTag::Displace => {
+            // A surface pushed into bumps.
+            let ground: Vec<P> = (0..=20)
+                .map(|i| {
+                    let t = i as f32 / 20.0;
+                    (0.1 + 0.8 * t, 0.62 - 0.16 * (TAU * 1.5 * t).sin().max(0.0))
+                })
+                .collect();
+            let mut area = ground.clone();
+            area.extend([(0.9, 0.86), (0.1, 0.86)]);
+            c.fill_with(&area, soft);
+            c.polyline(&ground, false);
+            c.line((0.1, 0.86), (0.9, 0.86));
+            c.line((0.3, 0.3), (0.3, 0.16));
+            c.line((0.3, 0.16), (0.25, 0.22));
+            c.line((0.3, 0.16), (0.35, 0.22));
+        }
+        ObjectKindTag::ProjectToSurface => {
+            // Points dropped onto a curved surface.
+            let surface: Vec<P> = (0..=16)
+                .map(|i| {
+                    let a = PI * (0.15 + 0.7 * i as f32 / 16.0);
+                    (0.5 - 0.46 * a.cos(), 1.2 - 0.46 * a.sin())
+                })
+                .collect();
+            let mut shell = surface.clone();
+            shell.extend([(0.9, 0.92), (0.1, 0.92)]);
+            c.fill_with(&shell, soft);
+            c.polyline(&surface, false);
+            for x in [0.3, 0.5, 0.7] {
+                c.disc((x, 0.12), 0.05);
+                c.line((x, 0.2), (x, 0.6));
+            }
+        }
+        ObjectKindTag::Smooth => {
+            // A jagged line over the smooth one it becomes.
+            c.polyline(
+                &[
+                    (0.1, 0.38),
+                    (0.24, 0.2),
+                    (0.36, 0.42),
+                    (0.5, 0.16),
+                    (0.64, 0.4),
+                    (0.76, 0.18),
+                    (0.9, 0.36),
+                ],
+                false,
+            );
+            let smooth: Vec<P> = (0..=16)
+                .map(|i| {
+                    let t = i as f32 / 16.0;
+                    (0.1 + 0.8 * t, 0.72 - 0.08 * (TAU * t).sin())
+                })
+                .collect();
+            let mut area = smooth.clone();
+            area.extend([(0.9, 0.9), (0.1, 0.9)]);
+            c.fill_with(&area, soft);
+            c.polyline(&smooth, false);
+        }
+        ObjectKindTag::Explode => {
+            // Pieces flying out from a centre.
+            for i in 0..6 {
+                let a = TAU * i as f32 / 6.0 + 0.3;
+                let (s, co) = a.sin_cos();
+                let at = (0.5 + co * 0.3, 0.5 + s * 0.3);
+                let piece = [
+                    (at.0 + co * 0.1, at.1 + s * 0.1),
+                    (at.0 - s * 0.07, at.1 + co * 0.07),
+                    (at.0 + s * 0.07, at.1 - co * 0.07),
+                ];
+                c.fill_with(&piece, soft);
+                c.polyline(&piece, true);
+                c.line((0.5 + co * 0.08, 0.5 + s * 0.08), (0.5 + co * 0.17, 0.5 + s * 0.17));
+            }
+        }
         ObjectKindTag::Ffd => {
             // A 3 × 3 lattice with one point pulled out.
             let at = |i: usize, j: usize| -> P {

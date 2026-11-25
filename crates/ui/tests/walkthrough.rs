@@ -887,6 +887,193 @@ fn crease_picture() {
     save(&mut h, &dir, "crease");
 }
 
+/// The manual's picture of the six deformers of step 17.9: a plane wrapped
+/// round a cylinder, a bar laid along a circle, a displaced plane, a cube
+/// pulled towards a sphere and an exploding sphere, the Displace selected:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored deformers_2_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn deformers_2_picture() {
+    use glam::Vec3;
+    use grid4d_geom::deformers as d;
+    use grid4d_scene::{Node, ObjectKind, ObjectKindTag};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::new("Deformers");
+    let at = |mut node: Node, x: f32| {
+        node.data.transform.position = Vec3::new(x, 0.0, 0.0);
+        node
+    };
+    // Wrap: a plane rolled into a tube (the deformer turned so its X and Y
+    // lie in the plane).
+    let sheet = doc.scene.insert(at(
+        Node::new(
+            "Sheet",
+            ObjectKind::Plane {
+                width: 300.0,
+                depth: 150.0,
+                width_segments: 40,
+                depth_segments: 6,
+            },
+        ),
+        -520.0,
+    ));
+    let mut wrap = Node::new(
+        "Wrap",
+        ObjectKind::Wrap(d::Wrap {
+            width: 300.0,
+            height: 150.0,
+            radius: 300.0 / std::f32::consts::TAU,
+            start: -2.6,
+            end: 2.6,
+            ..d::Wrap::default()
+        }),
+    );
+    wrap.data.transform.rotation.y = std::f32::consts::FRAC_PI_2;
+    doc.scene.insert_child(sheet, wrap).unwrap();
+    // Follow Spline: a bar bent round a circle.
+    let mut circle = Node::new("Track", ObjectKindTag::Circle.default_kind());
+    if let ObjectKind::SplinePrimitive(primitive) = &mut circle.data.kind
+        && let grid4d_geom::spline::SplineShape::Circle { radius, .. } = &mut primitive.shape
+    {
+        *radius = 110.0;
+    }
+    let circle = doc.scene.insert(at(circle, -260.0));
+    let bar = doc.scene.insert(at(
+        Node::new(
+            "Bar",
+            ObjectKind::Cube {
+                size: Vec3::new(40.0, 400.0, 40.0),
+                segments: [1, 40, 1],
+            },
+        ),
+        -260.0,
+    ));
+    doc.scene
+        .insert_child(
+            bar,
+            Node::new(
+                "Follow Spline",
+                ObjectKind::FollowSpline {
+                    follow: d::FollowSpline::default(),
+                    spline: Some(circle),
+                },
+            ),
+        )
+        .unwrap();
+    // Displace: noise on a fine plane.
+    let ground = doc.scene.insert(at(
+        Node::new(
+            "Ground",
+            ObjectKind::Plane {
+                width: 250.0,
+                depth: 250.0,
+                width_segments: 60,
+                depth_segments: 60,
+            },
+        ),
+        0.0,
+    ));
+    let displace = doc
+        .scene
+        .insert_child(
+            ground,
+            Node::new(
+                "Displace",
+                ObjectKind::Displace {
+                    displace: d::Displace {
+                        noise_scale: 40.0,
+                        height: 60.0,
+                        ..d::Displace::default()
+                    },
+                    texture: None,
+                },
+            ),
+        )
+        .unwrap();
+    // Project to Surface: a cube pulled most of the way onto a ball.
+    let mut ball = at(
+        Node::new(
+            "Ball",
+            ObjectKind::Sphere {
+                radius: 90.0,
+                segments: 32,
+            },
+        ),
+        260.0,
+    );
+    ball.data.visible_in_editor = false;
+    let ball = doc.scene.insert(ball);
+    let block = doc.scene.insert(at(
+        Node::new(
+            "Block",
+            ObjectKind::Cube {
+                size: Vec3::splat(160.0),
+                segments: [8, 8, 8],
+            },
+        ),
+        260.0,
+    ));
+    doc.scene
+        .insert_child(
+            block,
+            Node::new(
+                "Project to Surface",
+                ObjectKind::ProjectToSurface {
+                    project: d::ProjectToSurface {
+                        strength: 0.75,
+                        ..d::ProjectToSurface::default()
+                    },
+                    target: Some(ball),
+                },
+            ),
+        )
+        .unwrap();
+    // Explode: a sphere a third of the way gone.
+    let globe = doc.scene.insert(at(
+        Node::new(
+            "Globe",
+            ObjectKind::Sphere {
+                radius: 90.0,
+                segments: 16,
+            },
+        ),
+        520.0,
+    ));
+    doc.scene
+        .insert_child(
+            globe,
+            Node::new(
+                "Explode",
+                ObjectKind::Explode(d::Explode {
+                    strength: 0.3,
+                    distance: 220.0,
+                    ..d::Explode::default()
+                }),
+            ),
+        )
+        .unwrap();
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    h.state_mut().editor.selection.set_single(displace);
+    h.run_steps(2);
+    h.state_mut().editor.commands.push(grid4d_ui::EditorCommand::FrameScene);
+    h.run_steps(4);
+    // The Attribute Manager's Object tab: the Displace's own settings.
+    let tab = h
+        .get_all_by_label("Object")
+        .map(|node| node.rect())
+        .filter(|rect| rect.top() > SIZE[1] * 0.5)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    click(&mut h, tab.center());
+    h.run_steps(2);
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "deformers-2");
+}
+
 /// The manual's picture of the render region: the demo scene with a region
 /// over part of the view, rendered there by the Render View:
 ///

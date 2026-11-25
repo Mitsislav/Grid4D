@@ -149,7 +149,9 @@ pub fn remap_objects(data: &mut NodeData, map: impl Fn(NodeId) -> Option<NodeId>
             linking.objects.retain_mut(|id| map(*id).map(|new| *id = new).is_some());
         }
         ObjectKind::Camera { lens, .. } => lens.focus_object = lens.focus_object.and_then(&map),
-        ObjectKind::Instance { reference } => *reference = reference.and_then(&map),
+        ObjectKind::Instance { reference }
+        | ObjectKind::FollowSpline { spline: reference, .. }
+        | ObjectKind::ProjectToSurface { target: reference, .. } => *reference = reference.and_then(&map),
         _ => {}
     }
 }
@@ -169,17 +171,21 @@ pub fn refers_to_objects(data: &NodeData) -> bool {
         ObjectKind::Cloner { object, effectors, .. } => object.is_some() || !effectors.is_empty(),
         ObjectKind::Light { linking, .. } => !linking.objects.is_empty(),
         ObjectKind::Camera { lens, .. } => lens.focus_object.is_some(),
-        ObjectKind::Instance { reference } => reference.is_some(),
+        ObjectKind::Instance { reference }
+        | ObjectKind::FollowSpline { spline: reference, .. }
+        | ObjectKind::ProjectToSurface { target: reference, .. } => reference.is_some(),
         _ => false,
     };
     tags || kind
 }
 
-/// Rewrites an Environment's texture in `data` through `map` (a reference
-/// `map` does not know is dropped).
+/// Rewrites an Environment's or a Displace's texture in `data` through `map`
+/// (a reference `map` does not know is dropped).
 pub fn remap_object_textures(data: &mut NodeData, map: impl Fn(TextureId) -> Option<TextureId>) {
-    if let ObjectKind::Environment(environment) = &mut data.kind {
-        environment.texture = environment.texture.and_then(map);
+    match &mut data.kind {
+        ObjectKind::Environment(environment) => environment.texture = environment.texture.and_then(map),
+        ObjectKind::Displace { texture, .. } => *texture = texture.and_then(map),
+        _ => {}
     }
 }
 

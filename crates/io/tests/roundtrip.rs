@@ -56,6 +56,12 @@ fn version_4_kinds() -> Vec<ObjectKindTag> {
                     | ObjectKindTag::Join
                     | ObjectKindTag::SplineBoolean
                     | ObjectKindTag::Reduce
+                    | ObjectKindTag::Wrap
+                    | ObjectKindTag::FollowSpline
+                    | ObjectKindTag::Displace
+                    | ObjectKindTag::ProjectToSurface
+                    | ObjectKindTag::Smooth
+                    | ObjectKindTag::Explode
             )
         })
         .collect()
@@ -594,6 +600,110 @@ proptest! {
             panic!("an Instance")
         };
         prop_assert_eq!(reference.and_then(|r| loaded.scene.get(r)).map(|n| n.data.name.as_str()), linked.then_some("A"));
+        prop_assert!(grid4d_io::to_bytes(&loaded).unwrap() == bytes);
+        prop_assert!(grid4d_io::from_bytes(&labelled(&bytes, 5)).is_err());
+    }
+
+    /// Step 17.9: the six deformers, with random settings and links,
+    /// round-trip; a version 5 file naming one is refused.
+    #[test]
+    fn deformers_round_trip_and_a_version_5_file_refuses_them(
+        shape in 0usize..2,
+        sizes in (1.0f32..500.0, 1.0f32..500.0, 0.0f32..500.0),
+        angles in (-6.0f32..6.0, -6.0f32..6.0),
+        strength in 0.0f32..=1.0,
+        choices in (0usize..6, 0usize..2, 0usize..2, 0usize..2, 0usize..4, 0usize..3),
+        counts in (1u32..=8, any::<u32>(), 1u32..=200),
+        numbers in (0.01f32..200.0, -50.0f32..50.0, 0.0f32..=1.0),
+        switches in (any::<bool>(), any::<bool>(), any::<bool>()),
+    ) {
+        use grid4d_geom::deformers as d;
+        let mut doc = document(Vec::new(), Vec::new(), Vec::new());
+        let texture = doc.scene.textures_mut().insert(grid4d_scene::Texture::linked(std::path::PathBuf::from("height.png")));
+        let host = doc.scene.insert(Node::new("Host", ObjectKindTag::Plane.default_kind()));
+        let path = doc.scene.insert(Node::new("Path", ObjectKindTag::Helix.default_kind()));
+        let wrap = ObjectKind::Wrap(d::Wrap {
+            shape: d::WrapShape::ALL[shape],
+            width: sizes.0,
+            height: sizes.1,
+            radius: sizes.2,
+            start: angles.0,
+            end: angles.1,
+            strength,
+        });
+        let follow = ObjectKind::FollowSpline {
+            follow: d::FollowSpline {
+                axis: d::AxisDirection::ALL[choices.0],
+                fit: d::PathFit::ALL[choices.1],
+                offset: numbers.2,
+                strength,
+            },
+            spline: switches.0.then_some(path),
+        };
+        let displace = ObjectKind::Displace {
+            displace: d::Displace {
+                source: d::DisplaceSource::ALL[choices.2],
+                mapping: d::DisplaceMapping::ALL[choices.3],
+                noise_scale: numbers.0,
+                octaves: counts.0,
+                seed: counts.1,
+                height: numbers.1,
+                mid: numbers.2,
+                direction: d::DisplaceDirection::ALL[choices.4],
+                strength,
+            },
+            texture: switches.1.then_some(texture),
+        };
+        let project = ObjectKind::ProjectToSurface {
+            project: d::ProjectToSurface {
+                mode: d::ProjectMode::ALL[choices.5],
+                offset: numbers.1,
+                strength,
+            },
+            target: switches.2.then_some(host),
+        };
+        let smooth = ObjectKind::Smooth(d::Smooth {
+            iterations: counts.2,
+            keep_volume: switches.0,
+            keep_borders: switches.1,
+            strength,
+        });
+        let explode = ObjectKind::Explode(d::Explode {
+            strength,
+            distance: numbers.1,
+            variation: numbers.2,
+            spin: angles.0,
+            end_size: sizes.2 / 100.0,
+            seed: counts.1,
+        });
+        let kinds = [
+            ("Wrap", wrap),
+            ("Follow Spline", follow),
+            ("Displace", displace),
+            ("Project to Surface", project),
+            ("Smooth", smooth),
+            ("Explode", explode),
+        ];
+        for (name, kind) in &kinds {
+            doc.scene.insert_child(host, Node::new(*name, kind.clone())).unwrap();
+        }
+        let bytes = grid4d_io::to_bytes(&doc).unwrap();
+        let loaded = grid4d_io::from_bytes(&bytes).unwrap();
+        let named = |name: &str| loaded.scene.iter().find(|(_, n)| n.data.name == name).unwrap();
+        let (new_host, _) = named("Host");
+        let (new_path, _) = named("Path");
+        let new_texture = loaded.scene.textures().ids()[0];
+        for (name, kind) in kinds {
+            // Links point at the loaded document's objects and texture.
+            let mut expected = kind;
+            match &mut expected {
+                ObjectKind::FollowSpline { spline, .. } => *spline = spline.map(|_| new_path),
+                ObjectKind::ProjectToSurface { target, .. } => *target = target.map(|_| new_host),
+                ObjectKind::Displace { texture, .. } => *texture = texture.map(|_| new_texture),
+                _ => {}
+            }
+            prop_assert_eq!(&named(name).1.data.kind, &expected, "{}", name);
+        }
         prop_assert!(grid4d_io::to_bytes(&loaded).unwrap() == bytes);
         prop_assert!(grid4d_io::from_bytes(&labelled(&bytes, 5)).is_err());
     }

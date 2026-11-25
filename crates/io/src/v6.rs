@@ -28,6 +28,10 @@ use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
     cloner::{CloneOrder, Cloner, Distribution, GridArray, Layout, Linear, Radial, StepMode, Surface},
     deform::{Bend, BendOrigin, Bulge, DeformerMode, Ffd, Shape, Taper, Twist},
+    deformers::{
+        AxisDirection, Displace, DisplaceDirection, DisplaceMapping, DisplaceSource, Explode, FollowSpline, PathFit,
+        ProjectMode, ProjectToSurface, Smooth, Wrap, WrapShape,
+    },
     effector::{Effector, Falloff as EffectorFalloff, FalloffShape},
     spline::{
         ArcType, Interpolation as SplineInterpolation, Segment, Spline, SplinePlane, SplinePrimitive, SplineShape,
@@ -1350,6 +1354,8 @@ enum ParamDto {
     BladeRotation,
     /// A Reduce's (version 6, step 17.5).
     Keep,
+    /// A Follow Spline's (version 6, step 17.9).
+    PathOffset,
     /// A plugin object's number, by its name (added in step 13.2):
     /// `{"plugin": "Phase"}`.
     Plugin(String),
@@ -1444,6 +1450,7 @@ impl From<Param> for ParamDto {
             Param::Object(ObjectParam::FStop) => Self::FStop,
             Param::Object(ObjectParam::BladeRotation) => Self::BladeRotation,
             Param::Object(ObjectParam::Keep) => Self::Keep,
+            Param::Object(ObjectParam::PathOffset) => Self::PathOffset,
             // Named by `ParamDto::new`, which has the object.
             Param::Object(ObjectParam::Plugin(_)) => Self::Plugin(String::new()),
         }
@@ -1512,6 +1519,7 @@ impl From<ParamDto> for Param {
             ParamDto::FStop => Self::Object(ObjectParam::FStop),
             ParamDto::BladeRotation => Self::Object(ObjectParam::BladeRotation),
             ParamDto::Keep => Self::Object(ObjectParam::Keep),
+            ParamDto::PathOffset => Self::Object(ObjectParam::PathOffset),
             ParamDto::Curvature => Self::Object(ObjectParam::Curvature),
             // Resolved by `ParamDto::into_param`; never reached from there.
             ParamDto::Plugin(_) => Self::Object(ObjectParam::Plugin(u8::MAX)),
@@ -2521,6 +2529,80 @@ enum KindDto {
     PlainEffector(EffectorDto),
     /// A Random effector (added in step 10.8).
     RandomEffector(EffectorDto),
+    /// A Wrap deformer (version 6, step 17.9); angles in radians.
+    Wrap {
+        #[serde(default, skip_serializing_if = "WrapShapeDto::is_cylinder")]
+        shape: WrapShapeDto,
+        width: f32,
+        height: f32,
+        radius: f32,
+        start: f32,
+        end: f32,
+        strength: f32,
+    },
+    /// A Follow Spline deformer (version 6, step 17.9): its path by index in
+    /// `objects` (written by the object, resolved once every object exists).
+    FollowSpline {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spline: Option<usize>,
+        #[serde(default, skip_serializing_if = "AxisDirectionDto::is_plus_y")]
+        axis: AxisDirectionDto,
+        #[serde(default, skip_serializing_if = "PathFitDto::is_keep_length")]
+        fit: PathFitDto,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        offset: f32,
+        strength: f32,
+    },
+    /// A Displace deformer (version 6, step 17.9): its picture by index in
+    /// `textures` (written by the object).
+    Displace {
+        #[serde(default, skip_serializing_if = "DisplaceSourceDto::is_noise")]
+        source: DisplaceSourceDto,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        texture: Option<usize>,
+        #[serde(default, skip_serializing_if = "DisplaceMappingDto::is_uv")]
+        mapping: DisplaceMappingDto,
+        noise_scale: f32,
+        octaves: u32,
+        #[serde(default, skip_serializing_if = "is_zero_count")]
+        seed: u32,
+        height: f32,
+        mid: f32,
+        #[serde(default, skip_serializing_if = "DisplaceDirectionDto::is_normal")]
+        direction: DisplaceDirectionDto,
+        strength: f32,
+    },
+    /// A Project to Surface deformer (version 6, step 17.9): its target by
+    /// index in `objects` (written by the object).
+    ProjectToSurface {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<usize>,
+        #[serde(default, skip_serializing_if = "ProjectModeDto::is_nearest_point")]
+        mode: ProjectModeDto,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        offset: f32,
+        strength: f32,
+    },
+    /// A Smooth deformer (version 6, step 17.9).
+    Smooth {
+        iterations: u32,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        keep_volume: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        keep_borders: bool,
+        strength: f32,
+    },
+    /// An Explode deformer (version 6, step 17.9); the spin in radians, the
+    /// others as fractions.
+    Explode {
+        strength: f32,
+        distance: f32,
+        variation: f32,
+        spin: f32,
+        end_size: f32,
+        #[serde(default, skip_serializing_if = "is_zero_count")]
+        seed: u32,
+    },
     /// A Bend deformer (added in step 10.2); angles in radians, defaults omitted.
     Bend {
         size: [f32; 3],
@@ -3629,6 +3711,9 @@ fn link_objects(kind: &mut ObjectKind, indices: &[usize], ids: &[NodeId]) {
             lens.focus_object = indices.first().and_then(|&i| ids.get(i).copied());
         }
         ObjectKind::Instance { reference } => *reference = indices.first().and_then(|&i| ids.get(i).copied()),
+        ObjectKind::FollowSpline { spline: link, .. } | ObjectKind::ProjectToSurface { target: link, .. } => {
+            *link = indices.first().and_then(|&i| ids.get(i).copied());
+        }
         _ => {}
     }
 }
@@ -3699,8 +3784,10 @@ impl LensDto {
 /// Links an Environment `kind` read from a file to the texture at `index`
 /// of `textures` (none for an index the file lacks).
 fn link_texture(kind: &mut ObjectKind, index: Option<usize>, textures: &[TextureId]) {
-    if let ObjectKind::Environment(environment) = kind {
-        environment.texture = index.and_then(|i| textures.get(i).copied());
+    match kind {
+        ObjectKind::Environment(environment) => environment.texture = index.and_then(|i| textures.get(i).copied()),
+        ObjectKind::Displace { texture, .. } => *texture = index.and_then(|i| textures.get(i).copied()),
+        _ => {}
     }
 }
 
@@ -3905,6 +3992,279 @@ enum FalloffDto {
     InverseSquare,
 }
 
+/// What a Wrap wraps onto (version 6, step 17.9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum WrapShapeDto {
+    #[default]
+    Cylinder,
+    Sphere,
+}
+
+impl WrapShapeDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_cylinder(&self) -> bool {
+        *self == Self::Cylinder
+    }
+}
+
+impl From<WrapShape> for WrapShapeDto {
+    fn from(value: WrapShape) -> Self {
+        match value {
+            WrapShape::Cylinder => Self::Cylinder,
+            WrapShape::Sphere => Self::Sphere,
+        }
+    }
+}
+
+impl From<WrapShapeDto> for WrapShape {
+    fn from(value: WrapShapeDto) -> Self {
+        match value {
+            WrapShapeDto::Cylinder => Self::Cylinder,
+            WrapShapeDto::Sphere => Self::Sphere,
+        }
+    }
+}
+/// The axis a Follow Spline lays along its path (version 6, step 17.9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AxisDirectionDto {
+    PlusX,
+    MinusX,
+    #[default]
+    PlusY,
+    MinusY,
+    PlusZ,
+    MinusZ,
+}
+
+impl AxisDirectionDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_plus_y(&self) -> bool {
+        *self == Self::PlusY
+    }
+}
+
+impl From<AxisDirection> for AxisDirectionDto {
+    fn from(value: AxisDirection) -> Self {
+        match value {
+            AxisDirection::PlusX => Self::PlusX,
+            AxisDirection::MinusX => Self::MinusX,
+            AxisDirection::PlusY => Self::PlusY,
+            AxisDirection::MinusY => Self::MinusY,
+            AxisDirection::PlusZ => Self::PlusZ,
+            AxisDirection::MinusZ => Self::MinusZ,
+        }
+    }
+}
+
+impl From<AxisDirectionDto> for AxisDirection {
+    fn from(value: AxisDirectionDto) -> Self {
+        match value {
+            AxisDirectionDto::PlusX => Self::PlusX,
+            AxisDirectionDto::MinusX => Self::MinusX,
+            AxisDirectionDto::PlusY => Self::PlusY,
+            AxisDirectionDto::MinusY => Self::MinusY,
+            AxisDirectionDto::PlusZ => Self::PlusZ,
+            AxisDirectionDto::MinusZ => Self::MinusZ,
+        }
+    }
+}
+/// How a Follow Spline spreads along its path (version 6, step 17.9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PathFitDto {
+    #[default]
+    KeepLength,
+    FitToSpline,
+}
+
+impl PathFitDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_keep_length(&self) -> bool {
+        *self == Self::KeepLength
+    }
+}
+
+impl From<PathFit> for PathFitDto {
+    fn from(value: PathFit) -> Self {
+        match value {
+            PathFit::KeepLength => Self::KeepLength,
+            PathFit::FitToSpline => Self::FitToSpline,
+        }
+    }
+}
+
+impl From<PathFitDto> for PathFit {
+    fn from(value: PathFitDto) -> Self {
+        match value {
+            PathFitDto::KeepLength => Self::KeepLength,
+            PathFitDto::FitToSpline => Self::FitToSpline,
+        }
+    }
+}
+/// Where a Displace reads its value (version 6, step 17.9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DisplaceSourceDto {
+    #[default]
+    Noise,
+    Texture,
+}
+
+impl DisplaceSourceDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_noise(&self) -> bool {
+        *self == Self::Noise
+    }
+}
+
+impl From<DisplaceSource> for DisplaceSourceDto {
+    fn from(value: DisplaceSource) -> Self {
+        match value {
+            DisplaceSource::Noise => Self::Noise,
+            DisplaceSource::Texture => Self::Texture,
+        }
+    }
+}
+
+impl From<DisplaceSourceDto> for DisplaceSource {
+    fn from(value: DisplaceSourceDto) -> Self {
+        match value {
+            DisplaceSourceDto::Noise => Self::Noise,
+            DisplaceSourceDto::Texture => Self::Texture,
+        }
+    }
+}
+/// Where a Displace reads its picture (version 6, step 17.9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DisplaceMappingDto {
+    #[default]
+    Uv,
+    Flat,
+}
+
+impl DisplaceMappingDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_uv(&self) -> bool {
+        *self == Self::Uv
+    }
+}
+
+impl From<DisplaceMapping> for DisplaceMappingDto {
+    fn from(value: DisplaceMapping) -> Self {
+        match value {
+            DisplaceMapping::Uv => Self::Uv,
+            DisplaceMapping::Flat => Self::Flat,
+        }
+    }
+}
+
+impl From<DisplaceMappingDto> for DisplaceMapping {
+    fn from(value: DisplaceMappingDto) -> Self {
+        match value {
+            DisplaceMappingDto::Uv => Self::Uv,
+            DisplaceMappingDto::Flat => Self::Flat,
+        }
+    }
+}
+/// Which way a Displace moves points (version 6, step 17.9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DisplaceDirectionDto {
+    #[default]
+    Normal,
+    X,
+    Y,
+    Z,
+}
+
+impl DisplaceDirectionDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_normal(&self) -> bool {
+        *self == Self::Normal
+    }
+}
+
+impl From<DisplaceDirection> for DisplaceDirectionDto {
+    fn from(value: DisplaceDirection) -> Self {
+        match value {
+            DisplaceDirection::Normal => Self::Normal,
+            DisplaceDirection::X => Self::X,
+            DisplaceDirection::Y => Self::Y,
+            DisplaceDirection::Z => Self::Z,
+        }
+    }
+}
+
+impl From<DisplaceDirectionDto> for DisplaceDirection {
+    fn from(value: DisplaceDirectionDto) -> Self {
+        match value {
+            DisplaceDirectionDto::Normal => Self::Normal,
+            DisplaceDirectionDto::X => Self::X,
+            DisplaceDirectionDto::Y => Self::Y,
+            DisplaceDirectionDto::Z => Self::Z,
+        }
+    }
+}
+/// How a Project to Surface finds its surface (version 6, step 17.9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProjectModeDto {
+    #[default]
+    NearestPoint,
+    AlongDirection,
+    AlongNormal,
+}
+
+impl ProjectModeDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_nearest_point(&self) -> bool {
+        *self == Self::NearestPoint
+    }
+}
+
+impl From<ProjectMode> for ProjectModeDto {
+    fn from(value: ProjectMode) -> Self {
+        match value {
+            ProjectMode::NearestPoint => Self::NearestPoint,
+            ProjectMode::AlongDirection => Self::AlongDirection,
+            ProjectMode::AlongNormal => Self::AlongNormal,
+        }
+    }
+}
+
+impl From<ProjectModeDto> for ProjectMode {
+    fn from(value: ProjectModeDto) -> Self {
+        match value {
+            ProjectModeDto::NearestPoint => Self::NearestPoint,
+            ProjectModeDto::AlongDirection => Self::AlongDirection,
+            ProjectModeDto::AlongNormal => Self::AlongNormal,
+        }
+    }
+}
 /// The plane a Symmetry mirrors across (version 6, step 17.4).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -4756,6 +5116,9 @@ impl KindDto {
             } => linking.objects.clone(),
             Self::Camera { lens: Some(lens), .. } => lens.focus_object.into_iter().collect(),
             Self::Instance { reference } => reference.iter().copied().collect(),
+            Self::FollowSpline { spline: link, .. } | Self::ProjectToSurface { target: link, .. } => {
+                link.iter().copied().collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -4774,7 +5137,9 @@ impl KindDto {
             (Self::Camera { lens: Some(dto), .. }, ObjectKind::Camera { lens, .. }) => {
                 dto.focus_object = lens.focus_object.and_then(|id| objects.get(&id).copied());
             }
-            (Self::Instance { reference: dto }, ObjectKind::Instance { reference }) => {
+            (Self::Instance { reference: dto }, ObjectKind::Instance { reference })
+            | (Self::FollowSpline { spline: dto, .. }, ObjectKind::FollowSpline { spline: reference, .. })
+            | (Self::ProjectToSurface { target: dto, .. }, ObjectKind::ProjectToSurface { target: reference, .. }) => {
                 *dto = reference.and_then(|id| objects.get(&id).copied());
             }
             _ => {}
@@ -4784,15 +5149,21 @@ impl KindDto {
     /// An Environment's texture index, as the file has it.
     const fn texture_index(&self) -> Option<usize> {
         match self {
-            Self::Environment { texture, .. } => *texture,
+            Self::Environment { texture, .. } | Self::Displace { texture, .. } => *texture,
             _ => None,
         }
     }
 
     /// Writes an Environment's texture by its index in `textures`.
     fn link_texture(&mut self, kind: &ObjectKind, textures: &HashMap<TextureId, usize>) {
-        if let (Self::Environment { texture, .. }, ObjectKind::Environment(environment)) = (self, kind) {
-            *texture = environment.texture.and_then(|id| textures.get(&id).copied());
+        match (self, kind) {
+            (Self::Environment { texture, .. }, ObjectKind::Environment(environment)) => {
+                *texture = environment.texture.and_then(|id| textures.get(&id).copied());
+            }
+            (Self::Displace { texture: dto, .. }, ObjectKind::Displace { texture, .. }) => {
+                *dto = texture.and_then(|id| textures.get(&id).copied());
+            }
+            _ => {}
         }
     }
 
@@ -4987,6 +5358,55 @@ impl KindDto {
                 },
                 reverse: text.reverse,
                 intermediate_points: SplinePointsDto::new(text.interpolation),
+            },
+            ObjectKind::Wrap(wrap) => Self::Wrap {
+                shape: wrap.shape.into(),
+                width: wrap.width,
+                height: wrap.height,
+                radius: wrap.radius,
+                start: wrap.start,
+                end: wrap.end,
+                strength: wrap.strength,
+            },
+            // Links are written by the object (`link_objects`, `link_texture`).
+            ObjectKind::FollowSpline { follow, .. } => Self::FollowSpline {
+                spline: None,
+                axis: follow.axis.into(),
+                fit: follow.fit.into(),
+                offset: follow.offset,
+                strength: follow.strength,
+            },
+            ObjectKind::Displace { displace, .. } => Self::Displace {
+                source: displace.source.into(),
+                texture: None,
+                mapping: displace.mapping.into(),
+                noise_scale: displace.noise_scale,
+                octaves: displace.octaves,
+                seed: displace.seed,
+                height: displace.height,
+                mid: displace.mid,
+                direction: displace.direction.into(),
+                strength: displace.strength,
+            },
+            ObjectKind::ProjectToSurface { project, .. } => Self::ProjectToSurface {
+                target: None,
+                mode: project.mode.into(),
+                offset: project.offset,
+                strength: project.strength,
+            },
+            ObjectKind::Smooth(smooth) => Self::Smooth {
+                iterations: smooth.iterations,
+                keep_volume: smooth.keep_volume,
+                keep_borders: smooth.keep_borders,
+                strength: smooth.strength,
+            },
+            ObjectKind::Explode(explode) => Self::Explode {
+                strength: explode.strength,
+                distance: explode.distance,
+                variation: explode.variation,
+                spin: explode.spin,
+                end_size: explode.end_size,
+                seed: explode.seed,
             },
             ObjectKind::Bend(bend) => Self::Bend {
                 size: bend.size.to_array(),
@@ -5551,6 +5971,100 @@ impl KindDto {
             }),
             // Resolved once every object exists.
             Self::Instance { .. } => ObjectKind::Instance { reference: None },
+            Self::Wrap {
+                shape,
+                width,
+                height,
+                radius,
+                start,
+                end,
+                strength,
+            } => ObjectKind::Wrap(Wrap {
+                shape: shape.into(),
+                width,
+                height: height.abs(),
+                radius: radius.max(0.0),
+                start,
+                end,
+                strength: strength.clamp(0.0, 1.0),
+            }),
+            // Links are resolved once every object (and texture) exists.
+            Self::FollowSpline {
+                axis,
+                fit,
+                offset,
+                strength,
+                ..
+            } => ObjectKind::FollowSpline {
+                follow: FollowSpline {
+                    axis: axis.into(),
+                    fit: fit.into(),
+                    offset,
+                    strength: strength.clamp(0.0, 1.0),
+                },
+                spline: None,
+            },
+            Self::Displace {
+                source,
+                mapping,
+                noise_scale,
+                octaves,
+                seed,
+                height,
+                mid,
+                direction,
+                strength,
+                ..
+            } => ObjectKind::Displace {
+                displace: Displace {
+                    source: source.into(),
+                    mapping: mapping.into(),
+                    noise_scale: noise_scale.max(Displace::MIN_NOISE_SCALE),
+                    octaves: octaves.clamp(1, Displace::MAX_OCTAVES),
+                    seed,
+                    height,
+                    mid,
+                    direction: direction.into(),
+                    strength: strength.clamp(0.0, 1.0),
+                },
+                texture: None,
+            },
+            Self::ProjectToSurface {
+                mode, offset, strength, ..
+            } => ObjectKind::ProjectToSurface {
+                project: ProjectToSurface {
+                    mode: mode.into(),
+                    offset,
+                    strength: strength.clamp(0.0, 1.0),
+                },
+                target: None,
+            },
+            Self::Smooth {
+                iterations,
+                keep_volume,
+                keep_borders,
+                strength,
+            } => ObjectKind::Smooth(Smooth {
+                iterations: iterations.clamp(1, Smooth::MAX_ITERATIONS),
+                keep_volume,
+                keep_borders,
+                strength: strength.clamp(0.0, 1.0),
+            }),
+            Self::Explode {
+                strength,
+                distance,
+                variation,
+                spin,
+                end_size,
+                seed,
+            } => ObjectKind::Explode(Explode {
+                strength: strength.clamp(0.0, 1.0),
+                distance,
+                variation: variation.clamp(0.0, 1.0),
+                spin,
+                end_size: end_size.max(0.0),
+                seed,
+            }),
             Self::Join { weld, tolerance } => ObjectKind::Join(Join {
                 weld,
                 tolerance: tolerance.clamp(0.0, Join::MAX_TOLERANCE),
@@ -5719,6 +6233,33 @@ impl KindDto {
             Self::Boolean { weld, .. } => vec![weld],
             Self::Symmetry { tolerance, .. } | Self::Join { tolerance, .. } => vec![tolerance],
             Self::Instance { .. } | Self::SplineBoolean { .. } => Vec::new(),
+            Self::Wrap {
+                width,
+                height,
+                radius,
+                start,
+                end,
+                strength,
+                ..
+            } => vec![width, height, radius, start, end, strength],
+            Self::FollowSpline { offset, strength, .. } => vec![offset, strength],
+            Self::Displace {
+                noise_scale,
+                height,
+                mid,
+                strength,
+                ..
+            } => vec![noise_scale, height, mid, strength],
+            Self::ProjectToSurface { offset, strength, .. } => vec![offset, strength],
+            Self::Smooth { strength, .. } => vec![strength],
+            Self::Explode {
+                strength,
+                distance,
+                variation,
+                spin,
+                end_size,
+                ..
+            } => vec![strength, distance, variation, spin, end_size],
             Self::Reduce { keep, .. } => vec![keep],
             Self::Cloner { ref layout, .. } => layout.parameters(),
             Self::PlainEffector(ref dto) | Self::RandomEffector(ref dto) => dto.parameters(),

@@ -95,6 +95,8 @@ pub enum ObjectParam {
     BladeRotation,
     /// A Reduce's share of the triangles kept (0 – 1).
     Keep,
+    /// Where along its path a Follow Spline starts (a share of the path).
+    PathOffset,
     /// A plugin object's number: its value at this index of
     /// [`PluginObject::values`](crate::PluginObject::values) (below
     /// [`ObjectParam::PLUGIN_PARAMS`]).
@@ -104,7 +106,7 @@ pub enum ObjectParam {
 impl ObjectParam {
     /// How many built-in ones there are (their [`ObjectParam::index`] is below
     /// this; a plugin's follow).
-    pub const COUNT: usize = 50;
+    pub const COUNT: usize = 51;
 
     /// How many of a plugin object's values can be animated (the first ones).
     pub const PLUGIN_PARAMS: usize = 64;
@@ -161,6 +163,7 @@ impl ObjectParam {
         Self::FStop,
         Self::BladeRotation,
         Self::Keep,
+        Self::PathOffset,
     ];
 
     /// The row label (shared by the Attribute Manager and the F-Curve editor).
@@ -216,6 +219,7 @@ impl ObjectParam {
             Self::FStop => "F-Stop",
             Self::BladeRotation => "Blade Rotation",
             Self::Keep => "Keep",
+            Self::PathOffset => "Path Offset",
             // Named by its plugin: see `ObjectKind::param_label`.
             Self::Plugin(_) => "Plugin Parameter",
         }
@@ -272,6 +276,7 @@ impl ObjectParam {
             Self::FStop => 47,
             Self::BladeRotation => 48,
             Self::Keep => 49,
+            Self::PathOffset => 50,
             Self::Plugin(i) => Self::COUNT + i as usize,
         }
     }
@@ -300,7 +305,8 @@ impl ObjectParam {
             | Self::EndGrowth
             | Self::Amount
             | Self::Curvature
-            | Self::Keep => ParamUnit::Fraction,
+            | Self::Keep
+            | Self::PathOffset => ParamUnit::Fraction,
             Self::Size(_)
             | Self::Radius
             | Self::Height
@@ -447,6 +453,11 @@ impl ObjectKind {
             | Self::Spline { .. }
             // The lattice is edited, not keyed.
             | Self::Ffd { .. } => &[],
+            Self::Wrap(_) => &[P::Radius, P::StartAngle, P::EndAngle, P::Amount],
+            Self::FollowSpline { .. } => &[P::PathOffset, P::Amount],
+            Self::Displace { .. } => &[P::Height, P::Amount],
+            Self::ProjectToSurface { .. } => &[P::Offset, P::Amount],
+            Self::Smooth(_) | Self::Explode(_) => &[P::Amount],
             // Its numbers, in the order of its values.
             Self::Plugin(object) => {
                 return (0..object.values.len().min(ObjectParam::PLUGIN_PARAMS))
@@ -660,6 +671,18 @@ impl ObjectKind {
             (Self::Bulge(d), P::Size(axis)) => Some(&mut d.size[axis.index()]),
             (Self::Bulge(d), P::Amount) => Some(&mut d.strength),
             (Self::Bulge(d), P::Curvature) => Some(&mut d.shape.curvature),
+            (Self::Wrap(d), P::Radius) => Some(&mut d.radius),
+            (Self::Wrap(d), P::StartAngle) => Some(&mut d.start),
+            (Self::Wrap(d), P::EndAngle) => Some(&mut d.end),
+            (Self::Wrap(d), P::Amount) => Some(&mut d.strength),
+            (Self::FollowSpline { follow, .. }, P::PathOffset) => Some(&mut follow.offset),
+            (Self::FollowSpline { follow, .. }, P::Amount) => Some(&mut follow.strength),
+            (Self::Displace { displace, .. }, P::Height) => Some(&mut displace.height),
+            (Self::Displace { displace, .. }, P::Amount) => Some(&mut displace.strength),
+            (Self::ProjectToSurface { project, .. }, P::Offset) => Some(&mut project.offset),
+            (Self::ProjectToSurface { project, .. }, P::Amount) => Some(&mut project.strength),
+            (Self::Smooth(d), P::Amount) => Some(&mut d.strength),
+            (Self::Explode(d), P::Amount) => Some(&mut d.strength),
             (Self::Cloner { cloner, .. }, param) => match (&mut cloner.layout, param) {
                 (Layout::Radial(radial), P::Radius) => Some(&mut radial.radius),
                 (Layout::Radial(radial), P::StartAngle) => Some(&mut radial.start_angle),

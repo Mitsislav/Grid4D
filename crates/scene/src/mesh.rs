@@ -83,6 +83,16 @@ impl MeshHandle {
             .raycast_where(self.0.mesh.points(), origin, dir, accept)
     }
 
+    /// The point of the mesh nearest to `query` (object space), with its
+    /// polygon; uses the same BVH as [`raycast`](Self::raycast).
+    #[must_use]
+    pub fn nearest(&self, query: Vec3) -> Option<(Vec3, u32)> {
+        self.0
+            .bvh
+            .get_or_init(|| Bvh::build(&self.0.mesh))
+            .nearest(self.0.mesh.points(), query)
+    }
+
     /// The mesh's adjacency, built on first use and shared by every clone.
     #[must_use]
     pub fn topology(&self) -> &Topology {

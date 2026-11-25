@@ -56,9 +56,15 @@ deformers).
   in exported files; the Phong tag's Weighted Normals keep large flat faces
   flat next to bevels. A Boolean can mark its cut edges hard, and the
   Reduce keeps hard edges.
+- **Six new deformers** — **Wrap** lays a flat object round a cylinder or a
+  sphere; **Follow Spline** lays an object along a spline (animate Path
+  Offset to send it along); **Displace** pushes points by noise or by a
+  picture's brightness; **Project to Surface** pulls an object onto
+  another; **Smooth** evens out points, keeping volume and borders if
+  asked; **Explode** flings polygons apart as its Strength rises.
 - **Files** — documents are saved in `.g4d` format version 6, which holds
   the Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce, creases,
-  hard edges and weighted normals; Grid4D 1.3's other features will add to it until 1.3 is
+  hard edges, weighted normals and the new deformers; Grid4D 1.3's other features will add to it until 1.3 is
   released. Every earlier file opens unchanged; Grid4D 1.2 cannot open
   version 6 files and says they come from a newer Grid4D.
 

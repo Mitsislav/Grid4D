@@ -239,6 +239,8 @@ pub struct EvaluatedScene {
     /// Objects placed by a simulation, and scratch space for applying them.
     overrides: crate::Overrides,
     override_stack: Vec<(u32, Mat4)>,
+    /// The pictures Displace deformers read.
+    pictures: crate::Pictures,
     /// The frame animation is evaluated at.
     frame: f64,
     /// Whether the last update found animated objects (only then does a new frame
@@ -312,6 +314,21 @@ impl EvaluatedScene {
         }
     }
 
+    /// The pictures Displace deformers read, by texture (the editor's
+    /// decoded textures in grey). Different pictures mean a new evaluation.
+    pub fn set_pictures(&mut self, pictures: &crate::Pictures) {
+        if self.pictures != *pictures {
+            self.pictures.clone_from(pictures);
+            self.revision = None;
+        }
+    }
+
+    /// The pictures handed in by [`set_pictures`](Self::set_pictures).
+    #[must_use]
+    pub const fn pictures(&self) -> &crate::Pictures {
+        &self.pictures
+    }
+
     /// While `deferring`, a generator whose last rebuild took longer than
     /// [`SLOW_REBUILD`] keeps its result when its inputs change (the
     /// interface sets it while something is dragged). Ending it re-evaluates
@@ -381,6 +398,7 @@ impl EvaluatedScene {
         let (curves, curve_cache, splines) = (&mut self.curves, &mut self.curve_cache, &mut self.splines);
         let (generated, inputs, cage_stack) = (&mut self.generated, &mut self.inputs, &mut self.cage_stack);
         let deferring = self.deferring;
+        let pictures = &self.pictures;
         let mut stale = false;
         let pending_cages = &mut self.pending_cages;
         pending_cages.clear();
@@ -444,7 +462,7 @@ impl EvaluatedScene {
                 }
             }
             // Its deformer children reach it and everything below it.
-            deform::push_children(scene, id, depth, frame, active);
+            deform::push_children(scene, id, depth, frame, pictures, active);
             // Its Material tags' material and layers, else the nearest ancestor's.
             while material_stack.last().is_some_and(|&(d, _, _)| d >= depth) {
                 material_stack.pop();
@@ -572,7 +590,7 @@ impl EvaluatedScene {
             }
             if let Some(options) = generator.filter(|_| data.enabled) {
                 if let Some(result) = generated_mesh(
-                    generated, inputs, cage_stack, scene, id, options, revision, purpose, frame, deferring,
+                    generated, inputs, cage_stack, scene, id, options, revision, purpose, frame, pictures, deferring,
                 ) {
                     stale |= result.stale;
                     let mesh = &result.mesh;
@@ -1523,9 +1541,10 @@ fn generated_mesh<'a>(
     revision: u64,
     purpose: Purpose,
     frame: f64,
+    pictures: &crate::Pictures,
     deferring: bool,
 ) -> Option<&'a Generated> {
-    let colour = generator::gather(scene, id, &options, purpose, frame, stack, inputs)?;
+    let colour = generator::gather(scene, id, &options, purpose, frame, pictures, stack, inputs)?;
     let fresh = generated
         .get(&id)
         .is_some_and(|entry| entry.options == options && entry.inputs == *inputs);
@@ -1695,6 +1714,12 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Twist(_)
         | ObjectKind::Taper(_)
         | ObjectKind::Bulge(_)
+        | ObjectKind::Wrap(_)
+        | ObjectKind::FollowSpline { .. }
+        | ObjectKind::Displace { .. }
+        | ObjectKind::ProjectToSurface { .. }
+        | ObjectKind::Smooth(_)
+        | ObjectKind::Explode(_)
         | ObjectKind::Ffd { .. }
         | ObjectKind::SplinePrimitive(_)
         | ObjectKind::Text(_)
@@ -2914,6 +2939,181 @@ mod tests {
         assert!(matches!(node(&eval, a).drawable.unwrap().key, MeshKey::Cube { .. }));
     }
 
+    #[test]
+    fn deformers_2_keep_their_input_at_zero_strength_and_follow_their_links() {
+        use grid4d_geom::deformers as d;
+        use std::sync::Arc;
+        let mut doc = Document::new("deformers 2");
+        let plane_kind = ObjectKind::Plane {
+            width: 200.0,
+            depth: 200.0,
+            width_segments: 10,
+            depth_segments: 10,
+        };
+        let input = crate::editable_mesh(&plane_kind).unwrap();
+        let plane = doc.scene.insert(Node::new("Plane", plane_kind));
+        let ball = doc.scene.insert(Node::new(
+            "Ball",
+            ObjectKind::Sphere {
+                radius: 100.0,
+                segments: 48,
+            },
+        ));
+        let texture = doc
+            .scene
+            .textures_mut()
+            .insert(grid4d_scene::Texture::linked(std::path::PathBuf::from("bumps.png")));
+        let mut eval = EvaluatedScene::new();
+        let points = |eval: &EvaluatedScene| eval.deformed(plane).map(|m| m.mesh().points().to_vec());
+        let same = |a: &[Vec3], b: &[Vec3]| a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.distance(*q) < 1e-4);
+
+        // Strength 0: every new deformer leaves the input as it is.
+        let zero = [
+            ObjectKind::Wrap(d::Wrap {
+                strength: 0.0,
+                ..d::Wrap::default()
+            }),
+            ObjectKind::Displace {
+                displace: d::Displace {
+                    strength: 0.0,
+                    ..d::Displace::default()
+                },
+                texture: None,
+            },
+            ObjectKind::ProjectToSurface {
+                project: d::ProjectToSurface {
+                    strength: 0.0,
+                    ..d::ProjectToSurface::default()
+                },
+                target: Some(ball),
+            },
+            ObjectKind::Smooth(d::Smooth {
+                strength: 0.0,
+                keep_borders: false,
+                ..d::Smooth::default()
+            }),
+            ObjectKind::Explode(d::Explode::default()),
+            ObjectKind::FollowSpline {
+                follow: d::FollowSpline::default(),
+                spline: None,
+            },
+        ];
+        for kind in zero {
+            let label = kind.label();
+            let deformer = doc.scene.insert_child(plane, Node::new(label, kind)).unwrap();
+            eval.update(&doc.scene);
+            assert!(same(&points(&eval).unwrap(), input.points()), "{label}");
+            doc.scene.remove(deformer);
+        }
+
+        // Displace by a picture: nothing until the picture is handed in.
+        let displace = doc
+            .scene
+            .insert_child(
+                plane,
+                Node::new(
+                    "Displace",
+                    ObjectKind::Displace {
+                        displace: d::Displace {
+                            source: d::DisplaceSource::Texture,
+                            height: 20.0,
+                            ..d::Displace::default()
+                        },
+                        texture: Some(texture),
+                    },
+                ),
+            )
+            .unwrap();
+        eval.update(&doc.scene);
+        assert!(same(&points(&eval).unwrap(), input.points()), "no picture yet");
+        let mut pictures = crate::Pictures::default();
+        pictures.insert(
+            texture,
+            Arc::new(d::GreyPicture {
+                width: 1,
+                height: 1,
+                values: Arc::from(vec![1.0f32]),
+            }),
+        );
+        eval.set_pictures(&pictures);
+        assert!(eval.update(&doc.scene), "a new picture means a new evaluation");
+        let raised = points(&eval).unwrap();
+        assert!(
+            raised
+                .iter()
+                .zip(input.points())
+                .all(|(p, q)| (p.y - q.y - 10.0).abs() < 1e-4)
+        );
+        // Idle: nothing is evaluated again; an unrelated edit keeps the mesh.
+        let id = eval.deformed(plane).unwrap().id();
+        assert!(!eval.update(&doc.scene));
+        doc.scene.get_mut(ball).unwrap().data.name = "Globe".to_owned();
+        eval.update(&doc.scene);
+        assert_eq!(eval.deformed(plane).unwrap().id(), id, "not rebuilt");
+        doc.scene.remove(displace);
+
+        // Project to Surface onto the ball (a primitive, made when applied).
+        doc.scene
+            .insert_child(
+                plane,
+                Node::new(
+                    "Project",
+                    ObjectKind::ProjectToSurface {
+                        project: d::ProjectToSurface::default(),
+                        target: Some(ball),
+                    },
+                ),
+            )
+            .unwrap();
+        eval.update(&doc.scene);
+        for p in points(&eval).unwrap() {
+            assert!((p.length() - 100.0).abs() < 1.0, "{p} on the ball's facets");
+        }
+    }
+
+    #[test]
+    fn follow_spline_lays_an_object_along_its_linked_path() {
+        use grid4d_geom::deformers as d;
+        use grid4d_geom::spline::{Spline, SplineType};
+        let mut doc = Document::new("follow");
+        let cube_kind = ObjectKind::Cube {
+            size: Vec3::splat(100.0),
+            segments: [1, 4, 1],
+        };
+        let cube = doc.scene.insert(Node::new("Cube", cube_kind));
+        let line = Spline::new(SplineType::Linear, vec![Vec3::ZERO, Vec3::new(0.0, 0.0, 300.0)], false);
+        let mut path = Node::new(
+            "Path",
+            ObjectKind::Spline {
+                spline: SplineHandle::new(line),
+                interpolation: grid4d_geom::spline::Interpolation::default(),
+                components: Components::default(),
+            },
+        );
+        // The path elsewhere: it is read where it stands.
+        path.data.transform.position = Vec3::new(500.0, 0.0, 0.0);
+        let path = doc.scene.insert(path);
+        doc.scene
+            .insert_child(
+                cube,
+                Node::new(
+                    "Follow",
+                    ObjectKind::FollowSpline {
+                        follow: d::FollowSpline::default(),
+                        spline: Some(path),
+                    },
+                ),
+            )
+            .unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let mesh = eval.deformed(cube).unwrap().mesh().clone();
+        let (min, max) = mesh.bounds().unwrap();
+        // The cube's Y now runs along the path: Z from 0 to 100, around X = 500.
+        assert!(min.z.abs() < 1e-3 && (max.z - 100.0).abs() < 1e-3, "{min} {max}");
+        assert!((min.x - 450.0).abs() < 1e-3 && (max.x - 550.0).abs() < 1e-3);
+    }
+
     /// The test plugins, installed once for this test binary.
     fn plugins() {
         static ONCE: std::sync::Once = std::sync::Once::new();
@@ -3003,6 +3203,12 @@ mod tests {
                 | K::Twist
                 | K::Taper
                 | K::Bulge
+                | K::Wrap
+                | K::FollowSpline
+                | K::Displace
+                | K::ProjectToSurface
+                | K::Smooth
+                | K::Explode
                 | K::Ffd
                 | K::Circle
                 | K::Rectangle

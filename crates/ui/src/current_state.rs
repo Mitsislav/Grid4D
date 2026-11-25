@@ -21,12 +21,19 @@ pub(crate) struct Baked {
 /// pre-order (parents before children): what the viewport shows at the current
 /// frame, frozen. Deformers and the objects enabled generators consume are
 /// left out.
-/// `simulated`: the simulation's poses at the current frame.
-pub(crate) fn bake(doc: &Document, selection: &[NodeId], simulated: &Overrides) -> Vec<Baked> {
+/// `simulated`: the simulation's poses at the current frame; `pictures`: the
+/// grey pictures Displace deformers read.
+pub(crate) fn bake(
+    doc: &Document,
+    selection: &[NodeId],
+    simulated: &Overrides,
+    pictures: &grid4d_eval::Pictures,
+) -> Vec<Baked> {
     let frame = f64::from(doc.time.frame());
     let mut eval = EvaluatedScene::new();
     eval.set_frame(frame);
     eval.set_overrides(simulated);
+    eval.set_pictures(pictures);
     eval.update(&doc.scene);
     let nodes = eval.nodes();
     let mut baked = Vec::new();

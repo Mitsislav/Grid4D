@@ -479,6 +479,7 @@ pub fn apply_pending(doc: &mut Document, editor: &mut EditorState, viewport: &mu
     }
     // Texture pictures loading in the background.
     changed |= editor.textures.update(doc.scene.textures());
+    editor.grey_pictures.update(&doc.scene, &editor.textures);
     // Material previews rendered in the background.
     changed |= editor
         .previews
@@ -944,7 +945,12 @@ fn apply(command: EditorCommand, doc: &mut Document, editor: &mut EditorState, v
             // Simulated clones as they are at this frame.
             let mut simulated = grid4d_eval::Overrides::default();
             editor.simulation.overrides(doc.time.frame(), &mut simulated);
-            let edits = make_editable_edits(doc, editor.selection.as_slice(), &simulated);
+            let edits = make_editable_edits(
+                doc,
+                editor.selection.as_slice(),
+                &simulated,
+                editor.grey_pictures.pictures(),
+            );
             commit(doc, editor, "Make Editable", edits, |_, _| {});
         }
         EditorCommand::CurrentStateToObject => current_state_to_object(doc, editor),
@@ -2573,7 +2579,12 @@ fn current_state_to_object(doc: &mut Document, editor: &mut EditorState) {
     // Simulated objects as they are at this frame.
     let mut simulated = grid4d_eval::Overrides::default();
     editor.simulation.overrides(doc.time.frame(), &mut simulated);
-    let baked = crate::current_state::bake(doc, editor.selection.as_slice(), &simulated);
+    let baked = crate::current_state::bake(
+        doc,
+        editor.selection.as_slice(),
+        &simulated,
+        editor.grey_pictures.pictures(),
+    );
     if baked.is_empty() {
         return;
     }
@@ -2628,7 +2639,12 @@ fn current_state_to_object(doc: &mut Document, editor: &mut EditorState) {
 /// object; each selected, enabled generator a polygon object holding its result
 /// at the viewport level, its cage removed. Objects inside such a cage are not
 /// baked on their own (they go with it); everything else is left alone.
-fn make_editable_edits(doc: &Document, selection: &[NodeId], simulated: &grid4d_eval::Overrides) -> Vec<SceneEdit> {
+fn make_editable_edits(
+    doc: &Document,
+    selection: &[NodeId],
+    simulated: &grid4d_eval::Overrides,
+    pictures: &grid4d_eval::Pictures,
+) -> Vec<SceneEdit> {
     let enabled_generator = |id: NodeId| {
         doc.scene
             .get(id)
@@ -2707,6 +2723,7 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId], simulated: &grid4d_
                 let mut eval = grid4d_eval::EvaluatedScene::new();
                 eval.set_frame(frame);
                 eval.set_overrides(simulated);
+                eval.set_pictures(pictures);
                 eval.update(&doc.scene);
                 eval
             });
@@ -2749,7 +2766,7 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId], simulated: &grid4d_
             if enabled_generator(id).is_none() {
                 continue;
             }
-            let Some(built) = grid4d_eval::generator_built(&doc.scene, id, frame) else {
+            let Some(built) = grid4d_eval::generator_built_with(&doc.scene, id, frame, pictures) else {
                 continue;
             };
             // A Boolean's cut edges come selected, ready for a bevel.
@@ -2896,6 +2913,12 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Twist
         | ObjectKindTag::Taper
         | ObjectKindTag::Bulge
+        | ObjectKindTag::Wrap
+        | ObjectKindTag::FollowSpline
+        | ObjectKindTag::Displace
+        | ObjectKindTag::ProjectToSurface
+        | ObjectKindTag::Smooth
+        | ObjectKindTag::Explode
         | ObjectKindTag::Ffd => {
             data.display_color = [0.55, 0.4, 0.9];
         }
@@ -2996,6 +3019,12 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Twist
         | ObjectKindTag::Taper
         | ObjectKindTag::Bulge
+        | ObjectKindTag::Wrap
+        | ObjectKindTag::FollowSpline
+        | ObjectKindTag::Displace
+        | ObjectKindTag::ProjectToSurface
+        | ObjectKindTag::Smooth
+        | ObjectKindTag::Explode
         | ObjectKindTag::Ffd => palette().icon_deformer,
         ObjectKindTag::PlainEffector | ObjectKindTag::RandomEffector => palette().icon_effector,
         ObjectKindTag::Cube

@@ -324,6 +324,20 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
         ObjectKindTag::Taper => key("Add Taper (Shift: under the selected object, fitted to it)"),
         ObjectKindTag::Bulge => key("Add Bulge (Shift: under the selected object, fitted to it)"),
         ObjectKindTag::Ffd => key("Add FFD (Shift: under the selected object, fitted to it)"),
+        ObjectKindTag::Wrap => {
+            key("Add Wrap: lays a flat object round a cylinder or a sphere (Shift: under the selected object)")
+        }
+        ObjectKindTag::FollowSpline => {
+            key("Add Follow Spline: lays an object along a spline (Shift: under the selected object)")
+        }
+        ObjectKindTag::Displace => key("Add Displace: bumps by noise or a picture (Shift: under the selected object)"),
+        ObjectKindTag::ProjectToSurface => {
+            key("Add Project to Surface: pulls an object onto another (Shift: under the selected object)")
+        }
+        ObjectKindTag::Smooth => key("Add Smooth: evens out an object's points (Shift: under the selected object)"),
+        ObjectKindTag::Explode => {
+            key("Add Explode: flings an object's polygons apart (Shift: under the selected object)")
+        }
         ObjectKindTag::Circle => key("Add Circle"),
         ObjectKindTag::Rectangle => key("Add Rectangle"),
         ObjectKindTag::Arc => key("Add Arc"),

@@ -11,6 +11,10 @@ use egui::{Button, DragValue, Grid, Margin, RichText, ScrollArea, Sense, TextEdi
 use grid4d_eval::GeneratorNote;
 use grid4d_geom::cloner::{CloneOrder, Cloner, Distribution, Layout, StepMode};
 use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode, Ffd, Shape};
+use grid4d_geom::deformers::{
+    AxisDirection, Displace, DisplaceDirection, DisplaceMapping, DisplaceSource, Explode, FollowSpline, PathFit,
+    ProjectMode, Smooth, Wrap, WrapShape,
+};
 use grid4d_geom::effector::{Effector, FalloffShape};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
@@ -1041,6 +1045,33 @@ fn object_tab(
                 shape_rows(ui, k, &mut bulge.shape);
                 fit_row(ui, k, "Bulges its parent's subtree");
             }
+            ObjectKind::Wrap(wrap) => wrap_rows(ui, k, wrap),
+            ObjectKind::FollowSpline { follow, spline } => {
+                if let Some((scene, owner)) = links {
+                    object_row(ui, "Spline", spline, scene, owner);
+                }
+                follow_spline_rows(ui, k, follow);
+            }
+            ObjectKind::Displace { displace, texture } => {
+                displace_rows(ui, k, displace, texture, links.map(|(scene, _)| scene));
+            }
+            ObjectKind::ProjectToSurface { project, target } => {
+                if let Some((scene, owner)) = links {
+                    object_row(ui, "Target", target, scene, owner);
+                }
+                choice_row(ui, "Mode", &mut project.mode, &ProjectMode::ALL, |m| tr(m.label()));
+                offset_row(ui, k, "Offset", &mut project.offset);
+                percent_row(ui, k, "Strength", &mut project.strength);
+                hint_row(ui, "Pulls its parent's subtree onto the target");
+            }
+            ObjectKind::Smooth(smooth) => {
+                bounded_count_row(ui, "Iterations", &mut smooth.iterations, 1, Smooth::MAX_ITERATIONS);
+                check_row(ui, "Keep Volume", &mut smooth.keep_volume);
+                check_row(ui, "Keep Borders", &mut smooth.keep_borders);
+                percent_row(ui, k, "Strength", &mut smooth.strength);
+                hint_row(ui, "Smooths its parent's subtree");
+            }
+            ObjectKind::Explode(explode) => explode_rows(ui, k, explode),
             ObjectKind::Sweep(sweep) => sweep_rows(ui, k, sweep),
             ObjectKind::Loft(loft) => loft_rows(ui, loft),
             ObjectKind::Boolean(boolean) => boolean_rows(ui, boolean, note),
@@ -2924,6 +2955,153 @@ fn fit_row(ui: &mut Ui, k: &mut KeyRows, hint: &str) {
         ui.add(egui::Label::new(RichText::new(tr(hint)).color(p().text_dim)).wrap());
     });
     ui.end_row();
+}
+
+/// A dim line of help under a deformer's rows.
+fn hint_row(ui: &mut Ui, hint: &str) {
+    ui.label("");
+    ui.vertical(|ui| {
+        ui.set_max_width(FIELD_WIDTH * 1.5);
+        ui.add(egui::Label::new(RichText::new(tr(hint)).color(p().text_dim)).wrap());
+    });
+    ui.end_row();
+}
+
+/// A length that is not animated (no key button).
+fn plain_length_row(ui: &mut Ui, label: &str, value: &mut f32, min: f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let field = ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        widgets::length(ui, value)
+            .speed(1.0)
+            .range(min..=1_000_000.0)
+            .max_decimals(2),
+    );
+    name_field(ui, &field, label);
+    ui.end_row();
+}
+
+/// An angle that is not animated, stored in radians, edited in degrees.
+fn plain_angle_row(ui: &mut Ui, label: &str, radians: &mut f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let mut value = radians.to_degrees();
+    let field = ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        DragValue::new(&mut value)
+            .speed(0.5)
+            .range(-36_000.0..=36_000.0)
+            .suffix("°"),
+    );
+    if field.changed() {
+        *radians = value.to_radians();
+    }
+    name_field(ui, &field, label);
+    ui.end_row();
+}
+
+/// The Wrap deformer's rows.
+fn wrap_rows(ui: &mut Ui, k: &mut KeyRows, wrap: &mut Wrap) {
+    choice_row(ui, "Shape", &mut wrap.shape, &WrapShape::ALL, |s| tr(s.label()));
+    plain_length_row(ui, "Width", &mut wrap.width, 0.01);
+    plain_length_row(ui, "Height", &mut wrap.height, 0.0);
+    length_row(ui, k, "Radius", &mut wrap.radius);
+    angle_row(ui, k, "Start Angle", &mut wrap.start, -36_000.0..=36_000.0);
+    angle_row(ui, k, "End Angle", &mut wrap.end, -36_000.0..=36_000.0);
+    percent_row(ui, k, "Strength", &mut wrap.strength);
+    hint_row(ui, "Wraps its parent's subtree round a cylinder or a sphere");
+}
+
+/// The Follow Spline deformer's rows (the Spline link is drawn before).
+fn follow_spline_rows(ui: &mut Ui, k: &mut KeyRows, follow: &mut FollowSpline) {
+    choice_row(ui, "Axis", &mut follow.axis, &AxisDirection::ALL, AxisDirection::label);
+    choice_row(ui, "Fit", &mut follow.fit, &PathFit::ALL, |f| tr(f.label()));
+    unbounded_key_percent_row(ui, k, "Path Offset", &mut follow.offset);
+    percent_row(ui, k, "Strength", &mut follow.strength);
+    hint_row(ui, "Lays its parent's subtree along the spline");
+}
+
+/// A fraction shown in percent, negative or above 100 % too, with a key button.
+fn unbounded_key_percent_row(ui: &mut Ui, k: &mut KeyRows, label: &str, value: &mut f32) {
+    attr_label(ui, label, LABEL_WIDTH);
+    let mut percent = *value * 100.0;
+    let field = ui.add_sized(
+        [FIELD_WIDTH, 19.0],
+        DragValue::new(&mut percent)
+            .speed(0.5)
+            .range(-10_000.0..=10_000.0)
+            .suffix(" %"),
+    );
+    if field.changed() {
+        *value = percent / 100.0;
+    }
+    name_field(ui, &field, label);
+    k.button(ui, label);
+    ui.end_row();
+}
+
+/// The Displace deformer's rows.
+fn displace_rows(
+    ui: &mut Ui,
+    k: &mut KeyRows,
+    displace: &mut Displace,
+    texture: &mut Option<grid4d_scene::TextureId>,
+    scene: Option<&Scene>,
+) {
+    choice_row(ui, "Source", &mut displace.source, &DisplaceSource::ALL, |s| {
+        tr(s.label())
+    });
+    match displace.source {
+        DisplaceSource::Texture => {
+            if let Some(scene) = scene {
+                attr_label(ui, "Texture", LABEL_WIDTH);
+                let textures = scene.textures();
+                let name = texture
+                    .and_then(|id| textures.get(id))
+                    .map_or(tr("None"), |t| t.name.as_str());
+                egui::ComboBox::from_id_salt("grid4d.attr.displace.texture")
+                    .selected_text(name)
+                    .width(FIELD_WIDTH + 40.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(texture, None, tr("None"));
+                        for (id, picture) in textures.iter() {
+                            ui.selectable_value(texture, Some(id), &picture.name);
+                        }
+                    })
+                    .response
+                    .on_hover_text(tr("Its brightness moves the points; add one in the Texture Manager"));
+                ui.end_row();
+            }
+            choice_row(ui, "Mapping", &mut displace.mapping, &DisplaceMapping::ALL, |m| {
+                tr(m.label())
+            });
+        }
+        DisplaceSource::Noise => {
+            plain_length_row(ui, "Noise Scale", &mut displace.noise_scale, Displace::MIN_NOISE_SCALE);
+            bounded_count_row(ui, "Octaves", &mut displace.octaves, 1, Displace::MAX_OCTAVES);
+            big_count_row(ui, "Seed", &mut displace.seed, 0, 99_999);
+        }
+    }
+    length_row(ui, k, "Height", &mut displace.height);
+    fraction_row(ui, "Mid Level", &mut displace.mid);
+    choice_row(ui, "Direction", &mut displace.direction, &DisplaceDirection::ALL, |d| {
+        tr(d.label())
+    });
+    percent_row(ui, k, "Strength", &mut displace.strength);
+    hint_row(ui, "Moves its parent's subtree's points by noise or a picture");
+}
+
+/// The Explode deformer's rows.
+fn explode_rows(ui: &mut Ui, k: &mut KeyRows, explode: &mut Explode) {
+    percent_row(ui, k, "Strength", &mut explode.strength);
+    plain_length_row(ui, "Distance", &mut explode.distance, 0.0);
+    fraction_row(ui, "Variation", &mut explode.variation);
+    plain_angle_row(ui, "Spin", &mut explode.spin);
+    scale_percent_row(ui, "End Size", &mut explode.end_size);
+    big_count_row(ui, "Seed", &mut explode.seed, 0, 99_999);
+    hint_row(
+        ui,
+        "Flings its parent's subtree's polygons apart; animate Strength from 0 to 100 %",
+    );
 }
 
 /// The FFD's box, grid and Reset Lattice: Size scales the lattice, a new grid

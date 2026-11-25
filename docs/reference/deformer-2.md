@@ -115,23 +115,83 @@
 | Piece | Where |
 |-------|-------|
 | `ObjectKind::{Wrap, FollowSpline, Displace, ProjectToSurface, Smooth, Explode, PointOffsets}` in `DEFORMERS`, labels, icons, pages, `ObjectParam`s for keyed values | `scene/node.rs`, `scene/param.rs` |
-| The point functions (wrap mapping, path frames, noise, Laplacian/Taubin, explode per polygon) | `grid4d-geom::deform` (pure) |
+| The point functions (wrap mapping, path frames, noise, Laplacian/Taubin, explode per polygon) | `grid4d-geom::deformers` (pure) |
 | Stack entries, links (spline, target, texture), pictures handed in (`EvaluatedScene::set_pictures`) | `grid4d-eval::deform` |
 | File | `.g4d` v6 kinds `wrap`, `follow_spline`, `displace`, `project_to_surface`, `smooth`, `explode` (`point_offsets`); links by index; new parameter names (17.9) |
 
-## Acceptance criteria
+## Decisions made while implementing (2026-11-25)
 
-- [ ] Wrap of a 400 × 200 plane onto a cylinder of radius 400 / 2π closes
+1. **Point Offsets moved to 1.4** (R5): editing the deformed shape needs
+   the gizmo and Points mode to work through a deformer stack, which is a
+   step of its own. The other six are in 17.9.
+2. **Whole-mesh deformers**: Displace needs normals and UVs, Smooth edges,
+   Explode polygons, so the stack now hands each deformer the whole mesh
+   (in its own space) rather than its points; the box deformers and plugins
+   still see points only. The maths is in `grid4d_geom::deformers` (beside
+   `deform`, which keeps the box deformers).
+3. **Links are resolved while walking**, placed at the evaluated frame:
+   - The path is the linked spline's own curve: a spline primitive, a Text
+     or an editable spline. A Spline Boolean's curve is not followed.
+     Only the path's first segment is used. Past its ends, points carry on
+     along the end segments.
+   - The target is a polygon object's mesh or a primitive's (its BVH is
+     built once per mesh). The target is not deformed, and generators are
+     not targets.
+   - A dangling or unsuitable link does nothing.
+4. **Pictures (D44)**:
+   - The editor turns its decoded pictures into **grey pictures** (luminance,
+     at most 1024 wide) for the textures a Displace reads. Only an unchanged
+     picture is kept, and the conversion repeats only when a picture changes.
+   - It hands them to evaluation (`EvaluatedScene::set_pictures`). Different
+     pictures mean a new evaluation, so the deformer updates when the
+     picture arrives.
+   - Renders make the grey pictures once per render from the pictures they
+     take. Make Editable and Current State use the editor's.
+5. **Follow Spline**: the object is measured along its Axis from its lowest
+   point. With Keep Length that point sits at Path Offset, and with Fit to
+   Spline the object spans the whole path. Frames are carried along the
+   path by parallel transport, starting from the turn that takes the Axis
+   to the path's first direction.
+6. **Smooth** is Taubin's λ | μ smoothing with λ = 0.5 and μ = −0.53. Keep
+   Volume off is plain Laplacian smoothing. Keep Borders holds the points on
+   edges with one polygon.
+7. **Explode** moves each polygon outward from the deformer's origin, through
+   its centre (along its normal when the centre is at the origin). Distance,
+   axis and turn are random per polygon and seed. Polygons keep their order
+   and UVs. At Strength 0 the mesh is untouched and still welded.
+8. **Displace**:
+   - Flat mapping repeats the picture every 100 cm, centred on the deformer.
+   - Height is not negative: the parameter is a length like the others.
+     Mid Level gives the push inwards.
+   - Noise is value noise, smoothly interpolated, in 1 – 8 octaves.
+9. **Guides**: the Wrap draws its cylinder (two circles) or sphere (three
+   circles). The others draw a 50 cm cross with a diamond, picked like a
+   spline. None has a strength handle, and Fit to Parent does nothing for
+   them (they have no box).
+10. **Keyed values**:
+    - Wrap's Radius, Start Angle, End Angle and Strength.
+    - Follow Spline's **Path Offset** (a new parameter, `path_offset`, refused
+      in a version 5 file) and Strength.
+    - Displace's Height and Strength.
+    - Project to Surface's Offset and Strength.
+    - Smooth's and Explode's Strength.
+11. **Project to Surface, Along Direction** casts forward only, down the
+    deformer's −Z axis.
+
+## Acceptance criteria (all met in 17.9; Point Offsets moved to 1.4)
+
+- [x] Wrap of a 400 × 200 plane onto a cylinder of radius 400 / 2π closes
       the seam within 1e-3 cm.
-- [ ] Follow Spline of a cylinder along a quarter circle bends it with
+- [x] Follow Spline of a cylinder along a quarter circle bends it with
       constant cross-section (Keep Length).
-- [ ] Displace by a known picture moves each point by height × (value − mid)
+- [x] Displace by a known picture moves each point by height × (value − mid)
       along its normal; a missing picture moves nothing.
-- [ ] Project to Surface (Nearest Point) puts every point on a sphere target
+- [x] Project to Surface (Nearest Point) puts every point on a sphere target
       within 1e-3 cm; Offset keeps them off by it.
-- [ ] Smooth with Keep Volume keeps a noisy sphere's volume within 2 %; Keep
+- [x] Smooth with Keep Volume keeps a noisy sphere's volume within 2 %; Keep
       Borders keeps a plane's border points.
-- [ ] Explode at 0 % is the input; at 100 % each polygon is at its distance.
-- [ ] Every new deformer: strength 0 % is the input; idle frames do not
-      recompute; one undo step per edit; saved as v6 and reopened the same; a
-      v5 file naming one is refused.
+- [x] Explode at 0 % is the input; at 100 % each polygon is at its distance.
+- [x] Every new deformer: strength 0 % is the input; idle frames do not
+      recompute; one undo step per edit (the Attribute Manager's live edits,
+      as for every object); saved as v6 and reopened the same; a v5 file
+      naming one is refused.

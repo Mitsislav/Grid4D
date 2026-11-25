@@ -32,12 +32,14 @@ mod overrides;
 pub mod sky;
 
 pub use curve::{CurveHandle, CurveId};
-pub use deform::is_deformer;
+pub use deform::{Pictures, is_deformer};
 pub use drawable::{Drawable, Shading, Surface, drawable, editable_mesh};
 pub use evaluated::{
     EvaluatedInstance, EvaluatedLight, EvaluatedNode, EvaluatedScene, MAX_LINKED_LIGHTS, PickShape, Purpose,
 };
-pub use generator::{Built, GeneratorNote, generator_built, generator_color, generator_curve, generator_mesh};
+pub use generator::{
+    Built, GeneratorNote, generator_built, generator_built_with, generator_color, generator_curve, generator_mesh,
+};
 pub use key::{MeshKey, Ratio};
 pub use material_layer::{MaterialLayer, MaterialLayers};
 pub use overrides::Overrides;

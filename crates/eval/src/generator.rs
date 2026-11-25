@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use crate::deform::Pictures;
 use glam::Mat4;
 use grid4d_geom::{
     PolyMesh,
@@ -212,12 +213,14 @@ pub(crate) fn options(kind: &ObjectKind, purpose: Purpose) -> Option<Options> {
 /// descendants that have geometry), for an Extrude its spline(s) — placed as
 /// they are at `frame` (animation included), and returns the colour the result
 /// shows without a material. `stack` is scratch space.
+#[expect(clippy::too_many_arguments, reason = "where and when it is evaluated, passed apart")]
 pub(crate) fn gather(
     scene: &Scene,
     id: NodeId,
     options: &Options,
     purpose: Purpose,
     frame: f64,
+    pictures: &Pictures,
     stack: &mut Vec<NodeId>,
     inputs: &mut Vec<Input>,
 ) -> Option<[f32; 3]> {
@@ -226,13 +229,13 @@ pub(crate) fn gather(
     match options {
         Options::Sweep(_) => return gather_sweep(scene, id, purpose, frame, inputs),
         Options::Loft(_) => return gather_loft(scene, id, purpose, frame, inputs),
-        Options::Boolean(_) => return gather_solids(scene, id, purpose, frame, Operands::Two, 0, inputs),
+        Options::Boolean(_) => return gather_solids(scene, id, purpose, frame, pictures, Operands::Two, 0, inputs),
         Options::Symmetry(_) | Options::Join(_) => {
-            return gather_solids(scene, id, purpose, frame, Operands::All, 0, inputs);
+            return gather_solids(scene, id, purpose, frame, pictures, Operands::All, 0, inputs);
         }
         Options::Reduce(reduce) => {
             let operands = if reduce.together { Operands::All } else { Operands::Each };
-            return gather_solids(scene, id, purpose, frame, operands, 0, inputs);
+            return gather_solids(scene, id, purpose, frame, pictures, operands, 0, inputs);
         }
         Options::SplineBoolean(_) => return gather_curves(scene, id, purpose, frame, 0, inputs),
         Options::Subdivision(_) | Options::Extrude { .. } | Options::Lathe(_) => {}
@@ -271,7 +274,7 @@ pub(crate) fn gather(
                 && let Some(nested) = options_of_solids(&kind, purpose)
             {
                 let mut gathered = Vec::new();
-                if gather_solids(scene, node_id, purpose, frame, nested.1, 1, &mut gathered).is_some() {
+                if gather_solids(scene, node_id, purpose, frame, pictures, nested.1, 1, &mut gathered).is_some() {
                     inputs.push(Input {
                         source: Source::Generated(nested.0, gathered),
                         matrix: into_generator * scene.world_matrix_at(node_id, frame),
@@ -312,7 +315,7 @@ pub(crate) fn gather(
         };
         if let Some(source) = source {
             let links = match source {
-                Source::Mesh(..) | Source::Primitive(_) => deform::input_chain(scene, node_id, id, frame),
+                Source::Mesh(..) | Source::Primitive(_) => deform::input_chain(scene, node_id, id, frame, pictures),
                 Source::SplinePrimitive(_) | Source::Text(_) | Source::Spline(..) | Source::Generated(..) => Vec::new(),
             };
             inputs.push(Input {
@@ -500,11 +503,13 @@ enum Operands {
 /// space. A generator among them enters with its own inputs (its children are
 /// its, not this one's), up to [`MAX_NESTING`] deep. The colour returned is
 /// the Boolean's own, else the first child's (the result stands in for it).
+#[expect(clippy::too_many_arguments, reason = "where and when it is evaluated, passed apart")]
 fn gather_solids(
     scene: &Scene,
     id: NodeId,
     purpose: Purpose,
     frame: f64,
+    pictures: &Pictures,
     operands: Operands,
     nesting: u32,
     inputs: &mut Vec<Input>,
@@ -545,17 +550,49 @@ fn gather_solids(
                 // A generator: its result stands in for it and its children.
                 let mut nested = Vec::new();
                 let gathered = match options {
-                    Options::Boolean(_) => {
-                        gather_solids(scene, node_id, purpose, frame, Operands::Two, nesting + 1, &mut nested)
-                    }
-                    Options::Symmetry(_) | Options::Join(_) => {
-                        gather_solids(scene, node_id, purpose, frame, Operands::All, nesting + 1, &mut nested)
-                    }
+                    Options::Boolean(_) => gather_solids(
+                        scene,
+                        node_id,
+                        purpose,
+                        frame,
+                        pictures,
+                        Operands::Two,
+                        nesting + 1,
+                        &mut nested,
+                    ),
+                    Options::Symmetry(_) | Options::Join(_) => gather_solids(
+                        scene,
+                        node_id,
+                        purpose,
+                        frame,
+                        pictures,
+                        Operands::All,
+                        nesting + 1,
+                        &mut nested,
+                    ),
                     Options::Reduce(reduce) => {
                         let operands = if reduce.together { Operands::All } else { Operands::Each };
-                        gather_solids(scene, node_id, purpose, frame, operands, nesting + 1, &mut nested)
+                        gather_solids(
+                            scene,
+                            node_id,
+                            purpose,
+                            frame,
+                            pictures,
+                            operands,
+                            nesting + 1,
+                            &mut nested,
+                        )
                     }
-                    _ => gather(scene, node_id, &options, purpose, frame, &mut Vec::new(), &mut nested),
+                    _ => gather(
+                        scene,
+                        node_id,
+                        &options,
+                        purpose,
+                        frame,
+                        pictures,
+                        &mut Vec::new(),
+                        &mut nested,
+                    ),
                 };
                 if gathered.is_some() {
                     inputs.push(Input {
@@ -578,7 +615,7 @@ fn gather_solids(
                 inputs.push(Input {
                     source,
                     matrix,
-                    links: deform::input_chain(scene, node_id, id, frame),
+                    links: deform::input_chain(scene, node_id, id, frame, pictures),
                     operand,
                 });
             }
@@ -918,6 +955,13 @@ pub fn generator_curve(scene: &Scene, id: NodeId, frame: f64) -> Option<Polyline
 /// cut edges, for Make Editable to select).
 #[must_use]
 pub fn generator_built(scene: &Scene, id: NodeId, frame: f64) -> Option<Built> {
+    generator_built_with(scene, id, frame, &Pictures::default())
+}
+
+/// [`generator_built`] with the pictures Displace deformers inside its
+/// inputs read (see [`crate::EvaluatedScene::set_pictures`]).
+#[must_use]
+pub fn generator_built_with(scene: &Scene, id: NodeId, frame: f64, pictures: &Pictures) -> Option<Built> {
     let options = options(&scene.get(id)?.data.kind_at(frame), Purpose::Editor)?;
     let mut inputs = Vec::new();
     gather(
@@ -926,13 +970,14 @@ pub fn generator_built(scene: &Scene, id: NodeId, frame: f64) -> Option<Built> {
         &options,
         Purpose::Editor,
         frame,
+        pictures,
         &mut Vec::new(),
         &mut inputs,
     )?;
     Some(build_all(&inputs, &options))
 }
 
-fn editable_mesh_exists(kind: &ObjectKind) -> bool {
+pub(crate) fn editable_mesh_exists(kind: &ObjectKind) -> bool {
     matches!(
         kind,
         ObjectKind::Cube { .. }

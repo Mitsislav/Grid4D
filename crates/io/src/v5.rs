@@ -77,6 +77,36 @@ const NEW_VALUES: &[NewValue] = &[
         field: "param",
         value: "keep",
     },
+    // Step 17.9: the deformers, and a Follow Spline's Path Offset as an
+    // animated parameter.
+    NewValue {
+        field: "type",
+        value: "wrap",
+    },
+    NewValue {
+        field: "type",
+        value: "follow_spline",
+    },
+    NewValue {
+        field: "type",
+        value: "displace",
+    },
+    NewValue {
+        field: "type",
+        value: "project_to_surface",
+    },
+    NewValue {
+        field: "type",
+        value: "smooth",
+    },
+    NewValue {
+        field: "type",
+        value: "explode",
+    },
+    NewValue {
+        field: "param",
+        value: "path_offset",
+    },
 ];
 
 /// A version 5 `document.json`, already parsed, as version 6 (see the module
@@ -122,7 +152,20 @@ mod tests {
                 "meshes": []
             })
         };
-        for kind in ["boolean", "symmetry", "instance", "join", "spline_boolean", "reduce"] {
+        for kind in [
+            "boolean",
+            "symmetry",
+            "instance",
+            "join",
+            "spline_boolean",
+            "reduce",
+            "wrap",
+            "follow_spline",
+            "displace",
+            "project_to_surface",
+            "smooth",
+            "explode",
+        ] {
             let file = with(json!({ "name": "New", "kind": { "type": kind } }));
             assert!(upgrade(file).is_err(), "{kind}");
         }
@@ -132,6 +175,12 @@ mod tests {
             "tracks": [{ "param": "keep", "keys": [] }]
         }));
         assert!(upgrade(keyed).is_err(), "a Reduce's Keep");
+        let offset = with(json!({
+            "name": "Ball",
+            "kind": { "type": "sphere" },
+            "tracks": [{ "param": "path_offset", "keys": [] }]
+        }));
+        assert!(upgrade(offset).is_err(), "a Follow Spline's Path Offset");
     }
 
     #[test]

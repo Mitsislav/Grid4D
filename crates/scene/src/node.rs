@@ -180,6 +180,31 @@ pub enum ObjectKind {
         lattice: SplineHandle,
         components: Components,
     },
+    /// Wrap deformer: lays a flat region round a cylinder or a sphere
+    /// (`docs/reference/deformer-2.md`).
+    Wrap(grid4d_geom::deformers::Wrap),
+    /// Follow Spline deformer: lays its parent's subtree along a path.
+    FollowSpline {
+        follow: grid4d_geom::deformers::FollowSpline,
+        /// The path (a dangling id or a non-curve does nothing).
+        spline: Option<NodeId>,
+    },
+    /// Displace deformer: moves points by noise or a picture's brightness.
+    Displace {
+        displace: grid4d_geom::deformers::Displace,
+        /// The picture of a Texture source (none: nothing moves).
+        texture: Option<crate::TextureId>,
+    },
+    /// Project to Surface deformer: pulls points onto another object.
+    ProjectToSurface {
+        project: grid4d_geom::deformers::ProjectToSurface,
+        /// The surface (a dangling id or an object without a mesh does nothing).
+        target: Option<NodeId>,
+    },
+    /// Smooth deformer: evens out its parent's subtree's points.
+    Smooth(grid4d_geom::deformers::Smooth),
+    /// Explode deformer: flings its parent's subtree's polygons apart.
+    Explode(grid4d_geom::deformers::Explode),
     /// A parametric spline (Circle, Rectangle, Arc, n-Side, Star, Helix,
     /// Flower): a curve, drawn as lines, not rendered.
     SplinePrimitive(SplinePrimitive),
@@ -234,6 +259,12 @@ pub enum ObjectKindTag {
     Taper,
     Bulge,
     Ffd,
+    Wrap,
+    FollowSpline,
+    Displace,
+    ProjectToSurface,
+    Smooth,
+    Explode,
     Circle,
     Rectangle,
     Arc,
@@ -249,7 +280,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 42] = [
+    pub const ALL: [Self; 48] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -283,6 +314,12 @@ impl ObjectKindTag {
         Self::Taper,
         Self::Bulge,
         Self::Ffd,
+        Self::Wrap,
+        Self::FollowSpline,
+        Self::Displace,
+        Self::ProjectToSurface,
+        Self::Smooth,
+        Self::Explode,
         Self::Circle,
         Self::Rectangle,
         Self::Arc,
@@ -328,7 +365,19 @@ impl ObjectKindTag {
     pub const EFFECTORS: [Self; 2] = [Self::PlainEffector, Self::RandomEffector];
 
     /// Deformers: objects that reshape their parent and its subtree.
-    pub const DEFORMERS: [Self; 5] = [Self::Bend, Self::Twist, Self::Taper, Self::Bulge, Self::Ffd];
+    pub const DEFORMERS: [Self; 11] = [
+        Self::Bend,
+        Self::Twist,
+        Self::Taper,
+        Self::Bulge,
+        Self::Ffd,
+        Self::Wrap,
+        Self::FollowSpline,
+        Self::Displace,
+        Self::ProjectToSurface,
+        Self::Smooth,
+        Self::Explode,
+    ];
 
     /// Geometric primitives (the "Create ▸ Object" family).
     pub const PRIMITIVES: [Self; 8] = [
@@ -378,6 +427,12 @@ impl ObjectKindTag {
             Self::Taper => "Taper",
             Self::Bulge => "Bulge",
             Self::Ffd => "FFD",
+            Self::Wrap => "Wrap",
+            Self::FollowSpline => "Follow Spline",
+            Self::Displace => "Displace",
+            Self::ProjectToSurface => "Project to Surface",
+            Self::Smooth => "Smooth",
+            Self::Explode => "Explode",
             Self::Circle => "Circle",
             Self::Rectangle => "Rectangle",
             Self::Arc => "Arc",
@@ -496,6 +551,22 @@ impl ObjectKindTag {
             Self::Bulge => ObjectKind::Bulge(grid4d_geom::deform::Bulge::default()),
             // docs/reference/deformer-ffd.md: a 3 × 3 × 3 lattice, unmoved.
             Self::Ffd => ObjectKind::ffd(grid4d_geom::deform::Ffd::default()),
+            // docs/reference/deformer-2.md: the tables' defaults.
+            Self::Wrap => ObjectKind::Wrap(grid4d_geom::deformers::Wrap::default()),
+            Self::FollowSpline => ObjectKind::FollowSpline {
+                follow: grid4d_geom::deformers::FollowSpline::default(),
+                spline: None,
+            },
+            Self::Displace => ObjectKind::Displace {
+                displace: grid4d_geom::deformers::Displace::default(),
+                texture: None,
+            },
+            Self::ProjectToSurface => ObjectKind::ProjectToSurface {
+                project: grid4d_geom::deformers::ProjectToSurface::default(),
+                target: None,
+            },
+            Self::Smooth => ObjectKind::Smooth(grid4d_geom::deformers::Smooth::default()),
+            Self::Explode => ObjectKind::Explode(grid4d_geom::deformers::Explode::default()),
             // The manual states no defaults: these are ours (docs/reference/object-spline.md).
             Self::Circle => spline(SplineShape::Circle {
                 radius: 200.0,
@@ -645,6 +716,12 @@ impl ObjectKind {
             Self::Taper(_) => ObjectKindTag::Taper,
             Self::Bulge(_) => ObjectKindTag::Bulge,
             Self::Ffd { .. } => ObjectKindTag::Ffd,
+            Self::Wrap(_) => ObjectKindTag::Wrap,
+            Self::FollowSpline { .. } => ObjectKindTag::FollowSpline,
+            Self::Displace { .. } => ObjectKindTag::Displace,
+            Self::ProjectToSurface { .. } => ObjectKindTag::ProjectToSurface,
+            Self::Smooth(_) => ObjectKindTag::Smooth,
+            Self::Explode(_) => ObjectKindTag::Explode,
             Self::SplinePrimitive(primitive) => match primitive.shape {
                 SplineShape::Circle { .. } => ObjectKindTag::Circle,
                 SplineShape::Rectangle { .. } => ObjectKindTag::Rectangle,
@@ -703,6 +780,12 @@ impl ObjectKind {
             | Self::Taper(_)
             | Self::Bulge(_)
             | Self::Ffd { .. }
+            | Self::Wrap(_)
+            | Self::FollowSpline { .. }
+            | Self::Displace { .. }
+            | Self::ProjectToSurface { .. }
+            | Self::Smooth(_)
+            | Self::Explode(_)
             | Self::PlainEffector(_)
             | Self::RandomEffector(_)
             | Self::Plugin(_) => 0,
@@ -720,7 +803,17 @@ impl ObjectKind {
     pub const fn is_deformer(&self) -> bool {
         matches!(
             self,
-            Self::Bend(_) | Self::Twist(_) | Self::Taper(_) | Self::Bulge(_) | Self::Ffd { .. }
+            Self::Bend(_)
+                | Self::Twist(_)
+                | Self::Taper(_)
+                | Self::Bulge(_)
+                | Self::Ffd { .. }
+                | Self::Wrap(_)
+                | Self::FollowSpline { .. }
+                | Self::Displace { .. }
+                | Self::ProjectToSurface { .. }
+                | Self::Smooth(_)
+                | Self::Explode(_)
         )
     }
 
@@ -892,6 +985,13 @@ impl ObjectKind {
             Self::Taper(d) => d.size * 0.5,
             Self::Bulge(d) => d.size * 0.5,
             Self::Ffd { ffd, .. } => ffd.size * 0.5,
+            Self::Wrap(wrap) => Vec3::new(wrap.radius, wrap.height * 0.5, wrap.radius),
+            // No box: a marker of the deformers' guide size.
+            Self::FollowSpline { .. }
+            | Self::Displace { .. }
+            | Self::ProjectToSurface { .. }
+            | Self::Smooth(_)
+            | Self::Explode(_) => Vec3::splat(grid4d_geom::deformers::GUIDE_SIZE * 0.5),
             Self::PlainEffector(effector) | Self::RandomEffector(effector) => match effector.falloff.shape {
                 grid4d_geom::effector::FalloffShape::Infinite => Vec3::splat(25.0),
                 _ => effector.falloff.size * 0.5,

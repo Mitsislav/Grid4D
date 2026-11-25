@@ -240,6 +240,12 @@ pub fn gltf_document(objects: &Objects, buffer_uri: Option<&str>) -> Result<(Vec
             | ObjectKind::Twist(_)
             | ObjectKind::Taper(_)
             | ObjectKind::Bulge(_)
+            | ObjectKind::Wrap(_)
+            | ObjectKind::FollowSpline { .. }
+            | ObjectKind::Displace { .. }
+            | ObjectKind::ProjectToSurface { .. }
+            | ObjectKind::Smooth(_)
+            | ObjectKind::Explode(_)
             | ObjectKind::Ffd { .. }
             // glTF has no sky or surrounding picture: the node keeps its place.
             | ObjectKind::Sky(_)

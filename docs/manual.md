@@ -1131,7 +1131,7 @@ triangle. One undo step turns it back into the parametric object. On a Subdivisi
 Surface, Make Editable keeps the smooth result
 ([§12.4](#124-switching-it-off-and-baking-it)). To keep the original and get a
 polygon copy of what you see instead — deformers and animation included — use
-**Current State to Object** ([§14.6](#146-current-state-to-object)).
+**Current State to Object** ([§14.7](#147-current-state-to-object)).
 
 ### 11.2 Component modes
 
@@ -1978,8 +1978,10 @@ Generator ▸ Spline Boolean**).
 
 A **deformer** changes the shape of other objects without touching their
 points: bend a tube into an arch, curl a column into an S — and keep editing the
-original or animate the deformer. There are five: **Bend**, **Twist**,
-**Taper**, **Bulge** and **FFD**.
+original or animate the deformer. There are eleven: **Bend**, **Twist**,
+**Taper**, **Bulge** and **FFD**, which work through a box, and **Wrap**,
+**Follow Spline**, **Displace**, **Project to Surface**, **Smooth** and
+**Explode** (§14.6).
 
 ![Three Bends: a tube bent into an arch, a column curled into an S, a Subdivision Surface bent towards the back; the selected Bend's box and its Object properties](images/manual/deformer-bend.png)
 
@@ -2086,7 +2088,92 @@ The Attribute Manager's **Object** tab:
 Lattice points cannot be deleted, and the lattice is edited rather than
 animated.
 
-### 14.6 Current State to Object
+### 14.6 Wrap, Follow Spline, Displace, Project to Surface, Smooth and Explode
+
+![A plane wrapped round a cylinder, a bar laid round a circle, a plane displaced by noise, a cube pulled towards a sphere and an exploding sphere; the Displace's Object properties](images/manual/deformers-2.png)
+
+These six are created and placed like the others (**Create ▸ Deformer ▸ …**,
+**Shift** to put one under the selected object) and change their parent and
+everything below it. Except for the Wrap, they have no box: they show a small
+violet cross where they stand. Every one has a **Strength** (0 – 100 %, with
+a key button): 0 % leaves the object as it is, 100 % applies the full effect,
+anything between blends the two.
+
+**Wrap** lays a flat object round a cylinder or a sphere — a label round a
+bottle, a map round a globe.
+
+- **Shape**: **Cylinder** or **Sphere**, drawn as circles round the deformer's
+  Y axis.
+- **Width** and **Height**: the flat region, in the deformer's X and Y, that
+  goes round the shape. **Width** is spread from **Start Angle** to **End
+  Angle** (−180° to 180°: once round); on a Sphere, Height goes from pole to
+  pole.
+- **Radius**: the shape's radius. What sticks out of the flat region (along
+  the deformer's Z) stands off the shape by as much.
+- Radius, Start Angle and End Angle have key buttons: animate End Angle to roll
+  a sheet up.
+
+**Follow Spline** lays an object along a spline — a train along its track, a
+ribbon along a path.
+
+- **Spline**: the path (pick any spline object in the list). Without one,
+  nothing happens.
+- **Axis**: the object's own axis that is laid along the path (+Y by default).
+- **Fit**: **Keep Length** keeps the object as long as it is; **Fit to
+  Spline** stretches it over the whole path.
+- **Path Offset**: where along the path the object starts, as a share of the
+  path's length. Animate it (it has a key button) to send the object along
+  the path; on a closed path it goes round and round.
+
+**Displace** pushes points in or out — by noise, for rough rock or water, or
+by the brightness of a picture.
+
+- **Source**: **Noise** or **Texture**.
+- With Noise: **Noise Scale** (the size of the bumps), **Octaves** (how many
+  layers of finer detail, 1 – 8) and **Seed** (another pattern).
+- With Texture: **Texture** (a picture added in the Texture Manager) and
+  **Mapping**: **UV** reads it through the object's UVs, **Flat** lays it
+  across the deformer's X and Y, 100 cm a picture. Until the picture has
+  loaded, nothing moves.
+- **Height**: how far a white point moves; **Mid Level**: the brightness that
+  stays where it is (points darker than it move in, brighter ones out).
+- **Direction**: along each point's **Normal**, or along X, Y or Z.
+
+The object needs enough points to show the detail: a plane with many
+segments, or a Subdivision Surface around the Displace's parent.
+
+**Project to Surface** pulls points onto another object — a decal onto a
+car body, a road onto a terrain.
+
+- **Target**: the object to pull onto (a polygon object or a primitive).
+- **Mode**: **Nearest Point** (each point to the nearest place on the target),
+  **Along Direction** (straight down the deformer's −Z axis: point the
+  deformer at the target) or **Along Normal** (along each point's normal,
+  whichever side is nearer). Points that find nothing stay where they are.
+- **Offset**: how far the points stay off the target's surface.
+
+**Smooth** evens out an object's points, rounding off sharp bumps.
+
+- **Iterations** (1 – 200): how many smoothing passes.
+- **Keep Volume**: on, the object keeps its size; off, it shrinks as it
+  smooths.
+- **Keep Borders**: on, open borders (the edge of a plane) do not move.
+
+**Explode** flings an object's polygons apart, outward from the deformer.
+
+- **Strength** is how far the explosion has gone: animate it from 0 % to
+  100 %. At 0 % the object is whole.
+- **Distance**: how far the polygons have flown at 100 %; **Variation**:
+  how much that differs from polygon to polygon.
+- **Spin**: how far each polygon has turned at 100 %; **End Size**: each
+  polygon's size at 100 % (0 % shrinks them away); **Seed**: another
+  pattern.
+
+Current State to Object (§14.7) keeps any of these effects as a polygon
+object; a deformer inside a generator's input (a Subdivision Surface's cage,
+for example) changes the input before the generator uses it.
+
+### 14.7 Current State to Object
 
 A deformed object stays editable: its own points never change. When you want
 the deformed shape itself — to model it further, or to keep it while you change
@@ -2179,7 +2266,7 @@ Choose the layout in the Object tab's **Mode**:
   parameters.
 - **Make Editable** (C) turns the Cloner into a Null holding one polygon object
   per clone (`Cube.0`, `Cube.1`, …); **Current State to Object**
-  ([§14.6](#146-current-state-to-object)) adds the same as a copy.
+  ([§14.7](#147-current-state-to-object)) adds the same as a copy.
 - Clones are rendered, and glTF and OBJ export write the Cloner as a group of
   its clones.
 - A Cloner makes at most 10 000 clones.

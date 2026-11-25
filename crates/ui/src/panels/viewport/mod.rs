@@ -683,6 +683,7 @@ impl ViewportPanel {
         }
         editor.simulation.overrides(frame, &mut self.simulated);
         self.evaluated.set_overrides(&self.simulated);
+        self.evaluated.set_pictures(editor.grey_pictures.pictures());
         // While anything is held (a gizmo, a field, a drag), slow generators
         // keep their result; it is rebuilt on release (risk R9).
         self.evaluated.set_deferring(ui.input(|i| i.pointer.any_down()));

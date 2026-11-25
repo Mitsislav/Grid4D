@@ -25,6 +25,7 @@ pub mod boolean;
 mod bvh;
 pub mod cloner;
 pub mod deform;
+pub mod deformers;
 pub mod displace;
 pub mod effector;
 mod exact;

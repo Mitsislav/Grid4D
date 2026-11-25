@@ -117,13 +117,19 @@ fn golden_with(mesh: grid4d_geom::PolyMesh) -> Document {
 /// The kinds of object version 5 adds ([`full_v5_document`] has them).
 const VERSION_5_KINDS: [ObjectKindTag; 2] = [ObjectKindTag::Sky, ObjectKindTag::Environment];
 /// The kinds of object version 6 adds ([`full_document`] has them).
-const VERSION_6_KINDS: [ObjectKindTag; 6] = [
+const VERSION_6_KINDS: [ObjectKindTag; 12] = [
     ObjectKindTag::Boolean,
     ObjectKindTag::Symmetry,
     ObjectKindTag::Instance,
     ObjectKindTag::Join,
     ObjectKindTag::SplineBoolean,
     ObjectKindTag::Reduce,
+    ObjectKindTag::Wrap,
+    ObjectKindTag::FollowSpline,
+    ObjectKindTag::Displace,
+    ObjectKindTag::ProjectToSurface,
+    ObjectKindTag::Smooth,
+    ObjectKindTag::Explode,
 ];
 
 /// Everything a version 6 file can hold (see `docs/FILE_FORMAT.md`): version
@@ -132,7 +138,9 @@ const VERSION_6_KINDS: [ObjectKindTag; 6] = [
 /// setting changed, an Instance of the sphere (17.4); a Spline Boolean and a
 /// Reduce with every setting changed, the Reduce's Keep keyed (17.5); a
 /// polygon object with creases and hard edges, a weighted Phong tag, the
-/// Boolean's hard cut edges and the Reduce's Keep Hard Edges off (17.8).
+/// Boolean's hard cut edges and the Reduce's Keep Hard Edges off (17.8);
+/// the six new deformers with every setting changed and their links, a
+/// Follow Spline's Path Offset keyed (17.9).
 fn full_document() -> (Document, SimulationCache) {
     let (mut doc, cache) = full_v5_document();
     let boolean = doc.scene.insert(Node::new(
@@ -229,6 +237,98 @@ fn full_document() -> (Document, SimulationCache) {
         weighted: true,
     });
     doc.scene.insert(creased);
+    // Step 17.9: the deformers under a cube, linked to a circle, the sphere
+    // and the first texture.
+    use grid4d_geom::deformers as d;
+    let host = doc
+        .scene
+        .insert(Node::new("Deformed", ObjectKindTag::Cube.default_kind()));
+    let path = doc
+        .scene
+        .insert(Node::new("Path", ObjectKindTag::Circle.default_kind()));
+    let picture = doc.scene.textures().ids()[0];
+    let mut follow = Node::new(
+        "Follow Spline",
+        ObjectKind::FollowSpline {
+            follow: d::FollowSpline {
+                axis: d::AxisDirection::MinusZ,
+                fit: d::PathFit::FitToSpline,
+                offset: 0.25,
+                strength: 0.75,
+            },
+            spline: Some(path),
+        },
+    );
+    follow.data.tracks.push(Track {
+        param: Param::Object(ObjectParam::PathOffset),
+        curve: Curve::from_keys([Key::new(0.0, 0.0), Key::new(20.0, 1.0)]),
+    });
+    let deformers = [
+        Node::new(
+            "Wrap",
+            ObjectKind::Wrap(d::Wrap {
+                shape: d::WrapShape::Sphere,
+                width: 300.0,
+                height: 150.0,
+                radius: 80.0,
+                start: -1.0,
+                end: 2.0,
+                strength: 0.5,
+            }),
+        ),
+        follow,
+        Node::new(
+            "Displace",
+            ObjectKind::Displace {
+                displace: d::Displace {
+                    source: d::DisplaceSource::Texture,
+                    mapping: d::DisplaceMapping::Flat,
+                    noise_scale: 20.0,
+                    octaves: 5,
+                    seed: 7,
+                    height: 12.0,
+                    mid: 0.25,
+                    direction: d::DisplaceDirection::Y,
+                    strength: 0.8,
+                },
+                texture: Some(picture),
+            },
+        ),
+        Node::new(
+            "Project to Surface",
+            ObjectKind::ProjectToSurface {
+                project: d::ProjectToSurface {
+                    mode: d::ProjectMode::AlongNormal,
+                    offset: 2.0,
+                    strength: 0.9,
+                },
+                target: Some(sphere),
+            },
+        ),
+        Node::new(
+            "Smooth",
+            ObjectKind::Smooth(d::Smooth {
+                iterations: 25,
+                keep_volume: false,
+                keep_borders: false,
+                strength: 0.6,
+            }),
+        ),
+        Node::new(
+            "Explode",
+            ObjectKind::Explode(d::Explode {
+                strength: 0.4,
+                distance: 150.0,
+                variation: 0.2,
+                spin: 1.5,
+                end_size: 0.5,
+                seed: 3,
+            }),
+        ),
+    ];
+    for deformer in deformers {
+        doc.scene.insert_child(host, deformer).unwrap();
+    }
     (doc, cache)
 }
 

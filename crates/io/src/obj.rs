@@ -620,6 +620,12 @@ fn texts(
             | ObjectKind::Twist(_)
             | ObjectKind::Taper(_)
             | ObjectKind::Bulge(_)
+            | ObjectKind::Wrap(_)
+            | ObjectKind::FollowSpline { .. }
+            | ObjectKind::Displace { .. }
+            | ObjectKind::ProjectToSurface { .. }
+            | ObjectKind::Smooth(_)
+            | ObjectKind::Explode(_)
             | ObjectKind::Ffd { .. }
             | ObjectKind::SplinePrimitive(_)
             | ObjectKind::Text(_)

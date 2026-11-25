@@ -188,6 +188,41 @@ impl Bvh {
         self.triangles.len()
     }
 
+    /// The point of the triangles nearest to `query`, with its polygon;
+    /// `None` without triangles. `points` as for [`raycast`](Self::raycast).
+    #[must_use]
+    pub fn nearest(&self, points: &[Vec3], query: Vec3) -> Option<(Vec3, u32)> {
+        let mut best: Option<(f32, Vec3, u32)> = None;
+        let mut stack: Vec<usize> = Vec::with_capacity(64);
+        if self.nodes.is_empty() {
+            return None;
+        }
+        stack.push(0);
+        let at = |p: u32| points.get(us(p)).copied().unwrap_or(Vec3::NAN);
+        while let Some(n) = stack.pop() {
+            let node = self.nodes[n];
+            let outside = (node.min - query).max(query - node.max).max(Vec3::ZERO);
+            if best.is_some_and(|(d, _, _)| outside.length_squared() > d) {
+                continue;
+            }
+            if node.count == 0 {
+                stack.push(us(node.first));
+                stack.push(us(node.first) + 1);
+                continue;
+            }
+            let start = us(node.first);
+            for t in start..start + us(node.count) {
+                let [a, b, c] = self.triangles[t].map(at);
+                let q = closest_on_triangle(query, a, b, c);
+                let d = q.distance_squared(query);
+                if q.is_finite() && best.is_none_or(|(bd, _, _)| d < bd) {
+                    best = Some((d, q, self.faces[t]));
+                }
+            }
+        }
+        best.map(|(_, q, f)| (q, f))
+    }
+
     /// The closest hit of the ray `origin + t · dir` (`t ≥ 0`) with a triangle,
     /// from either side. `points` must be the points of the mesh this was built
     /// from. Allocation-free.
@@ -409,6 +444,39 @@ fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f3
     }
     let t = e2.dot(q) * inv_det;
     (t >= 0.0).then_some(t)
+}
+
+/// The point of triangle `a b c` nearest to `p` (Ericson's regions).
+fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
+    let (ab, ac, ap) = (b - a, c - a, p - a);
+    let (d1, d2) = (ab.dot(ap), ac.dot(ap));
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return a;
+    }
+    let bp = p - b;
+    let (d3, d4) = (ab.dot(bp), ac.dot(bp));
+    if d3 >= 0.0 && d4 <= d3 {
+        return b;
+    }
+    let vc = d1 * d4 - d3 * d2;
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        return a + ab * (d1 / (d1 - d3));
+    }
+    let cp = p - c;
+    let (d5, d6) = (ab.dot(cp), ac.dot(cp));
+    if d6 >= 0.0 && d5 <= d6 {
+        return c;
+    }
+    let vb = d5 * d2 - d1 * d6;
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        return a + ac * (d2 / (d2 - d6));
+    }
+    let va = d3 * d6 - d5 * d4;
+    if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
+        return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+    }
+    let denom = 1.0 / (va + vb + vc);
+    a + ab * (vb * denom) + ac * (vc * denom)
 }
 
 #[cfg(test)]

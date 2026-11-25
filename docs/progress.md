@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 17 — Modelling 2 (v1.3) |
-| Last step done | 17.8 — edge creases for the Subdivision Surface, hard edges, weighted normals (2026-11-25) |
-| Next step | 17.9 — the deformers (Wrap, Follow Spline, Displace, Project to Surface, Smooth, Explode) |
-| Tests | 1046 (and 24 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's, the Reduce's, soft selection's, the Bevel profile's and the crease's pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
+| Last step done | 17.9 — the deformers Wrap, Follow Spline, Displace, Project to Surface, Smooth and Explode (2026-11-25) |
+| Next step | 17.10 — the manual's chapters, the acceptance run, the budget, release 1.3 |
+| Tests | 1055 (and 25 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's, the Reduce's, soft selection's, the Bevel profile's, the crease's and the deformers' pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2742,6 +2742,7 @@ risks R5 – R8 go with it.
 | 17.6 | Soft selection and Slide. `grid4d_geom::soft` (four falloffs, distance through space by a grid of cells or along the edges by Dijkstra, hidden points weigh nothing); `TransformSettings::soft` on the Move, Scale and Rotate tool pages; the gizmo's point edits and Tweak move, turn and scale each point by its weight (world-space distances); the ramp on the points (a weight in the overlay's point flags, mixed in the shader; the viewport recomputes the weights only when something changed; the allocation-free frame test runs with it on). `grid4d_geom::ops::slide` (rails of points and loops, the loop's two sides from its faces, Clamp, Keep Curvature, Duplicate through Loop/Path Cut); `Tool::Slide` in the Mesh menu, a drag or Apply, one undo step; Greek; the manual's §11.4 with a picture and §11.8 | 1029 |
 | 17.7 | Modelling tools 2. Plane Cut (`ops::plane_cut`: Line Cut's cutting code shared, several parallel cuts composed, Split doubling the points on the planes, Selected Only), object or world axis planes moved by a drag; the Polygon Pen (`viewport/polygon_pen.rs`: corners on points, edges, the surface or the view's plane, closed on the first, Backspace, Esc; `ops::pen_polygon` wound with its neighbours; Ctrl + drag pulls a quad out of a border edge); Extrude along Spline (`ops::extrude_along`: the path resampled, parallel transport, twist, end scale; indices kept); Mirror and Array (`ops::{mirror, array}`, images' UVs turned, welds); Bevel's Custom profile (presets Chamfer, Step, Cove; points edited in the Tool page) and Patch mitres; `modeling::Context` (world matrix, path); a randomized test of carried points; Greek; the manual's §11.9 – §11.11 with a picture | 1039 |
 | 17.8 | Edge creases, hard edges, weighted normals. `ComponentState::{creases, hard}` (by corner; carried across rebuilding operations); semi-sharp Catmull-Clark (`subdivision::subdivide_creased`: sharpness 6 × the share, crease rules for edge and point, the halves carrying one level less, 100 % sharp throughout), the Subdivision Surface reading its cage's creases (`Source::Mesh` with `EdgeMarks`); hard edges drawn and exported as a mesh split along them (`split_hard_edges`, eval's shown mesh, `file::exportable`); `Smoothing::Weighted` (the strongest faces by area × angle), the Phong tag's Weighted Normals, the shading key's flag, glTF / OBJ export; the Crease tool, Mesh ▸ Normals (Make Hard, Make Soft, Hard from Angle, Clear Hard Edges), the edges' colours; the Boolean's Hard Cut Edges, the Reduce's Keep Hard Edges; `.g4d` v6 `creases`, `hard`, `weighted` (dropped from a v5 file), `hard_cut_edges`, `keep_hard`; Greek; the manual's §12.3 with a picture and §18.1 | 1046 |
+| 17.9 | Deformers 2. `grid4d_geom::deformers`: Wrap (cylinder or sphere), Follow Spline (parallel-transport frames, Keep Length / Fit to Spline, Path Offset), Displace (fractal value noise or a grey picture, UV or flat, along normals or an axis), Project to Surface (nearest point via the new `Bvh::nearest`, along −Z, along normals), Smooth (Taubin, borders kept), Explode (polygons split and flown out, spun, scaled); the deformer stack hands whole meshes; links resolved while walking (a path in the deformer's space, a target mesh, a picture); `EvaluatedScene::set_pictures` with grey pictures the editor makes from its decoded textures (renders make theirs); keyed values incl. the new Path Offset; attribute pages, icons, tooltips, Greek; `.g4d` v6 kinds and links (refused in v5), golden fixture, a property test; the manual's §14.6 with a picture. Point Offsets moved to 1.4 (R5) | 1055 |
 
 **17.1 — Specs, the format version 6, the modelling budget**
 
@@ -3009,6 +3010,31 @@ risks R5 – R8 go with it.
 - **A struct's attributes moved.** Inserting the crease type between
   `SetDto`'s derive line and its definition took the derive with it; the
   compiler's flood of errors pointed straight at it.
+
+**17.9 — the deformers**
+
+*Problems and solutions:*
+- **Points were not enough.** The deformer stack handed each deformer the
+  points only; Displace needs normals and UVs, Smooth the edges, Explode
+  the polygons (and makes new points). Each deformer now gets the whole
+  mesh in its own space; the box deformers and plugins still touch only
+  the points.
+- **Links in a cached chain.** A deformer's path, target and picture live
+  outside it, but the chain is compared to decide whether a deformed mesh
+  is still good. Links are resolved while walking into values that compare
+  cheaply: the path as a curve in the deformer's space, the target as a
+  mesh handle (or a primitive's parameters) with its matrix, the picture
+  by identity.
+- **Pictures cannot come from the renderer.** Evaluation may not depend on
+  the path tracer, whose picture type the texture cache holds. The editor
+  turns the pictures a Displace reads into plain grey pictures (at most
+  1024 wide, converted again only when a picture changes) and hands them
+  in; a new set of pictures means a new evaluation.
+- **Seven arguments.** Threading the pictures through the generators' input
+  gathering pushed two functions over clippy's argument limit; they say
+  why they take them apart.
+- **A helper after the tests.** The new nearest-point helper landed after
+  `bvh.rs`'s test module, which clippy refuses; it moved above it.
 
 ## Phase 16 — Render quality (2026-11-07 – 2026-11-09)
 

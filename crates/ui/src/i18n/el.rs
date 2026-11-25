@@ -118,10 +118,18 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Add Cylinder", "Προσθήκη Κυλίνδρου"),
     ("Add Disc", "Προσθήκη Δίσκου"),
     (
+        "Add Displace: bumps by noise or a picture (Shift: under the selected object)",
+        "Προσθήκη Μετατόπισης: εξογκώματα από θόρυβο ή εικόνα (Shift: κάτω από το επιλεγμένο αντικείμενο)",
+    ),
+    (
         "Add Documents to the Render Queue",
         "Προσθήκη εγγράφων στην ουρά render",
     ),
     ("Add Environment", "Προσθήκη Περιβάλλοντος"),
+    (
+        "Add Explode: flings an object's polygons apart (Shift: under the selected object)",
+        "Προσθήκη Έκρηξης: σκορπίζει τα πολύγωνα ενός αντικειμένου (Shift: κάτω από το επιλεγμένο αντικείμενο)",
+    ),
     (
         "Add Extrude (Alt: around the selected spline)",
         "Προσθήκη Εξώθησης (Alt: γύρω από την επιλεγμένη καμπύλη)",
@@ -132,6 +140,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Add Files…", "Προσθήκη αρχείων…"),
     ("Add Flower", "Προσθήκη Λουλουδιού"),
+    (
+        "Add Follow Spline: lays an object along a spline (Shift: under the selected object)",
+        "Προσθήκη Ακολούθησης καμπύλης: απλώνει ένα αντικείμενο κατά μήκος μιας καμπύλης (Shift: κάτω από το επιλεγμένο αντικείμενο)",
+    ),
     ("Add Helix", "Προσθήκη Έλικας"),
     (
         "Add Instance: shows the selected object again, without a copy",
@@ -160,6 +172,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Add Point", "Προσθήκη σημείου"),
     ("Add Polygon Object", "Προσθήκη Πολυγωνικού αντικειμένου"),
     (
+        "Add Project to Surface: pulls an object onto another (Shift: under the selected object)",
+        "Προσθήκη Προβολής σε επιφάνεια: τραβά ένα αντικείμενο πάνω σε άλλο (Shift: κάτω από το επιλεγμένο αντικείμενο)",
+    ),
+    (
         "Add Random effector: varies the selected Cloner's clones at random",
         "Προσθήκη Τυχαίου επιδραστή: μεταβάλλει τυχαία τους κλώνους του επιλεγμένου Κλωνοποιητή",
     ),
@@ -170,6 +186,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Add Selected Objects", "Προσθήκη επιλεγμένων αντικειμένων"),
     ("Add Sky", "Προσθήκη Ουρανού"),
+    (
+        "Add Smooth: evens out an object's points (Shift: under the selected object)",
+        "Προσθήκη Εξομάλυνσης: εξισώνει τα σημεία ενός αντικειμένου (Shift: κάτω από το επιλεγμένο αντικείμενο)",
+    ),
     ("Add Sphere", "Προσθήκη Σφαίρας"),
     ("Add Spline", "Προσθήκη Καμπύλης"),
     (
@@ -207,6 +227,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Add User Data…", "Προσθήκη δεδομένων χρήστη…"),
     (
+        "Add Wrap: lays a flat object round a cylinder or a sphere (Shift: under the selected object)",
+        "Προσθήκη Περιτύλιξης: τυλίγει ένα επίπεδο αντικείμενο γύρω από κύλινδρο ή σφαίρα (Shift: κάτω από το επιλεγμένο αντικείμενο)",
+    ),
+    (
         "Add a copy of the selection as shown now: deformed, generated, at this frame",
         "Προσθήκη αντιγράφου της επιλογής όπως φαίνεται τώρα: παραμορφωμένης, παραγμένης, σε αυτό το καρέ",
     ),
@@ -235,6 +259,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("All", "Όλα"),
     ("All Frames", "Όλα τα καρέ"),
     ("All Views", "Όλες οι προβολές"),
+    ("Along Direction", "Κατά την κατεύθυνση"),
+    ("Along Normal", "Κατά την κάθετο"),
     ("Along X", "Κατά μήκος του X"),
     ("Along Z", "Κατά μήκος του Z"),
     ("Alpha", "Άλφα"),
@@ -600,6 +626,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Disc", "Δίσκος"),
     ("Disc Segments", "Τμήματα δίσκου"),
     ("Discard", "Απόρριψη"),
+    ("Displace", "Μετατόπιση"),
     ("Displace in Renders", "Μετατόπιση στα render"),
     ("Display", "Εμφάνιση"),
     ("Display Color", "Χρώμα εμφάνισης"),
@@ -715,6 +742,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("End Radius", "Τελική ακτίνα"),
     ("End Rotation", "Τελική περιστροφή"),
     ("End Scale", "Τελική κλίμακα"),
+    ("End Size", "Τελικό μέγεθος"),
     ("Environment", "Περιβάλλον"),
     ("Error", "Σφάλμα"),
     ("Evaluation", "Αξιολόγηση"),
@@ -726,6 +754,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Exclude", "Εξαίρεση"),
     ("Exclusive", "Αποκλειστική"),
     ("Expand All", "Ανάπτυξη όλων"),
+    ("Explode", "Έκρηξη"),
     ("Export", "Εξαγωγή"),
     ("Export…", "Εξαγωγή…"),
     ("Extraction", "Εξαγωγή"),
@@ -785,7 +814,12 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Fit", "Προσαρμογή"),
     ("Fit to Object", "Προσαρμογή στο αντικείμενο"),
     ("Fit to Parent", "Προσαρμογή στον γονέα"),
+    ("Fit to Spline", "Σε όλη την καμπύλη"),
     ("Flat", "Επίπεδη"),
+    (
+        "Flings its parent's subtree's polygons apart; animate Strength from 0 to 100 %",
+        "Σκορπίζει τα πολύγωνα του υποδέντρου του γονέα του· κινήστε την Ισχύ από 0 έως 100 %",
+    ),
     ("Flip", "Αντιστροφή"),
     ("Flip U", "Αναστροφή U"),
     ("Flip V", "Αναστροφή V"),
@@ -794,6 +828,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Focus Distance", "Απόσταση εστίασης"),
     ("Focus Object", "Αντικείμενο εστίασης"),
     ("Follow Path", "Ακολουθία διαδρομής"),
+    ("Follow Spline", "Ακολούθηση καμπύλης"),
     ("Font", "Γραμματοσειρά"),
     (
         "Forget the simulated frames; they are simulated again as you visit them",
@@ -1004,6 +1039,11 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Μένει σε αυτόν τον υπολογιστή· επισυνάψτε την σε μια αναφορά σφάλματος, αν αναφέρετε το πρόβλημα.",
     ),
     ("Iterate", "Επανάληψη"),
+    ("Iterations", "Επαναλήψεις"),
+    (
+        "Its brightness moves the points; add one in the Texture Manager",
+        "Η φωτεινότητά της μετακινεί τα σημεία· προσθέστε μία στη Διαχείριση υφών",
+    ),
     (
         "Its children and their mirror image",
         "Τα παιδιά της και το είδωλό τους",
@@ -1015,7 +1055,9 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Keep Borders", "Διατήρηση ορίων"),
     ("Keep Curvature", "Διατήρηση καμπυλότητας"),
     ("Keep Hard Edges", "Διατήρηση σκληρών ακμών"),
+    ("Keep Length", "Διατήρηση μήκους"),
     ("Keep UV Seams", "Διατήρηση ραφών UV"),
+    ("Keep Volume", "Διατήρηση όγκου"),
     ("Keep Y-Axis Length", "Διατήρηση μήκους άξονα Y"),
     (
         "Keep a recovery copy of unsaved work, offered after a crash",
@@ -1053,6 +1095,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Layer: {0}", "Στρώμα: {0}"),
     ("Layers", "Στρώματα"),
     ("Layout: {0}", "Διάταξη: {0}"),
+    (
+        "Lays its parent's subtree along the spline",
+        "Απλώνει το υποδέντρο του γονέα του κατά μήκος της καμπύλης",
+    ),
     ("Left", "Αριστερά"),
     ("Length Unit", "Μονάδα μήκους"),
     ("Licences", "Άδειες"),
@@ -1167,6 +1213,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Διαχείριση: εμφανίζεται στη Διαχείριση Αντικειμένων",
     ),
     ("Manual", "Χειροκίνητα"),
+    ("Mapping", "Αντιστοίχιση"),
     ("Margin", "Περιθώριο"),
     ("Mark Seams", "Σήμανση ραφών"),
     ("Mass", "Μάζα"),
@@ -1269,6 +1316,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Movement . Y", "Κίνηση . Y"),
     ("Movement . Z", "Κίνηση . Z"),
     (
+        "Moves its parent's subtree's points by noise or a picture",
+        "Μετακινεί τα σημεία του υποδέντρου του γονέα του με θόρυβο ή εικόνα",
+    ),
+    (
         "M…  M Connect · N Dissolve · T Extrude · W Inset · S Bevel · B Bridge · L Loop/Path Cut · K Line Cut · Esc cancels",
         "M…  M Σύνδεση · N Διάλυση · T Εξώθηση · W Ένθεση · S Λοξοτόμηση · B Γεφύρωση · L Κοπή βρόχου/διαδρομής · K Κοπή γραμμής · Esc ακυρώνει",
     ),
@@ -1278,6 +1329,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Name0000", "Όνομα0000"),
     ("Name_0000", "Όνομα_0000"),
     ("Natural", "Φυσική"),
+    ("Nearest Point", "Πλησιέστερο σημείο"),
     (
         "Needs two children with surfaces: the first is shown as it is",
         "Χρειάζεται δύο παιδιά με επιφάνειες: το πρώτο εμφανίζεται όπως είναι",
@@ -1326,6 +1378,8 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "No textures yet. Add… chooses pictures; you can also drop picture files on the window.",
         "Δεν υπάρχουν ακόμη υφές. Η Προσθήκη… επιλέγει εικόνες· μπορείτε και να αφήσετε αρχεία εικόνων στο παράθυρο.",
     ),
+    ("Noise", "Θόρυβος"),
+    ("Noise Scale", "Κλίμακα θορύβου"),
     ("Noise Threshold", "Όριο θορύβου"),
     ("None", "Κανένα"),
     (
@@ -1380,6 +1434,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Object XZ", "XZ αντικειμένου"),
     ("Object ZY", "ZY αντικειμένου"),
     ("Objects", "Αντικείμενα"),
+    ("Octaves", "Οκτάβες"),
     ("Off", "Όχι"),
     ("Offset", "Μετατόπιση"),
     ("Omni", "Πανκατευθυντικό"),
@@ -1452,6 +1507,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Passes", "Περάσματα"),
     ("Paste", "Επικόλληση"),
     ("Patch", "Μπάλωμα"),
+    ("Path Offset", "Θέση στη διαδρομή"),
     ("Path Tracer", "Ιχνηλάτης διαδρομών"),
     ("Pen", "Πένα"),
     (
@@ -1564,6 +1620,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Project Settings…", "Ρυθμίσεις έργου…"),
     ("Project UVs", "Προβολή UV"),
     ("Project [{0}]", "Έργο [{0}]"),
+    ("Project to Surface", "Προβολή σε επιφάνεια"),
     ("Projection", "Προβολή"),
     ("Projection Position", "Θέση προβολής"),
     ("Projection Rotation", "Περιστροφή προβολής"),
@@ -1573,6 +1630,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Τα προστατευμένα κανάλια δεν αλλάζουν με το gizmo ή με τα πεδία Συντεταγμένων",
     ),
     ("Protection", "Προστασία"),
+    (
+        "Pulls its parent's subtree onto the target",
+        "Τραβά το υποδέντρο του γονέα του πάνω στον στόχο",
+    ),
     (
         "Put every lattice point back on its grid",
         "Επαναφορά κάθε σημείου του πλέγματος στη θέση του",
@@ -2052,6 +2113,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Smooths its first child (the cage)",
         "Λειαίνει το πρώτο του παιδί (τον κλωβό)",
     ),
+    ("Smooths its parent's subtree", "Εξομαλύνει το υποδέντρο του γονέα του"),
     ("Snap", "Έλξη"),
     ("Snap Distance", "Απόσταση έλξης"),
     ("Snap Radius", "Ακτίνα έλξης"),
@@ -2068,6 +2130,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Solo: φαίνονται μόνο τα αντικείμενα των στρωμάτων Solo",
     ),
     ("Solver Iterations", "Επαναλήψεις επιλυτή"),
+    ("Source", "Πηγή"),
     ("Spacing", "Απόσταση"),
     ("Specular", "Κατοπτρισμός"),
     ("Specular Direct", "Γυαλιστερό άμεσο"),
@@ -2079,6 +2142,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Sphere", "Σφαίρα"),
     ("Spherical", "Σφαιρική"),
+    ("Spin", "Περιστροφή"),
     ("Spin . X", "Περιστροφή . X"),
     ("Spin . Y", "Περιστροφή . Y"),
     ("Spin . Z", "Περιστροφή . Z"),
@@ -2422,6 +2486,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "U…  L Βρόχος · B Δακτύλιος · W Συνδεδεμένα · Y Επέκταση · K Συρρίκνωση · I Αντιστροφή · Z Τήξη · O Βελτιστοποίηση · Esc ακυρώνει",
     ),
     ("VGA 640 × 480", "VGA 640 × 480"),
+    ("Variation", "Διακύμανση"),
     ("Velocity . X", "Ταχύτητα . X"),
     ("Velocity . Y", "Ταχύτητα . Y"),
     ("Velocity . Z", "Ταχύτητα . Z"),
@@ -2512,6 +2577,11 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("World XY", "XY κόσμου"),
     ("World XZ", "XZ κόσμου"),
     ("World ZY", "ZY κόσμου"),
+    ("Wrap", "Περιτύλιξη"),
+    (
+        "Wraps its parent's subtree round a cylinder or a sphere",
+        "Τυλίγει το υποδέντρο του γονέα του γύρω από κύλινδρο ή σφαίρα",
+    ),
     (
         "Write the picture to a file and link it",
         "Γράφει την εικόνα σε αρχείο και τη συνδέει",

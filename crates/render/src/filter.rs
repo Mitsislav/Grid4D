@@ -87,6 +87,12 @@ impl FilterItem {
             | ObjectKindTag::Twist
             | ObjectKindTag::Taper
             | ObjectKindTag::Bulge
+            | ObjectKindTag::Wrap
+            | ObjectKindTag::FollowSpline
+            | ObjectKindTag::Displace
+            | ObjectKindTag::ProjectToSurface
+            | ObjectKindTag::Smooth
+            | ObjectKindTag::Explode
             | ObjectKindTag::Ffd => Some(Self::Deformer),
             ObjectKindTag::PlainEffector | ObjectKindTag::RandomEffector => Some(Self::Effector),
         }

@@ -1920,5 +1920,8 @@ slid along their edges, Duplicate inserting a loop), and the tools of 17.7
 (Plane Cut sharing Line Cut's code, the Polygon Pen, Extrude along Spline,
 Mirror, Array, Bevel's Custom profile and Patch mitres), and edge
 creases, hard edges and weighted normals, 17.8 (semi-sharp Catmull-Clark,
-hard edges drawn as a split mesh, the strongest faces' normals). Next: the
-deformers (17.9).
+hard edges drawn as a split mesh, the strongest faces' normals), and the
+deformers, 17.9 (Wrap, Follow Spline, Displace with pictures handed to
+evaluation, Project to Surface, Smooth, Explode; the stack hands deformers
+whole meshes; Point Offsets moved to 1.4, R5). Next: the manual, the
+acceptance run, the budget and release 1.3 (17.10).

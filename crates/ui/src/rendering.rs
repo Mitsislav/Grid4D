@@ -1173,6 +1173,9 @@ fn work(
 struct Evaluation {
     evaluated: Option<EvaluatedScene>,
     simulated: grid4d_eval::Overrides,
+    /// The grey pictures Displace deformers read, made once per render
+    /// from its texture pictures.
+    grey: Option<grid4d_eval::Pictures>,
 }
 
 /// `scene` (with its texture `pictures`) at `frame` as the renderer sees it,
@@ -1186,7 +1189,11 @@ fn build_frame(
     options: &RenderOptions,
     (segments, mut replay): (Option<u32>, Option<&mut Replay>),
 ) -> (RenderScene, RenderCamera) {
+    let grey = evaluation
+        .grey
+        .get_or_insert_with(|| crate::textures::grey_pictures(scene, pictures, &mut std::collections::HashMap::new()));
     let evaluated = evaluation.evaluated.get_or_insert_with(EvaluatedScene::for_render);
+    evaluated.set_pictures(grey);
     let simulated = &mut evaluation.simulated;
     let at = f64::from(frame);
     // With motion blur, the scene at moments of the shutter interval.

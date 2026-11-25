@@ -6,14 +6,98 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use glam::{Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 use grid4d_geom::{
     PolyMesh,
     deform::{Bend, Bulge, Ffd, Taper, Twist},
+    deformers::{Displace, Explode, FollowSpline, GreyPicture, ProjectToSurface, Smooth, Surface, Wrap, marker_guide},
     spline::Polyline,
 };
 use grid4d_plugin::DeformerPlugin;
-use grid4d_scene::{MeshHandle, NodeId, ObjectKind, PluginObject, Scene, SplineHandle};
+use grid4d_scene::{MeshHandle, NodeId, ObjectKind, PluginObject, Scene, SplineHandle, TextureId};
+
+/// The pictures Displace deformers read (by texture), as the editor hands
+/// them to evaluation (see [`crate::EvaluatedScene::set_pictures`]): grey
+/// values, shared. A texture missing here displaces nothing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Pictures(HashMap<TextureId, SharedPicture>);
+
+impl Pictures {
+    /// Gives `texture` its picture (replacing one it had).
+    pub fn insert(&mut self, texture: TextureId, picture: Arc<GreyPicture>) {
+        self.0.insert(texture, SharedPicture(picture));
+    }
+
+    /// `texture`'s picture, if it has one.
+    #[must_use]
+    pub fn get(&self, texture: TextureId) -> Option<&Arc<GreyPicture>> {
+        self.0.get(&texture).map(|p| &p.0)
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// A picture compared by identity (the same decoded picture), so comparing
+/// chains stays cheap.
+#[derive(Clone, Debug)]
+pub struct SharedPicture(Arc<GreyPicture>);
+
+impl PartialEq for SharedPicture {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// What a Project to Surface deformer pulls points onto: a polygon
+/// object's mesh (compared by id) or a primitive's (made when applied),
+/// with the matrix from the deformer's space into the target's.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Target {
+    shape: TargetShape,
+    into: Mat4,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum TargetShape {
+    Mesh(MeshHandle),
+    Primitive(ObjectKind),
+}
+
+/// A target placed in the deformer's space, for [`ProjectToSurface::apply`].
+struct Placed<'a> {
+    mesh: &'a MeshHandle,
+    into: Mat4,
+    back: Mat4,
+    normals: Mat3,
+}
+
+impl Placed<'_> {
+    fn normal(&self, face: u32) -> Vec3 {
+        let face = usize::try_from(face).unwrap_or(usize::MAX);
+        if face >= self.mesh.mesh().face_count() {
+            return Vec3::ZERO;
+        }
+        (self.normals * self.mesh.mesh().face_normal(face)).normalize_or_zero()
+    }
+}
+
+impl Surface for Placed<'_> {
+    fn nearest(&self, point: Vec3) -> Option<(Vec3, Vec3)> {
+        let (at, face) = self.mesh.nearest(self.into.transform_point3(point))?;
+        Some((self.back.transform_point3(at), self.normal(face)))
+    }
+
+    fn cast(&self, origin: Vec3, dir: Vec3) -> Option<(Vec3, Vec3)> {
+        let local_origin = self.into.transform_point3(origin);
+        let local_dir = self.into.transform_vector3(dir);
+        let hit = self.mesh.raycast(local_origin, local_dir)?;
+        let at = local_origin + local_dir * hit.t;
+        Some((self.back.transform_point3(at), self.normal(hit.face)))
+    }
+}
 
 /// `true` if `kind` deforms: a built-in deformer, or an object of an installed
 /// deformer plugin.
@@ -52,6 +136,15 @@ pub(crate) enum Deformer {
     Bulge(Bulge),
     /// With its lattice (shared: cloning does not copy it).
     Ffd(Ffd, SplineHandle),
+    Wrap(Wrap),
+    /// With its path in the deformer's space (none: nothing moves).
+    FollowSpline(FollowSpline, Option<Arc<Polyline>>),
+    /// With its picture (none: a Texture source moves nothing).
+    Displace(Displace, Option<SharedPicture>),
+    /// With its target (none: nothing moves).
+    Project(ProjectToSurface, Option<Target>),
+    Smooth(Smooth),
+    Explode(Explode),
     Plugin(PluginDeformer),
 }
 
@@ -64,6 +157,12 @@ impl Deformer {
             ObjectKind::Taper(d) => Some(Self::Taper(*d)),
             ObjectKind::Bulge(d) => Some(Self::Bulge(*d)),
             ObjectKind::Ffd { ffd, lattice, .. } => Some(Self::Ffd(*ffd, lattice.clone())),
+            ObjectKind::Wrap(d) => Some(Self::Wrap(*d)),
+            ObjectKind::FollowSpline { follow, .. } => Some(Self::FollowSpline(*follow, None)),
+            ObjectKind::Displace { displace, .. } => Some(Self::Displace(*displace, None)),
+            ObjectKind::ProjectToSurface { project, .. } => Some(Self::Project(*project, None)),
+            ObjectKind::Smooth(d) => Some(Self::Smooth(*d)),
+            ObjectKind::Explode(d) => Some(Self::Explode(*d)),
             ObjectKind::Plugin(object) => grid4d_plugin::registry().deformer(&object.type_id).map(|plugin| {
                 Self::Plugin(PluginDeformer {
                     plugin,
@@ -82,26 +181,119 @@ impl Deformer {
             Self::Taper(d) => d.box_lines(),
             Self::Bulge(d) => d.box_lines(),
             Self::Ffd(d, lattice) => d.lattice_lines(&lattice.spline().points),
+            Self::Wrap(d) => d.guide(),
+            Self::FollowSpline(..) | Self::Displace(..) | Self::Project(..) | Self::Smooth(_) | Self::Explode(_) => {
+                marker_guide()
+            }
             Self::Plugin(d) => d.plugin.box_lines(&d.object),
         }
     }
 
-    /// `points`, in the deformer's space, deformed.
-    fn apply(&self, points: &mut [Vec3]) {
+    /// The deformer `kind` is (placed at `frame` with `world_inverse`), with
+    /// what it links to resolved: a path in its space, a picture, a target.
+    fn resolved(
+        scene: &Scene,
+        kind: &ObjectKind,
+        frame: f64,
+        world_inverse: Mat4,
+        pictures: &Pictures,
+    ) -> Option<Self> {
+        let mut deformer = Self::of(kind)?;
+        match (&mut deformer, kind) {
+            (
+                Self::FollowSpline(_, path),
+                ObjectKind::FollowSpline {
+                    spline: Some(spline), ..
+                },
+            ) => {
+                *path = path_of(scene, *spline, frame).map(|mut line| {
+                    let into = world_inverse * scene.world_matrix_at(*spline, frame);
+                    line.points.iter_mut().for_each(|p| *p = into.transform_point3(*p));
+                    Arc::new(line)
+                });
+            }
+            (
+                Self::Displace(_, picture),
+                ObjectKind::Displace {
+                    texture: Some(texture), ..
+                },
+            ) => {
+                *picture = pictures.0.get(texture).cloned();
+            }
+            (Self::Project(_, target), ObjectKind::ProjectToSurface { target: Some(node), .. }) => {
+                let shape = scene.get(*node).and_then(|n| match &*n.data.kind_at(frame) {
+                    ObjectKind::Polygon { mesh, .. } => Some(TargetShape::Mesh(mesh.clone())),
+                    kind => crate::generator::editable_mesh_exists(kind).then(|| TargetShape::Primitive(kind.clone())),
+                });
+                *target = shape.map(|shape| Target {
+                    shape,
+                    into: scene.world_matrix_at(*node, frame).inverse() * world_inverse.inverse(),
+                });
+            }
+            _ => {}
+        }
+        Some(deformer)
+    }
+
+    /// `mesh`, in the deformer's space, deformed.
+    fn apply(&self, mesh: &mut PolyMesh) {
         match self {
-            Self::Bend(d) => points.iter_mut().for_each(|p| *p = d.apply(*p)),
-            Self::Twist(d) => points.iter_mut().for_each(|p| *p = d.apply(*p)),
-            Self::Taper(d) => points.iter_mut().for_each(|p| *p = d.apply(*p)),
-            Self::Bulge(d) => points.iter_mut().for_each(|p| *p = d.apply(*p)),
+            Self::Bend(d) => mesh.points_mut().iter_mut().for_each(|p| *p = d.apply(*p)),
+            Self::Twist(d) => mesh.points_mut().iter_mut().for_each(|p| *p = d.apply(*p)),
+            Self::Taper(d) => mesh.points_mut().iter_mut().for_each(|p| *p = d.apply(*p)),
+            Self::Bulge(d) => mesh.points_mut().iter_mut().for_each(|p| *p = d.apply(*p)),
             Self::Ffd(d, lattice) => {
                 let lattice = &lattice.spline().points;
-                points.iter_mut().for_each(|p| *p = d.apply(lattice, *p));
+                mesh.points_mut().iter_mut().for_each(|p| *p = d.apply(lattice, *p));
             }
+            Self::Wrap(d) => mesh.points_mut().iter_mut().for_each(|p| *p = d.apply(*p)),
+            Self::FollowSpline(d, path) => {
+                if let Some(path) = path {
+                    d.apply(mesh.points_mut(), path);
+                }
+            }
+            Self::Displace(d, picture) => d.apply(mesh, picture.as_ref().map(|p| &*p.0)),
+            Self::Project(d, Some(target)) => {
+                let built;
+                let handle = match &target.shape {
+                    TargetShape::Mesh(handle) => handle,
+                    TargetShape::Primitive(kind) => {
+                        let Some(made) = crate::editable_mesh(kind) else { return };
+                        built = MeshHandle::new(made);
+                        &built
+                    }
+                };
+                let back = target.into.inverse();
+                let placed = Placed {
+                    mesh: handle,
+                    into: target.into,
+                    back,
+                    normals: Mat3::from_mat4(back).inverse().transpose(),
+                };
+                d.apply(mesh, &placed);
+            }
+            Self::Project(_, None) => {}
+            Self::Smooth(d) => d.apply(mesh),
+            Self::Explode(d) => *mesh = d.apply(mesh),
             // All at once: a plugin reads its values once per mesh.
             Self::Plugin(d) => {
-                d.plugin.deform_checked(&d.object, points);
+                d.plugin.deform_checked(&d.object, mesh.points_mut());
             }
         }
+    }
+}
+
+/// The curve of spline object `id` at `frame`, in its own space: a spline
+/// primitive's, a text's or an editable spline's; `None` for other objects.
+fn path_of(scene: &Scene, id: NodeId, frame: f64) -> Option<Polyline> {
+    let data = &scene.get(id)?.data;
+    match &*data.kind_at(frame) {
+        ObjectKind::SplinePrimitive(primitive) => Some(primitive.polyline()),
+        ObjectKind::Text(text) => Some(grid4d_text::text_spline(text).sample(text.interpolation)),
+        ObjectKind::Spline {
+            spline, interpolation, ..
+        } => Some(spline.spline().sample(*interpolation)),
+        _ => None,
     }
 }
 
@@ -124,11 +316,15 @@ impl Link {
         }
     }
 
-    /// `points`, in the object's space, through the deformer and back.
-    fn apply(&self, points: &mut [Vec3]) {
-        points.iter_mut().for_each(|p| *p = self.to.transform_point3(*p));
-        self.deformer.apply(points);
-        points.iter_mut().for_each(|p| *p = self.from.transform_point3(*p));
+    /// `mesh`, in the object's space, through the deformer and back.
+    fn apply(&self, mesh: &mut PolyMesh) {
+        mesh.points_mut()
+            .iter_mut()
+            .for_each(|p| *p = self.to.transform_point3(*p));
+        self.deformer.apply(mesh);
+        mesh.points_mut()
+            .iter_mut()
+            .for_each(|p| *p = self.from.transform_point3(*p));
     }
 }
 
@@ -143,7 +339,14 @@ pub(crate) struct Active {
 
 /// Pushes the switched-on deformer children of `id` (at `depth`), in Object
 /// Manager order, placed as they are at `frame`.
-pub(crate) fn push_children(scene: &Scene, id: NodeId, depth: u32, frame: f64, active: &mut Vec<Active>) {
+pub(crate) fn push_children(
+    scene: &Scene,
+    id: NodeId,
+    depth: u32,
+    frame: f64,
+    pictures: &Pictures,
+    active: &mut Vec<Active>,
+) {
     for &child in scene.children(id) {
         // Switched off, or on a layer whose deformers are off: it does nothing.
         let Some(data) = scene
@@ -153,10 +356,11 @@ pub(crate) fn push_children(scene: &Scene, id: NodeId, depth: u32, frame: f64, a
         else {
             continue;
         };
-        if let Some(deformer) = Deformer::of(&data.kind_at(frame)) {
+        let world_inverse = scene.world_matrix_at(child, frame).inverse();
+        if let Some(deformer) = Deformer::resolved(scene, &data.kind_at(frame), frame, world_inverse, pictures) {
             active.push(Active {
                 depth,
-                world_inverse: scene.world_matrix_at(child, frame).inverse(),
+                world_inverse,
                 deformer,
             });
         }
@@ -194,7 +398,13 @@ pub(crate) fn chain(active: &[Active], world: Mat4, out: &mut Vec<Link>) {
 /// The chain for `node` inside generator `generator`'s input: the deformers
 /// below the generator on the way up from `node` (deepest first), placed at
 /// `frame`, as seen from `node`.
-pub(crate) fn input_chain(scene: &Scene, node: NodeId, generator: NodeId, frame: f64) -> Vec<Link> {
+pub(crate) fn input_chain(
+    scene: &Scene,
+    node: NodeId,
+    generator: NodeId,
+    frame: f64,
+    pictures: &Pictures,
+) -> Vec<Link> {
     let mut links = Vec::new();
     let world = scene.world_matrix_at(node, frame);
     let mut at = Some(node);
@@ -207,12 +417,9 @@ pub(crate) fn input_chain(scene: &Scene, node: NodeId, generator: NodeId, frame:
             else {
                 continue;
             };
-            if let Some(deformer) = Deformer::of(&data.kind_at(frame)) {
-                links.push(Link::new(
-                    scene.world_matrix_at(child, frame).inverse(),
-                    world,
-                    deformer,
-                ));
+            let world_inverse = scene.world_matrix_at(child, frame).inverse();
+            if let Some(deformer) = Deformer::resolved(scene, &data.kind_at(frame), frame, world_inverse, pictures) {
+                links.push(Link::new(world_inverse, world, deformer));
             }
         }
         at = scene.get(current).and_then(grid4d_scene::Node::parent);
@@ -224,7 +431,7 @@ pub(crate) fn input_chain(scene: &Scene, node: NodeId, generator: NodeId, frame:
 pub(crate) fn deform_mesh(mesh: &PolyMesh, links: &[Link]) -> PolyMesh {
     let mut out = mesh.clone();
     for link in links {
-        link.apply(out.points_mut());
+        link.apply(&mut out);
     }
     out
 }

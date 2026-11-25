@@ -283,6 +283,12 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
         | ObjectKind::Twist(_)
         | ObjectKind::Taper(_)
         | ObjectKind::Bulge(_)
+        | ObjectKind::Wrap(_)
+        | ObjectKind::FollowSpline { .. }
+        | ObjectKind::Displace { .. }
+        | ObjectKind::ProjectToSurface { .. }
+        | ObjectKind::Smooth(_)
+        | ObjectKind::Explode(_)
         | ObjectKind::Ffd { .. } => None,
     }
 }
@@ -340,6 +346,12 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
         | ObjectKind::Twist(_)
         | ObjectKind::Taper(_)
         | ObjectKind::Bulge(_)
+        | ObjectKind::Wrap(_)
+        | ObjectKind::FollowSpline { .. }
+        | ObjectKind::Displace { .. }
+        | ObjectKind::ProjectToSurface { .. }
+        | ObjectKind::Smooth(_)
+        | ObjectKind::Explode(_)
         | ObjectKind::Ffd { .. }
         // Curves, not surfaces (a spline primitive is made editable as a spline).
         | ObjectKind::SplinePrimitive(_)
@@ -403,6 +415,12 @@ mod tests {
                     | ObjectKindTag::Taper
                     | ObjectKindTag::Bulge
                     | ObjectKindTag::Ffd
+                    | ObjectKindTag::Wrap
+                    | ObjectKindTag::FollowSpline
+                    | ObjectKindTag::Displace
+                    | ObjectKindTag::ProjectToSurface
+                    | ObjectKindTag::Smooth
+                    | ObjectKindTag::Explode
             ) && !tag.is_spline();
             assert_eq!(style.is_some(), expected, "{tag:?}");
         }
