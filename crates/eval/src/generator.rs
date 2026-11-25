@@ -7,20 +7,26 @@
 //! the Loft stretches a skin over all its child splines; the Boolean combines
 //! its first two children (each with its own children, other generators'
 //! results included) as solids; the Symmetry shows its children with their
-//! mirror image; the Join merges its children into one mesh.
+//! mirror image; the Join merges its children into one mesh; the Reduce
+//! makes them lighter. The Spline Boolean combines its child splines into a
+//! curve, which the spline generators read like a spline (D45).
+
+use std::sync::Arc;
 
 use glam::Mat4;
 use grid4d_geom::{
     PolyMesh,
     boolean::{self, BooleanError},
     ops::{OptimizeOptions, optimize},
+    reduce::{CollapseOrder, Constraints},
     spline::{Interpolation, Polyline, SplinePrimitive, Text},
+    spline_boolean::{self, SplineBoolean},
     subdivision::{self, SubdivisionOptions},
     surface::{self, Extrusion, Lathe, Loft, Sweep},
     symmetry::{self, Symmetry},
     uv,
 };
-use grid4d_scene::{Boolean, Join, MeshHandle, NodeId, ObjectKind, Scene, SplineHandle};
+use grid4d_scene::{Boolean, Join, MeshHandle, NodeId, ObjectKind, Reduce, Scene, SplineHandle};
 
 use crate::{
     Purpose,
@@ -39,6 +45,19 @@ pub(crate) enum Options {
     Boolean(Boolean),
     Symmetry(Symmetry),
     Join(Join),
+    SplineBoolean(SplineBoolean),
+    Reduce(Reduce),
+}
+
+impl Options {
+    /// The options that decide a Reduce's collapse order: everything but
+    /// its Keep (a change of Keep only replays the order).
+    pub(crate) fn order_key(&self) -> Option<Reduce> {
+        match *self {
+            Self::Reduce(reduce) => Some(Reduce { keep: 0.0, ..reduce }),
+            _ => None,
+        }
+    }
 }
 
 /// Something a generator wants its user to know about its result (shown in
@@ -57,6 +76,8 @@ pub enum GeneratorNote {
 #[derive(Clone, Debug, Default)]
 pub struct Built {
     pub mesh: PolyMesh,
+    /// A generator of curves' result (the Spline Boolean's), in its space.
+    pub curve: Option<Polyline>,
     /// A Boolean's edges along the cut (point pairs of `mesh`).
     pub cut_edges: Vec<[u32; 2]>,
     pub note: Option<GeneratorNote>,
@@ -75,8 +96,9 @@ pub(crate) struct Input {
     matrix: Mat4,
     /// The deformers inside the input reaching this node (empty for most).
     links: Vec<Link>,
-    /// Which of a Boolean's two inputs it belongs to (0 for others).
-    operand: u8,
+    /// Which of a Boolean's two inputs it belongs to, or which child of a
+    /// Reduce that reduces its children apart (0 for others).
+    operand: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -91,8 +113,9 @@ enum Source {
     Text(Text),
     /// An editable spline (compared by id) and how it is sampled.
     Spline(SplineHandle, Interpolation),
-    /// Another generator inside a Boolean's input: its options and inputs
-    /// (in its own space; its result is built when needed).
+    /// Another generator inside a Boolean's input, or a generator of curves
+    /// inside a spline generator: its options and inputs (in its own space;
+    /// its result is built when needed).
     Generated(Options, Vec<Input>),
 }
 
@@ -103,6 +126,7 @@ impl Source {
             Self::SplinePrimitive(primitive) => Some(primitive.polyline()),
             Self::Text(text) => Some(grid4d_text::text_spline(text).sample(text.interpolation)),
             Self::Spline(spline, interpolation) => Some(spline.spline().sample(*interpolation)),
+            Self::Generated(options @ Options::SplineBoolean(_), inputs) => build_all(inputs, options).curve,
             Self::Mesh(_) | Self::Primitive(_) | Self::Generated(..) => None,
         }
     }
@@ -138,6 +162,8 @@ pub(crate) fn options(kind: &ObjectKind, purpose: Purpose) -> Option<Options> {
         ObjectKind::Boolean(boolean) => Some(Options::Boolean(boolean)),
         ObjectKind::Symmetry(symmetry) => Some(Options::Symmetry(symmetry)),
         ObjectKind::Join(join) => Some(Options::Join(join)),
+        ObjectKind::SplineBoolean(settings) => Some(Options::SplineBoolean(settings)),
+        ObjectKind::Reduce(reduce) => Some(Options::Reduce(reduce)),
         _ => None,
     }
 }
@@ -165,6 +191,11 @@ pub(crate) fn gather(
         Options::Symmetry(_) | Options::Join(_) => {
             return gather_solids(scene, id, purpose, frame, Operands::All, 0, inputs);
         }
+        Options::Reduce(reduce) => {
+            let operands = if reduce.together { Operands::All } else { Operands::Each };
+            return gather_solids(scene, id, purpose, frame, operands, 0, inputs);
+        }
+        Options::SplineBoolean(_) => return gather_curves(scene, id, purpose, frame, 0, inputs),
         Options::Subdivision(_) | Options::Extrude { .. } | Options::Lathe(_) => {}
     }
     let &first = scene.children(id).first()?;
@@ -174,7 +205,13 @@ pub(crate) fn gather(
         // Its own: a spline's line colour would not suit a solid.
         Options::Extrude { hierarchical, .. } => (scene.get(id)?.data.display_color, hierarchical),
         Options::Lathe(_) => (scene.get(id)?.data.display_color, false),
-        Options::Sweep(_) | Options::Loft(_) | Options::Boolean(_) | Options::Symmetry(_) | Options::Join(_) => {
+        Options::Sweep(_)
+        | Options::Loft(_)
+        | Options::Boolean(_)
+        | Options::Symmetry(_)
+        | Options::Join(_)
+        | Options::SplineBoolean(_)
+        | Options::Reduce(_) => {
             return None;
         }
     };
@@ -203,6 +240,17 @@ pub(crate) fn gather(
                         operand: 0,
                     });
                 }
+            }
+            // An Extrude's or a Lathe's spline may be a generator's curve.
+            if matches!(options, Options::Extrude { .. } | Options::Lathe(_))
+                && let Some(source) = curve_generator(scene, node_id, &kind, purpose, frame, 1)
+            {
+                inputs.push(Input {
+                    source,
+                    matrix: into_generator * scene.world_matrix_at(node_id, frame),
+                    links: Vec::new(),
+                    operand: 0,
+                });
             }
             continue;
         }
@@ -251,13 +299,8 @@ fn gather_sweep(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs:
             break;
         };
         let kind = data.kind_at(frame);
-        let source = match &*kind {
-            ObjectKind::SplinePrimitive(primitive) => Source::SplinePrimitive(*primitive),
-            ObjectKind::Text(text) => Source::Text(text.clone()),
-            ObjectKind::Spline {
-                spline, interpolation, ..
-            } => Source::Spline(spline.clone(), *interpolation),
-            _ => break,
+        let Some(source) = curve_source(scene, child, &kind, purpose, frame, 1) else {
+            break;
         };
         if !purpose.shows(data) || !scene.layers().shows_own(data.layer, purpose == Purpose::Render) || !data.enabled {
             break;
@@ -290,13 +333,8 @@ fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs: 
             continue;
         };
         let kind = data.kind_at(frame);
-        let source = match &*kind {
-            ObjectKind::SplinePrimitive(primitive) => Source::SplinePrimitive(*primitive),
-            ObjectKind::Text(text) => Source::Text(text.clone()),
-            ObjectKind::Spline {
-                spline, interpolation, ..
-            } => Source::Spline(spline.clone(), *interpolation),
-            _ => continue,
+        let Some(source) = curve_source(scene, child, &kind, purpose, frame, 1) else {
+            continue;
         };
         if purpose.shows(data) && scene.layers().shows_own(data.layer, purpose == Purpose::Render) && data.enabled {
             inputs.push(Input {
@@ -310,17 +348,97 @@ fn gather_loft(scene: &Scene, id: NodeId, purpose: Purpose, frame: f64, inputs: 
     Some(colour)
 }
 
+/// The Spline Boolean's inputs: every visible, enabled spline child (or
+/// generator of curves, up to [`MAX_NESTING`] deep), in order, in the
+/// generator's space. Its colour is its own (the result is its line).
+fn gather_curves(
+    scene: &Scene,
+    id: NodeId,
+    purpose: Purpose,
+    frame: f64,
+    nesting: u32,
+    inputs: &mut Vec<Input>,
+) -> Option<[f32; 3]> {
+    let colour = scene.get(id)?.data.display_color;
+    let into_generator = scene.world_matrix_at(id, frame).inverse();
+    for &child in scene.children(id) {
+        let Some(data) = scene.get(child).map(|node| &node.data) else {
+            continue;
+        };
+        if !purpose.shows(data) || !scene.layers().shows_own(data.layer, purpose == Purpose::Render) || !data.enabled {
+            continue;
+        }
+        let kind = data.kind_at(frame);
+        if let Some(source) = curve_source(scene, child, &kind, purpose, frame, nesting + 1) {
+            inputs.push(Input {
+                source,
+                matrix: into_generator * scene.world_matrix_at(child, frame),
+                links: Vec::new(),
+                operand: 0,
+            });
+        }
+    }
+    Some(colour)
+}
+
+/// What a spline input reads from `kind` (object `id`): a spline's
+/// parameters or content, or a generator of curves with its own inputs;
+/// `None` for anything else.
+fn curve_source(
+    scene: &Scene,
+    id: NodeId,
+    kind: &ObjectKind,
+    purpose: Purpose,
+    frame: f64,
+    nesting: u32,
+) -> Option<Source> {
+    match kind {
+        ObjectKind::SplinePrimitive(primitive) => Some(Source::SplinePrimitive(*primitive)),
+        ObjectKind::Text(text) => Some(Source::Text(text.clone())),
+        ObjectKind::Spline {
+            spline, interpolation, ..
+        } => Some(Source::Spline(spline.clone(), *interpolation)),
+        _ => curve_generator(scene, id, kind, purpose, frame, nesting),
+    }
+}
+
+/// A generator of curves (a Spline Boolean, enabled) as a spline input: its
+/// options and inputs; `None` for anything else or too deep.
+fn curve_generator(
+    scene: &Scene,
+    id: NodeId,
+    kind: &ObjectKind,
+    purpose: Purpose,
+    frame: f64,
+    nesting: u32,
+) -> Option<Source> {
+    let ObjectKind::SplineBoolean(settings) = *kind else {
+        return None;
+    };
+    let data = &scene.get(id)?.data;
+    if !data.enabled || nesting > MAX_NESTING || !scene.layer_switches(id).generators {
+        return None;
+    }
+    let mut nested = Vec::new();
+    gather_curves(scene, id, purpose, frame, nesting, &mut nested)?;
+    Some(Source::Generated(Options::SplineBoolean(settings), nested))
+}
+
 /// A generator of solids' options and which children it takes; `None` for
 /// other kinds.
 fn options_of_solids(kind: &ObjectKind, purpose: Purpose) -> Option<(Options, Operands)> {
     match options(kind, purpose)? {
         options @ Options::Boolean(_) => Some((options, Operands::Two)),
         options @ (Options::Symmetry(_) | Options::Join(_)) => Some((options, Operands::All)),
+        options @ Options::Reduce(reduce) => {
+            Some((options, if reduce.together { Operands::All } else { Operands::Each }))
+        }
         Options::Subdivision(_)
         | Options::Extrude { .. }
         | Options::Lathe(_)
         | Options::Sweep(_)
-        | Options::Loft(_) => None,
+        | Options::Loft(_)
+        | Options::SplineBoolean(_) => None,
     }
 }
 
@@ -331,6 +449,8 @@ enum Operands {
     Two,
     /// All of them, as one (a Symmetry's or a Join's).
     All,
+    /// All of them, each apart (a Reduce's that reduces children apart).
+    Each,
 }
 
 /// The inputs of a generator of solids (a Boolean, Symmetry, Join): its
@@ -351,7 +471,7 @@ fn gather_solids(
     let own = scene.get(id)?.data.display_color;
     let colour = match operands {
         Operands::Two => own,
-        Operands::All => scene
+        Operands::All | Operands::Each => scene
             .children(id)
             .first()
             .and_then(|&c| scene.get(c))
@@ -361,11 +481,11 @@ fn gather_solids(
     let mut stack = Vec::new();
     let count = match operands {
         Operands::Two => 2,
-        Operands::All => usize::MAX,
+        Operands::All | Operands::Each => usize::MAX,
     };
-    for (k, &child) in (0u8..).zip(scene.children(id).iter().take(count)) {
+    for (k, &child) in (0u32..).zip(scene.children(id).iter().take(count)) {
         let operand = match operands {
-            Operands::Two => k,
+            Operands::Two | Operands::Each => k,
             Operands::All => 0,
         };
         stack.push(child);
@@ -389,6 +509,10 @@ fn gather_solids(
                     }
                     Options::Symmetry(_) | Options::Join(_) => {
                         gather_solids(scene, node_id, purpose, frame, Operands::All, nesting + 1, &mut nested)
+                    }
+                    Options::Reduce(reduce) => {
+                        let operands = if reduce.together { Operands::All } else { Operands::Each };
+                        gather_solids(scene, node_id, purpose, frame, operands, nesting + 1, &mut nested)
                     }
                     _ => gather(scene, node_id, &options, purpose, frame, &mut Vec::new(), &mut nested),
                 };
@@ -445,6 +569,23 @@ pub(crate) fn build_all(inputs: &[Input], options: &Options) -> Built {
     let mut merged = Merged::default();
     let mesh = match options {
         Options::Boolean(settings) => return build_boolean(inputs, *settings),
+        Options::SplineBoolean(settings) => {
+            let shapes: Vec<Polyline> = inputs
+                .iter()
+                .filter_map(|input| {
+                    let mut shape = input.source.polyline()?;
+                    for point in &mut shape.points {
+                        *point = input.matrix.transform_point3(*point);
+                    }
+                    Some(shape)
+                })
+                .collect();
+            return Built {
+                curve: Some(spline_boolean::spline_boolean(&shapes, settings)),
+                ..Built::default()
+            };
+        }
+        Options::Reduce(reduce) => return replay(&reduce_orders(inputs, *reduce), reduce.keep),
         Options::Symmetry(settings) => {
             for input in inputs {
                 add_surface(&mut merged, input);
@@ -525,8 +666,47 @@ pub(crate) fn build_all(inputs: &[Input], options: &Options) -> Built {
     };
     Built {
         mesh,
+        curve: None,
         cut_edges: Vec::new(),
         note: None,
+    }
+}
+
+/// The collapse orders of a Reduce's inputs: one for all of them, or one
+/// per child when it reduces them apart.
+pub(crate) fn reduce_orders(inputs: &[Input], reduce: Reduce) -> Arc<Vec<CollapseOrder>> {
+    let constraints = Constraints {
+        borders: reduce.keep_borders,
+        seams: reduce.keep_seams,
+    };
+    let mut groups: Vec<(u32, Merged)> = Vec::new();
+    for input in inputs {
+        let at = match groups.iter().position(|(operand, _)| *operand == input.operand) {
+            Some(at) => at,
+            None => {
+                groups.push((input.operand, Merged::default()));
+                groups.len() - 1
+            }
+        };
+        add_surface(&mut groups[at].1, input);
+    }
+    Arc::new(
+        groups
+            .into_iter()
+            .map(|(_, merged)| CollapseOrder::new(&merged.finish(), constraints))
+            .collect(),
+    )
+}
+
+/// A Reduce's result: each order replayed to `keep` (0 – 1) and merged.
+pub(crate) fn replay(orders: &[CollapseOrder], keep: f32) -> Built {
+    let mut merged = Merged::default();
+    for order in orders {
+        merged.add(&order.replay(keep), Mat4::IDENTITY);
+    }
+    Built {
+        mesh: merged.finish(),
+        ..Built::default()
     }
 }
 
@@ -535,30 +715,30 @@ pub(crate) fn build_all(inputs: &[Input], options: &Options) -> Built {
 fn build_boolean(inputs: &[Input], settings: Boolean) -> Built {
     let mut operands = [Merged::default(), Merged::default()];
     for input in inputs {
-        add_surface(&mut operands[usize::from(input.operand.min(1))], input);
+        add_surface(&mut operands[usize::from(input.operand >= 1)], input);
     }
     let [a, b] = operands;
     let (a, b) = (a.finish(), b.finish());
     if b.face_count() == 0 || a.face_count() == 0 {
         return Built {
             mesh: a,
-            cut_edges: Vec::new(),
             note: Some(GeneratorNote::MissingInput),
+            ..Built::default()
         };
     }
     match boolean::boolean(&a, &b, settings.mode, settings.options()) {
         Ok(result) => Built {
             mesh: result.mesh,
             cut_edges: result.cut_edges,
-            note: None,
+            ..Built::default()
         },
         Err(error) => Built {
             mesh: a,
-            cut_edges: Vec::new(),
             note: Some(match error {
                 BooleanError::NotFinite => GeneratorNote::NotANumber,
                 BooleanError::TooLarge => GeneratorNote::TooLarge,
             }),
+            ..Built::default()
         },
     }
 }
@@ -625,14 +805,17 @@ pub fn generator_color(scene: &Scene, id: NodeId) -> Option<[f32; 3]> {
             .and_then(|&cage| scene.get(cage))
             .map(|cage| cage.data.display_color),
         // The result stands in for the first child.
-        Options::Symmetry(_) | Options::Join(_) => scene
+        Options::Symmetry(_) | Options::Join(_) | Options::Reduce(_) => scene
             .children(id)
             .first()
             .and_then(|&first| scene.get(first))
             .map(|first| first.data.display_color),
-        Options::Extrude { .. } | Options::Lathe(_) | Options::Sweep(_) | Options::Loft(_) | Options::Boolean(_) => {
-            Some(node.data.display_color)
-        }
+        Options::Extrude { .. }
+        | Options::Lathe(_)
+        | Options::Sweep(_)
+        | Options::Loft(_)
+        | Options::Boolean(_)
+        | Options::SplineBoolean(_) => Some(node.data.display_color),
     }
 }
 
@@ -642,6 +825,13 @@ pub fn generator_color(scene: &Scene, id: NodeId) -> Option<[f32; 3]> {
 #[must_use]
 pub fn generator_mesh(scene: &Scene, id: NodeId, frame: f64) -> Option<PolyMesh> {
     generator_built(scene, id, frame).map(|built| built.mesh)
+}
+
+/// The curve a generator of curves (a Spline Boolean) shows at `frame`, in
+/// its space (what Make Editable bakes); `None` for other objects.
+#[must_use]
+pub fn generator_curve(scene: &Scene, id: NodeId, frame: f64) -> Option<Polyline> {
+    generator_built(scene, id, frame)?.curve
 }
 
 /// [`generator_mesh`] with what else the generator has to say (a Boolean's

@@ -481,6 +481,43 @@ fn paint_object(c: &Canvas<'_>, tag: ObjectKindTag, soft: Color32) {
                 c.line((0.5, y), (0.5, y + 0.08));
             }
         }
+        ObjectKindTag::SplineBoolean => {
+            // Two overlapping outlines; the shape they share filled.
+            let (r, a, b) = (0.3f32, (0.36f32, 0.5f32), (0.64f32, 0.5f32));
+            let half = (r * r - 0.14 * 0.14).sqrt();
+            let reach = (half / r).asin();
+            let arc = |centre: P, from: f32, to: f32| -> Vec<P> {
+                (0..=8)
+                    .map(|i| {
+                        let t = from + (to - from) * i as f32 / 8.0;
+                        (centre.0 + r * t.cos(), centre.1 - r * t.sin())
+                    })
+                    .collect()
+            };
+            // The lens: the right circle's left side, then the left circle's
+            // right side.
+            let mut lens = arc(b, PI - reach, PI + reach);
+            lens.extend(arc(a, -reach, reach));
+            c.fill_with(&lens, soft);
+            c.circle(a, r);
+            c.circle(b, r);
+        }
+        ObjectKindTag::Reduce => {
+            // A surface dense on the left, light on the right.
+            let outline = [(0.08, 0.2), (0.92, 0.2), (0.92, 0.8), (0.08, 0.8)];
+            c.fill_with(&outline, soft);
+            c.polyline(&outline, true);
+            for k in 1..4 {
+                let x = 0.08 + 0.1 * k as f32;
+                c.line((x, 0.2), (x, 0.8));
+            }
+            for k in 1..3 {
+                let y = 0.2 + 0.2 * k as f32;
+                c.line((0.08, y), (0.48, y));
+            }
+            c.line((0.48, 0.2), (0.48, 0.8));
+            c.line((0.48, 0.8), (0.92, 0.2));
+        }
         ObjectKindTag::Sweep => {
             // A tube following a curve: its two edges and its end opening.
             let curve = |offset: f32| -> Vec<P> {

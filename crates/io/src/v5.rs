@@ -53,6 +53,20 @@ const NEW_VALUES: &[NewValue] = &[
         field: "type",
         value: "join",
     },
+    // Step 17.5: the Spline Boolean and Reduce objects, and the Reduce's
+    // Keep as an animated parameter.
+    NewValue {
+        field: "type",
+        value: "spline_boolean",
+    },
+    NewValue {
+        field: "type",
+        value: "reduce",
+    },
+    NewValue {
+        field: "param",
+        value: "keep",
+    },
 ];
 
 /// A version 5 `document.json`, already parsed, as version 6 (see the module
@@ -86,6 +100,28 @@ mod tests {
         assert_eq!(v6["document"], v5["document"], "nothing version 6 adds is in it");
         assert_eq!(v6["format"], "grid4d");
         assert_eq!(v6["meshes"], v5["meshes"]);
+    }
+
+    #[test]
+    fn version_6_objects_and_parameters_are_refused() {
+        let with = |object: Value| {
+            json!({
+                "format": "grid4d",
+                "version": 5,
+                "document": { "name": "Shot", "objects": [object] },
+                "meshes": []
+            })
+        };
+        for kind in ["boolean", "symmetry", "instance", "join", "spline_boolean", "reduce"] {
+            let file = with(json!({ "name": "New", "kind": { "type": kind } }));
+            assert!(upgrade(file).is_err(), "{kind}");
+        }
+        let keyed = with(json!({
+            "name": "Ball",
+            "kind": { "type": "sphere" },
+            "tracks": [{ "param": "keep", "keys": [] }]
+        }));
+        assert!(upgrade(keyed).is_err(), "a Reduce's Keep");
     }
 
     #[test]

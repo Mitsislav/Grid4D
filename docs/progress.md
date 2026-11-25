@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 17 — Modelling 2 (v1.3) |
-| Last step done | 17.4 — Symmetry, Instance and Join: mirroring welded at a plane, Instances without copies, children merged into one mesh; pages, file data, Make Editable (2026-11-24) |
-| Next step | 17.5 — the Spline Boolean and Reduce |
-| Tests | 999 (and 19 ignored, run by hand: three timings, the walkthrough, the Boolean's and the Symmetry's pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
+| Last step done | 17.5 — the Spline Boolean and Reduce: flat shapes combined into a curve the spline generators read, meshes made lighter with Keep replayed at once; pages, file data, Make Editable (2026-11-24) |
+| Next step | 17.6 — soft selection and Slide |
+| Tests | 1017 (and 21 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's and the Reduce's pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2738,6 +2738,7 @@ risks R5 – R8 go with it.
 | 17.2 | The boolean spike: `grid4d-geom::exact` (intervals rounded outwards as a filter, Shewchuk's expansions for exact signs) and `grid4d-geom::boolean` — one pipeline (box-touching triangle pairs, triangles cut by the other input's planes into convex pieces bounded by planes, equal points joined exactly, points on edges stitched in exact order, groups classified by the generalised winding number, pieces in the other's surface by the mode's rule, face origins) with two ways to hold the points a cut makes: implicit (three planes, plane-based) or rounded; a corpus of 14 hard cases, an open cutter, property tests (20 000 random pairs checked closed and by volume identities; garbage meshes never panic), a `boolean` cargo-fuzz target in CI and the weekly Fuzz workflow; both timed (`modeling_budget`). **D39: the plane-based method** — the only one passing everything (rounding: 4 of 14 cases and 185 of 1 000 random pairs wrong) and faster on large inputs; its speed (29 – 38 ms for the product shell, target 8) is 17.3's work | 979 |
 | 17.3 | The Boolean generator. Geometry: only triangles near the other input are cut (faces with no cut pass through whole, getting the cut's points on their edges by lookup), equal support planes shared, one edge plane and partner plane per input edge (an edge's crossings are then one point from both sides), known incidences, equality tested by sides, a small hasher; kept pieces merged back into polygons per face, UVs interpolated (turned faces' pictures mirrored back), cut edges listed, a weld that splits pinched faces so closed stays closed; the spike's rounded method removed; the shell 38 → 11 ms, 50k spheres 0.67 → 0.18 s, a million triangles 11 → 4 s. The object: `ObjectKind::Boolean` (Mode, Merge Faces, Select Cut Edges, Weld), its operands each a subtree, another generator as an input (nested Booleans), both hidden, a note when an input is missing; the drag fallback (R9: a rebuild over 33 ms keeps the last result while a pointer is held, the status bar says so); Make Editable selects the cut edges; `.g4d` v6 `boolean` (refused in v5), golden fixtures, property tests; renders see it; icon, page, tooltip, Greek; the manual's §12.5 with a picture | 990 |
 | 17.4 | Symmetry, Instance and Join. `grid4d_geom::symmetry` (`Symmetry`, `MirrorPlane`, `mirror`: the half and its image wound the other way, welded and held at the plane, faces in the plane not doubled, the mirror's U turned round, the half's point numbers kept; 5.1 ms for a 100 000-point half); `ObjectKind::{Symmetry, Join}` take all their children (`gather_solids`, hidden as cages), the Join merged and welded; a Subdivision Surface's cage may now be a Join, Symmetry or Boolean; `ObjectKind::Instance { reference }` shows its reference's subtree as clones owned by the Instance (its Cloners' clones and nested Instances too, chains up to 16, cycles show nothing, its own material over them; 0.17 ms to evaluate a thousand), created linked to the selection; Make Editable, Current State and export bake all three; `.g4d` v6 `symmetry`, `instance` (by index), `join`, refused in v5; icons, pages, tooltips, Greek; the manual's §12.6 with a picture | 999 |
+| 17.5 | The Spline Boolean and Reduce. `grid4d_geom::spline_boolean` (closed outlines flattened onto a plane, edges cut where they cross or touch by exact orientation tests, merged within 0.001 cm, each classified by a ray and chained into outlines and holes; Union, Subtract, Intersect, Exclusive; 71 ms for a hundred circles; a fuzz target in CI); the first generator whose result is a curve, drawn and picked as one, its splines hidden, read by Extrude, Lathe, Sweep, Loft and another Spline Boolean (D45); `grid4d_geom::reduce` (`CollapseOrder`: triangles and UV wedges, quadric costs, borders and seams held by constraint planes, half-edge collapses so the points and UVs are the input's own, no flips, pinches or doubled faces; `replay` merges numbers only: 3.8 s for the order of a million triangles, 24 ms for a replay to 10 %); `ObjectKind::Reduce` with Keep (animatable), borders, seams, children together or apart, the order kept while only Keep changes; Make Editable (a Linear spline; a mesh), Current State and export; `.g4d` v6 `spline_boolean`, `reduce`, track `keep`, refused in v5; icons, pages, tooltips, Greek; the manual's §12.7 and §13.9 with pictures | 1017 |
 
 **17.1 — Specs, the format version 6, the modelling budget**
 
@@ -2903,6 +2904,45 @@ risks R5 – R8 go with it.
   space.
 - **A file held open.** rustfmt once could not write a source file another
   program had open; running it again wrote it.
+
+**17.5 — the Spline Boolean and Reduce**
+
+*Problems and solutions:*
+- **A simpler Spline Boolean than the sweep.** Cutting every edge where it
+  crosses another (the crossing decided exactly, its point in `f64`),
+  merging points within 0.001 cm and classifying each edge with a ray from
+  its middle gives the same results for overlapping, coincident and touching
+  shapes with far less code. Chaining the kept edges by the sharpest right
+  turn keeps two squares that touch at a corner as two outlines.
+- **A line of three points emptied an Intersect.** An outline with no area
+  is now no shape at all.
+- **The Reduce's replay read the order's working copy.** Building the order
+  marked removed triangles in the same list the replay starts from; the
+  work now has a copy of its own.
+- **Large triangles near a sphere's poles.** Area-weighted errors took the
+  small polar triangles first; unweighted ones (the paper's) spread the
+  loss: within 1.3 % of the radius at 10 % (the target is 2 %).
+- **A sphere's pole locked its first ring.** Every polar edge splits the
+  UVs at the pole, so each point of the first ring had one seam edge and
+  could not move. An edge now holds only the end where the UVs split; a
+  collapse that would give a UV two places to go is refused instead.
+- **The cube's sides share UVs by chance.** The test cube's sides each show
+  the whole picture, so points on their edges have equal UVs on both sides
+  and are not seams. The test now gives every side an island of its own.
+- **Keep dragged with the pointer down.** R9 keeps a slow generator's
+  result while a pointer is held; a change of Keep only replays, so it is
+  never kept back, and the order's own time is remembered for the next
+  change of the inputs.
+- **18 s for a million triangles against a target of 5.** Finding a
+  point's neighbours searched a list (a fine sphere's pole has a thousand),
+  and 95 % of what came out of the heap was out of date. Sorting the
+  neighbours, one entry per edge, and checking an entry's cost when it
+  comes out (costs only grow) brought it to 3.8 s; a replay takes 24 ms.
+- **A label too long.** "Reduce Children Together" did not fit the
+  Attribute Manager's label column; the row is "Children Together".
+- **The Boolean's fuzz target no longer built** since 17.3 changed the
+  Boolean's options; it was brought up to date with the new Spline Boolean
+  target.
 
 ## Phase 16 — Render quality (2026-11-07 – 2026-11-09)
 

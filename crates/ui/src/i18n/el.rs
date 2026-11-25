@@ -163,6 +163,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Προσθήκη Τυχαίου επιδραστή: μεταβάλλει τυχαία τους κλώνους του επιλεγμένου Κλωνοποιητή",
     ),
     ("Add Rectangle", "Προσθήκη Ορθογωνίου"),
+    (
+        "Add Reduce: its children with fewer polygons (Alt: around the selected objects)",
+        "Προσθήκη μείωσης: τα παιδιά της με λιγότερα πολύγωνα (Alt: γύρω από τα επιλεγμένα αντικείμενα)",
+    ),
     ("Add Selected Objects", "Προσθήκη επιλεγμένων αντικειμένων"),
     ("Add Sky", "Προσθήκη Ουρανού"),
     ("Add Sphere", "Προσθήκη Σφαίρας"),
@@ -170,6 +174,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     (
         "Add Spline (Circle, Rectangle, …)",
         "Προσθήκη Καμπύλης (Κύκλος, Ορθογώνιο, …)",
+    ),
+    (
+        "Add Spline Boolean: its child splines combined as flat shapes (Alt: around the selected splines)",
+        "Προσθήκη Boolean καμπυλών: οι καμπύλες-παιδιά του συνδυασμένες ως επίπεδα σχήματα (Alt: γύρω από τις επιλεγμένες καμπύλες)",
     ),
     ("Add Star", "Προσθήκη Αστεριού"),
     (
@@ -394,6 +402,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Αλλαγμένο χωρίς καταγραφή: χάνεται όταν αλλάξει το καρέ · κλικ: κλειδί · Shift+Ctrl+κλικ: διαγραφή του καναλιού",
     ),
     ("Child 1: profile; child 2: path", "Παιδί 1: προφίλ· παιδί 2: διαδρομή"),
+    ("Children Together", "Τα παιδιά μαζί"),
     (
         "Choose a picture for this channel",
         "Επιλέξτε εικόνα για αυτό το κανάλι",
@@ -444,6 +453,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Collider Body Tag", "Ετικέτα Σώματος σύγκρουσης"),
     ("Color", "Χρώμα"),
     ("Colour Space", "Χρωματικός χώρος"),
+    (
+        "Combines its child splines as flat shapes",
+        "Συνδυάζει τις καμπύλες-παιδιά του ως επίπεδα σχήματα",
+    ),
     (
         "Combines its first two children as solids",
         "Συνδυάζει τα δύο πρώτα παιδιά της ως στερεά",
@@ -683,6 +696,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Κάθε pixel παίρνει τόσα πριν σταματήσει οποιοδήποτε",
     ),
     ("Exclude", "Εξαίρεση"),
+    ("Exclusive", "Αποκλειστική"),
     ("Expand All", "Ανάπτυξη όλων"),
     ("Export", "Εξαγωγή"),
     ("Export…", "Εξαγωγή…"),
@@ -955,7 +969,11 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Τα παιδιά της και το είδωλό τους",
     ),
     ("Its children as one mesh", "Τα παιδιά της ως ένα πλέγμα"),
+    ("Its children with fewer polygons", "Τα παιδιά της με λιγότερα πολύγωνα"),
     ("Join", "Ένωση πλεγμάτων"),
+    ("Keep", "Διατήρηση"),
+    ("Keep Borders", "Διατήρηση ορίων"),
+    ("Keep UV Seams", "Διατήρηση ραφών UV"),
     ("Keep Y-Axis Length", "Διατήρηση μήκους άξονα Y"),
     (
         "Keep a recovery copy of unsaved work, offered after a crash",
@@ -1545,6 +1563,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Επανάληψη (Ctrl+Y) — τίποτα για επανάληψη",
     ),
     ("Redo {0}", "Επανάληψη: {0}"),
+    ("Reduce", "Μείωση"),
     ("Reference Object", "Αντικείμενο αναφοράς"),
     ("Reflection", "Ανάκλαση"),
     (
@@ -1970,6 +1989,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Spin . Z", "Περιστροφή . Z"),
     ("Spin Steps", "Βήματα περιστροφής"),
     ("Spline", "Καμπύλη"),
+    ("Spline Boolean", "Boolean καμπυλών"),
     ("Spot", "Προβολέας"),
     (
         "Spreads copies of the selected objects over the surface of the one selected last",

@@ -297,6 +297,10 @@ const fn create_tooltip(tag: ObjectKindTag) -> &'static str {
             key("Add Symmetry: its children and their mirror image (Alt: around the selected object)")
         }
         ObjectKindTag::Join => key("Add Join: its children as one mesh (Alt: around the selected objects)"),
+        ObjectKindTag::SplineBoolean => {
+            key("Add Spline Boolean: its child splines combined as flat shapes (Alt: around the selected splines)")
+        }
+        ObjectKindTag::Reduce => key("Add Reduce: its children with fewer polygons (Alt: around the selected objects)"),
         ObjectKindTag::Instance => key("Add Instance: shows the selected object again, without a copy"),
         ObjectKindTag::Cloner => key("Add Cloner: repeats its children (Alt: around the selected object)"),
         ObjectKindTag::PlainEffector => key("Add Plain effector: moves, turns, scales the selected Cloner's clones"),

@@ -953,7 +953,18 @@ pub fn exportable_at(doc: &Document, simulated: &grid4d_eval::Overrides) -> Obje
         let mut data = node.data.clone();
         let mut cage = None;
         let mut inputs: &[NodeId] = &[];
-        if data.kind.is_generator() {
+        if let ObjectKind::SplineBoolean(_) = data.kind {
+            // A curve, left out like every spline: written as the spline it
+            // shows, its own splines consumed.
+            if data.enabled
+                && let Some(curve) = grid4d_eval::generator_curve(&doc.scene, id, f64::from(doc.time.frame()))
+            {
+                data.kind = crate::current_state::curve_object(&curve);
+                inputs = node.children();
+            } else {
+                data.kind = ObjectKind::Null;
+            }
+        } else if data.kind.is_generator() {
             match grid4d_eval::generator_mesh(&doc.scene, id, f64::from(doc.time.frame())).filter(|_| data.enabled) {
                 Some(mesh) => {
                     let taken = node.children().len().min(data.kind.generator_inputs());

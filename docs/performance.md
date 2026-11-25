@@ -332,6 +332,22 @@ button is held (R9).
 The Symmetry's first version took 12.8 ms: it built a vector per face; it
 now writes points and faces straight into the mesh with one reused buffer.
 
+### Step 17.5: the Reduce and the Spline Boolean
+
+| What | 17.1 (floor) | 17.5 | Target |
+|------|--------------|------|--------|
+| A scan of a million triangles: the Reduce's collapse order | 0.36 s (topology and BVH alone) | 3.8 s | ≤ 5 s: met |
+| The same, Keep changed (a replay to 10 %) | — | 24 ms | ≤ 100 ms: met |
+| A hundred overlapping circles of 128 points united (Spline Boolean) | — | 71 ms | — |
+
+The first collapse order took 18 s. Three changes brought it to 3.8 s:
+finding a point's neighbours by sorting instead of searching (a fine
+sphere's pole has a thousand of them: 12 s → 5 s); one heap entry per edge
+instead of per direction, with each triangle's points kept beside its UV
+corners; and no re-insertion of every edge of the kept point after a
+collapse — costs only grow, so an entry is checked when it comes out and
+goes back in only if its cost has risen (5 s → 3.8 s).
+
 ## Benchmarks
 
 `cargo bench -p <crate>` runs a crate's `criterion` benches (CI only builds

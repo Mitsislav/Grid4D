@@ -22,6 +22,7 @@ use std::{
 };
 
 use glam::{Vec2, Vec3};
+use grid4d_geom::spline_boolean::{SplineBoolean, SplineBooleanMode};
 use grid4d_geom::symmetry::{MirrorPlane, Symmetry};
 use grid4d_geom::{
     BitSet, ComponentSet, PolyMesh,
@@ -37,7 +38,7 @@ use grid4d_geom::{
 };
 use grid4d_scene::{
     AreaShape, Boolean, BooleanMode, Denoise, Environment, Join, Lens, LinkMode, Linking, NoiseThreshold, Pass,
-    PngPasses, RenderRegion, ShutterPosition, Sky, SunPlacement,
+    PngPasses, Reduce, RenderRegion, ShutterPosition, Sky, SunPlacement,
 };
 use grid4d_scene::{
     Axis, Body, CachedBody, CollisionShape, ComponentState, Components, Curve, Document, Falloff, FrameNaming,
@@ -1347,6 +1348,8 @@ enum ParamDto {
     FocusDistance,
     FStop,
     BladeRotation,
+    /// A Reduce's (version 6, step 17.5).
+    Keep,
     /// A plugin object's number, by its name (added in step 13.2):
     /// `{"plugin": "Phase"}`.
     Plugin(String),
@@ -1440,6 +1443,7 @@ impl From<Param> for ParamDto {
             Param::Object(ObjectParam::FocusDistance) => Self::FocusDistance,
             Param::Object(ObjectParam::FStop) => Self::FStop,
             Param::Object(ObjectParam::BladeRotation) => Self::BladeRotation,
+            Param::Object(ObjectParam::Keep) => Self::Keep,
             // Named by `ParamDto::new`, which has the object.
             Param::Object(ObjectParam::Plugin(_)) => Self::Plugin(String::new()),
         }
@@ -1507,6 +1511,7 @@ impl From<ParamDto> for Param {
             ParamDto::FocusDistance => Self::Object(ObjectParam::FocusDistance),
             ParamDto::FStop => Self::Object(ObjectParam::FStop),
             ParamDto::BladeRotation => Self::Object(ObjectParam::BladeRotation),
+            ParamDto::Keep => Self::Object(ObjectParam::Keep),
             ParamDto::Curvature => Self::Object(ObjectParam::Curvature),
             // Resolved by `ParamDto::into_param`; never reached from there.
             ParamDto::Plugin(_) => Self::Object(ObjectParam::Plugin(u8::MAX)),
@@ -2425,6 +2430,25 @@ enum KindDto {
             skip_serializing_if = "is_default_join_tolerance"
         )]
         tolerance: f32,
+    },
+    /// A Spline Boolean generator (version 6, step 17.5); defaults omitted.
+    SplineBoolean {
+        #[serde(default, skip_serializing_if = "SplineBooleanModeDto::is_union")]
+        mode: SplineBooleanModeDto,
+        #[serde(default, skip_serializing_if = "SplinePlaneDto::is_xy")]
+        plane: SplinePlaneDto,
+    },
+    /// A Reduce generator (version 6, step 17.5); defaults omitted.
+    Reduce {
+        /// The share kept, 0 – 1; 0.5 when absent.
+        #[serde(default = "default_keep", skip_serializing_if = "is_default_keep")]
+        keep: f32,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        keep_borders: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        keep_seams: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        together: bool,
     },
     /// A Loft generator (added in step 9.7); defaults omitted.
     Loft {
@@ -3904,6 +3928,81 @@ fn is_default_symmetry_tolerance(tolerance: &f32) -> bool {
     tolerance.to_bits() == default_symmetry_tolerance().to_bits()
 }
 
+/// How a Spline Boolean combines its shapes (version 6, step 17.5).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SplineBooleanModeDto {
+    #[default]
+    Union,
+    Subtract,
+    Intersect,
+    Exclusive,
+}
+
+impl SplineBooleanModeDto {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    fn is_union(&self) -> bool {
+        *self == Self::Union
+    }
+}
+
+impl From<SplineBooleanMode> for SplineBooleanModeDto {
+    fn from(mode: SplineBooleanMode) -> Self {
+        match mode {
+            SplineBooleanMode::Union => Self::Union,
+            SplineBooleanMode::Subtract => Self::Subtract,
+            SplineBooleanMode::Intersect => Self::Intersect,
+            SplineBooleanMode::Exclusive => Self::Exclusive,
+        }
+    }
+}
+
+impl From<SplineBooleanModeDto> for SplineBooleanMode {
+    fn from(mode: SplineBooleanModeDto) -> Self {
+        match mode {
+            SplineBooleanModeDto::Union => Self::Union,
+            SplineBooleanModeDto::Subtract => Self::Subtract,
+            SplineBooleanModeDto::Intersect => Self::Intersect,
+            SplineBooleanModeDto::Exclusive => Self::Exclusive,
+        }
+    }
+}
+
+impl From<SplinePlane> for SplinePlaneDto {
+    fn from(plane: SplinePlane) -> Self {
+        match plane {
+            SplinePlane::XY => Self::Xy,
+            SplinePlane::ZY => Self::Zy,
+            SplinePlane::XZ => Self::Xz,
+        }
+    }
+}
+
+impl From<SplinePlaneDto> for SplinePlane {
+    fn from(plane: SplinePlaneDto) -> Self {
+        match plane {
+            SplinePlaneDto::Xy => Self::XY,
+            SplinePlaneDto::Zy => Self::ZY,
+            SplinePlaneDto::Xz => Self::XZ,
+        }
+    }
+}
+
+fn default_keep() -> f32 {
+    Reduce::default().keep
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_default_keep(keep: &f32) -> bool {
+    keep.to_bits() == default_keep().to_bits()
+}
+
 fn default_join_tolerance() -> f32 {
     Join::default().tolerance
 }
@@ -4895,6 +4994,16 @@ impl KindDto {
                 weld: join.weld,
                 tolerance: join.tolerance,
             },
+            ObjectKind::SplineBoolean(settings) => Self::SplineBoolean {
+                mode: settings.mode.into(),
+                plane: settings.plane.into(),
+            },
+            ObjectKind::Reduce(reduce) => Self::Reduce {
+                keep: reduce.keep,
+                keep_borders: reduce.keep_borders,
+                keep_seams: reduce.keep_seams,
+                together: reduce.together,
+            },
             ObjectKind::Loft(loft) => Self::Loft {
                 subdivision_u: loft.subdivision_u,
                 subdivision_v: loft.subdivision_v,
@@ -5349,6 +5458,21 @@ impl KindDto {
                 weld,
                 tolerance: tolerance.clamp(0.0, Join::MAX_TOLERANCE),
             }),
+            Self::SplineBoolean { mode, plane } => ObjectKind::SplineBoolean(SplineBoolean {
+                mode: mode.into(),
+                plane: plane.into(),
+            }),
+            Self::Reduce {
+                keep,
+                keep_borders,
+                keep_seams,
+                together,
+            } => ObjectKind::Reduce(Reduce {
+                keep: keep.clamp(0.0, 1.0),
+                keep_borders,
+                keep_seams,
+                together,
+            }),
             Self::Boolean {
                 mode,
                 merge_faces,
@@ -5493,7 +5617,8 @@ impl KindDto {
             Self::Null | Self::Polygon { .. } | Self::SubdivisionSurface { .. } | Self::Loft { .. } => Vec::new(),
             Self::Boolean { weld, .. } => vec![weld],
             Self::Symmetry { tolerance, .. } | Self::Join { tolerance, .. } => vec![tolerance],
-            Self::Instance { .. } => Vec::new(),
+            Self::Instance { .. } | Self::SplineBoolean { .. } => Vec::new(),
+            Self::Reduce { keep, .. } => vec![keep],
             Self::Cloner { ref layout, .. } => layout.parameters(),
             Self::PlainEffector(ref dto) | Self::RandomEffector(ref dto) => dto.parameters(),
             Self::Extrude { offset, movement, .. } => vec![offset, movement[0], movement[1], movement[2]],

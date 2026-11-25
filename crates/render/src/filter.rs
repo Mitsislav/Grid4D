@@ -66,6 +66,8 @@ impl FilterItem {
             | ObjectKindTag::Symmetry
             | ObjectKindTag::Instance
             | ObjectKindTag::Join
+            | ObjectKindTag::SplineBoolean
+            | ObjectKindTag::Reduce
             | ObjectKindTag::Cloner
             // Plugin objects are parametric too.
             | ObjectKindTag::Plugin => Some(Self::Generator),

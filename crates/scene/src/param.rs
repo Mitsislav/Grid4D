@@ -93,6 +93,8 @@ pub enum ObjectParam {
     FStop,
     /// A camera's aperture blades' turn (radians).
     BladeRotation,
+    /// A Reduce's share of the triangles kept (0 – 1).
+    Keep,
     /// A plugin object's number: its value at this index of
     /// [`PluginObject::values`](crate::PluginObject::values) (below
     /// [`ObjectParam::PLUGIN_PARAMS`]).
@@ -102,7 +104,7 @@ pub enum ObjectParam {
 impl ObjectParam {
     /// How many built-in ones there are (their [`ObjectParam::index`] is below
     /// this; a plugin's follow).
-    pub const COUNT: usize = 49;
+    pub const COUNT: usize = 50;
 
     /// How many of a plugin object's values can be animated (the first ones).
     pub const PLUGIN_PARAMS: usize = 64;
@@ -158,6 +160,7 @@ impl ObjectParam {
         Self::FocusDistance,
         Self::FStop,
         Self::BladeRotation,
+        Self::Keep,
     ];
 
     /// The row label (shared by the Attribute Manager and the F-Curve editor).
@@ -212,6 +215,7 @@ impl ObjectParam {
             Self::FocusDistance => "Focus Distance",
             Self::FStop => "F-Stop",
             Self::BladeRotation => "Blade Rotation",
+            Self::Keep => "Keep",
             // Named by its plugin: see `ObjectKind::param_label`.
             Self::Plugin(_) => "Plugin Parameter",
         }
@@ -267,6 +271,7 @@ impl ObjectParam {
             Self::FocusDistance => 46,
             Self::FStop => 47,
             Self::BladeRotation => 48,
+            Self::Keep => 49,
             Self::Plugin(i) => Self::COUNT + i as usize,
         }
     }
@@ -294,7 +299,8 @@ impl ObjectParam {
             | Self::StartGrowth
             | Self::EndGrowth
             | Self::Amount
-            | Self::Curvature => ParamUnit::Fraction,
+            | Self::Curvature
+            | Self::Keep => ParamUnit::Fraction,
             Self::Size(_)
             | Self::Radius
             | Self::Height
@@ -402,6 +408,7 @@ impl ObjectKind {
             ],
             Self::Lathe(_) => &[P::Angle, P::Rise, P::Scaling],
             Self::Sweep(_) => &[P::EndScale, P::EndRotation, P::StartGrowth, P::EndGrowth],
+            Self::Reduce(_) => &[P::Keep],
             Self::Bend(_) => &[
                 P::Size(Axis::X),
                 P::Size(Axis::Y),
@@ -436,6 +443,7 @@ impl ObjectKind {
             | Self::Symmetry(_)
             | Self::Instance { .. }
             | Self::Join(_)
+            | Self::SplineBoolean(_)
             | Self::Spline { .. }
             // The lattice is edited, not keyed.
             | Self::Ffd { .. } => &[],
@@ -507,7 +515,7 @@ impl ObjectKind {
             );
         let value = if non_negative { value.max(0.0) } else { value };
         let value = match param {
-            P::RadialBias | P::HeightBias | P::StartGrowth | P::EndGrowth => value.min(1.0),
+            P::RadialBias | P::HeightBias | P::StartGrowth | P::EndGrowth | P::Keep => value.min(1.0),
             P::FieldOfView => value.clamp(1.0, 170.0),
             P::FocusDistance => value.clamp(crate::Lens::MIN_FOCUS_DISTANCE, crate::Lens::MAX_FOCUS_DISTANCE),
             P::FStop => value.clamp(crate::Lens::MIN_F_STOP, crate::Lens::MAX_F_STOP),
@@ -640,6 +648,7 @@ impl ObjectKind {
             (Self::Sweep(sweep), P::EndRotation) => Some(&mut sweep.end_rotation),
             (Self::Sweep(sweep), P::StartGrowth) => Some(&mut sweep.start_growth),
             (Self::Sweep(sweep), P::EndGrowth) => Some(&mut sweep.end_growth),
+            (Self::Reduce(reduce), P::Keep) => Some(&mut reduce.keep),
             (Self::Bend(bend), P::Size(axis)) => Some(&mut bend.size[axis.index()]),
             (Self::Bend(bend), P::Strength) => Some(&mut bend.strength),
             (Self::Bend(bend), P::Angle) => Some(&mut bend.angle),

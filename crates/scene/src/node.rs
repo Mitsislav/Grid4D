@@ -141,6 +141,12 @@ pub enum ObjectKind {
     },
     /// Join generator: its children merged into one mesh.
     Join(crate::Join),
+    /// Spline Boolean generator: its child splines combined as flat shapes
+    /// into a curve (`docs/reference/generator-spline-boolean.md`).
+    SplineBoolean(grid4d_geom::spline_boolean::SplineBoolean),
+    /// Reduce generator: its children with fewer triangles
+    /// (`docs/reference/generator-reduce.md`).
+    Reduce(crate::Reduce),
     /// Repeats its children along a line, a circle or a grid
     /// (`docs/reference/mograph-cloner.md`). The clones are instances made by
     /// evaluation, not nodes.
@@ -218,6 +224,8 @@ pub enum ObjectKindTag {
     Symmetry,
     Instance,
     Join,
+    SplineBoolean,
+    Reduce,
     Cloner,
     PlainEffector,
     RandomEffector,
@@ -241,7 +249,7 @@ pub enum ObjectKindTag {
 }
 
 impl ObjectKindTag {
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 42] = [
         Self::Null,
         Self::Cube,
         Self::Sphere,
@@ -265,6 +273,8 @@ impl ObjectKindTag {
         Self::Symmetry,
         Self::Instance,
         Self::Join,
+        Self::SplineBoolean,
+        Self::Reduce,
         Self::Cloner,
         Self::PlainEffector,
         Self::RandomEffector,
@@ -298,7 +308,7 @@ impl ObjectKindTag {
 
     /// Generators: objects that build their geometry from their children (the
     /// Cloner repeats them).
-    pub const GENERATORS: [Self; 10] = [
+    pub const GENERATORS: [Self; 12] = [
         Self::SubdivisionSurface,
         Self::Extrude,
         Self::Lathe,
@@ -307,6 +317,8 @@ impl ObjectKindTag {
         Self::Boolean,
         Self::Symmetry,
         Self::Join,
+        Self::SplineBoolean,
+        Self::Reduce,
         Self::Instance,
         Self::Cloner,
     ];
@@ -356,6 +368,8 @@ impl ObjectKindTag {
             Self::Symmetry => "Symmetry",
             Self::Instance => "Instance",
             Self::Join => "Join",
+            Self::SplineBoolean => "Spline Boolean",
+            Self::Reduce => "Reduce",
             Self::Cloner => "Cloner",
             Self::PlainEffector => "Plain",
             Self::RandomEffector => "Random",
@@ -465,6 +479,10 @@ impl ObjectKindTag {
             Self::Instance => ObjectKind::Instance { reference: None },
             // Welded within 0.1 cm.
             Self::Join => ObjectKind::Join(crate::Join::default()),
+            // docs/reference/generator-spline-boolean.md: Union in XY.
+            Self::SplineBoolean => ObjectKind::SplineBoolean(grid4d_geom::spline_boolean::SplineBoolean::default()),
+            // docs/reference/generator-reduce.md: half the triangles.
+            Self::Reduce => ObjectKind::Reduce(crate::Reduce::default()),
             // docs/reference/mograph-cloner.md: three clones in a row, 250 cm apart.
             Self::Cloner => ObjectKind::cloner(grid4d_geom::cloner::Cloner::default()),
             // docs/reference/mograph-effectors.md: the clones lifted 100 cm / moved up to 50 cm.
@@ -617,6 +635,8 @@ impl ObjectKind {
             Self::Symmetry(_) => ObjectKindTag::Symmetry,
             Self::Instance { .. } => ObjectKindTag::Instance,
             Self::Join(_) => ObjectKindTag::Join,
+            Self::SplineBoolean(_) => ObjectKindTag::SplineBoolean,
+            Self::Reduce(_) => ObjectKindTag::Reduce,
             Self::Cloner { .. } => ObjectKindTag::Cloner,
             Self::PlainEffector(_) => ObjectKindTag::PlainEffector,
             Self::RandomEffector(_) => ObjectKindTag::RandomEffector,
@@ -651,7 +671,12 @@ impl ObjectKind {
     #[must_use]
     pub const fn generator_inputs(&self) -> usize {
         match self {
-            Self::Loft(_) | Self::Cloner { .. } | Self::Symmetry(_) | Self::Join(_) => usize::MAX,
+            Self::Loft(_)
+            | Self::Cloner { .. }
+            | Self::Symmetry(_)
+            | Self::Join(_)
+            | Self::SplineBoolean(_)
+            | Self::Reduce(_) => usize::MAX,
             Self::Sweep(_) | Self::Boolean(_) => 2,
             Self::SubdivisionSurface { .. } | Self::Extrude { .. } | Self::Lathe(_) => 1,
             // An Instance shows a linked object, not its children.
@@ -791,6 +816,8 @@ impl ObjectKind {
                 | Self::Boolean(_)
                 | Self::Symmetry(_)
                 | Self::Join(_)
+                | Self::SplineBoolean(_)
+                | Self::Reduce(_)
                 | Self::Cloner { .. }
         )
     }
@@ -816,6 +843,8 @@ impl ObjectKind {
             | Self::Symmetry(_)
             | Self::Instance { .. }
             | Self::Join(_)
+            | Self::SplineBoolean(_)
+            | Self::Reduce(_)
             | Self::Cloner { .. }
             // A plugin's mesh: evaluation knows its extent.
             | Self::Plugin(_)

@@ -255,6 +255,8 @@ pub fn drawable(kind: &ObjectKind, color: [f32; 3]) -> Option<Drawable> {
         | ObjectKind::Symmetry(_)
         | ObjectKind::Instance { .. }
         | ObjectKind::Join(_)
+        | ObjectKind::SplineBoolean(_)
+        | ObjectKind::Reduce(_)
         // A Cloner draws its clones (instances evaluation makes).
         | ObjectKind::Cloner { .. }
         // An effector draws its falloff as lines, sampled during evaluation.
@@ -313,6 +315,8 @@ pub fn editable_mesh(kind: &ObjectKind) -> Option<PolyMesh> {
         | ObjectKind::Symmetry(_)
         | ObjectKind::Instance { .. }
         | ObjectKind::Join(_)
+        | ObjectKind::SplineBoolean(_)
+        | ObjectKind::Reduce(_)
         | ObjectKind::Cloner { .. }
         | ObjectKind::PlainEffector(_)
         | ObjectKind::RandomEffector(_)
@@ -373,6 +377,8 @@ mod tests {
                     | ObjectKindTag::Symmetry
                     | ObjectKindTag::Instance
                     | ObjectKindTag::Join
+                    | ObjectKindTag::SplineBoolean
+                    | ObjectKindTag::Reduce
                     | ObjectKindTag::Cloner
                     | ObjectKindTag::PlainEffector
                     | ObjectKindTag::RandomEffector

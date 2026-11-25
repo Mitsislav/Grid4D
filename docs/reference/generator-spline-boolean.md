@@ -63,16 +63,44 @@ rectangles, a gasket with holes, a cookie-cutter profile.
 | Curve results of generators (`CurveHandle` per generator), spline generators reading them | `grid4d-eval::{generator, curve}` |
 | File | `.g4d` v6 kind `spline_boolean` (17.5) |
 
-## Acceptance criteria
+## Decisions made while implementing (2026-11-24)
 
-- [ ] Two overlapping circles: Union gives one outline, Subtract a crescent,
+1. **The method.** Not the endpoint sweep: every edge is cut where it
+   crosses or touches another (crossings decided by exact orientation
+   tests, the crossing point computed in `f64`), points within 0.001 cm
+   merged and equal edges made one, owned by the shapes that have it an odd
+   number of times. Each edge is then classified by a ray from its middle
+   (the shapes it crosses an odd number of times hold that side; the other
+   side differs by the edge's own shapes); edges where the mode's rule holds
+   on one side only are kept, turned so the result is on their left, and
+   chained into loops turning as sharply right as possible, so shapes that
+   touch at a corner stay two outlines. Simpler than the sweep, with the
+   same exact predicates; a hundred overlapping circles of 128 points take
+   71 ms.
+2. An outline with no area (fewer than three points, or all in a line)
+   counts as no shape: it never empties an Intersect.
+3. Subtract's "first child" is the first child that has a closed outline.
+4. It is listed with the generators, not the spline primitives, and is not
+   a spline itself (Points mode needs Make Editable).
+5. A spline generator above it rebuilds its curve from the inner inputs it
+   gathers (as a Boolean does with a generator inside its input), so one
+   comparison of inputs still decides every rebuild.
+6. Its children, splines included, are hidden while it is enabled; disabled
+   it is a group and they show as they are.
+7. Export writes it as the editable spline it shows, which glTF and OBJ
+   leave out like every spline.
+
+## Acceptance criteria (all met in 17.5)
+
+- [x] Two overlapping circles: Union gives one outline, Subtract a crescent,
       Intersect a lens, Exclusive two crescents; areas within 1e-3 of the
       analytic values at fine sampling.
-- [ ] A rectangle minus a circle inside it gives an outline and a hole; an
+- [x] A rectangle minus a circle inside it gives an outline and a hole; an
       Extrude of the generator gives a plate with a round hole and caps.
-- [ ] Coincident edges and touching corners give clean outlines (no zero-area
-      slivers), and the fuzzer finds no panic.
-- [ ] Open child segments are ignored; a child out of the plane is flattened.
-- [ ] Moving a child updates the Extrude above in the same frame.
-- [ ] Make Editable gives a Linear editable spline with the same points.
-- [ ] Saved as v6 and reopened the same; a v5 file naming it is refused.
+- [x] Coincident edges and touching corners give clean outlines (no zero-area
+      slivers), and the fuzzer finds no panic (`fuzz/fuzz_targets/spline_boolean.rs`,
+      in CI).
+- [x] Open child segments are ignored; a child out of the plane is flattened.
+- [x] Moving a child updates the Extrude above in the same frame.
+- [x] Make Editable gives a Linear editable spline with the same points.
+- [x] Saved as v6 and reopened the same; a v5 file naming it is refused.

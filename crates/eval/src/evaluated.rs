@@ -222,7 +222,7 @@ pub struct EvaluatedScene {
     cage_stack: Vec<NodeId>,
     /// Scratch space: the roots of cages the walk has still to reach (a
     /// Subdivision Surface's first child, a Boolean's first two).
-    pending_cages: Vec<NodeId>,
+    pending_cages: Vec<(NodeId, bool)>,
     /// While an input is dragged, generators slower than [`SLOW_REBUILD`]
     /// keep their last result ([`set_deferring`](Self::set_deferring)).
     deferring: bool,
@@ -400,9 +400,10 @@ impl EvaluatedScene {
         let materials = scene.materials();
         // The depth of the cage being consumed (its roots wait in
         // `pending_cages`).
-        let mut cage_depth: Option<u32> = None;
+        // With whether the cage's curves are hidden too (a Spline Boolean's).
+        let mut cage_depth: Option<(u32, bool)> = None;
         scene.walk(&mut self.walk_stack, |id, node, world, depth| {
-            if cage_depth.is_some_and(|d| depth <= d) {
+            if cage_depth.is_some_and(|(d, _)| depth <= d) {
                 cage_depth = None;
             }
             while cloner_stack.last().is_some_and(|&(d, _)| d >= depth) {
@@ -436,10 +437,10 @@ impl EvaluatedScene {
                 return false;
             }
             layer_stack.push((depth, layer));
-            if let Some(at) = pending_cages.iter().position(|&c| c == id) {
-                pending_cages.swap_remove(at);
+            if let Some(at) = pending_cages.iter().position(|&(c, _)| c == id) {
+                let (_, curves) = pending_cages.swap_remove(at);
                 if cage_depth.is_none() {
-                    cage_depth = Some(depth);
+                    cage_depth = Some((depth, curves));
                 }
             }
             // Its deformer children reach it and everything below it.
@@ -605,15 +606,38 @@ impl EvaluatedScene {
                             marker: false,
                         });
                     }
+                    // A generator of curves draws and picks its curve.
+                    if let Some(handle) = &result.curve {
+                        pick = PickShape::Curve(handle.id());
+                        bounds = handle.polyline().bounds().map(|(min, max)| Aabb {
+                            min: min - Vec3::splat(0.5),
+                            max: max + Vec3::splat(0.5),
+                        });
+                        drawable = (!handle.polyline().points.is_empty()).then_some(Drawable {
+                            key: MeshKey::Curve(handle.id()),
+                            shading: Shading::default(),
+                            scale: Vec3::ONE,
+                            color: data.display_color,
+                            surface: Surface::default(),
+                            unlit: true,
+                            marker: false,
+                        });
+                        curves.insert(handle.id(), handle.clone());
+                    }
                 }
                 // A Subdivision Surface hides its cage, a Boolean its two
                 // inputs: the spline generators' inputs are curves, drawn
                 // anyway, and anything else under them is not used and stays
                 // as it is.
+                let solids = |c: &NodeId| (*c, false);
                 match options {
-                    Options::Subdivision(_) => pending_cages.extend(scene.children(id).first()),
-                    Options::Boolean(_) => pending_cages.extend(scene.children(id).iter().take(2)),
-                    Options::Symmetry(_) | Options::Join(_) => pending_cages.extend(scene.children(id)),
+                    Options::Subdivision(_) => pending_cages.extend(scene.children(id).first().map(solids)),
+                    Options::Boolean(_) => pending_cages.extend(scene.children(id).iter().take(2).map(solids)),
+                    Options::Symmetry(_) | Options::Join(_) | Options::Reduce(_) => {
+                        pending_cages.extend(scene.children(id).iter().map(solids));
+                    }
+                    // A Spline Boolean's splines are replaced by its curve.
+                    Options::SplineBoolean(_) => pending_cages.extend(scene.children(id).iter().map(|&c| (c, true))),
                     Options::Extrude { .. } | Options::Lathe(_) | Options::Sweep(_) | Options::Loft(_) => {}
                 }
             }
@@ -643,7 +667,7 @@ impl EvaluatedScene {
                     }
                 }
             }
-            if cage_depth.is_some() && !kind.is_spline() {
+            if cage_depth.is_some_and(|(_, curves)| curves || !kind.is_spline()) {
                 // Part of a cage: the generator shows it. (Splines stay drawn:
                 // curves are guides, and an Extrude's input is edited as one.)
                 drawable = None;
@@ -1422,6 +1446,10 @@ struct Generated {
     inputs: Vec<Input>,
     colour: [f32; 3],
     mesh: MeshHandle,
+    /// A generator of curves' result.
+    curve: Option<CurveHandle>,
+    /// A Reduce's collapse orders (a change of Keep only replays them).
+    orders: Option<std::sync::Arc<Vec<grid4d_geom::reduce::CollapseOrder>>>,
     note: Option<GeneratorNote>,
     /// How long it took to build.
     took: Duration,
@@ -1508,8 +1536,24 @@ fn generated_mesh<'a>(
         entry.stale = !fresh && keep;
     }
     if !fresh && !keep {
+        // A Reduce with the same inputs and constraints keeps its orders.
+        let orders = generated
+            .get(&id)
+            .filter(|entry| {
+                options.order_key().is_some()
+                    && entry.options.order_key() == options.order_key()
+                    && entry.inputs == *inputs
+            })
+            .and_then(|entry| entry.orders.clone());
+        let replayed = orders.is_some();
         let start = Instant::now();
-        let built = generator::build_all(inputs, &options);
+        let (built, orders) = match options {
+            Options::Reduce(reduce) => {
+                let orders = orders.unwrap_or_else(|| generator::reduce_orders(inputs, reduce));
+                (generator::replay(&orders, reduce.keep), Some(orders))
+            }
+            _ => (generator::build_all(inputs, &options), None),
+        };
         let took = start.elapsed();
         let mesh = MeshHandle::new(built.mesh);
         let entry = generated.entry(id).or_insert_with(|| Generated {
@@ -1517,6 +1561,8 @@ fn generated_mesh<'a>(
             inputs: Vec::new(),
             colour,
             mesh: mesh.clone(),
+            curve: None,
+            orders: None,
             note: None,
             took,
             stale: false,
@@ -1524,8 +1570,12 @@ fn generated_mesh<'a>(
         });
         entry.options = options;
         entry.mesh = mesh;
+        entry.curve = built.curve.map(CurveHandle::new);
+        entry.orders = orders;
         entry.note = built.note;
-        entry.took = took;
+        // A replay is fast, but the next change of the inputs builds the
+        // order again: remember what that costs (R9).
+        entry.took = if replayed { entry.took.max(took) } else { took };
         entry.stale = false;
         // Keep the inputs; the old list (with its capacity) becomes the scratch.
         std::mem::swap(&mut entry.inputs, inputs);
@@ -1604,6 +1654,8 @@ fn pick_shape(kind: &ObjectKind) -> PickShape {
         | ObjectKind::Symmetry(_)
         | ObjectKind::Instance { .. }
         | ObjectKind::Join(_)
+        | ObjectKind::SplineBoolean(_)
+        | ObjectKind::Reduce(_)
         | ObjectKind::Bend(_)
         | ObjectKind::Twist(_)
         | ObjectKind::Taper(_)
@@ -2874,7 +2926,8 @@ mod tests {
                 | K::Loft
                 | K::Boolean
                 | K::Symmetry
-                | K::Join => {
+                | K::Join
+                | K::Reduce => {
                     let mut doc = Document::new("uvs");
                     let id = doc.scene.insert(Node::new(tag.label(), kind));
                     let children = match tag {
@@ -2885,6 +2938,7 @@ mod tests {
                         K::Boolean => vec![at(K::Cube, Vec3::ZERO), at(K::Sphere, Vec3::new(80.0, 60.0, 40.0))],
                         K::Symmetry => vec![at(K::Cube, Vec3::new(150.0, 0.0, 0.0))],
                         K::Join => vec![at(K::Cube, Vec3::ZERO), at(K::Sphere, Vec3::new(300.0, 0.0, 0.0))],
+                        K::Reduce => vec![at(K::Sphere, Vec3::ZERO)],
                         _ => vec![at(K::Circle, Vec3::ZERO), at(K::Circle, Vec3::new(0.0, 0.0, 300.0))],
                     };
                     for child in children {
@@ -2899,6 +2953,7 @@ mod tests {
                 // Instance's its reference's.
                 K::Null
                 | K::Instance
+                | K::SplineBoolean
                 | K::Camera
                 | K::Light
                 | K::Sky
@@ -4006,5 +4061,182 @@ mod tests {
         let copy = eval.instances().iter().find(|c| c.owner == instance).unwrap();
         assert_eq!(copy.drawable.unwrap().color, [1.0, 0.0, 0.0]);
         assert_ne!(node(&eval, sphere).drawable.unwrap().color, [1.0, 0.0, 0.0]);
+    }
+
+    /// An Extrude over a Spline Boolean subtracting a circle of radius 50
+    /// from a 400 × 200 rectangle. Returns (doc, extrude, boolean, circle).
+    fn plate_scene() -> (Document, NodeId, NodeId, NodeId) {
+        use grid4d_geom::spline_boolean::SplineBooleanMode;
+        let mut doc = Document::new("plate");
+        let extrude = doc
+            .scene
+            .insert(Node::new("Extrude", ObjectKindTag::Extrude.default_kind()));
+        let mut kind = ObjectKindTag::SplineBoolean.default_kind();
+        if let ObjectKind::SplineBoolean(settings) = &mut kind {
+            settings.mode = SplineBooleanMode::Subtract;
+        }
+        let boolean = doc
+            .scene
+            .insert_child(extrude, Node::new("Spline Boolean", kind))
+            .unwrap();
+        let mut rectangle = ObjectKindTag::Rectangle.default_kind();
+        rectangle.set_param(grid4d_scene::ObjectParam::Width, 400.0);
+        rectangle.set_param(grid4d_scene::ObjectParam::Height, 200.0);
+        doc.scene
+            .insert_child(boolean, Node::new("Rectangle", rectangle))
+            .unwrap();
+        let mut circle = ObjectKindTag::Circle.default_kind();
+        circle.set_param(grid4d_scene::ObjectParam::Radius, 50.0);
+        let circle = doc.scene.insert_child(boolean, Node::new("Circle", circle)).unwrap();
+        (doc, extrude, boolean, circle)
+    }
+
+    #[test]
+    fn a_spline_boolean_shows_a_curve_and_feeds_an_extrude() {
+        use grid4d_geom::spline::SplinePlane;
+        let (mut doc, extrude, boolean, circle) = plate_scene();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let PickShape::Curve(curve) = node(&eval, boolean).pick else {
+            panic!("a curve")
+        };
+        assert!(matches!(node(&eval, boolean).drawable.map(|d| d.key), Some(MeshKey::Curve(id)) if id == curve));
+        let polyline = eval.curve(curve).unwrap().polyline().clone();
+        assert_eq!(polyline.segments.len(), 2, "an outline and a hole");
+        let area = grid4d_geom::spline_boolean::polyline_area(&polyline, SplinePlane::XY);
+        let wanted = 80_000.0 - std::f64::consts::PI * 2500.0;
+        assert!((area - wanted).abs() < wanted * 0.01, "{area}");
+        assert!(node(&eval, boolean).bounds.is_some(), "framed by its curve");
+        assert_eq!(
+            (node(&eval, circle).drawable, node(&eval, circle).pick),
+            (None, PickShape::None),
+            "its splines are replaced by its curve"
+        );
+        assert_eq!(crate::generator_curve(&doc.scene, boolean, 0.0).unwrap(), polyline);
+        // The Extrude above makes a closed plate with a round hole.
+        let plate = result_of(&eval, extrude);
+        assert!(grid4d_geom::boolean::is_closed(plate.mesh()));
+        let volume = grid4d_geom::boolean::volume(plate.mesh()).abs();
+        assert!((volume - area * 20.0).abs() < 1.0, "{volume}");
+        // Moving the circle updates both in the same update; idle updates
+        // keep both.
+        assert!(!eval.update(&doc.scene));
+        doc.scene.get_mut(circle).unwrap().data.transform.position.x = 100.0;
+        eval.update(&doc.scene);
+        assert_ne!(node(&eval, boolean).pick, PickShape::Curve(curve));
+        assert_ne!(result_of(&eval, extrude).id(), plate.id());
+        // Disabled, it is a group: its splines show as they are.
+        doc.scene.get_mut(boolean).unwrap().data.enabled = false;
+        eval.update(&doc.scene);
+        assert!(matches!(node(&eval, circle).pick, PickShape::Curve(_)));
+    }
+
+    #[test]
+    fn spline_generators_read_a_nested_spline_boolean() {
+        use grid4d_geom::spline_boolean::SplineBooleanMode;
+        // A Lathe of a Spline Boolean of a Spline Boolean of two rectangles.
+        let mut doc = Document::new("nested");
+        let lathe = doc
+            .scene
+            .insert(Node::new("Lathe", ObjectKindTag::Lathe.default_kind()));
+        let outer = doc
+            .scene
+            .insert_child(lathe, Node::new("Outer", ObjectKindTag::SplineBoolean.default_kind()))
+            .unwrap();
+        let mut kind = ObjectKindTag::SplineBoolean.default_kind();
+        if let ObjectKind::SplineBoolean(settings) = &mut kind {
+            settings.mode = SplineBooleanMode::Union;
+        }
+        let inner = doc.scene.insert_child(outer, Node::new("Inner", kind)).unwrap();
+        for x in [150.0, 200.0] {
+            let mut rectangle = Node::new("Rectangle", ObjectKindTag::Rectangle.default_kind());
+            rectangle.data.kind.set_param(grid4d_scene::ObjectParam::Width, 100.0);
+            rectangle.data.kind.set_param(grid4d_scene::ObjectParam::Height, 100.0);
+            rectangle.data.transform.position.x = x;
+            doc.scene.insert_child(inner, rectangle).unwrap();
+        }
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let ring = result_of(&eval, lathe);
+        assert!(ring.mesh().face_count() > 0, "the Lathe turns the nested curve");
+        let inner_curve = crate::generator_curve(&doc.scene, inner, 0.0).unwrap();
+        assert_eq!(inner_curve.segments.len(), 1, "the two rectangles united");
+        assert!(matches!(node(&eval, outer).pick, PickShape::Curve(_)));
+        assert_eq!(node(&eval, inner).drawable, None, "the inner one is the outer's input");
+    }
+
+    #[test]
+    fn a_reduce_replays_its_order_when_only_keep_changes() {
+        let mut doc = Document::new("reduce");
+        let reduce = doc
+            .scene
+            .insert(Node::new("Reduce", ObjectKindTag::Reduce.default_kind()));
+        let sphere = doc
+            .scene
+            .insert_child(reduce, Node::new("Sphere", ObjectKindTag::Sphere.default_kind()))
+            .unwrap();
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        let half = result_of(&eval, reduce);
+        let orders = eval.generated[&reduce].orders.clone().unwrap();
+        let total = orders[0].triangle_count() as f64;
+        assert!((half.mesh().face_count() as f64 - total * 0.5).abs() <= total * 0.01);
+        assert_eq!(node(&eval, sphere).drawable, None, "the input is not drawn");
+        // Keep changed: the same order replayed, fewer triangles.
+        doc.scene
+            .get_mut(reduce)
+            .unwrap()
+            .data
+            .kind
+            .set_param(grid4d_scene::ObjectParam::Keep, 0.1);
+        eval.update(&doc.scene);
+        assert!(std::sync::Arc::ptr_eq(
+            &orders,
+            eval.generated[&reduce].orders.as_ref().unwrap()
+        ));
+        let tenth = result_of(&eval, reduce);
+        assert!((tenth.mesh().face_count() as f64 - total * 0.1).abs() <= total * 0.01);
+        assert_eq!(crate::generator_mesh(&doc.scene, reduce, 0.0).unwrap(), *tenth.mesh());
+        // Idle: nothing; a constraint changed: a new order.
+        assert!(!eval.update(&doc.scene));
+        if let ObjectKind::Reduce(settings) = &mut doc.scene.get_mut(reduce).unwrap().data.kind {
+            settings.keep_seams = false;
+        }
+        eval.update(&doc.scene);
+        assert!(!std::sync::Arc::ptr_eq(
+            &orders,
+            eval.generated[&reduce].orders.as_ref().unwrap()
+        ));
+    }
+
+    #[test]
+    fn a_reduce_takes_its_children_together_or_apart() {
+        let mut doc = Document::new("apart");
+        let mut kind = ObjectKindTag::Reduce.default_kind();
+        kind.set_param(grid4d_scene::ObjectParam::Keep, 0.3);
+        let reduce = doc.scene.insert(Node::new("Reduce", kind));
+        for (k, segments) in [(0.0, 24u32), (300.0, 48)] {
+            let mut sphere = Node::new(
+                "Sphere",
+                ObjectKind::Sphere {
+                    radius: 100.0,
+                    segments,
+                },
+            );
+            sphere.data.transform.position.x = k;
+            doc.scene.insert_child(reduce, sphere).unwrap();
+        }
+        let mut eval = EvaluatedScene::new();
+        eval.update(&doc.scene);
+        assert_eq!(eval.generated[&reduce].orders.as_ref().unwrap().len(), 1, "one mesh");
+        if let ObjectKind::Reduce(settings) = &mut doc.scene.get_mut(reduce).unwrap().data.kind {
+            settings.together = false;
+        }
+        eval.update(&doc.scene);
+        let orders = eval.generated[&reduce].orders.clone().unwrap();
+        assert_eq!(orders.len(), 2, "one order per child");
+        let wanted: f64 = orders.iter().map(|o| (o.triangle_count() as f64 * 0.3).round()).sum();
+        let got = result_of(&eval, reduce).mesh().face_count() as f64;
+        assert!((got - wanted).abs() <= wanted * 0.02, "{got} of {wanted}");
     }
 }

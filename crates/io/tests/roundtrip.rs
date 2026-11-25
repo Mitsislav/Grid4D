@@ -54,6 +54,8 @@ fn version_4_kinds() -> Vec<ObjectKindTag> {
                     | ObjectKindTag::Symmetry
                     | ObjectKindTag::Instance
                     | ObjectKindTag::Join
+                    | ObjectKindTag::SplineBoolean
+                    | ObjectKindTag::Reduce
             )
         })
         .collect()
@@ -532,6 +534,8 @@ proptest! {
         switches in (any::<bool>(), any::<bool>(), any::<bool>(), any::<bool>()),
         tolerance in prop_oneof![Just(0.1f32), 0.0f32..100.0],
         linked in any::<bool>(),
+        reduce in (prop_oneof![Just(0.5f32), 0.0f32..=1.0], any::<bool>(), any::<bool>(), any::<bool>()),
+        spline_mode in 0usize..4,
     ) {
         let mut doc = document(objects, Vec::new(), Vec::new());
         let boolean = grid4d_scene::Boolean {
@@ -554,7 +558,25 @@ proptest! {
         let join = grid4d_scene::Join { weld: switches.3, tolerance };
         doc.scene.insert(Node::new("Join", ObjectKind::Join(join)));
         let instance = ObjectKind::Instance { reference: linked.then_some(a) };
-        doc.scene.insert(Node::new("Instance", instance.clone()));
+        doc.scene.insert(Node::new("Instance", instance));
+        // Step 17.5: a Spline Boolean and a Reduce (its Keep keyed).
+        let spline_boolean = grid4d_geom::spline_boolean::SplineBoolean {
+            mode: grid4d_geom::spline_boolean::SplineBooleanMode::ALL[spline_mode],
+            plane: grid4d_geom::spline::SplinePlane::ALL[plane],
+        };
+        doc.scene.insert(Node::new("Spline Boolean", ObjectKind::SplineBoolean(spline_boolean)));
+        let reduce = grid4d_scene::Reduce {
+            keep: reduce.0,
+            keep_borders: reduce.1,
+            keep_seams: reduce.2,
+            together: reduce.3,
+        };
+        let mut reducer = Node::new("Reduce", ObjectKind::Reduce(reduce));
+        reducer.data.tracks.push(Track {
+            param: Param::Object(grid4d_scene::ObjectParam::Keep),
+            curve: Curve::from_keys([Key::new(0.0, reduce.keep)]),
+        });
+        doc.scene.insert(reducer);
         let bytes = grid4d_io::to_bytes(&doc).unwrap();
         let loaded = grid4d_io::from_bytes(&bytes).unwrap();
         let named = |name: &str| loaded.scene.iter().find(|(_, n)| n.data.name == name).unwrap().1;
@@ -562,6 +584,9 @@ proptest! {
         prop_assert_eq!(&back.data.kind, &ObjectKind::Boolean(boolean));
         prop_assert_eq!(&named("Symmetry").data.kind, &ObjectKind::Symmetry(symmetry));
         prop_assert_eq!(&named("Join").data.kind, &ObjectKind::Join(join));
+        prop_assert_eq!(&named("Spline Boolean").data.kind, &ObjectKind::SplineBoolean(spline_boolean));
+        prop_assert_eq!(&named("Reduce").data.kind, &ObjectKind::Reduce(reduce));
+        prop_assert_eq!(named("Reduce").data.tracks.len(), 1);
         let ObjectKind::Instance { reference } = named("Instance").data.kind else {
             panic!("an Instance")
         };

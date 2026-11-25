@@ -611,6 +611,8 @@ fn texts(
             | ObjectKind::Symmetry(_)
             | ObjectKind::Instance { .. }
             | ObjectKind::Join(_)
+            | ObjectKind::SplineBoolean(_)
+            | ObjectKind::Reduce(_)
             | ObjectKind::Cloner { .. }
             | ObjectKind::PlainEffector(_)
             | ObjectKind::RandomEffector(_)

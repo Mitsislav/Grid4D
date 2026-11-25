@@ -27,8 +27,15 @@ deformers).
   Join merges its children into one mesh, so another generator can take
   them as one: a Subdivision Surface over separate parts, a Boolean cutting
   with several shapes.
+- **Spline Boolean** — closed splines combined as flat shapes, live:
+  Union, Subtract, Intersect or Exclusive. The result is a spline that an
+  Extrude, Lathe, Sweep or Loft takes like any other: a plate with holes, a
+  logo outline. Make Editable turns it into an editable spline.
+- **Reduce** — its children with fewer polygons, keeping their shape, their
+  open borders and their texture seams. After the first calculation,
+  dragging Keep is immediate; Keep can be animated.
 - **Files** — documents are saved in `.g4d` format version 6, which holds
-  the Boolean, Symmetry, Instance and Join; Grid4D 1.3's other features will add to it until 1.3 is
+  the Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce; Grid4D 1.3's other features will add to it until 1.3 is
   released. Every earlier file opens unchanged; Grid4D 1.2 cannot open
   version 6 files and says they come from a newer Grid4D.
 

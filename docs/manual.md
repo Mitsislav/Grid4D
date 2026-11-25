@@ -22,7 +22,7 @@ screenshots come from the application itself.
 9. [Files](#9-files)
 10. [Timeline and playback](#10-timeline-and-playback)
 11. [Polygon modelling](#11-polygon-modelling)
-12. [Generators: Subdivision Surface, Boolean, Symmetry, Instance and Join](#12-generators-subdivision-surface-boolean-symmetry-instance-and-join)
+12. [Generators: Subdivision Surface, Boolean, Symmetry, Instance, Join and Reduce](#12-generators-subdivision-surface-boolean-symmetry-instance-join-and-reduce)
 13. [Splines](#13-splines)
 14. [Deformers](#14-deformers)
 15. [The Cloner](#15-the-cloner)
@@ -460,7 +460,7 @@ any time. To edit their points and polygons, make them editable
 
 **Generators** (Create ▸ Generator, or the green buttons at the right end of the
 command palette) build their shape from their children. The Subdivision Surface
-smooths a polygon mesh ([§12](#12-generators-subdivision-surface-boolean-symmetry-instance-and-join)); the Extrude
+smooths a polygon mesh ([§12](#12-generators-subdivision-surface-boolean-symmetry-instance-join-and-reduce)); the Extrude
 turns a spline into a solid ([§13.4](#134-extrude-from-outline-to-solid)) and
 the Lathe turns one around an axis ([§13.5](#135-lathe-turning-a-profile)) and
 the Sweep moves one along another ([§13.6](#136-sweep-a-profile-along-a-path))
@@ -1337,12 +1337,13 @@ Polygons that collapse are removed.
 - It works on the selected points (or those of the selected edges or polygons), or
   on the whole object when nothing is selected.
 
-## 12. Generators: Subdivision Surface, Boolean, Symmetry, Instance and Join
+## 12. Generators: Subdivision Surface, Boolean, Symmetry, Instance, Join and Reduce
 
 A **generator** is an object that builds its shape from its children. This
-section covers the **Subdivision Surface**, the **Boolean** (§12.5) and the
-**Symmetry**, **Instance** and **Join** (§12.6); the spline generators (Extrude,
-Lathe, Sweep, Loft) are in [§13.4–13.7](#134-extrude-from-outline-to-solid).
+section covers the **Subdivision Surface**, the **Boolean** (§12.5), the
+**Symmetry**, **Instance** and **Join** (§12.6) and the **Reduce** (§12.7); the
+spline generators (Extrude, Lathe, Sweep, Loft) and the Spline Boolean are in
+[§13.4–13.9](#134-extrude-from-outline-to-solid).
 The Subdivision Surface turns a coarse polygon mesh, the **cage**,
 into a smooth, rounded surface. The result updates live while you keep modelling
 the few points of the cage.
@@ -1515,11 +1516,34 @@ Subdivision Surface to smooth separate parts together, or make it a
 Boolean's second input to cut with several shapes at once. **Make Editable**
 gives one polygon object.
 
+### 12.7 Reduce: fewer polygons
+
+The **Reduce** makes heavy meshes lighter — a scan, an imported model, a
+finely subdivided shape — while keeping their form. Select the object and
+**Alt + click** the Reduce button (or Alt with **Create ▸ Generator ▸ Reduce**):
+the Reduce shows its children with a share of their triangles.
+
+![A sphere kept at 8 % by a Reduce, beside the whole sphere](images/manual/reduce.png)
+
+| Parameter | Meaning |
+|-----------|---------|
+| Keep | The share of the triangles kept, 0 – 100 % (50 % at first). It can be animated with its key button. |
+| Keep Borders | Open edges (holes, the rim of a plane) keep their outline. |
+| Keep UV Seams | Where the texture is cut, the cut stays, so the picture does not tear. |
+| Children Together | On: all its children are reduced as one mesh. Off: each child keeps its own share. |
+
+The first result takes a moment on a large mesh (a million triangles takes
+a few seconds); after that, dragging **Keep** is immediate, because only the
+share changes. The points that remain are the original's own, with their
+texture coordinates. The result is made of triangles. **Make Editable** (C)
+bakes it into a polygon object; **Current State to Object** copies it.
+
 ## 13. Splines
 
 A **spline** is a curve: an outline, a path or a profile. Splines are drawn as
 lines in every display mode and are not visible in a render; the generators
-Extrude, Lathe, Sweep and Loft turn them into surfaces (§13.4–13.7).
+Extrude, Lathe, Sweep and Loft turn them into surfaces (§13.4–13.7); the
+Spline Boolean combines them into new outlines (§13.9).
 
 ![The seven spline primitives, the Star selected; the toolbar's spline button opened](images/manual/splines.png)
 
@@ -1801,6 +1825,34 @@ The first line sits on the object's X axis (its baseline), further lines go
 downwards. **Make Editable** (C) turns the text into an editable spline with
 one closed segment per contour, so single letters can be edited point by
 point.
+
+### 13.9 Spline Boolean: shapes from shapes
+
+The **Spline Boolean** combines closed splines as flat shapes, live, and
+gives a spline: put circles, rectangles and text under it and get a logo
+outline, a gasket with holes or a cookie-cutter profile. Select the splines
+and **Alt + click** the Spline Boolean button (or Alt with **Create ▸
+Generator ▸ Spline Boolean**).
+
+![A plate extruded from a rectangle minus two circles](images/manual/spline_boolean.png)
+
+| Parameter | Meaning |
+|-----------|---------|
+| Mode | **Union**: inside any of the shapes. **Subtract**: the first child minus all the others. **Intersect**: inside all of them. **Exclusive**: inside an odd number of them. |
+| Plane | **XY**, **ZY** or **XZ**: the plane, in the Spline Boolean's own axes, the shapes are laid flat on. A child turned out of the plane is pressed flat onto it. |
+
+- Only **closed** splines count; open ones are ignored. Holes inside one
+  child (the hole of an *O* in a Text) stay holes.
+- Its children are hidden; the Spline Boolean draws the result in its own
+  colour, outlines and holes as separate closed parts. Edges that lie on top
+  of each other and shapes that touch at a corner give clean outlines.
+- Put it under an **Extrude**, **Lathe**, **Sweep** or **Loft** like any
+  spline: a plate with round holes is a rectangle minus circles, extruded.
+  Moving a child updates everything above it at once. A Spline Boolean may
+  also hold another Spline Boolean.
+- **Make Editable** (C) turns it into an editable spline of straight lines
+  through the same points; **Current State to Object** copies it. Exported
+  files leave it out, like every spline.
 
 ## 14. Deformers
 

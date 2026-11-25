@@ -21,7 +21,12 @@
 //!   million-triangle scan;
 //! * **the Boolean** (Subtract): a product shell (a box of about 1 700
 //!   triangles minus two cylinders), two spheres of 50 000 triangles, and a
-//!   sphere of a million triangles with a cylinder cut through it.
+//!   sphere of a million triangles with a cylinder cut through it;
+//! * **the Reduce** (step 17.5): the collapse order of the million-triangle
+//!   scan (once per change of the input) and a replay to 10 % (a change of
+//!   Keep);
+//! * **the Spline Boolean** (step 17.5): a hundred overlapping circles of 128
+//!   points united.
 
 use std::{
     error::Error,
@@ -36,6 +41,9 @@ use grid4d_geom::{
     boolean::{BooleanMode, BooleanOptions, boolean, is_closed},
     ops::{OptimizeOptions, optimize},
     primitives,
+    reduce::{CollapseOrder, Constraints},
+    spline::{Polyline, Segment},
+    spline_boolean::{SplineBoolean, spline_boolean},
 };
 use grid4d_scene::{Components, Document, MeshHandle, Node, ObjectKind, ObjectKindTag};
 
@@ -206,12 +214,60 @@ fn symmetry_by_hand() -> Result<(usize, Duration), Box<dyn Error>> {
     Ok((points, time))
 }
 
-/// The topology and BVH of a scan of about a million triangles.
-fn reduce_floor() -> (usize, Duration) {
+/// A scan of about a million triangles: a sphere with a bumpy surface.
+fn scan() -> PolyMesh {
     let mut scan = primitives::sphere(100.0, 1000);
     for p in scan.points_mut() {
         *p *= 1.0 + 0.02 * (p.x * 0.3).sin() * (p.z * 0.2).cos();
     }
+    scan
+}
+
+/// The Reduce on the scan: its triangles, the collapse order's time, the
+/// triangles a replay to 10 % keeps and the replay's time (step 17.5).
+fn reduce_generator() -> Result<(usize, Duration, usize, Duration), Box<dyn Error>> {
+    let scan = scan();
+    let mut order = None;
+    let build = median(3, || order = Some(CollapseOrder::new(&scan, Constraints::default())));
+    let order = order.ok_or("no order")?;
+    let mut kept = 0;
+    let replay = median(11, || {
+        let mesh = order.replay(0.1);
+        kept = mesh.face_count();
+        black_box(mesh);
+    });
+    Ok((order.triangle_count(), build, kept, replay))
+}
+
+/// A hundred circles of 128 points in a row, each overlapping the next,
+/// united (step 17.5): the outline's points and the time.
+fn spline_boolean_case() -> (usize, Duration) {
+    let circles: Vec<Polyline> = (0..100u16)
+        .map(|k| Polyline {
+            points: (0..128u16)
+                .map(|i| {
+                    let t = std::f32::consts::TAU * f32::from(i) / 128.0;
+                    Vec3::new(f32::from(k) * 15.0 + 20.0 * t.cos(), 20.0 * t.sin(), 0.0)
+                })
+                .collect(),
+            segments: vec![Segment {
+                count: 128,
+                closed: true,
+            }],
+        })
+        .collect();
+    let mut points = 0;
+    let time = median(11, || {
+        let result = spline_boolean(&circles, &SplineBoolean::default());
+        points = result.points.len();
+        black_box(result);
+    });
+    (points, time)
+}
+
+/// The topology and BVH of a scan of about a million triangles.
+fn reduce_floor() -> (usize, Duration) {
+    let scan = scan();
     let triangles = scan.faces().map(|f| f.len().saturating_sub(2)).sum::<usize>();
     let time = median(5, || {
         black_box(Topology::build(&scan));
@@ -292,6 +348,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!(
         "  a thousand Instances of a 10 000-triangle ball, one moved: {} a frame",
         ms(thousand_instances()?)
+    );
+    let (triangles, build, kept, replay) = reduce_generator()?;
+    println!(
+        "  the Reduce on the scan ({triangles} triangles): collapse order {}, replay to 10 % ({kept} triangles) {}",
+        ms(build),
+        ms(replay)
+    );
+    let (points, time) = spline_boolean_case();
+    println!(
+        "  the Spline Boolean: a hundred overlapping circles united ({points} points): {}",
+        ms(time)
     );
     println!("Boolean (Subtract)");
     let options = BooleanOptions::default();

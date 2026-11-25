@@ -12,7 +12,7 @@
 use glam::{Quat, Vec3};
 use grid4d_geom::{
     PolyMesh,
-    boolean::{BooleanMode, Method, boolean, is_closed},
+    boolean::{BooleanMode, BooleanOptions, boolean, is_closed},
     primitives,
 };
 use libfuzzer_sys::fuzz_target;
@@ -87,13 +87,13 @@ fuzz_target!(|data: &[u8]| {
     let mut bytes = Bytes(data);
     let (a, b) = (shape(&mut bytes), shape(&mut bytes));
     for mode in [BooleanMode::Union, BooleanMode::Subtract, BooleanMode::Intersect] {
-        let result = boolean(&a, &b, mode, Method::Exact).expect("finite shapes");
+        let result = boolean(&a, &b, mode, BooleanOptions::default()).expect("finite shapes");
         assert!(is_closed(&result.mesh), "{mode:?} of closed shapes is closed");
     }
-    let _ = boolean(&a, &b, BooleanMode::Without, Method::Exact);
+    let _ = boolean(&a, &b, BooleanMode::Without, BooleanOptions::default());
     let (c, d) = (raw(&mut bytes), raw(&mut bytes));
     for mode in BooleanMode::ALL {
-        let _ = boolean(&c, &d, mode, Method::Exact);
-        let _ = boolean(&a, &d, mode, Method::Exact);
+        let _ = boolean(&c, &d, mode, BooleanOptions::default());
+        let _ = boolean(&a, &d, mode, BooleanOptions::default());
     }
 });

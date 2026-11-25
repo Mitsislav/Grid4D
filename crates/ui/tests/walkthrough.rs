@@ -632,6 +632,108 @@ fn symmetry_picture() {
     save(&mut h, &dir, "symmetry");
 }
 
+/// The manual's picture of the Spline Boolean: a plate extruded from a
+/// rectangle minus two circles, the Spline Boolean selected:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored spline_boolean_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn spline_boolean_picture() {
+    use grid4d_scene::{Node, ObjectKind, ObjectKindTag, ObjectParam};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::new("Spline Boolean");
+    let extrude = doc
+        .scene
+        .insert(Node::new("Extrude", ObjectKindTag::Extrude.default_kind()));
+    let mut kind = ObjectKindTag::SplineBoolean.default_kind();
+    if let ObjectKind::SplineBoolean(settings) = &mut kind {
+        settings.mode = grid4d_geom::spline_boolean::SplineBooleanMode::Subtract;
+    }
+    let boolean = doc
+        .scene
+        .insert_child(extrude, Node::new("Spline Boolean", kind))
+        .unwrap();
+    let mut plate = Node::new("Rectangle", ObjectKindTag::Rectangle.default_kind());
+    plate.data.kind.set_param(ObjectParam::Width, 400.0);
+    plate.data.kind.set_param(ObjectParam::Height, 200.0);
+    doc.scene.insert_child(boolean, plate).unwrap();
+    for x in [-100.0, 100.0] {
+        let mut hole = Node::new("Circle", ObjectKindTag::Circle.default_kind());
+        hole.data.kind.set_param(ObjectParam::Radius, 60.0);
+        hole.data.transform.position.x = x;
+        doc.scene.insert_child(boolean, hole).unwrap();
+    }
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    h.state_mut()
+        .editor
+        .commands
+        .push(grid4d_ui::EditorCommand::FrameSelected);
+    h.run_steps(4);
+    h.state_mut().editor.selection.set_single(boolean);
+    h.run_steps(2);
+    let tab = h
+        .get_all_by_label("Object")
+        .map(|node| node.rect())
+        .filter(|rect| rect.top() > SIZE[1] * 0.5)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    click(&mut h, tab.center());
+    h.run_steps(2);
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "spline_boolean");
+}
+
+/// The manual's picture of the Reduce: a sphere kept at 8 % beside the
+/// whole one, the Reduce selected:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored reduce_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn reduce_picture() {
+    use grid4d_scene::{Node, ObjectKind, ObjectKindTag, ObjectParam};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::new("Reduce");
+    let mut kind = ObjectKindTag::Reduce.default_kind();
+    kind.set_param(ObjectParam::Keep, 0.08);
+    let mut reduce = Node::new("Reduce", kind);
+    reduce.data.transform.position.x = -120.0;
+    let reduce = doc.scene.insert(reduce);
+    let ball = || {
+        Node::new(
+            "Sphere",
+            ObjectKind::Sphere {
+                radius: 100.0,
+                segments: 48,
+            },
+        )
+    };
+    doc.scene.insert_child(reduce, ball()).unwrap();
+    let mut whole = ball();
+    whole.data.transform.position.x = 120.0;
+    doc.scene.insert(whole);
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    h.state_mut().editor.commands.push(grid4d_ui::EditorCommand::FrameScene);
+    h.run_steps(4);
+    h.state_mut().editor.selection.set_single(reduce);
+    h.run_steps(2);
+    let tab = h
+        .get_all_by_label("Object")
+        .map(|node| node.rect())
+        .filter(|rect| rect.top() > SIZE[1] * 0.5)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    click(&mut h, tab.center());
+    h.run_steps(2);
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "reduce");
+}
+
 /// The manual's picture of the render region: the demo scene with a region
 /// over part of the view, rendered there by the Render View:
 ///

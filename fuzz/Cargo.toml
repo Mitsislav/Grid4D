@@ -1,6 +1,6 @@
 [package]
 name = "grid4d-fuzz"
-description = "Fuzz targets for Grid4D (cargo fuzz, nightly): the .g4d loader and the mesh Boolean."
+description = "Fuzz targets for Grid4D (cargo fuzz, nightly): the .g4d loader, the mesh Boolean and the Spline Boolean."
 version = "0.0.0"
 edition = "2024"
 publish = false
@@ -28,6 +28,13 @@ bench = false
 [[bin]]
 name = "boolean"
 path = "fuzz_targets/boolean.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spline_boolean"
+path = "fuzz_targets/spline_boolean.rs"
 test = false
 doc = false
 bench = false

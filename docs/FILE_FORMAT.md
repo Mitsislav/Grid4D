@@ -126,6 +126,8 @@ The `kind` of an object, by its `type`:
 | `symmetry` | Version 6: `plane` (`xy`, `zy`, `xz`; `zy` when absent), `weld`, `hold` (true when absent), `flip` (false), `tolerance` (cm, 0 – 100; 0.01 when absent). Its children are its input |
 | `instance` | Version 6: `reference` (index into `objects`; none when absent: it shows nothing) |
 | `join` | Version 6: `weld` (true when absent), `tolerance` (cm, 0 – 100; 0.1 when absent). Its children are its input |
+| `spline_boolean` | Version 6: `mode` (`union` when absent, `subtract`, `intersect`, `exclusive`), `plane` (`xy` when absent, `zy`, `xz`). Its child splines are its input |
+| `reduce` | Version 6: `keep` (the share of triangles kept, 0 – 1; 0.5 when absent), `keep_borders`, `keep_seams`, `together` (each true when absent). Its children are its input |
 | `boolean` | Version 6: `mode` (`union`, `subtract`, `intersect`, `without`; `subtract` when absent), `merge_faces`, `select_cut_edges` (true when absent), `weld` (cm, 0 – 100; 0.01 when absent). Its first two children are its inputs, each with its own children |
 | `cloner` | `layout` (below), `object` (index, Object mode's surface; none), `effectors` (indices; `[]`), `clones`: `iterate` (default), `random`; `seed`; `reset_coordinates` (true) |
 | `plain_effector`, `random_effector` | `strength` (fraction); `position`, `scale` (fraction), `rotation`, `color` (each optional: off when absent); `uniform_scale` (false); `seed`; `falloff` (default Infinite): `shape` (`infinite`, `sphere`, `box`, `linear`), `size`, `soft` |
@@ -255,7 +257,8 @@ Each track of `tracks`:
   `movement_x` … `movement_z`, `angle`, `rise`, `scaling`, `end_scale`,
   `end_rotation`, `start_growth`, `end_growth`, `strength`, `amount`,
   `curvature`; version 5: `elevation`, `azimuth`, `turbidity`,
-  `picture_rotation`, `focus_distance`, `f_stop`, `blade_rotation`); or a plugin value by name, `{"plugin": "Phase"}`.
+  `picture_rotation`, `focus_distance`, `f_stop`, `blade_rotation`; version 6:
+  `keep`); or a plugin value by name, `{"plugin": "Phase"}`.
 - `keys`, ascending by frame: `frame` (may be fractional), `value` (in the
   parameter's stored unit), `interpolation`: `spline` (default), `linear`,
   `step`; `tangents` (default: automatic): `left` and `right`, each
@@ -340,6 +343,7 @@ each step arrives:
 | nothing yet but the version number | step 17.1 |
 | the kind `boolean` (`mode`, `merge_faces`, `select_cut_edges`, `weld`) | step 17.3 |
 | the kinds `symmetry`, `instance` (its `reference` by index) and `join` | step 17.4 |
+| the kinds `spline_boolean` (`mode`, `plane`) and `reduce` (`keep`, `keep_borders`, `keep_seams`, `together`); the track parameter `keep` | step 17.5 |
 
 A version 5 file is read as a version 6 file with the version number
 changed, minus any field this table lists; a `type` or other value version 6

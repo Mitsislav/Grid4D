@@ -17,13 +17,15 @@ use grid4d_geom::primitives::MAX_SEGMENTS;
 use grid4d_geom::spline::{
     ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape, SplineType, Text, TextAlign,
 };
+use grid4d_geom::spline_boolean::{SplineBoolean, SplineBooleanMode};
 use grid4d_geom::surface::{CapType, ExtrudeDirection, Extrusion, Lathe, Loft, Sweep};
 use grid4d_geom::symmetry::{MirrorPlane, Symmetry};
 use grid4d_scene::{
     AreaShape, Axis, Body, Boolean, BooleanMode, Channel, CollisionShape, Document, Environment, Falloff, Inherit,
     Join, KeyState, Lens, LightDetails, LightShadow, LightType, LinkMode, Linking, MassMode, Material, MaterialId,
-    MaterialTag, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, Placement, Projection, Scene, SceneEdit,
-    ShutterPosition, SimulationSettings, Sky, SplineHandle, SunPlacement, Tag, TagKind, TextureSlot, TimeSettings,
+    MaterialTag, Motion, NodeData, NodeId, ObjectKind, ObjectParam, Param, Placement, Projection, Reduce, Scene,
+    SceneEdit, ShutterPosition, SimulationSettings, Sky, SplineHandle, SunPlacement, Tag, TagKind, TextureSlot,
+    TimeSettings,
 };
 
 use crate::i18n::{key, tr, trf};
@@ -1043,6 +1045,8 @@ fn object_tab(
             ObjectKind::Boolean(boolean) => boolean_rows(ui, boolean, note),
             ObjectKind::Symmetry(symmetry) => symmetry_rows(ui, symmetry),
             ObjectKind::Join(join) => join_rows(ui, join),
+            ObjectKind::SplineBoolean(settings) => spline_boolean_rows(ui, settings),
+            ObjectKind::Reduce(reduce) => reduce_rows(ui, k, reduce),
             ObjectKind::Instance { reference } => {
                 if let Some((scene, owner)) = links {
                     object_row(ui, "Reference Object", reference, scene, owner);
@@ -2744,6 +2748,54 @@ fn join_rows(ui: &mut Ui, join: &mut Join) {
     ui.end_row();
     ui.label("");
     ui.label(RichText::new(tr("Its children as one mesh")).color(p().text_dim));
+    ui.end_row();
+}
+
+/// The Spline Boolean's rows (`docs/reference/generator-spline-boolean.md`).
+fn spline_boolean_rows(ui: &mut Ui, settings: &mut SplineBoolean) {
+    attr_label(ui, "Mode", LABEL_WIDTH);
+    let label = |mode: SplineBooleanMode| match mode {
+        SplineBooleanMode::Union => key("Union"),
+        SplineBooleanMode::Subtract => key("Subtract"),
+        SplineBooleanMode::Intersect => key("Intersect"),
+        SplineBooleanMode::Exclusive => key("Exclusive"),
+    };
+    let combo = egui::ComboBox::from_id_salt("grid4d.attr.spline_boolean.mode")
+        .selected_text(tr(label(settings.mode)))
+        .show_ui(ui, |ui| {
+            for mode in SplineBooleanMode::ALL {
+                ui.selectable_value(&mut settings.mode, mode, tr(label(mode)));
+            }
+        })
+        .response;
+    ui.ctx()
+        .accesskit_node_builder(combo.id, |node| node.set_label(tr("Mode")));
+    ui.end_row();
+    attr_label(ui, "Plane", LABEL_WIDTH);
+    let combo = egui::ComboBox::from_id_salt("grid4d.attr.spline_boolean.plane")
+        .selected_text(settings.plane.label())
+        .show_ui(ui, |ui| {
+            for plane in SplinePlane::ALL {
+                ui.selectable_value(&mut settings.plane, plane, plane.label());
+            }
+        })
+        .response;
+    ui.ctx()
+        .accesskit_node_builder(combo.id, |node| node.set_label(tr("Plane")));
+    ui.end_row();
+    ui.label("");
+    ui.label(RichText::new(tr("Combines its child splines as flat shapes")).color(p().text_dim));
+    ui.end_row();
+}
+
+/// The Reduce's rows (`docs/reference/generator-reduce.md`).
+fn reduce_rows(ui: &mut Ui, k: &mut KeyRows, reduce: &mut Reduce) {
+    percent_row(ui, k, "Keep", &mut reduce.keep);
+    check_row(ui, "Keep Borders", &mut reduce.keep_borders);
+    check_row(ui, "Keep UV Seams", &mut reduce.keep_seams);
+    check_row(ui, "Children Together", &mut reduce.together);
+    ui.label("");
+    ui.label(RichText::new(tr("Its children with fewer polygons")).color(p().text_dim));
     ui.end_row();
 }
 

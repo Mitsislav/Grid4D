@@ -116,18 +116,21 @@ fn golden_with(mesh: grid4d_geom::PolyMesh) -> Document {
 
 /// The kinds of object version 5 adds ([`full_v5_document`] has them).
 const VERSION_5_KINDS: [ObjectKindTag; 2] = [ObjectKindTag::Sky, ObjectKindTag::Environment];
-/// The kinds of object version 6 adds ([`full_document`] has them; none yet).
-const VERSION_6_KINDS: [ObjectKindTag; 4] = [
+/// The kinds of object version 6 adds ([`full_document`] has them).
+const VERSION_6_KINDS: [ObjectKindTag; 6] = [
     ObjectKindTag::Boolean,
     ObjectKindTag::Symmetry,
     ObjectKindTag::Instance,
     ObjectKindTag::Join,
+    ObjectKindTag::SplineBoolean,
+    ObjectKindTag::Reduce,
 ];
 
 /// Everything a version 6 file can hold (see `docs/FILE_FORMAT.md`): version
 /// 5's, and what Phase 17 adds as it arrives — a Boolean with every setting
 /// changed and its two inputs (17.3); a Symmetry and a Join with every
-/// setting changed, an Instance of the sphere (17.4).
+/// setting changed, an Instance of the sphere (17.4); a Spline Boolean and a
+/// Reduce with every setting changed, the Reduce's Keep keyed (17.5).
 fn full_document() -> (Document, SimulationCache) {
     let (mut doc, cache) = full_v5_document();
     let boolean = doc.scene.insert(Node::new(
@@ -175,6 +178,35 @@ fn full_document() -> (Document, SimulationCache) {
             reference: Some(sphere),
         },
     ));
+    let spline_boolean = doc.scene.insert(Node::new(
+        "Spline Boolean",
+        ObjectKind::SplineBoolean(grid4d_geom::spline_boolean::SplineBoolean {
+            mode: grid4d_geom::spline_boolean::SplineBooleanMode::Exclusive,
+            plane: grid4d_geom::spline::SplinePlane::ZY,
+        }),
+    ));
+    for name in ["Ring A", "Ring B"] {
+        doc.scene
+            .insert_child(spline_boolean, Node::new(name, ObjectKindTag::Circle.default_kind()))
+            .unwrap();
+    }
+    let mut reduce = Node::new(
+        "Reduce",
+        ObjectKind::Reduce(grid4d_scene::Reduce {
+            keep: 0.25,
+            keep_borders: false,
+            keep_seams: false,
+            together: false,
+        }),
+    );
+    reduce.data.tracks.push(Track {
+        param: Param::Object(ObjectParam::Keep),
+        curve: Curve::from_keys([Key::new(0.0, 1.0), Key::new(10.0, 0.25)]),
+    });
+    let reduce = doc.scene.insert(reduce);
+    doc.scene
+        .insert_child(reduce, Node::new("Heavy", ObjectKindTag::Sphere.default_kind()))
+        .unwrap();
     (doc, cache)
 }
 

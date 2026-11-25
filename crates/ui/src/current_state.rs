@@ -2,7 +2,7 @@
 //! the current frame — deformed, generated, animated — as plain objects.
 
 use glam::Mat4;
-use grid4d_eval::{EvaluatedNode, EvaluatedScene, MeshKey, Overrides};
+use grid4d_eval::{EvaluatedNode, EvaluatedScene, MeshKey, Overrides, PickShape};
 use grid4d_scene::{
     Components, Document, MeshHandle, Node, NodeData, NodeId, ObjectKind, Scene, SplineHandle, Tag, TagKind, Tags,
     Transform,
@@ -209,6 +209,13 @@ fn copy(
         },
         // An Instance's shapes are its clones (added by the caller).
         ObjectKind::Instance { .. } => ObjectKind::Null,
+        // A generator of curves: the curve it shows, as an editable spline.
+        ObjectKind::SplineBoolean(_) => match node.pick {
+            PickShape::Curve(curve) if original.data.enabled => eval
+                .curve(curve)
+                .map_or(ObjectKind::Null, |handle| curve_object(handle.polyline())),
+            _ => ObjectKind::Null,
+        },
         generator if generator.is_generator() => match shown.filter(|_| original.data.enabled) {
             Some(mesh) => {
                 if let Some(colour) = grid4d_eval::generator_color(scene, node.id) {
@@ -226,6 +233,16 @@ fn copy(
         },
     };
     data
+}
+
+/// A curve a generator made (a Spline Boolean's), as an editable spline of
+/// straight lines through its points.
+pub(crate) fn curve_object(curve: &grid4d_geom::spline::Polyline) -> ObjectKind {
+    ObjectKind::Spline {
+        spline: SplineHandle::new(grid4d_geom::spline::Spline::from_polyline(curve)),
+        interpolation: grid4d_geom::spline::Interpolation::None,
+        components: Components::default(),
+    }
 }
 
 /// A generator shows its cage's Phong tag and Material tags when it has none

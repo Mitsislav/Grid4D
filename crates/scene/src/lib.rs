@@ -32,6 +32,7 @@ mod mesh;
 mod node;
 mod param;
 mod plugin;
+mod reduce;
 mod render;
 mod scene;
 mod sky;
@@ -62,6 +63,7 @@ pub use mesh::{ComponentState, Components, MeshHandle, MeshId};
 pub use node::{CAMERA_MARKER_SIZE, LIGHT_MARKER_RADIUS, Node, NodeData, NodeId, ObjectKind, ObjectKindTag};
 pub use param::{ObjectParam, ParamUnit};
 pub use plugin::{PluginObject, PluginValue};
+pub use reduce::Reduce;
 pub use render::{
     Denoise, FrameNaming, FrameRange, ImageFormat, NoiseThreshold, Pass, Passes, PngPasses, RenderRegion,
     RenderSettings,

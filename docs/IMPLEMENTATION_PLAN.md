@@ -1910,5 +1910,7 @@ cut, n-gons merged back, UVs, cut edges, weld; the generator with nesting,
 its page, Make Editable, `.g4d` v6 `boolean`, the drag fallback of R9), and
 Symmetry, Instance and Join, 17.4 (mirroring welded at the plane in 5 ms
 for a 100 000-point half; Instances as clones of the reference's shapes, no
-copy; a Join counted as one input by other generators). Next: the Spline
-Boolean and Reduce (17.5).
+copy; a Join counted as one input by other generators), and the Spline
+Boolean and Reduce, 17.5 (2D booleans of splines by exact orientation tests,
+a curve read by the spline generators, D45; quadric edge collapses ordered
+once and replayed when Keep changes). Next: soft selection and Slide (17.6).

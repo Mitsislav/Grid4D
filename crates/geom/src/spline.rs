@@ -165,6 +165,18 @@ impl Spline {
         }
     }
 
+    /// A Linear spline through a polyline's points, segment by segment (a
+    /// curve made by a generator, baked).
+    #[must_use]
+    pub fn from_polyline(polyline: &Polyline) -> Self {
+        Self {
+            kind: SplineType::Linear,
+            points: polyline.points.clone(),
+            tangents: vec![[Vec3::ZERO; 2]; polyline.points.len()],
+            segments: polyline.segments.clone(),
+        }
+    }
+
     /// Appends `other`'s segments (its type is ignored).
     pub fn append(&mut self, other: Self) {
         self.points.extend(other.points);

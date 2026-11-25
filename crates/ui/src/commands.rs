@@ -2687,6 +2687,21 @@ fn make_editable_edits(doc: &Document, selection: &[NodeId], simulated: &grid4d_
             cages.extend(inputs(node));
             continue;
         }
+        // A Spline Boolean becomes the editable spline it shows.
+        if matches!(&*kind, ObjectKind::SplineBoolean(_)) {
+            let Some(curve) = enabled_generator(id).and_then(|_| grid4d_eval::generator_curve(&doc.scene, id, frame))
+            else {
+                continue;
+            };
+            let mut data = node.data.clone();
+            data.kind = crate::current_state::curve_object(&curve);
+            edits.push(SceneEdit::SetData {
+                id,
+                data: without_lost_tracks(data),
+            });
+            cages.extend(inputs(node));
+            continue;
+        }
         let mut state = ComponentState::default();
         let mesh = if node.data.kind.is_generator() {
             // A disabled generator shows its children as they are: nothing to bake.
@@ -2861,6 +2876,8 @@ fn new_object_data(tag: ObjectKindTag, scene: &Scene, camera: &OrbitCamera) -> N
         | ObjectKindTag::Symmetry
         | ObjectKindTag::Instance
         | ObjectKindTag::Join
+        | ObjectKindTag::SplineBoolean
+        | ObjectKindTag::Reduce
         | ObjectKindTag::Cloner => {}
     }
     data
@@ -2915,6 +2932,8 @@ pub fn tag_color(tag: ObjectKindTag) -> egui::Color32 {
         | ObjectKindTag::Symmetry
         | ObjectKindTag::Instance
         | ObjectKindTag::Join
+        | ObjectKindTag::SplineBoolean
+        | ObjectKindTag::Reduce
         | ObjectKindTag::Cloner => palette().icon_generator,
         ObjectKindTag::Circle
         | ObjectKindTag::Rectangle
@@ -5243,6 +5262,89 @@ mod tests {
         assert!(!doc.scene.contains(cube), "the child goes with it");
         run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
         assert_eq!(doc.scene.get(cube).unwrap().parent(), Some(symmetry));
+    }
+
+    #[test]
+    fn make_editable_on_a_spline_boolean_gives_the_spline_it_shows() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let circle = doc
+            .scene
+            .insert(Node::new("Circle", ObjectKindTag::Circle.default_kind()));
+        let mut moved = Node::new("Square", ObjectKindTag::Rectangle.default_kind());
+        moved.data.transform.position.x = 150.0;
+        let square = doc.scene.insert(moved);
+        editor.selection.set_all([circle, square]);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::WrapInGenerator(ObjectKindTag::SplineBoolean)],
+        );
+        let boolean = editor.selection.active().unwrap();
+        assert_eq!(
+            doc.scene.get(circle).unwrap().parent(),
+            Some(boolean),
+            "the splines wrapped"
+        );
+        let expected = grid4d_eval::generator_curve(&doc.scene, boolean, 0.0).unwrap();
+        assert_eq!(expected.segments.len(), 1, "united into one outline");
+        let undo_depth = editor.history.undo_len();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        assert_eq!(editor.history.undo_len(), undo_depth + 1, "one undo step");
+        let ObjectKind::Spline {
+            spline, interpolation, ..
+        } = &doc.scene.get(boolean).unwrap().data.kind
+        else {
+            panic!("not an editable spline")
+        };
+        assert_eq!(spline.spline().kind, grid4d_geom::spline::SplineType::Linear);
+        assert_eq!(spline.spline().sample(*interpolation), expected, "the same points");
+        assert!(
+            !doc.scene.contains(circle) && !doc.scene.contains(square),
+            "its splines go with it"
+        );
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert!(matches!(
+            doc.scene.get(boolean).unwrap().data.kind,
+            ObjectKind::SplineBoolean(_)
+        ));
+        assert_eq!(doc.scene.get(square).unwrap().parent(), Some(boolean));
+        // Current State to Object copies it as the same spline.
+        editor.selection.set_single(boolean);
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::CurrentStateToObject]);
+        let copy = editor.selection.active().unwrap();
+        let ObjectKind::Spline { spline, .. } = &doc.scene.get(copy).unwrap().data.kind else {
+            panic!("copied as a spline")
+        };
+        assert_eq!(spline.spline().points, expected.points);
+    }
+
+    #[test]
+    fn make_editable_on_a_reduce_bakes_the_lighter_mesh() {
+        let (mut doc, mut editor, mut vp) = demo();
+        let sphere = id_of(&doc, "Sphere");
+        editor.selection.set_single(sphere);
+        run(
+            &mut doc,
+            &mut editor,
+            &mut vp,
+            &[EditorCommand::WrapInGenerator(ObjectKindTag::Reduce)],
+        );
+        let reduce = editor.selection.active().unwrap();
+        let expected = grid4d_eval::generator_mesh(&doc.scene, reduce, 0.0).unwrap();
+        let full = grid4d_eval::editable_mesh(&doc.scene.get(sphere).unwrap().data.kind).unwrap();
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::MakeEditable]);
+        let ObjectKind::Polygon { mesh, .. } = &doc.scene.get(reduce).unwrap().data.kind else {
+            panic!("not baked")
+        };
+        assert_eq!(mesh.mesh(), &expected);
+        assert!(
+            mesh.mesh().face_count() < full.face_count() * 2,
+            "fewer triangles than the input's"
+        );
+        assert!(!doc.scene.contains(sphere));
+        run(&mut doc, &mut editor, &mut vp, &[EditorCommand::Undo]);
+        assert_eq!(doc.scene.get(sphere).unwrap().parent(), Some(reduce));
     }
 
     #[test]
