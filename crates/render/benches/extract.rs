@@ -81,8 +81,8 @@ fn components(c: &mut Criterion) {
         group.bench_function(name, |b| {
             b.iter(|| {
                 // Built again when the mode changes.
-                frame.extract_components(&evaluated, None, &[]);
-                frame.extract_components(&evaluated, Some((mesh, component)), &[]);
+                frame.extract_components(&evaluated, None, &[], None);
+                frame.extract_components(&evaluated, Some((mesh, component)), &[], None);
             });
         });
     }

@@ -1193,6 +1193,26 @@ together. Each drag is one undo step, and the selection stays as it was.
 **Tweak Mode** (option of the Move tool): with nothing selected, drag any point,
 edge or polygon to move just that one, without selecting it.
 
+**Soft Selection** (in the Attribute Manager's **Mode ▸ Tool** page of Move,
+Scale and Rotate) lets the points around the selection follow it, less and
+less the farther they are — for dents, bulges and gentle reshaping without
+an exact selection. While it is on, the points it reaches are tinted in the
+component modes, from the selection's colour to the mesh's, so you see its
+reach before you drag.
+
+![A plane with its centre point selected and Soft Selection on: the points around it tinted by how much they follow](images/manual/soft_selection.png)
+
+| Option | Meaning |
+|--------|---------|
+| Soft Selection | Turns it on for every move, scale and rotation in the component modes, and for Tweak. |
+| Radius | How far from the selection points still follow (50 cm at first). |
+| Falloff | How the pull fades: **Linear** (straight), **Smooth** (eased at both ends), **Dome** (round near the selection) or **Sharp** (dropping quickly). |
+| Distance | **Volume** measures straight through space; **Surface** measures along the mesh's edges, so the other side of a thin part does not follow. |
+
+A rotation turns each point by part of the angle, a scale scales it part of
+the way. Hidden points never follow. The settings belong to the tool, not to
+the document; each drag is still one undo step.
+
 ### 11.5 Extrude and Inset
 
 ![Extrude options, and a box after extrude, inset and extrude again](images/manual/extrude.png)
@@ -1280,7 +1300,29 @@ shortcuts). Each is one undo step.
 - Points that no polygon uses any more are removed automatically.
 - In Model mode, Delete removes the selected objects instead.
 
-### 11.8 Bevel, Bridge, Weld and Optimize
+### 11.8 Slide
+
+**Slide** (Mesh ▸ Slide) moves points or edge loops along the edges next to
+them, so the surface keeps its shape: tighten a loop towards a corner, or
+move a point along its edge.
+
+- In **Points** mode, drag left or right: each selected point slides along
+  its edge that points most nearly the way you drag.
+- In **Edges** mode, select a loop (double-click an edge, or Loop
+  Selection) and drag: the whole loop moves across the edges that cross it,
+  towards the side you drag, every point on its own edge.
+
+| Option | Meaning |
+|--------|---------|
+| Offset | How far, as a share of the edges (100 % reaches the neighbouring points); a drag sets it, **Apply** uses it. |
+| Clamp | Stops at the neighbouring points. Off, a drag can go beyond them. |
+| Keep Curvature | Moves along the curve through the neighbours instead of the straight edge, so a rounded surface stays round. |
+| Duplicate | Edges: leaves the loop where it is and slides a new one out of it (a loop inserted beside it). |
+
+Each drag, or **Apply**, is one undo step; **Esc** during a drag puts
+everything back.
+
+### 11.9 Bevel, Bridge, Weld and Optimize
 
 ![Results: a cube with every edge bevelled and rounded, a hole bridged through a cube, a cube with one edge welded into a wedge](images/manual/bevel-bridge-weld.png)
 

@@ -14,6 +14,7 @@ mod bridge;
 mod cut;
 mod extrude;
 mod rebuild;
+mod slide;
 
 use std::collections::HashSet;
 
@@ -26,6 +27,7 @@ pub use extrude::{
     EdgeExtrudeOptions, EdgeExtrusion, ExtrudeOptions, InsetOptions, extrude_edges, extrude_polygons, inset, pieces,
 };
 pub use rebuild::{OptimizeOptions, delete, dissolve, melt, optimize, weld};
+pub use slide::{Rail, SlideOptions, loop_rails, point_rails, slide, slide_duplicate};
 
 use crate::{BitSet, ComponentSet, MeshError, PolyMesh, Topology, selection, u32_index, us};
 

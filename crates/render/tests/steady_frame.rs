@@ -10,7 +10,7 @@
 use glam::Vec3;
 use grid4d_eval::EvaluatedScene;
 use grid4d_geom::Component;
-use grid4d_render::{ComponentHit, FrameData, OrbitCamera};
+use grid4d_render::{ComponentHit, FrameData, OrbitCamera, SoftWeights};
 use grid4d_scene::{Axis, Curve, Document, Key, Node, NodeData, NodeId, ObjectKind, Param, Track};
 
 /// `count` primitives of every shape in groups of 100, every `animated`-th
@@ -112,6 +112,8 @@ struct View {
     evaluated: EvaluatedScene,
     frame: FrameData,
     camera: OrbitCamera,
+    /// Soft selection's weights over the polygon object's points.
+    soft: Vec<f32>,
 }
 
 impl View {
@@ -120,6 +122,7 @@ impl View {
             evaluated: EvaluatedScene::new(),
             frame: FrameData::new(),
             camera: OrbitCamera::default(),
+            soft: Vec::new(),
         }
     }
 
@@ -136,7 +139,12 @@ impl View {
         self.frame.set_camera(&self.camera, 16.0 / 9.0);
         self.frame
             .extract_with_materials(&self.evaluated, Some(doc.scene.materials()), selected);
-        self.frame.extract_components(&self.evaluated, target, hover);
+        // Soft selection's ramp shown over the polygon object's points.
+        let soft = target.map(|_| SoftWeights {
+            weights: &self.soft,
+            generation: 1,
+        });
+        self.frame.extract_components(&self.evaluated, target, hover, soft);
     }
 }
 
@@ -144,6 +152,12 @@ impl View {
 fn a_steady_frame_allocates_nothing() {
     let (doc, polygon) = scene(10_000, 10);
     let mut view = View::new();
+    // Soft selection on: half the polygon object's points tinted.
+    if let Some(ObjectKind::Polygon { mesh, .. }) = doc.scene.get(polygon).map(|n| &n.data.kind) {
+        let count = mesh.mesh().point_count();
+        view.soft = (0..count).map(|p| if p < count / 2 { 0.5 } else { 0.0 }).collect();
+    }
+    assert!(!view.soft.is_empty());
     let none = |_: NodeId| false;
     let some = |id: NodeId| id == polygon;
     let target = Some((polygon, Component::Point));

@@ -37,6 +37,18 @@
   direction. **Edges**: a selected loop moves as a whole along the edges that
   cross it (each point on its own ring edge), towards the side the drag goes.
 - Never changes topology (unless Duplicate), so it is a point edit.
+- *Decided in 17.6 (2026-11-25):* a drag's left/right sets Offset as a
+  share of the rails' mean length; single points slide towards the
+  neighbour along the view's right (the direction is kept for Apply). A
+  loop's two sides come from grouping the faces around it (faces across a
+  loop edge are opposite, faces sharing another edge at a loop point are on
+  one side); positive offsets go to the side of the first face of the
+  loop's lowest edge, a drag to the side that lies the way it goes. Keep
+  Curvature follows the parabola through the two neighbours. Duplicate cuts
+  the ring of the first rail (Loop/Path Cut's own cut), so on a partly
+  selected loop the new loop runs the whole ring.
+- **Slide is done (17.6)**: Apply and a drag; one undo step; a test slides
+  a loop halfway on every rail and inserts one with Duplicate.
 
 ## Plane Cut
 

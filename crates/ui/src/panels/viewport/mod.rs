@@ -21,12 +21,14 @@ use std::time::Instant;
 use egui::{Align, Align2, Layout, Margin, PointerButton, Pos2, Rect, Response, Sense, Ui, pos2};
 use glam::{Mat4, Vec2 as GVec2, Vec3};
 use grid4d_eval::EvaluatedScene;
-use grid4d_geom::Component;
+use grid4d_geom::{Component, selection, soft::SoftSelection};
 use grid4d_render::{
     ComponentHit, ComponentStyle, DisplayMode, DisplayStyle, FilterItem, FrameData, OrbitCamera, Projection,
     ScreenView, ShadingMode, SnapCache, SnapHit, ViewEffects, ViewFilter, pick, pick_component, pick_curve,
 };
-use grid4d_scene::{Aabb, Document, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, Tags, Transform, WalkItem};
+use grid4d_scene::{
+    Aabb, Components, Document, NodeData, NodeId, ObjectKind, ObjectKindTag, Scene, Tags, Transform, WalkItem,
+};
 
 use self::{frame_time::Part, gizmo::GizmoGeometry, gizmo::GizmoState, gpu_view::GpuView, select_tools::Gesture};
 use crate::i18n::{key, tr, trf};
@@ -198,6 +200,63 @@ const DEFAULT_VIEWS: [ViewKind; 4] = [ViewKind::Perspective, ViewKind::Top, View
 /// Space between views, in points.
 const VIEW_GAP: f32 = 2.0;
 
+/// Soft selection's weights over the component target's points, computed
+/// again only when the mesh, its selection, its placement, the mode or the
+/// settings change (hot path: idle frames compare and allocate nothing).
+#[derive(Debug, Default)]
+struct SoftView {
+    key: Option<(NodeId, grid4d_scene::MeshId, Components, Mat4, SoftSelection, Component)>,
+    world: Vec<Vec3>,
+    weights: Vec<f32>,
+    scratch: grid4d_geom::soft::SoftScratch,
+    generation: u64,
+}
+
+impl SoftView {
+    /// Brings the weights up to date; `false` when soft selection shows
+    /// nothing (off, or no component target).
+    fn refresh(
+        &mut self,
+        evaluated: &EvaluatedScene,
+        target: Option<(NodeId, Component)>,
+        soft: SoftSelection,
+    ) -> bool {
+        let Some((node, component)) = target.filter(|_| soft.enabled) else {
+            return false;
+        };
+        let Some((shown, mesh, components)) = evaluated.polygon(node) else {
+            return false;
+        };
+        let world = shown.world;
+        let fresh = self.key.as_ref().is_some_and(|key| {
+            key.0 == node
+                && key.1 == mesh.id()
+                && key.2.same(components)
+                && key.3 == world
+                && key.4 == soft
+                && key.5 == component
+        });
+        if !fresh {
+            self.world.clear();
+            self.world
+                .extend(mesh.mesh().points().iter().map(|&p| world.transform_point3(p)));
+            let selected = selection::points_of(mesh.mesh(), components.selected().get(component), component);
+            grid4d_geom::soft::soft_weights(
+                &self.world,
+                &selected,
+                &components.hidden().points,
+                Some(mesh.topology()),
+                &soft,
+                &mut self.scratch,
+                &mut self.weights,
+            );
+            self.key = Some((node, mesh.id(), components.clone(), world, soft, component));
+            self.generation += 1;
+        }
+        true
+    }
+}
+
 #[derive(Debug)]
 pub struct ViewportPanel {
     camera: OrbitCamera,
@@ -239,6 +298,8 @@ pub struct ViewportPanel {
     loop_preview: Option<cut_tools::LoopPreview>,
     /// Primitives' meshes for snapping.
     snap_cache: SnapCache,
+    /// Soft selection's weights for the overlay's ramp.
+    soft: SoftView,
     /// The target the current drag is snapped to, shown in the view.
     snap_hit: Option<SnapHit>,
     /// The object the view looked through last frame (`EditorState::view_camera`).
@@ -320,6 +381,7 @@ impl ViewportPanel {
             view_rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0)),
             loop_preview: None,
             snap_cache: SnapCache::default(),
+            soft: SoftView::default(),
             snap_hit: None,
             linked: None,
             editor_camera: None,
@@ -749,6 +811,7 @@ impl ViewportPanel {
                 &mut editor.commands,
                 &mut snapper,
                 keying,
+                editor.transform_settings.soft,
             );
             self.snap_hit = snapper.hit;
             if interaction.moved_object {
@@ -855,7 +918,14 @@ impl ViewportPanel {
             self.frame.component_style = component_style(ui.ctx().pixels_per_point());
             // What a click would select shows where the pointer is.
             let hover: &[ComponentHit] = if interactive { &self.hover } else { &[] };
-            self.frame.extract_components(&self.evaluated, target, hover);
+            let soft = self
+                .soft
+                .refresh(&self.evaluated, target, editor.transform_settings.soft)
+                .then_some(grid4d_render::SoftWeights {
+                    weights: &self.soft.weights,
+                    generation: self.soft.generation,
+                });
+            self.frame.extract_components(&self.evaluated, target, hover, soft);
             self.times.add(Part::Extraction, start);
             let start = Instant::now();
             gpu.sync_textures(doc.scene.textures(), &editor.textures);
@@ -999,7 +1069,13 @@ impl ViewportPanel {
                     .extend(pick_component(&self.evaluated, node, component, &view, cursor, radius));
             }
             // Mesh tools: a click still selects, a drag runs the tool.
-            Tool::RectangleSelection | Tool::Move | Tool::Scale | Tool::Rotate | Tool::Extrude | Tool::Inset => {
+            Tool::RectangleSelection
+            | Tool::Move
+            | Tool::Scale
+            | Tool::Rotate
+            | Tool::Extrude
+            | Tool::Inset
+            | Tool::Slide => {
                 let view = self.screen_view(rect);
                 let radius = metrics::COMPONENT_PICK_RADIUS;
                 self.hover
@@ -1656,6 +1732,17 @@ const fn component_hint(component: Component, tool: Tool, active: bool) -> &'sta
             return key("Weld: click a selected point to weld onto it, or anywhere else to weld at the centre");
         }
         Tool::Pen => return Tool::Pen.hint(),
+        Tool::Slide => {
+            return match component {
+                Component::Point => key(
+                    "Slide: drag left/right to slide the selected points along their edges · Apply in the Attribute Manager · Esc cancels",
+                ),
+                Component::Edge => {
+                    key("Slide: drag left/right to slide the selected edge loops across their neighbours · Esc cancels")
+                }
+                Component::Polygon => key("Slide works on points or edges: switch to Points or Edges mode"),
+            };
+        }
         Tool::Move | Tool::Scale | Tool::Rotate => {}
     }
     match component {
@@ -1812,7 +1899,7 @@ mod tests {
             mesh.clone()
         }
 
-        fn components(&self, id: NodeId) -> grid4d_scene::Components {
+        fn components(&self, id: NodeId) -> Components {
             let ObjectKind::Polygon { components, .. } = &self.doc.scene.get(id).unwrap().data.kind else {
                 panic!("not a polygon object");
             };
@@ -2163,6 +2250,84 @@ mod tests {
         );
         assert_eq!(data.unkeyed, None);
         assert_eq!(data.tracks.len(), 1, "unchanged parameters get no keys");
+    }
+
+    #[test]
+    fn soft_selection_drags_the_points_around_the_selection_by_their_weight() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Points, Tool::Move);
+        h.select(cube, Component::Point, vec![0]);
+        let before = h.mesh(cube);
+        let points = before.mesh().points().to_vec();
+        let edge = points
+            .iter()
+            .map(|p| p.distance(points[0]))
+            .filter(|&d| d > 1e-3)
+            .fold(f32::INFINITY, f32::min);
+        // Reaching the three neighbours along the cube's edges, not beyond.
+        h.editor.transform_settings.soft = SoftSelection {
+            enabled: true,
+            radius: edge * 1.2,
+            ..SoftSelection::default()
+        };
+        h.frame(vec![]);
+        // The ramp's weights (drawn with the GPU, which the harness lacks).
+        let mut soft = SoftView::default();
+        let target = Some((cube, Component::Point));
+        assert!(soft.refresh(&h.viewport.evaluated, target, h.editor.transform_settings.soft));
+        assert!(
+            soft.weights.iter().filter(|&&w| w > 0.0 && w < 1.0).count() == 3,
+            "three neighbours"
+        );
+        let generation = soft.generation;
+        assert!(soft.refresh(&h.viewport.evaluated, target, h.editor.transform_settings.soft));
+        assert_eq!(soft.generation, generation, "unchanged: not computed again");
+        let steps = h.editor.history.undo_len();
+        h.drag_handle(0, 4);
+        let after = h.mesh(cube);
+        let moved: Vec<f32> = (0..points.len())
+            .map(|p| after.mesh().points()[p].x - points[p].x)
+            .collect();
+        let full = moved[0];
+        assert!(full > 1.0, "the selected point moves the whole way: {full}");
+        for (p, &m) in moved.iter().enumerate().skip(1) {
+            let d = points[p].distance(points[0]);
+            if d < edge * 1.01 {
+                assert!(m > 0.0 && m < full, "a neighbour follows part of the way: {m}");
+            } else {
+                assert_eq!(m, 0.0, "beyond the radius nothing moves");
+            }
+        }
+        assert_eq!(h.editor.history.undo_len(), steps + 1, "one undo step");
+        h.editor.commands.push(EditorCommand::Undo);
+        h.frame(vec![]);
+        assert_eq!(h.mesh(cube).mesh().points(), &points[..], "undo restores every point");
+    }
+
+    #[test]
+    fn slide_moves_a_point_along_one_of_its_edges() {
+        let mut h = Harness::new();
+        let cube = h.edit("Cube", EditMode::Points, Tool::Slide);
+        h.select(cube, Component::Point, vec![0]);
+        let before = h.mesh(cube);
+        let steps = h.editor.history.undo_len();
+        let centre = h.viewport.view_rect.center();
+        h.drag(centre, centre + vec2(30.0, 0.0));
+        let after = h.mesh(cube);
+        let (old, new) = (before.mesh().points()[0], after.mesh().points()[0]);
+        assert!(new.distance(old) > 1.0, "the point slid");
+        let topology = before.topology();
+        let along_an_edge = topology.point_edges(0).iter().any(|&e| {
+            let [a, b] = topology.edges()[e as usize];
+            let other = before.mesh().points()[if a == 0 { b } else { a } as usize];
+            let (edge, moved) = (other - old, new - old);
+            edge.cross(moved).length() < 1e-2 * edge.length() * moved.length() + 1e-4
+                && moved.length() <= edge.length() + 1e-3
+        });
+        assert!(along_an_edge, "on one of its edges, not beyond the neighbour");
+        assert_eq!(after.mesh().points()[1..], before.mesh().points()[1..]);
+        assert_eq!(h.editor.history.undo_len(), steps + 1);
+        assert_eq!(h.editor.history.undo_label(), Some("Slide"));
     }
 
     #[test]
@@ -3369,11 +3534,9 @@ mod tests {
         };
         let points: grid4d_geom::BitSet = [0].into_iter().collect();
         let pivot = spline.points[0];
-        let edit = gizmo::PointEdit::spline(&handle, &points, Mat4::IDENTITY, pivot);
-        let quarter = Mat4::from_translation(pivot)
-            * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2)
-            * Mat4::from_translation(-pivot);
-        edit.apply(quarter, &mut h.doc.scene, id);
+        let mut edit = gizmo::PointEdit::spline(&handle, &points, Mat4::IDENTITY, pivot);
+        edit.angle = std::f32::consts::FRAC_PI_2;
+        edit.apply(Tool::Rotate, Vec3::Z, &mut h.doc.scene, id);
         let (turned, _) = spline_state(&h, id);
         assert!(turned.points[0].abs_diff_eq(pivot, 1e-4), "rotated about itself");
         let expected = Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2).transform_vector3(spline.tangents[0][1]);
@@ -3577,8 +3740,9 @@ mod tests {
         };
         let points: grid4d_geom::BitSet = [26].into_iter().collect();
         let corner = lattice.spline().points[26];
-        let edit = gizmo::PointEdit::spline(&lattice, &points, Mat4::IDENTITY, corner);
-        edit.apply(Mat4::from_translation(Vec3::Y * 30.0), &mut h.doc.scene, id);
+        let mut edit = gizmo::PointEdit::spline(&lattice, &points, Mat4::IDENTITY, corner);
+        edit.moved = Vec3::Y * 30.0;
+        edit.apply(Tool::Move, Vec3::X, &mut h.doc.scene, id);
         let ObjectKind::Ffd { lattice: moved, .. } = &h.doc.scene.get(id).unwrap().data.kind else {
             panic!()
         };

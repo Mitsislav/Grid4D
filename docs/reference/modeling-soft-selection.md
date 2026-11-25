@@ -51,15 +51,35 @@ around it, so dents, bulges and gentle reshaping need no exact selection.
 | `soft_weights(mesh, topology, selected, options, &mut Vec<f32>)` — volume by a grid of cells, surface by Dijkstra with a reused heap | `grid4d-geom::selection` (pure) |
 | Weights cached with the overlay (mesh id, selection, options) in reused buffers; the gizmo's `PointEdit` and Tweak apply them | `ui/panels/viewport/gizmo.rs`, `grid4d-render::components` (the ramp) |
 
-## Acceptance criteria
+## Decisions made while implementing (2026-11-25)
 
-- [ ] On a plane, a moved centre point drags its neighbours by the falloff's
+1. The weights live in their own module, `grid4d_geom::soft`
+   (`SoftSelection`, `Falloff`, `SoftDistance`, `soft_weights`,
+   `SoftScratch`), not in `selection`.
+2. Distances are measured in **world space** (the object's points placed by
+   its matrix), so the radius means the same on a scaled object.
+3. The settings sit with the transform tools' (`TransformSettings::soft`)
+   and show on the Move, Scale and Rotate tool pages; the ramp shows in
+   every component mode while it is on.
+4. The ramp is the overlay's point colour: a weight (0 – 255) in the point's
+   flags, mixed in the shader from the wire colour to the selection colour;
+   in Edges and Polygons modes only the points it reaches are drawn. The
+   viewport keeps the weights and computes them again only when the mesh,
+   its selection, its placement, the mode or the settings change.
+5. Falloffs: Linear 1 − t, Smooth 1 − (3t² − 2t³), Dome √(1 − t²), Sharp
+   (1 − t)².
+6. An editable spline's or FFD lattice's points use Volume distance (they
+   have no edges to walk).
+
+## Acceptance criteria (all met in 17.6)
+
+- [x] On a plane, a moved centre point drags its neighbours by the falloff's
       weights; points beyond the radius stay.
-- [ ] Surface distance: on a folded strip the far layer does not follow;
+- [x] Surface distance: on a folded strip the far layer does not follow;
       with Volume it does.
-- [ ] Rotation and scale apply by weight; weight 1 points move exactly as
+- [x] Rotation and scale apply by weight; weight 1 points move exactly as
       without soft selection.
-- [ ] Each falloff gives 1 at distance 0 and 0 at the radius, monotonic.
-- [ ] The steady frame allocates nothing (the allocation test with soft
+- [x] Each falloff gives 1 at distance 0 and 0 at the radius, monotonic.
+- [x] The steady frame allocates nothing (the allocation test with soft
       selection on and the overlay shown).
-- [ ] One drag is one undo step; undo restores every moved point.
+- [x] One drag is one undo step; undo restores every moved point.

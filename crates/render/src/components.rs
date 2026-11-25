@@ -523,6 +523,31 @@ pub const SELECTED: u32 = 1;
 pub const HOVERED: u32 = 2;
 /// Instance flag: an edge drawn for context in Points or Polygons mode.
 pub const CONTEXT: u32 = 4;
+/// Instance flag: a point soft selection reaches; its weight (0 – 255) is in
+/// bits 8 – 15 (the colour runs from the wire's to the selection's).
+pub const SOFT: u32 = 8;
+
+/// Soft selection's weight per point of the overlay's mesh, and a number that
+/// changes whenever they do (the overlay rebuilds only then).
+#[derive(Clone, Copy, Debug)]
+pub struct SoftWeights<'a> {
+    pub weights: &'a [f32],
+    pub generation: u64,
+}
+
+/// A point's flags for soft-selection weight `weight` (0 for none).
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "clamped to 0 – 255"
+)]
+fn soft_flags(weight: f32) -> u32 {
+    if weight > 0.0 {
+        SOFT | ((weight.clamp(0.0, 1.0) * 255.0).round() as u32) << 8
+    } else {
+        0
+    }
+}
 
 /// One point square. Layout must match `PointIn` in `shaders/overlay.wgsl`.
 #[repr(C)]
@@ -596,6 +621,7 @@ struct Built {
     components: Components,
     world: Mat4,
     component: Component,
+    soft: Option<u64>,
 }
 
 /// CPU side of the component overlay, owned by [`FrameData`](crate::FrameData).
@@ -629,6 +655,7 @@ impl ComponentOverlay {
         scene: &EvaluatedScene,
         target: Option<(NodeId, Component)>,
         hover: &[ComponentHit],
+        soft: Option<SoftWeights<'_>>,
     ) {
         let Some((node, component)) = target else {
             self.clear();
@@ -645,15 +672,18 @@ impl ComponentOverlay {
                 && b.components.same(components)
                 && b.world == world
                 && b.component == component
+                && b.soft == soft.map(|s| s.generation)
         });
         if !unchanged {
-            self.rebuild(handle, components.state(), world, component);
+            let weights = soft.map_or(&[][..], |s| s.weights);
+            self.rebuild(handle, components.state(), world, component, weights);
             self.built = Some(Built {
                 node,
                 mesh: handle.id(),
                 components: components.clone(),
                 world,
                 component,
+                soft: soft.map(|s| s.generation),
             });
             self.generation += 1;
             // The hover arrays may refer to the old mesh or placement.
@@ -682,13 +712,21 @@ impl ComponentOverlay {
         self.hover_generation += 1;
     }
 
-    fn rebuild(&mut self, handle: &MeshHandle, state: &ComponentState, world: Mat4, component: Component) {
+    fn rebuild(
+        &mut self,
+        handle: &MeshHandle,
+        state: &ComponentState,
+        world: Mat4,
+        component: Component,
+        soft: &[f32],
+    ) {
         let (mesh, topology) = (handle.mesh(), handle.topology());
         let hidden = Hidden::new(handle, state);
         let selected = &state.selected;
         let at = |p: u32| world.transform_point3(mesh.points()[idx(p)]).to_array();
 
         self.points.clear();
+        let weight = |p: u32| soft.get(idx(p)).copied().unwrap_or(0.0);
         if component == Component::Point {
             self.points.extend(
                 (0..mesh.point_count())
@@ -696,7 +734,23 @@ impl ComponentOverlay {
                     .filter_map(|p| u32::try_from(p).ok())
                     .map(|p| PointInstance {
                         position: at(p),
-                        flags: if selected.points.contains(idx(p)) { SELECTED } else { 0 },
+                        flags: if selected.points.contains(idx(p)) {
+                            SELECTED
+                        } else {
+                            soft_flags(weight(p))
+                        },
+                    }),
+            );
+        } else if !soft.is_empty() {
+            // Edges and Polygons modes show only the points soft selection reaches.
+            self.points.extend(
+                (0..mesh.point_count())
+                    .filter(|&p| !hidden.points.contains(p))
+                    .filter_map(|p| u32::try_from(p).ok())
+                    .filter(|&p| weight(p) > 0.0)
+                    .map(|p| PointInstance {
+                        position: at(p),
+                        flags: soft_flags(weight(p)),
                     }),
             );
         }
@@ -931,7 +985,7 @@ mod tests {
         state.selected.points.insert(2);
         let (_, id, eval) = scene_with_cube(state);
         let mut overlay = ComponentOverlay::default();
-        overlay.update(&eval, Some((id, Component::Point)), &[]);
+        overlay.update(&eval, Some((id, Component::Point)), &[], None);
         assert_eq!(overlay.points.len(), 8);
         assert_eq!(overlay.points.iter().filter(|p| p.flags == SELECTED).count(), 1);
         assert_eq!(overlay.edges.len(), 12, "context edges");
@@ -940,11 +994,11 @@ mod tests {
         let capacity = (overlay.points.capacity(), overlay.edges.capacity());
 
         for _ in 0..3 {
-            overlay.update(&eval, Some((id, Component::Point)), &[]);
+            overlay.update(&eval, Some((id, Component::Point)), &[], None);
         }
         assert_eq!(overlay.generation, generation, "idle frames rebuild nothing");
 
-        overlay.update(&eval, Some((id, Component::Point)), &[ComponentHit::Point(5)]);
+        overlay.update(&eval, Some((id, Component::Point)), &[ComponentHit::Point(5)], None);
         assert_eq!(
             overlay.generation, generation,
             "hovering does not touch the main arrays"
@@ -952,14 +1006,46 @@ mod tests {
         assert_eq!(overlay.hover_points.len(), 1);
         assert_eq!((overlay.points.capacity(), overlay.edges.capacity()), capacity);
 
-        overlay.update(&eval, Some((id, Component::Polygon)), &[]);
+        overlay.update(&eval, Some((id, Component::Polygon)), &[], None);
         assert!(overlay.generation > generation, "another mode rebuilds");
         assert!(
             overlay.points.is_empty() && overlay.faces.is_empty(),
             "nothing selected in Polygons"
         );
-        overlay.update(&eval, None, &[]);
+        overlay.update(&eval, None, &[], None);
         assert!(overlay.edges.is_empty() && overlay.hover_points.is_empty());
+    }
+
+    #[test]
+    fn soft_selection_tints_the_points_it_reaches() {
+        let mut state = ComponentState::default();
+        state.selected.points.insert(2);
+        let (_, id, eval) = scene_with_cube(state);
+        let mut overlay = ComponentOverlay::default();
+        let weights = [0.0, 0.5, 1.0, 0.0, 0.25, 0.0, 0.0, 0.0];
+        let soft = |generation| {
+            Some(SoftWeights {
+                weights: &weights,
+                generation,
+            })
+        };
+        overlay.update(&eval, Some((id, Component::Point)), &[], soft(1));
+        let flags: Vec<u32> = overlay.points.iter().map(|p| p.flags).collect();
+        assert_eq!(flags[2], SELECTED, "the selection keeps its colour");
+        assert_eq!(flags[1], SOFT | (128 << 8));
+        assert_eq!(flags[4], SOFT | (64 << 8));
+        assert_eq!(flags[0], 0);
+        // Edges mode shows only the points it reaches; the same weights
+        // rebuild nothing.
+        overlay.update(&eval, Some((id, Component::Edge)), &[], soft(1));
+        assert_eq!(overlay.points.len(), 3);
+        let generation = overlay.generation;
+        overlay.update(&eval, Some((id, Component::Edge)), &[], soft(1));
+        assert_eq!(overlay.generation, generation);
+        overlay.update(&eval, Some((id, Component::Edge)), &[], soft(2));
+        assert!(overlay.generation > generation, "new weights rebuild");
+        overlay.update(&eval, Some((id, Component::Edge)), &[], None);
+        assert!(overlay.points.is_empty(), "off: no points in Edges mode");
     }
 
     #[test]
@@ -969,9 +1055,9 @@ mod tests {
         state.selected.edges.insert(0);
         let (_, id, eval) = scene_with_cube(state);
         let mut overlay = ComponentOverlay::default();
-        overlay.update(&eval, Some((id, Component::Polygon)), &[]);
+        overlay.update(&eval, Some((id, Component::Polygon)), &[], None);
         assert_eq!(overlay.faces.len(), 6, "one quad = two triangles");
-        overlay.update(&eval, Some((id, Component::Edge)), &[]);
+        overlay.update(&eval, Some((id, Component::Edge)), &[], None);
         assert_eq!(overlay.edges.iter().filter(|e| e.flags == SELECTED).count(), 1);
     }
 
@@ -1144,10 +1230,10 @@ mod tests {
         let (_, id, eval) = scene_with_cube(ComponentState::default());
         let mut overlay = ComponentOverlay::default();
         let loop_edges = [ComponentHit::Edge(0), ComponentHit::Edge(1), ComponentHit::Edge(2)];
-        overlay.update(&eval, Some((id, Component::Edge)), &loop_edges);
+        overlay.update(&eval, Some((id, Component::Edge)), &loop_edges, None);
         assert_eq!(overlay.hover_edges.len(), 3);
         let generation = overlay.hover_generation;
-        overlay.update(&eval, Some((id, Component::Edge)), &loop_edges);
+        overlay.update(&eval, Some((id, Component::Edge)), &loop_edges, None);
         assert_eq!(overlay.hover_generation, generation, "same preview, no re-upload");
     }
 

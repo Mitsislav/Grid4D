@@ -734,6 +734,61 @@ fn reduce_picture() {
     save(&mut h, &dir, "reduce");
 }
 
+/// The manual's picture of soft selection: a plane in Points mode, its
+/// centre point selected, the points around it tinted by their weight; the
+/// Move tool's options with Soft Selection:
+///
+/// `GRID4D_WALKTHROUGH=<folder> cargo test -p grid4d-ui --test walkthrough -- --ignored soft_selection_picture`
+#[test]
+#[ignore = "renders a picture for the manual; needs a graphics adapter"]
+fn soft_selection_picture() {
+    use grid4d_scene::{MeshHandle, Node, ObjectKind};
+
+    let dir = std::env::var_os("GRID4D_WALKTHROUGH")
+        .map_or_else(|| std::env::temp_dir().join("grid4d-walkthrough"), PathBuf::from);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut doc = Document::new("Soft Selection");
+    let mut plane = grid4d_geom::primitives::plane(400.0, 400.0, 24, 24);
+    // A gentle bump already pulled up, as a drag would leave it.
+    let centre = plane.points().iter().position(|p| p.length() < 1e-3).unwrap();
+    for p in plane.points_mut() {
+        let t = (p.length() / 120.0).min(1.0);
+        p.y += 60.0 * (1.0 - t * t * (3.0 - 2.0 * t));
+    }
+    let id = doc
+        .scene
+        .insert(Node::new("Plane", ObjectKind::polygon(MeshHandle::new(plane))));
+    if let ObjectKind::Polygon { components, .. } = &mut doc.scene.get_mut(id).unwrap().data.kind {
+        components.make_mut().selected.points.insert(centre);
+    }
+    let mut h = harness_with(doc, Language::English, ColorTheme::Dark);
+    {
+        let editor = &mut h.state_mut().editor;
+        editor.mode = grid4d_ui::EditMode::Points;
+        editor.tool = grid4d_ui::Tool::Move;
+        editor.transform_settings.soft = grid4d_geom::soft::SoftSelection {
+            enabled: true,
+            radius: 120.0,
+            ..grid4d_geom::soft::SoftSelection::default()
+        };
+        editor.commands.push(grid4d_ui::EditorCommand::FrameScene);
+    }
+    h.run_steps(4);
+    let mode = h
+        .get_all_by_label("Mode")
+        .map(|node| node.rect())
+        .filter(|rect| rect.top() > SIZE[1] * 0.5)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    click(&mut h, mode.center());
+    h.run_steps(2);
+    let tool = h.get_by_label("Tool").rect();
+    click(&mut h, tool.center());
+    h.run_steps(2);
+    h.hover_at(egui::pos2(SIZE[0] * 0.5, SIZE[1] - 4.0));
+    save(&mut h, &dir, "soft_selection");
+}
+
 /// The manual's picture of the render region: the demo scene with a region
 /// over part of the view, rendered there by the Render View:
 ///

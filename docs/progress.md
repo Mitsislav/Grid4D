@@ -13,9 +13,9 @@ solved them. Newest steps at the bottom of each phase.
 | | |
 |-|-|
 | Current phase | 17 — Modelling 2 (v1.3) |
-| Last step done | 17.5 — the Spline Boolean and Reduce: flat shapes combined into a curve the spline generators read, meshes made lighter with Keep replayed at once; pages, file data, Make Editable (2026-11-24) |
-| Next step | 17.6 — soft selection and Slide |
-| Tests | 1017 (and 21 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's and the Reduce's pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
+| Last step done | 17.6 — soft selection and Slide: points around the selection follow transforms by a falloff, shown as a ramp; points and loops slid along their edges (2026-11-25) |
+| Next step | 17.7 — Plane Cut, Polygon Pen, Extrude along Spline, Mirror, Array, Bevel profiles |
+| Tests | 1029 (and 22 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's, the Reduce's and soft selection's pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2739,6 +2739,7 @@ risks R5 – R8 go with it.
 | 17.3 | The Boolean generator. Geometry: only triangles near the other input are cut (faces with no cut pass through whole, getting the cut's points on their edges by lookup), equal support planes shared, one edge plane and partner plane per input edge (an edge's crossings are then one point from both sides), known incidences, equality tested by sides, a small hasher; kept pieces merged back into polygons per face, UVs interpolated (turned faces' pictures mirrored back), cut edges listed, a weld that splits pinched faces so closed stays closed; the spike's rounded method removed; the shell 38 → 11 ms, 50k spheres 0.67 → 0.18 s, a million triangles 11 → 4 s. The object: `ObjectKind::Boolean` (Mode, Merge Faces, Select Cut Edges, Weld), its operands each a subtree, another generator as an input (nested Booleans), both hidden, a note when an input is missing; the drag fallback (R9: a rebuild over 33 ms keeps the last result while a pointer is held, the status bar says so); Make Editable selects the cut edges; `.g4d` v6 `boolean` (refused in v5), golden fixtures, property tests; renders see it; icon, page, tooltip, Greek; the manual's §12.5 with a picture | 990 |
 | 17.4 | Symmetry, Instance and Join. `grid4d_geom::symmetry` (`Symmetry`, `MirrorPlane`, `mirror`: the half and its image wound the other way, welded and held at the plane, faces in the plane not doubled, the mirror's U turned round, the half's point numbers kept; 5.1 ms for a 100 000-point half); `ObjectKind::{Symmetry, Join}` take all their children (`gather_solids`, hidden as cages), the Join merged and welded; a Subdivision Surface's cage may now be a Join, Symmetry or Boolean; `ObjectKind::Instance { reference }` shows its reference's subtree as clones owned by the Instance (its Cloners' clones and nested Instances too, chains up to 16, cycles show nothing, its own material over them; 0.17 ms to evaluate a thousand), created linked to the selection; Make Editable, Current State and export bake all three; `.g4d` v6 `symmetry`, `instance` (by index), `join`, refused in v5; icons, pages, tooltips, Greek; the manual's §12.6 with a picture | 999 |
 | 17.5 | The Spline Boolean and Reduce. `grid4d_geom::spline_boolean` (closed outlines flattened onto a plane, edges cut where they cross or touch by exact orientation tests, merged within 0.001 cm, each classified by a ray and chained into outlines and holes; Union, Subtract, Intersect, Exclusive; 71 ms for a hundred circles; a fuzz target in CI); the first generator whose result is a curve, drawn and picked as one, its splines hidden, read by Extrude, Lathe, Sweep, Loft and another Spline Boolean (D45); `grid4d_geom::reduce` (`CollapseOrder`: triangles and UV wedges, quadric costs, borders and seams held by constraint planes, half-edge collapses so the points and UVs are the input's own, no flips, pinches or doubled faces; `replay` merges numbers only: 3.8 s for the order of a million triangles, 24 ms for a replay to 10 %); `ObjectKind::Reduce` with Keep (animatable), borders, seams, children together or apart, the order kept while only Keep changes; Make Editable (a Linear spline; a mesh), Current State and export; `.g4d` v6 `spline_boolean`, `reduce`, track `keep`, refused in v5; icons, pages, tooltips, Greek; the manual's §12.7 and §13.9 with pictures | 1017 |
+| 17.6 | Soft selection and Slide. `grid4d_geom::soft` (four falloffs, distance through space by a grid of cells or along the edges by Dijkstra, hidden points weigh nothing); `TransformSettings::soft` on the Move, Scale and Rotate tool pages; the gizmo's point edits and Tweak move, turn and scale each point by its weight (world-space distances); the ramp on the points (a weight in the overlay's point flags, mixed in the shader; the viewport recomputes the weights only when something changed; the allocation-free frame test runs with it on). `grid4d_geom::ops::slide` (rails of points and loops, the loop's two sides from its faces, Clamp, Keep Curvature, Duplicate through Loop/Path Cut); `Tool::Slide` in the Mesh menu, a drag or Apply, one undo step; Greek; the manual's §11.4 with a picture and §11.8 | 1029 |
 
 **17.1 — Specs, the format version 6, the modelling budget**
 
@@ -2943,6 +2944,29 @@ risks R5 – R8 go with it.
 - **The Boolean's fuzz target no longer built** since 17.3 changed the
   Boolean's options; it was brought up to date with the new Spline Boolean
   target.
+
+**17.6 — soft selection and Slide**
+
+*Problems and solutions:*
+- **Where the weights live.** Distances are taken between the object's
+  points placed in the world, so a radius means the same on a scaled
+  object; the gizmo computes them once at the press and keeps them beside
+  the points it moves.
+- **Showing the ramp without new buffers.** The overlay's point already has
+  a flags word; a soft flag and an 8-bit weight in it let the shader mix
+  the wire and selection colours, and Edges and Polygons modes draw only
+  the points soft selection reaches. The viewport recomputes the weights
+  only when the mesh, its selection, its placement, the mode or the
+  settings change, so the steady-frame allocation test stays at zero with
+  it on.
+- **Which side of a loop is which.** Faces around the loop are grouped:
+  across a loop edge they are on opposite sides, across another edge at a
+  loop point on the same one. Each point then has one rail per side.
+- **The harness has no GPU**, so the ramp's weights are checked through the
+  viewport's cache directly, and the shader's mix through the overlay's
+  flags.
+- **8-byte settings by value.** Clippy asks for `SoftSelection` to be
+  passed by value; it is.
 
 ## Phase 16 — Render quality (2026-11-07 – 2026-11-09)
 

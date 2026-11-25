@@ -8,7 +8,10 @@ use std::f32::consts::{PI, TAU};
 
 use egui::{Color32, CornerRadius, PointerButton, Pos2, Rect, Response, Shape, Stroke, Ui, Vec2};
 use glam::{Mat3, Mat4, Quat, Vec3};
-use grid4d_geom::{BitSet, Component, selection};
+use grid4d_geom::{
+    BitSet, Component, Topology, selection,
+    soft::{SoftScratch, SoftSelection, soft_weights},
+};
 use grid4d_render::OrbitCamera;
 use grid4d_scene::{MeshHandle, NodeData, NodeId, ObjectKind, Scene, SceneEdit, SplineHandle};
 
@@ -90,7 +93,8 @@ impl GizmoGeometry {
                 | Tool::Bevel
                 | Tool::Bridge
                 | Tool::Weld
-                | Tool::Pen => false,
+                | Tool::Pen
+                | Tool::Slide => false,
             };
             if locked {
                 return None;
@@ -240,7 +244,8 @@ impl GizmoGeometry {
                 | Tool::Bevel
                 | Tool::Bridge
                 | Tool::Weld
-                | Tool::Pen => {}
+                | Tool::Pen
+                | Tool::Slide => {}
             }
         }
         painter.circle_filled(self.origin_px, 3.5, p().text_strong);
@@ -283,6 +288,9 @@ enum Original {
 pub(super) struct PointEdit {
     original: Original,
     points: Vec<u32>,
+    /// How much each of `points` follows (1 for the selection; less around
+    /// it with soft selection).
+    weights: Vec<f32>,
     /// The object's world matrix (unchanged by the edit).
     world: Mat4,
     /// World position the edit scales and rotates around.
@@ -290,7 +298,7 @@ pub(super) struct PointEdit {
     /// So far: world translation, scale factor, rotation angle.
     pub(super) moved: Vec3,
     factor: f32,
-    angle: f32,
+    pub(super) angle: f32,
     /// The translation before snapping (`moved` is where snapping put it).
     pub(super) free: Vec3,
     /// The edited points, for snapping to leave out.
@@ -308,27 +316,64 @@ impl PointEdit {
         Self::of(Original::Spline(spline.clone()), points, world, pivot)
     }
 
-    fn of(original: Original, points: &BitSet, world: Mat4, pivot: Vec3) -> Self {
+    fn of(original: Original, selected: &BitSet, world: Mat4, pivot: Vec3) -> Self {
+        let points: Vec<u32> = selected.iter().filter_map(|p| u32::try_from(p).ok()).collect();
         Self {
             original,
-            points: points.iter().filter_map(|p| u32::try_from(p).ok()).collect(),
+            weights: vec![1.0; points.len()],
+            points,
             world,
             pivot,
             moved: Vec3::ZERO,
             factor: 1.0,
             angle: 0.0,
             free: Vec3::ZERO,
-            moving: points.clone(),
+            moving: selected.clone(),
         }
     }
 
-    /// The world-space transform so far, for `tool` along world axis `axis`.
-    fn delta(&self, tool: Tool, axis: Vec3) -> Mat4 {
+    /// With soft selection on: the points around the edited ones join the
+    /// edit, each weighted by its distance (measured in world space; hidden
+    /// points stay; `topology` for distance along the surface).
+    pub(super) fn soften(mut self, soft: SoftSelection, hidden: &BitSet, topology: Option<&Topology>) -> Self {
+        if !soft.enabled {
+            return self;
+        }
+        let positions: Vec<Vec3> = match &self.original {
+            Original::Mesh(mesh) => mesh.mesh().points().to_vec(),
+            Original::Spline(spline) => spline.spline().points.clone(),
+        };
+        let world: Vec<Vec3> = positions.iter().map(|&p| self.world.transform_point3(p)).collect();
+        let mut weights = Vec::new();
+        soft_weights(
+            &world,
+            &self.moving,
+            hidden,
+            topology,
+            &soft,
+            &mut SoftScratch::default(),
+            &mut weights,
+        );
+        self.points.clear();
+        self.weights.clear();
+        for (p, &w) in weights.iter().enumerate() {
+            if w > 0.0 {
+                self.points.push(u32::try_from(p).unwrap_or(u32::MAX));
+                self.weights.push(w);
+                self.moving.insert(p);
+            }
+        }
+        self
+    }
+
+    /// The world-space transform so far, for `tool` along world axis `axis`,
+    /// at `weight` (1: the whole transform; less: as much of it).
+    fn delta(&self, tool: Tool, axis: Vec3, weight: f32) -> Mat4 {
         let around = |m: Mat4| Mat4::from_translation(self.pivot) * m * Mat4::from_translation(-self.pivot);
         match tool {
             Tool::Scale => {
                 // Scale by `factor` along `axis` only: I + (factor − 1) · axis axisᵀ.
-                let k = self.factor - 1.0;
+                let k = (self.factor - 1.0) * weight;
                 let m = Mat3::from_cols(
                     Vec3::X + axis * (k * axis.x),
                     Vec3::Y + axis * (k * axis.y),
@@ -336,7 +381,7 @@ impl PointEdit {
                 );
                 around(Mat4::from_mat3(m))
             }
-            Tool::Rotate => around(Mat4::from_quat(Quat::from_axis_angle(axis, self.angle))),
+            Tool::Rotate => around(Mat4::from_quat(Quat::from_axis_angle(axis, self.angle * weight))),
             Tool::Move
             | Tool::LiveSelection
             | Tool::RectangleSelection
@@ -349,23 +394,33 @@ impl PointEdit {
             | Tool::Bevel
             | Tool::Bridge
             | Tool::Weld
-            | Tool::Pen => Mat4::from_translation(self.moved),
+            | Tool::Pen
+            | Tool::Slide => Mat4::from_translation(self.moved * weight),
         }
     }
 
-    /// Writes the original mesh with world transform `delta` applied to the
-    /// edited points (in object space) to `node`.
-    pub(super) fn apply(&self, delta: Mat4, scene: &mut Scene, node: NodeId) {
+    /// Writes the original mesh with the transform so far (`tool` along world
+    /// axis `axis`) applied to the edited points, each by its weight, to
+    /// `node`.
+    pub(super) fn apply(&self, tool: Tool, axis: Vec3, scene: &mut Scene, node: NodeId) {
         if self.world.determinant().abs() <= f32::EPSILON {
             return;
         }
-        let local = self.world.inverse() * delta * self.world;
+        let into = self.world.inverse();
+        let whole = into * self.delta(tool, axis, 1.0) * self.world;
+        let local_at = |w: f32| {
+            if w >= 1.0 {
+                whole
+            } else {
+                into * self.delta(tool, axis, w) * self.world
+            }
+        };
         match &self.original {
             Original::Mesh(original) => {
                 let mut points = original.mesh().points().to_vec();
-                for &p in &self.points {
+                for (&p, &w) in self.points.iter().zip(&self.weights) {
                     if let Some(point) = usize::try_from(p).ok().and_then(|p| points.get_mut(p)) {
-                        *point = local.transform_point3(*point);
+                        *point = local_at(w).transform_point3(*point);
                     }
                 }
                 let moved = original.with_points(&points);
@@ -378,8 +433,9 @@ impl PointEdit {
             Original::Spline(original) => {
                 let mut points = original.spline().points.clone();
                 let mut tangents = original.spline().tangents.clone();
-                for &p in &self.points {
+                for (&p, &w) in self.points.iter().zip(&self.weights) {
                     let Ok(p) = usize::try_from(p) else { continue };
+                    let local = local_at(w);
                     if let Some(point) = points.get_mut(p) {
                         *point = local.transform_point3(*point);
                     }
@@ -479,6 +535,7 @@ impl GizmoState {
         commands: &mut CommandQueue,
         snapper: &mut Snapper<'_>,
         keying: Keying,
+        soft: SoftSelection,
     ) -> GizmoInteraction {
         let alt = ui.input(|i| i.modifiers.alt);
 
@@ -526,10 +583,18 @@ impl GizmoState {
                 let points = match (geo.target, &node.data.kind) {
                     (Target::Components { component, world }, ObjectKind::Polygon { mesh, components }) => {
                         let points = selection::points_of(mesh.mesh(), components.selected().get(component), component);
-                        Some(PointEdit::new(mesh, &points, world, geo.origin))
+                        Some(PointEdit::new(mesh, &points, world, geo.origin).soften(
+                            soft,
+                            &components.hidden().points,
+                            Some(mesh.topology()),
+                        ))
                     }
                     (Target::Components { world, .. }, kind) => kind.points().map(|(spline, components)| {
-                        PointEdit::spline(spline, &components.selected().points, world, geo.origin)
+                        PointEdit::spline(spline, &components.selected().points, world, geo.origin).soften(
+                            soft,
+                            &components.hidden().points,
+                            None,
+                        )
                     }),
                     (Target::Object, _) => None,
                 };
@@ -635,9 +700,10 @@ fn apply_component_drag(
         | Tool::Bevel
         | Tool::Bridge
         | Tool::Weld
-        | Tool::Pen => return,
+        | Tool::Pen
+        | Tool::Slide => return,
     }
-    edit.apply(edit.delta(geo.tool, geo.axes[axis]), scene, node);
+    edit.apply(geo.tool, geo.axes[axis], scene, node);
 }
 
 /// One frame of an object drag: the transform shown at the current frame is
@@ -705,7 +771,8 @@ fn apply_drag(
         | Tool::Bevel
         | Tool::Bridge
         | Tool::Weld
-        | Tool::Pen => return,
+        | Tool::Pen
+        | Tool::Slide => return,
     }
     node.data.set_transform_at(&shown, keying.frame, keying.autokey);
 }

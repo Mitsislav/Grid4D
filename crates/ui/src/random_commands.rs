@@ -426,11 +426,14 @@ fn random_command(rng: &mut Rng, doc: &mut Document, editor: &mut EditorState) -
                     EditorCommand::UvCommand(op)
                 }
                 _ => {
-                    editor.tool = [Tool::Extrude, Tool::Inset, Tool::Bevel][rng.below(3)];
+                    editor.tool = [Tool::Extrude, Tool::Inset, Tool::Bevel, Tool::Slide][rng.below(4)];
                     let settings = &mut editor.modeling_settings;
                     settings.extrude.offset = rng.range(-50.0, 50.0);
                     settings.inset.offset = rng.range(0.0, 20.0);
                     settings.bevel.offset = rng.range(0.0, 20.0);
+                    settings.slide.offset = rng.range(-1.0, 1.0);
+                    settings.slide.keep_curvature = rng.chance(2);
+                    settings.slide.duplicate = rng.chance(3);
                     EditorCommand::ApplyMeshTool
                 }
             }

@@ -303,6 +303,7 @@ pub fn show(ui: &mut Ui, doc: &mut Document, editor: &mut EditorState) {
                 Tool::Extrude,
                 Tool::Inset,
                 Tool::Bevel,
+                Tool::Slide,
                 Tool::Bridge,
                 Tool::Weld,
                 Tool::LoopCut,

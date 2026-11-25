@@ -43,7 +43,8 @@ impl ViewportPanel {
             | Tool::Bevel
             | Tool::Bridge
             | Tool::Weld
-            | Tool::Pen => {
+            | Tool::Pen
+            | Tool::Slide => {
                 self.loop_preview = None;
                 false
             }

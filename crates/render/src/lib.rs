@@ -32,8 +32,8 @@ mod textures;
 
 pub use camera::{OrbitCamera, Projection, Ray};
 pub use components::{
-    Brush, BrushCoverage, ComponentHit, ComponentStyle, RegionRules, ScreenView, components_in_rect, nearest_face_edge,
-    paint_brush, pick_component,
+    Brush, BrushCoverage, ComponentHit, ComponentStyle, RegionRules, ScreenView, SoftWeights, components_in_rect,
+    nearest_face_edge, paint_brush, pick_component,
 };
 pub use display::{DisplayMode, DisplayStyle, ShadingMode};
 pub use effects::ViewEffects;

@@ -37,6 +37,9 @@ pub enum Tool {
     Weld,
     /// Create ▸ Spline ▸ Pen: click to add spline points, drag to pull tangents.
     Pen,
+    /// Mesh ▸ Slide: drag to slide the selected points or edge loops along
+    /// the edges next to them.
+    Slide,
 }
 
 impl Tool {
@@ -69,6 +72,7 @@ impl Tool {
             Self::Bridge => "Bridge",
             Self::Weld => "Weld",
             Self::Pen => "Pen",
+            Self::Slide => "Slide",
         }
     }
 
@@ -85,7 +89,7 @@ impl Tool {
             Self::LineCut => "K~K",
             Self::Bevel => "M~S",
             Self::Bridge => "B",
-            Self::Weld | Self::Pen => "",
+            Self::Weld | Self::Pen | Self::Slide => "",
             Self::Move => "E",
             Self::Scale => "T",
             Self::Rotate => "R",
@@ -117,6 +121,7 @@ impl Tool {
             Self::Pen => {
                 "Pen: click to add a point · drag to pull its tangents · click the first point to close · Esc finishes"
             }
+            Self::Slide => "Slide works on the selected points or edge loops of a polygon object",
         }
     }
 
@@ -137,7 +142,7 @@ impl Tool {
     /// The Mesh menu's modelling tools: drag in the viewport, or Apply.
     #[must_use]
     pub const fn is_mesh_tool(self) -> bool {
-        matches!(self, Self::Extrude | Self::Inset | Self::Bevel)
+        matches!(self, Self::Extrude | Self::Inset | Self::Bevel | Self::Slide)
     }
 
     /// The tools that join components: Bridge (drag between two) and Weld (click).
@@ -251,11 +256,14 @@ impl Default for PenSettings {
 }
 
 /// Options of the transform tools (Attribute Manager, Tool mode). Editor state.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TransformSettings {
     /// Move tool, component modes: with nothing selected, dragging a component
     /// moves just that component and leaves the selection alone.
     pub tweak: bool,
+    /// Soft selection for every component transform and Tweak (D41; never
+    /// saved in a document).
+    pub soft: grid4d_geom::soft::SoftSelection,
 }
 
 /// Options of the modelling tools (Attribute Manager, Tool mode). Editor state.
@@ -272,6 +280,10 @@ pub struct ModelingSettings {
     pub bevel: BevelOptions,
     pub bridge: BridgeOptions,
     pub optimize: OptimizeOptions,
+    pub slide: grid4d_geom::ops::SlideOptions,
+    /// The direction (object space) single points slide towards with
+    /// positive offsets: the last drag's, the object's X axis at first.
+    pub slide_direction: glam::Vec3,
 }
 
 /// Loop/Path Cut options.
@@ -359,6 +371,9 @@ impl Default for ModelingSettings {
                 tolerance: 0.01,
                 unused_points: true,
             },
+            // docs/reference/modeling-tools-2.md: no offset, clamped.
+            slide: grid4d_geom::ops::SlideOptions::default(),
+            slide_direction: glam::Vec3::X,
         }
     }
 }

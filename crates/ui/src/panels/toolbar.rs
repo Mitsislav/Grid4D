@@ -245,7 +245,8 @@ const fn tool_icon(tool: Tool) -> Icon {
         | Tool::Bevel
         | Tool::Bridge
         | Tool::Weld
-        | Tool::Pen => Icon::Move,
+        | Tool::Pen
+        | Tool::Slide => Icon::Move,
     }
 }
 
@@ -266,6 +267,7 @@ const fn tool_tooltip(tool: Tool) -> &'static str {
         Tool::Bridge => key("Bridge (B)"),
         Tool::Weld => "Weld",
         Tool::Pen => "Pen",
+        Tool::Slide => "Slide",
     }
 }
 

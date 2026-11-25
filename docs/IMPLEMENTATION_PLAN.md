@@ -1913,4 +1913,9 @@ for a 100 000-point half; Instances as clones of the reference's shapes, no
 copy; a Join counted as one input by other generators), and the Spline
 Boolean and Reduce, 17.5 (2D booleans of splines by exact orientation tests,
 a curve read by the spline generators, D45; quadric edge collapses ordered
-once and replayed when Keep changes). Next: soft selection and Slide (17.6).
+once and replayed when Keep changes), and soft selection and Slide, 17.6
+(weights by a falloff of the distance through space or along the edges,
+used by the gizmo and Tweak, shown as a ramp on the points; points and loops
+slid along their edges, Duplicate inserting a loop). Next: Plane Cut, the
+Polygon Pen, Extrude along Spline, Mirror, Array and Bevel's profiles
+(17.7).

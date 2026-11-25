@@ -52,6 +52,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Σώμα σύγκρουσης: τα άκαμπτα σώματα το χτυπούν· κινείται μόνο με τη δική του κίνηση",
     ),
     ("A crash report was written: {0}", "Γράφτηκε αναφορά κατάρρευσης: {0}"),
+    ("A drag in the viewport sets it", "Το ορίζει ένα σύρσιμο στην προβολή"),
     (
         "A new material in the Material Manager",
         "Ένα νέο υλικό στη Διαχείριση Υλικών",
@@ -417,6 +418,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ),
     ("Choose where to save", "Επιλέξτε πού θα αποθηκευτεί"),
     ("Circle", "Κύκλος"),
+    ("Clamp", "Περιορισμός"),
     ("Clamp Indirect", "Περιορισμός έμμεσου φωτός"),
     ("Clear", "Καθαρισμός"),
     ("Clear Override", "Καθαρισμός παράκαμψης"),
@@ -578,11 +580,13 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Display", "Εμφάνιση"),
     ("Display Color", "Χρώμα εμφάνισης"),
     ("Dissolve", "Διάλυση"),
+    ("Distance", "Απόσταση"),
     (
         "Distance from the camera along its view, in cm",
         "Απόσταση από την κάμερα κατά τη ματιά της, σε cm",
     ),
     ("Distribution", "Κατανομή"),
+    ("Dome", "Θόλος"),
     ("Don't Save", "Χωρίς αποθήκευση"),
     (
         "Double-click to rename; right-click for more",
@@ -911,6 +915,10 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "Πόσες φορές αναπηδά το φως ανάμεσα στις επιφάνειες (0: μόνο άμεσο φως)",
     ),
     ("IOR", "Δείκτης διάθλασης"),
+    (
+        "In component modes, the points around the selection follow it less the farther they are",
+        "Στις λειτουργίες στοιχείων, τα σημεία γύρω από την επιλογή την ακολουθούν λιγότερο όσο πιο μακριά βρίσκονται",
+    ),
     ("Inches", "Ίντσες"),
     ("Include", "Συμπερίληψη"),
     ("Infinite", "Άπειρο"),
@@ -973,6 +981,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Join", "Ένωση πλεγμάτων"),
     ("Keep", "Διατήρηση"),
     ("Keep Borders", "Διατήρηση ορίων"),
+    ("Keep Curvature", "Διατήρηση καμπυλότητας"),
     ("Keep UV Seams", "Διατήρηση ραφών UV"),
     ("Keep Y-Axis Length", "Διατήρηση μήκους άξονα Y"),
     (
@@ -1892,6 +1901,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Shadow Maps (Soft)", "Χάρτες σκιών (μαλακές)"),
     ("Shadows", "Σκιές"),
     ("Shape", "Σχήμα"),
+    ("Sharp", "Απότομη"),
     (
         "Shift + click: under the selected object, fitted to it",
         "Shift + κλικ: κάτω από το επιλεγμένο αντικείμενο, προσαρμοσμένο σε αυτό",
@@ -1951,10 +1961,28 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Size+", "Μέγεθος+"),
     ("Skeleton — planned", "Σκελετός — προγραμματίζεται"),
     ("Sky", "Ουρανός"),
+    ("Slide", "Ολίσθηση"),
+    (
+        "Slide works on points or edges: switch to Points or Edges mode",
+        "Η ολίσθηση δουλεύει σε σημεία ή ακμές: περάστε σε λειτουργία Σημείων ή Ακμών",
+    ),
+    (
+        "Slide works on the selected points or edge loops of a polygon object",
+        "Η ολίσθηση δουλεύει στα επιλεγμένα σημεία ή βρόχους ακμών ενός πολυγωνικού αντικειμένου",
+    ),
+    (
+        "Slide: drag left/right to slide the selected edge loops across their neighbours · Esc cancels",
+        "Ολίσθηση: σύρετε αριστερά/δεξιά για να γλιστρήσουν οι επιλεγμένοι βρόχοι ακμών προς τους γείτονές τους · Esc ακυρώνει",
+    ),
+    (
+        "Slide: drag left/right to slide the selected points along their edges · Apply in the Attribute Manager · Esc cancels",
+        "Ολίσθηση: σύρετε αριστερά/δεξιά για να γλιστρήσουν τα επιλεγμένα σημεία κατά μήκος των ακμών τους · Εφαρμογή στον Διαχειριστή ιδιοτήτων · Esc ακυρώνει",
+    ),
     (
         "Smaller numbers open the aperture: a shallower depth of field",
         "Μικρότεροι αριθμοί ανοίγουν το διάφραγμα: πιο ρηχό βάθος πεδίου",
     ),
+    ("Smooth", "Ομαλή"),
     (
         "Smooths its first child (the cage)",
         "Λειαίνει το πρώτο του παιδί (τον κλωβό)",
@@ -1968,6 +1996,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Soft Body", "Μαλακό σώμα"),
     ("Soft Edge", "Μαλακή άκρη"),
     ("Soft Interpolation", "Μαλακή παρεμβολή"),
+    ("Soft Selection", "Ήπια επιλογή"),
     (
         "Solo: only soloed layers' objects show",
         "Solo: φαίνονται μόνο τα αντικείμενα των στρωμάτων Solo",
@@ -2038,6 +2067,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Sun Direction", "Θέση ήλιου"),
     ("Sun Intensity", "Ένταση ήλιου"),
     ("Sun Size", "Μέγεθος ήλιου"),
+    ("Surface", "Επιφάνεια"),
     (
         "Surfaces with Emission are sampled as lights: far less noise where they light the scene",
         "Οι επιφάνειες με εκπομπή δειγματίζονται ως φώτα: πολύ λιγότερος θόρυβος όπου φωτίζουν τη σκηνή",
@@ -2226,10 +2256,6 @@ pub(super) static TABLE: &[(&str, &str)] = &[
         "This build has no licence list.",
         "Αυτή η έκδοση δεν έχει λίστα αδειών.",
     ),
-    (
-        "This tool has no options yet.",
-        "Αυτό το εργαλείο δεν έχει ακόμη επιλογές.",
-    ),
     ("Threshold", "Κατώφλι"),
     ("Tiling", "Επανάληψη"),
     ("Time Scale", "Κλίμακα χρόνου"),
@@ -2356,6 +2382,7 @@ pub(super) static TABLE: &[(&str, &str)] = &[
     ("Visible in Render", "Ορατό σχήμα στην απόδοση"),
     ("Visible in Renderer", "Ορατό στην απόδοση"),
     ("Visible to Camera", "Ορατό από την κάμερα"),
+    ("Volume", "Όγκος"),
     ("Wave", "Κύμα"),
     ("Wavefront OBJ (.obj + .mtl)", "Wavefront OBJ (.obj + .mtl)"),
     ("Wavelength", "Μήκος κύματος"),

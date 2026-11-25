@@ -35,6 +35,7 @@ pub mod ops;
 pub mod primitives;
 pub mod reduce;
 pub mod selection;
+pub mod soft;
 pub mod spline;
 pub mod spline_boolean;
 pub mod subdivision;

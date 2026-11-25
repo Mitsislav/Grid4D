@@ -34,6 +34,14 @@ deformers).
 - **Reduce** — its children with fewer polygons, keeping their shape, their
   open borders and their texture seams. After the first calculation,
   dragging Keep is immediate; Keep can be animated.
+- **Soft selection** — moving, scaling or rotating points, edges or
+  polygons can pull the points around them along, less the farther they
+  are (a radius, four falloffs, distance through space or along the
+  surface); the points it reaches are tinted before you drag. Tweak uses it
+  too.
+- **Slide** — a new tool (Mesh ▸ Slide) moves points along their edges and
+  edge loops across their neighbours, keeping the surface's shape;
+  optionally along the curve, or leaving the loop and sliding a new one.
 - **Files** — documents are saved in `.g4d` format version 6, which holds
   the Boolean, Symmetry, Instance, Join, Spline Boolean and Reduce; Grid4D 1.3's other features will add to it until 1.3 is
   released. Every earlier file opens unchanged; Grid4D 1.2 cannot open

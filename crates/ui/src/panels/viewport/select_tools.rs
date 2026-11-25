@@ -323,7 +323,11 @@ impl ViewportPanel {
             let Some(centre) = centre_of(mesh, &points) else {
                 return false;
             };
-            let edit = PointEdit::new(mesh, &points, world, world.transform_point3(centre));
+            let edit = PointEdit::new(mesh, &points, world, world.transform_point3(centre)).soften(
+                editor.transform_settings.soft,
+                &mesh_hidden(&before),
+                Some(mesh.topology()),
+            );
             self.gesture = Gesture::Tweak {
                 node,
                 component,
@@ -366,7 +370,7 @@ impl ViewportPanel {
             let to = snapper.snap(pointer, edit.pivot + edit.free, None, skip, Some((*node, &edit.moving)));
             if to - edit.pivot != edit.moved {
                 edit.moved = to - edit.pivot;
-                edit.apply(glam::Mat4::from_translation(edit.moved), &mut doc.scene, *node);
+                edit.apply(Tool::Move, glam::Vec3::X, &mut doc.scene, *node);
             }
         }
         self.snap_hit = snapper.hit;
@@ -594,4 +598,12 @@ fn idx(index: u32) -> usize {
 
 fn index_u32(index: usize) -> u32 {
     u32::try_from(index).unwrap_or(u32::MAX)
+}
+
+/// The hidden points of a polygon object's data (none for other kinds).
+fn mesh_hidden(data: &NodeData) -> BitSet {
+    match &data.kind {
+        ObjectKind::Polygon { components, .. } => components.hidden().points.clone(),
+        _ => BitSet::new(),
+    }
 }

@@ -14,6 +14,7 @@ use grid4d_geom::deform::{Bend, BendOrigin, DeformerMode, Ffd, Shape};
 use grid4d_geom::effector::{Effector, FalloffShape};
 use grid4d_geom::loops::WalkOptions;
 use grid4d_geom::primitives::MAX_SEGMENTS;
+use grid4d_geom::soft::{Falloff as SoftFalloff, SoftDistance, SoftSelection};
 use grid4d_geom::spline::{
     ArcType, Interpolation, SplinePlane, SplinePrimitive, SplineShape, SplineType, Text, TextAlign,
 };
@@ -1144,10 +1145,8 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 );
                 ui.end_row();
             }
-            Tool::Scale | Tool::Rotate => {
-                ui.label(RichText::new(tr("This tool has no options yet.")).color(p().text_dim));
-                ui.end_row();
-            }
+            // Their options are soft selection's (below).
+            Tool::Scale | Tool::Rotate => {}
             Tool::Extrude => {
                 let m = &mut editor.modeling_settings;
                 offset_row(ui, k, "Offset", &mut m.extrude.offset);
@@ -1234,6 +1233,29 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                     .on_hover_text(tr("The type of a new spline; points added to a spline keep its type"));
                 ui.end_row();
             }
+            Tool::Slide => {
+                let m = &mut editor.modeling_settings.slide;
+                attr_label(ui, "Offset", LABEL_WIDTH);
+                let limit = if m.clamp { 100.0 } else { 1000.0 };
+                let mut percent = m.offset * 100.0;
+                if ui
+                    .add_sized(
+                        [FIELD_WIDTH, 19.0],
+                        DragValue::new(&mut percent)
+                            .speed(0.5)
+                            .range(-limit..=limit)
+                            .suffix(" %"),
+                    )
+                    .on_hover_text(tr("A drag in the viewport sets it"))
+                    .changed()
+                {
+                    m.offset = percent / 100.0;
+                }
+                ui.end_row();
+                check_row(ui, "Clamp", &mut m.clamp);
+                check_row(ui, "Keep Curvature", &mut m.keep_curvature);
+                check_row(ui, "Duplicate", &mut m.duplicate);
+            }
             Tool::LineCut => {
                 let m = &mut editor.modeling_settings.line_cut;
                 check_row(ui, "Visible Only", &mut m.visible_only);
@@ -1242,6 +1264,9 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
                 check_row(ui, "Select Cuts", &mut m.select_cuts);
             }
         });
+    if tool.has_gizmo() {
+        soft_section(ui, &mut editor.transform_settings.soft);
+    }
     if tool == Tool::Move {
         snap_section(ui, &mut editor.snap);
     }
@@ -1294,6 +1319,71 @@ fn tool_ui(ui: &mut Ui, doc: &Document, editor: &mut EditorState) {
             RichText::new(tr("Or drag left/right in the viewport: every drag is a new operation")).color(p().text_dim),
         );
     }
+}
+
+/// Soft selection (`docs/reference/modeling-soft-selection.md`): shown with
+/// the transform tools, used in component modes.
+fn soft_section(ui: &mut Ui, soft: &mut SoftSelection) {
+    section_heading(ui, "Soft Selection");
+    Grid::new("grid4d.attr.soft")
+        .num_columns(2)
+        .spacing([6.0, 4.0])
+        .show(ui, |ui| {
+            check_row(ui, "Soft Selection", &mut soft.enabled);
+            attr_label(ui, "Radius", LABEL_WIDTH);
+            ui.add_enabled_ui(soft.enabled, |ui| {
+                ui.add_sized(
+                    [FIELD_WIDTH, 19.0],
+                    widgets::length(ui, &mut soft.radius)
+                        .speed(0.5)
+                        .range(SoftSelection::MIN_RADIUS..=100_000.0),
+                );
+            });
+            ui.end_row();
+            attr_label(ui, "Falloff", LABEL_WIDTH);
+            let combo = ui
+                .add_enabled_ui(soft.enabled, |ui| {
+                    egui::ComboBox::from_id_salt("grid4d.attr.soft.falloff")
+                        .selected_text(tr(soft.falloff.label()))
+                        .show_ui(ui, |ui| {
+                            for falloff in SoftFalloff::ALL {
+                                ui.selectable_value(&mut soft.falloff, falloff, tr(falloff.label()));
+                            }
+                        })
+                        .response
+                })
+                .inner;
+            ui.ctx()
+                .accesskit_node_builder(combo.id, |node| node.set_label(tr("Falloff")));
+            ui.end_row();
+            attr_label(ui, "Distance", LABEL_WIDTH);
+            let combo = ui
+                .add_enabled_ui(soft.enabled, |ui| {
+                    egui::ComboBox::from_id_salt("grid4d.attr.soft.distance")
+                        .selected_text(tr(soft.distance.label()))
+                        .show_ui(ui, |ui| {
+                            for distance in SoftDistance::ALL {
+                                ui.selectable_value(&mut soft.distance, distance, tr(distance.label()));
+                            }
+                        })
+                        .response
+                })
+                .inner;
+            ui.ctx()
+                .accesskit_node_builder(combo.id, |node| node.set_label(tr("Distance")));
+            ui.end_row();
+            ui.label("");
+            ui.add(
+                egui::Label::new(
+                    RichText::new(tr(
+                        "In component modes, the points around the selection follow it less the farther they are",
+                    ))
+                    .color(p().text_dim),
+                )
+                .wrap(),
+            );
+            ui.end_row();
+        });
 }
 
 /// A tag's settings (Attribute Manager, Mode ▸ Tags); `owner` is the tagged object.

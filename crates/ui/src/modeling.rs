@@ -20,6 +20,7 @@ pub(crate) const fn works_in(tool: Tool, component: Component) -> bool {
         (Tool::Extrude, Component::Polygon | Component::Edge)
             | (Tool::Inset, Component::Polygon)
             | (Tool::Bevel, Component::Point | Component::Edge)
+            | (Tool::Slide, Component::Point | Component::Edge)
     )
 }
 
@@ -29,6 +30,7 @@ pub(crate) fn offset_mut(tool: Tool, settings: &mut ModelingSettings) -> Option<
         Tool::Extrude => Some(&mut settings.extrude.offset),
         Tool::Inset => Some(&mut settings.inset.offset),
         Tool::Bevel => Some(&mut settings.bevel.offset),
+        Tool::Slide => Some(&mut settings.slide.offset),
         Tool::LiveSelection
         | Tool::RectangleSelection
         | Tool::LoopSelection
@@ -189,6 +191,27 @@ pub(crate) fn apply(
             let rebuilt = ops::bevel(source, topology, &edges, &points, &options).ok()?;
             return rebuilt_data(data, rebuilt, Fresh::edges_if(component == Component::Edge));
         }
+        (Tool::Slide, Component::Point | Component::Edge) => {
+            let rails = slide_rails(source, topology, state, component, settings.slide_direction)?;
+            let options = ops::SlideOptions {
+                offset,
+                ..settings.slide
+            };
+            if component == Component::Edge && options.duplicate {
+                let rebuilt = ops::slide_duplicate(source, topology, &rails, offset).ok()?;
+                return rebuilt_data(data, rebuilt, Fresh::EdgesSelected);
+            }
+            // Points move, nothing else: the topology is shared.
+            let points = ops::slide(source, &rails, &options);
+            if points == source.points() {
+                return None;
+            }
+            let mut data = data.clone();
+            if let ObjectKind::Polygon { mesh: moved, .. } = &mut data.kind {
+                *moved = mesh.with_points(&points);
+            }
+            return Some(data);
+        }
         _ => return None,
     };
     if result == *source {
@@ -200,6 +223,31 @@ pub(crate) fn apply(
         components,
     };
     Some(data)
+}
+
+/// What the selected points or edges of `state` slide along: single points
+/// towards `direction` (object space), edges as loops. `None` when nothing
+/// of `component` is selected.
+pub(crate) fn slide_rails(
+    mesh: &grid4d_geom::PolyMesh,
+    topology: &grid4d_geom::Topology,
+    state: &ComponentState,
+    component: Component,
+    direction: glam::Vec3,
+) -> Option<Vec<ops::Rail>> {
+    let rails = match component {
+        Component::Point => {
+            let mut points = state.selected.points.clone();
+            points.remove_all(&state.hidden.points);
+            ops::point_rails(mesh, topology, &points, direction)
+        }
+        Component::Edge => {
+            let edges = selection::edges_from_corners(&state.selected.edges, topology);
+            ops::loop_rails(mesh, topology, &edges)
+        }
+        Component::Polygon => return None,
+    };
+    (!rails.is_empty()).then_some(rails)
 }
 
 /// The selected members of `0..len` that are not hidden; every visible one when
@@ -279,6 +327,45 @@ mod tests {
         let selected: Vec<usize> = components.selected().edges.iter().collect();
         assert_eq!(selected.len(), 1);
         assert!(selected[0] >= corners, "a corner of the new polygon, not the old edge");
+    }
+
+    #[test]
+    fn slide_moves_a_loop_or_inserts_one() {
+        // A 4 × 4 plane and its middle row of edges.
+        let mesh = grid4d_geom::primitives::plane(100.0, 100.0, 4, 4);
+        let topology = grid4d_geom::Topology::build(&mesh);
+        let middle: Vec<usize> = (0..topology.edge_count())
+            .filter(|&e| {
+                let [a, b] = topology.edges()[e];
+                mesh.points()[a as usize].z.abs() < 1e-3 && mesh.points()[b as usize].z.abs() < 1e-3
+            })
+            .collect();
+        let corners = selection::corners_from_edges(&middle.iter().copied().collect(), &topology);
+        let mut data = Node::new("Plane", ObjectKind::polygon(MeshHandle::new(mesh.clone()))).data;
+        let ObjectKind::Polygon { components, .. } = &mut data.kind else {
+            unreachable!()
+        };
+        components.make_mut().selected.edges = corners;
+        let mut settings = ModelingSettings::default();
+        let slid = apply(&data, Tool::Slide, Component::Edge, &settings, 0.5).unwrap();
+        let moved = mesh_of(&slid).mesh();
+        assert_eq!(moved.face_count(), mesh.face_count(), "a slide keeps the topology");
+        let row: Vec<f32> = (0..mesh.point_count())
+            .filter(|&p| mesh.points()[p].z.abs() < 1e-3)
+            .map(|p| moved.points()[p].z)
+            .collect();
+        assert!(
+            row.iter().all(|&z| (z.abs() - 12.5).abs() < 1e-3 && z == row[0]),
+            "{row:?}"
+        );
+        settings.slide.duplicate = true;
+        let doubled = apply(&data, Tool::Slide, Component::Edge, &settings, 0.5).unwrap();
+        assert_eq!(
+            mesh_of(&doubled).mesh().face_count(),
+            mesh.face_count() + 4,
+            "a loop inserted"
+        );
+        assert!(apply(&data, Tool::Slide, Component::Polygon, &settings, 0.5).is_none());
     }
 
     #[test]
