@@ -3904,7 +3904,7 @@ mod tests {
                 object_tab(ui, &mut shown, &mut keys, None, None)
             })
             .drop_without_applying_deltas();
-            let mut drawn = keys.drawn.clone();
+            let mut drawn = keys.drawn;
             drawn.sort_by_key(|p| p.index());
             let mut wanted = kind.params();
             wanted.sort_by_key(|p| p.index());

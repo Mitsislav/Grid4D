@@ -15,7 +15,7 @@ solved them. Newest steps at the bottom of each phase.
 | Current phase | 17 — Modelling 2 (v1.3) |
 | Last step done | 17.10b — release 1.3.0 prepared; Phase 17 complete (2026-11-26) |
 | Next step | Phase 18 (fields and motion graphics 2, v1.4): the plan in detail, then its specs |
-| Tests | 1056 (and 25 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's, the Reduce's, soft selection's, the Bevel profile's, the crease's and the deformers' pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
+| Tests | 1057 (and 25 ignored, run by hand: three timings, the walkthrough, the Boolean's, the Symmetry's, the Spline Boolean's, the Reduce's, soft selection's, the Bevel profile's, the crease's and the deformers' pictures, the README pictures, and the manual's Texture Manager, Sky, light-linking, Sky / Environment, lens, passes, adaptive sampling, denoiser, render region, Render Queue, subsurface and displacement pictures), all passing; clippy and rustfmt clean |
 
 ---
 
@@ -2744,7 +2744,7 @@ risks R5 – R8 go with it.
 | 17.8 | Edge creases, hard edges, weighted normals. `ComponentState::{creases, hard}` (by corner; carried across rebuilding operations); semi-sharp Catmull-Clark (`subdivision::subdivide_creased`: sharpness 6 × the share, crease rules for edge and point, the halves carrying one level less, 100 % sharp throughout), the Subdivision Surface reading its cage's creases (`Source::Mesh` with `EdgeMarks`); hard edges drawn and exported as a mesh split along them (`split_hard_edges`, eval's shown mesh, `file::exportable`); `Smoothing::Weighted` (the strongest faces by area × angle), the Phong tag's Weighted Normals, the shading key's flag, glTF / OBJ export; the Crease tool, Mesh ▸ Normals (Make Hard, Make Soft, Hard from Angle, Clear Hard Edges), the edges' colours; the Boolean's Hard Cut Edges, the Reduce's Keep Hard Edges; `.g4d` v6 `creases`, `hard`, `weighted` (dropped from a v5 file), `hard_cut_edges`, `keep_hard`; Greek; the manual's §12.3 with a picture and §18.1 | 1046 |
 | 17.9 | Deformers 2. `grid4d_geom::deformers`: Wrap (cylinder or sphere), Follow Spline (parallel-transport frames, Keep Length / Fit to Spline, Path Offset), Displace (fractal value noise or a grey picture, UV or flat, along normals or an axis), Project to Surface (nearest point via the new `Bvh::nearest`, along −Z, along normals), Smooth (Taubin, borders kept), Explode (polygons split and flown out, spun, scaled); the deformer stack hands whole meshes; links resolved while walking (a path in the deformer's space, a target mesh, a picture); `EvaluatedScene::set_pictures` with grey pictures the editor makes from its decoded textures (renders make theirs); keyed values incl. the new Path Offset; attribute pages, icons, tooltips, Greek; `.g4d` v6 kinds and links (refused in v5), golden fixture, a property test; the manual's §14.6 with a picture. Point Offsets moved to 1.4 (R5) | 1055 |
 | 17.10a | Phase 17's acceptance as an integration test (`crates/ui/tests/acceptance_17.rs`: every 1.x file opens; a box bevelled with a Cove profile and cut by a live Boolean, a cutter moved (the result follows, closed); half a handle completed by a Symmetry (closed) and its top extruded along a spline; a cage creased under a Subdivision Surface keeps its corners; a soft-selection dent; an imported OBJ scan reduced to 10 % with its outline and UVs; a label wrapped round a bottle and a decal projected onto the shell; weighted normals; every step undone and redone; saved as v6 and reopened the same; rendered). The review walkthrough with Phase 17's object and tool pages; fixes: object links' "None" translated, the Boolean's note wrapped, three Greek labels shortened. The nearest-point search visits the nearer child first with a fixed stack (Project to Surface 180 → 24 ms); the deformers in the modelling budget, Phase 17's targets re-measured in `performance.md`; the manual's §11 opens with where to find what | 1056 |
-| 17.10b | Release 1.3.0 prepared: the workspace version 1.3.0 (the lockfile's own crates), `url` 2.5.9 for RUSTSEC-2026-0592 (the licence list regenerated, `cargo deny` clean), the changelog's `[1.3.0]` section: modelling; `.g4d` version 6 frozen (`FILE_FORMAT.md`, `v6.rs`, the golden test's notes, the v6 spec); the README's and the itch.io page's features, the release spec's version list, the plan's next action (Phase 18) | 1056 |
+| 17.10b | Release 1.3.0 prepared: the workspace version 1.3.0 (the lockfile's own crates), `url` 2.5.9 for RUSTSEC-2026-0592 (the licence list regenerated, `cargo deny` clean), the changelog's `[1.3.0]` section: modelling; `.g4d` version 6 frozen (`FILE_FORMAT.md`, `v6.rs`, the golden test's notes, the v6 spec); the README's and the itch.io page's features, the release spec's version list, the plan's next action (Phase 18); clippy clean on Rust 1.100, the Spline Boolean's grid (and three others) safe from huge coordinates (found by CI's fuzzer) | 1057 |
 
 **17.1 — Specs, the format version 6, the modelling budget**
 
@@ -3012,6 +3012,23 @@ risks R5 – R8 go with it.
 - **A struct's attributes moved.** Inserting the crease type between
   `SetDto`'s derive line and its definition took the derive with it; the
   compiler's flood of errors pointed straight at it.
+
+**17.10b — Release 1.3.0 prepared**
+
+*Problems and solutions:*
+- **A new advisory.** `cargo deny` reported RUSTSEC-2026-0592 in `url`
+  (through eframe's link opener): updated to 2.5.9, the licence list
+  regenerated.
+- **The first CI run of Phase 17 failed twice over.** Rust 1.100 (out on
+  2026-11-09; the machine still had 1.99) widened two clippy lints: five
+  loops that indexed by face now walk the islands or groups they index, and
+  three clones that were not needed went. The fuzzer, which had never run
+  the Spline Boolean target in CI, found a crash: points near the largest
+  `f32` put the merge grid's cells at the end of the integer range, and
+  looking at the next cell overflowed. Neighbouring cells are now found with
+  saturating arithmetic — also in the mesh Boolean's grid, Optimize's weld
+  and soft selection's cells, where the same could happen — and a test
+  keeps huge coordinates.
 
 **17.10a — Acceptance, walkthrough, the budget**
 

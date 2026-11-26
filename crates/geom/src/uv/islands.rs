@@ -275,8 +275,8 @@ pub fn stretch_measure(mesh: &PolyMesh, topology: &Topology) -> f32 {
     };
     let layout = layout(mesh, topology);
     let mut sums = vec![(0.0f64, 0.0f64); layout.island_count];
-    for f in 0..mesh.face_count() {
-        if let Some(sum) = sums.get_mut(us(layout.island_of[f])) {
+    for (f, &island) in layout.island_of.iter().enumerate().take(mesh.face_count()) {
+        if let Some(sum) = sums.get_mut(us(island)) {
             sum.0 += f64::from(uv_area(uvs, mesh.corner_range(f)).abs());
             sum.1 += f64::from(mesh.face_area(f));
         }
@@ -284,8 +284,8 @@ pub fn stretch_measure(mesh: &PolyMesh, topology: &Topology) -> f32 {
     let points = mesh.points();
     let corner_points = mesh.corner_points();
     let (mut total, mut count) = (0.0f64, 0usize);
-    for f in 0..mesh.face_count() {
-        let Some(&(island_uv, island_surface)) = sums.get(us(layout.island_of[f])) else {
+    for (f, &island) in layout.island_of.iter().enumerate().take(mesh.face_count()) {
+        let Some(&(island_uv, island_surface)) = sums.get(us(island)) else {
             continue;
         };
         if island_uv <= 0.0 || island_surface <= 0.0 {

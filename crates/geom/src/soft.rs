@@ -194,7 +194,7 @@ fn volume(points: &[Vec3], selected: &BitSet, hidden: &BitSet, radius: f32, scra
         for x in -1..=1 {
             for y in -1..=1 {
                 for z in -1..=1 {
-                    if let Some(list) = scratch.cells.get(&(home + IVec3::new(x, y, z))) {
+                    if let Some(list) = scratch.cells.get(&home.saturating_add(IVec3::new(x, y, z))) {
                         for &s in list {
                             nearest = nearest.min(point.distance(points[us(s)]));
                         }

@@ -980,7 +980,7 @@ fn inside(
         let range = mesh.corner_range(f);
         match component {
             Component::Point => {
-                for c in range.clone() {
+                for c in range {
                     if inside(uvs[c]) {
                         hits.insert(mesh.corner_points()[c] as usize);
                     }
@@ -998,7 +998,7 @@ fn inside(
                 }
             }
             Component::Polygon => {
-                if range.clone().all(|c| inside(uvs[c])) {
+                if mesh.corner_range(f).all(|c| inside(uvs[c])) {
                     hits.insert(f);
                 }
             }

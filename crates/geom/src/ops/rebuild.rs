@@ -345,7 +345,7 @@ pub fn optimize(mesh: &PolyMesh, scope: Option<&BitSet>, options: &OptimizeOptio
             for dz in -1..=1 {
                 for dy in -1..=1 {
                     for dx in -1..=1 {
-                        let Some(others) = grid.get(&(k + glam::IVec3::new(dx, dy, dz))) else {
+                        let Some(others) = grid.get(&k.saturating_add(glam::IVec3::new(dx, dy, dz))) else {
                             continue;
                         };
                         for &q in others {

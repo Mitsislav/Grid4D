@@ -212,7 +212,7 @@ impl Grid {
     fn near(&self, lo: DVec3, hi: DVec3, out: &mut Vec<u32>) {
         out.clear();
         let (a, b) = (self.key(lo), self.key(hi));
-        let span = (b - a + I64Vec3::ONE).max(I64Vec3::ZERO);
+        let span = b.saturating_sub(a).saturating_add(I64Vec3::ONE).max(I64Vec3::ZERO);
         let cells = span.x.saturating_mul(span.y).saturating_mul(span.z);
         if cells > i64::try_from(self.map.len()).unwrap_or(i64::MAX) {
             for ids in self.map.values() {
@@ -517,7 +517,7 @@ impl<'a> Work<'a> {
         for &t in &near_b {
             let (lo, hi) = sb.bounds(t);
             let (a, b) = (grid.key(lo), grid.key(hi));
-            let span = b - a + I64Vec3::ONE;
+            let span = b.saturating_sub(a).saturating_add(I64Vec3::ONE);
             if span.x.saturating_mul(span.y).saturating_mul(span.z) > 64 {
                 large.push(u32_index(t));
                 continue;

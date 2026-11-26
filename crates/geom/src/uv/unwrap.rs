@@ -55,8 +55,8 @@ pub fn unwrap(
     let mut tri = TriMesh::default();
     Triangulator::default().triangulate(mesh, Smoothing::default(), &mut tri);
     let mut faces_of_part = vec![Vec::new(); parts.group_count];
-    for f in 0..mesh.face_count() {
-        if let Some(list) = faces_of_part.get_mut(us(parts.group_of[f])) {
+    for (f, &group) in parts.group_of.iter().enumerate().take(mesh.face_count()) {
+        if let Some(list) = faces_of_part.get_mut(us(group)) {
             list.push(f);
         }
     }

@@ -285,7 +285,7 @@ impl Vertices {
         let cell = (p / MERGE_DISTANCE).floor().as_i64vec2();
         for dx in -1..=1 {
             for dy in -1..=1 {
-                let near = cell + glam::I64Vec2::new(dx, dy);
+                let near = cell.saturating_add(glam::I64Vec2::new(dx, dy));
                 if let Some(found) = self.cells.get(&near).and_then(|list| {
                     list.iter()
                         .copied()
@@ -704,6 +704,32 @@ mod tests {
         let line = closed(vec![Vec3::ZERO, Vec3::X, Vec3::X * 2.0]);
         let with = run(&[ring.clone(), open, line], SplineBooleanMode::Intersect);
         assert!((area_of(&with) - 300.0).abs() < 1e-6, "only the ring counts");
+    }
+
+    #[test]
+    fn huge_coordinates_never_panic() {
+        // Found by the fuzzer: points near f32::MAX put the merge grid's
+        // cells at the end of the integer range.
+        let huge = closed(vec![
+            Vec3::new(3e38, 3e38, 0.0),
+            Vec3::new(-3e38, 3e38, 0.0),
+            Vec3::new(-3e38, -3e38, 0.0),
+            Vec3::new(3e38, -3e38, 0.0),
+        ]);
+        let small = rectangle([0.0, 0.0], [10.0, 10.0]);
+        let tiny_far = closed(vec![
+            Vec3::new(f32::MAX, 0.0, 0.0),
+            Vec3::new(f32::MAX, 1.0, 0.0),
+            Vec3::new(-f32::MAX, 0.5, 0.0),
+        ]);
+        for mode in SplineBooleanMode::ALL {
+            for shapes in [vec![huge.clone(), small.clone()], vec![tiny_far.clone(), small.clone()]] {
+                let result = run(&shapes, mode);
+                let counted: usize = result.segments.iter().map(|s| s.count as usize).sum();
+                assert_eq!(counted, result.points.len());
+                assert!(result.segments.iter().all(|s| s.closed && s.count >= 3));
+            }
+        }
     }
 
     #[test]
