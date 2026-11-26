@@ -92,8 +92,21 @@ jobs:
           # bundle consistent, which Apple silicon requires to run it.
           codesign --force --deep --sign - "$app"
           ln -s /Applications "$staging/Applications"
-          hdiutil create -volname Grid4D -srcfolder "$staging" -ov -format UDZO \
-            "dist/Grid4D-$VERSION-macos-universal.dmg"
+          # hdiutil on the hosted runners now and then fails with "Resource
+          # busy" (a disk-image service still holding the folder): try again.
+          dmg="dist/Grid4D-$VERSION-macos-universal.dmg"
+          for attempt in 1 2 3 4 5; do
+            if hdiutil create -volname Grid4D -srcfolder "$staging" -ov -format UDZO "$dmg"; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              echo "::error::hdiutil could not make the .dmg in five attempts"
+              exit 1
+            fi
+            echo "hdiutil failed (attempt $attempt); trying again in 15 s"
+            sync
+            sleep 15
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: packages-macos
