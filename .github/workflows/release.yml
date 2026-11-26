@@ -92,11 +92,18 @@ jobs:
           # bundle consistent, which Apple silicon requires to run it.
           codesign --force --deep --sign - "$app"
           ln -s /Applications "$staging/Applications"
-          # hdiutil on the hosted runners now and then fails with "Resource
-          # busy" (a disk-image service still holding the folder): try again.
+          # hdiutil's own guess of the image size from -srcfolder came out too
+          # small for 1.3's binary ("No space left on device"), so the size is
+          # given: the folder plus half again and 20 MB, on HFS+ (no APFS
+          # overhead to guess). It can also fail with "Resource busy" (a
+          # disk-image service still holding the folder): try again then.
+          size_mb=$(du -sm "$staging" | cut -f1)
+          size_mb=$((size_mb + size_mb / 2 + 20))
+          echo "staging folder: $(du -sh "$staging" | cut -f1); image: ${size_mb} MB"
           dmg="dist/Grid4D-$VERSION-macos-universal.dmg"
           for attempt in 1 2 3 4 5; do
-            if hdiutil create -volname Grid4D -srcfolder "$staging" -ov -format UDZO "$dmg"; then
+            if hdiutil create -volname Grid4D -srcfolder "$staging" -fs HFS+ -size "${size_mb}m" \
+              -ov -format UDZO "$dmg"; then
               break
             fi
             if [ "$attempt" = 5 ]; then

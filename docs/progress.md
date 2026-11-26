@@ -3029,6 +3029,12 @@ risks R5 – R8 go with it.
   saturating arithmetic — also in the mesh Boolean's grid, Optimize's weld
   and soft selection's cells, where the same could happen — and a test
   keeps huge coordinates.
+- **The macOS package did not fit its own disk image.** The release run
+  built every package but stopped at the `.dmg`: `hdiutil` sizes the image
+  from the folder by its own guess, which came out too small for 1.3's
+  larger universal binary ("No space left on device"). The workflow now
+  gives the size (the folder plus half again and 20 MB) and HFS+, and
+  tries again if the disk-image service is still busy.
 
 **17.10a — Acceptance, walkthrough, the budget**
 
